@@ -2,12 +2,15 @@
 
 import { useState } from 'react';
 import { Flex, Box, Button, Text, Heading } from '@radix-ui/themes';
+import { supabase } from '@/lib/supabase';
+import type { User } from '@supabase/supabase-js';
 // Removed unused supabase import
 
 export default function OnboardingPage() {
     const [isUploading, setIsUploading] = useState(false);
-    const [countdown, setCountdown] = useState(0);
+    const [countdown, setCountdown] = useState(300); // 5 minutes in seconds
     const [error, setError] = useState<string | null>(null);
+    const [isComplete, setIsComplete] = useState(false);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) {
@@ -24,9 +27,18 @@ export default function OnboardingPage() {
         setError(null);
 
         try {
-            // TODO: Implement file upload to server
-            // For MVP, simulate upload delay and start countdown
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            const formData = new FormData();
+            formData.append('file', file);
+            const response = await fetch('/api/linkedin', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to upload file');
+            }
+
             setIsUploading(false);
             startCountdown();
         } catch (err) {
@@ -36,16 +48,25 @@ export default function OnboardingPage() {
     };
 
     const startCountdown = () => {
-        setCountdown(5); // 5 minutes countdown
+        setCountdown(300); // 5 minutes in seconds
         const interval = setInterval(() => {
             setCountdown(prev => {
                 if (prev <= 1) {
                     clearInterval(interval);
+                    setIsComplete(true);
+                    // Send email notification
+                    supabase.auth.getUser().then(({ data: { user } }: { data: { user: User | null } }) => {
+                        if (user?.email) {
+                            supabase.functions.invoke('send-completion-email', {
+                                body: { email: user.email }
+                            });
+                        }
+                    });
                     return 0;
                 }
                 return prev - 1;
             });
-        }, 60000); // Update every minute
+        }, 1000); // Update every second
     };
 
     return (
@@ -106,17 +127,31 @@ export default function OnboardingPage() {
                 )}
 
                 {countdown > 0 && (
-                    <Box mt="4">
-                        <Text size="3">
-                            Processing your data... It will be ready in approximately {countdown} minutes.
+                    <Box className="text-center p-6 border rounded-lg">
+                        <Heading size="5" mb="3">Processing Your LinkedIn Data</Heading>
+                        <Text size="5" className="font-mono mb-3">
+                            {Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}
                         </Text>
-                        <Text size="2" color="gray">
-                            We&apos;ll send you an email when it&apos;s done.
+                        <Text color="gray">
+                            We&apos;ll send you an email when your data is ready
                         </Text>
                     </Box>
                 )}
 
-                {countdown === 0 && !isUploading && !error && (
+                {isComplete && (
+                    <Box className="text-center p-6 border rounded-lg">
+                        <Heading size="5" mb="3">Your Data is Ready!</Heading>
+                        <Text color="gray" mb="4">
+                            Your LinkedIn data has been processed successfully.
+                            You can now explore your connections and profile.
+                        </Text>
+                        <Button size="3" onClick={() => window.location.href = '/profile'}>
+                            View Your Profile
+                        </Button>
+                    </Box>
+                )}
+
+                {!countdown && !isComplete && !isUploading && !error && (
                     <Text size="2" color="gray">
                         Upload your LinkedIn data export ZIP file to get started.
                     </Text>
