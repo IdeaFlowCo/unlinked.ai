@@ -16,7 +16,7 @@ function getSlugFromLinkedInUrl(url: string): string {
         return '';
     }
 }
-import * as unzipper from 'unzipper';
+import AdmZip from 'adm-zip';
 
 interface ProfileData {
     'First Name': string;
@@ -226,8 +226,9 @@ export async function POST(request: NextRequest) {
 
         try {
             // Extract ZIP contents
-            const directory = await unzipper.Open.buffer(buffer);
-            if (!directory || !directory.files) {
+            const zip = new AdmZip(buffer);
+            const entries = zip.getEntries();
+            if (!entries || entries.length === 0) {
                 return NextResponse.json({ error: 'Invalid ZIP file format' }, { status: 400 });
             }
         
@@ -242,21 +243,21 @@ export async function POST(request: NextRequest) {
             const requiredFiles = new Set(['Profile.csv', 'Connections.csv']);
             const foundFiles = new Set<string>();
 
-            for (const entry of directory.files) {
-                if (entry.path.endsWith('.csv')) {
+            for (const entry of entries) {
+                if (entry.entryName.endsWith('.csv')) {
                     let content: Buffer;
                     try {
-                        content = await entry.buffer();
+                        content = entry.getData();
                     } catch (error) {
-                        console.error(`Error reading ${entry.path}:`, error);
+                        console.error(`Error reading ${entry.entryName}:`, error);
                         continue;
                     }
 
                     const stream = Readable.from(content);
-                    foundFiles.add(entry.path);
+                    foundFiles.add(entry.entryName);
 
                     try {
-                        switch (entry.path) {
+                        switch (entry.entryName) {
                             case 'Profile.csv':
                                 profileData = await parseCSV<ProfileData>(stream);
                                 break;
@@ -274,9 +275,9 @@ export async function POST(request: NextRequest) {
                                 break;
                         }
                     } catch (error) {
-                        console.error(`Error parsing ${entry.path}:`, error);
+                        console.error(`Error parsing ${entry.entryName}:`, error);
                         // Remove from foundFiles if parsing failed
-                        foundFiles.delete(entry.path);
+                        foundFiles.delete(entry.entryName);
                     }
                 }
             }
