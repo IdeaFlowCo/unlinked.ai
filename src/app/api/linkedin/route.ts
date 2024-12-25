@@ -2,15 +2,38 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { Readable } from 'stream';
 import csv from 'csv-parser';
+
+// Helper function to extract LinkedIn URL slug
+function getSlugFromLinkedInUrl(url: string): string {
+    if (!url) return '';
+    try {
+        const urlObj = new URL(url);
+        const path = urlObj.pathname;
+        // Remove /in/ prefix and any trailing slash
+        return path.replace(/^\/in\//, '').replace(/\/$/, '');
+    } catch (error) {
+        console.error('Invalid LinkedIn URL:', url, 'Error:', error instanceof Error ? error.message : String(error));
+        return '';
+    }
+}
 import * as unzipper from 'unzipper';
 
 interface ProfileData {
     'First Name': string;
     'Last Name': string;
+    'Email Address'?: string; // Optional since it might not be present in all CSVs
     'Headline': string;
     'Summary': string;
     'Industry': string;
     'Geo Location': string;
+    'Profile URL': string;
+}
+
+interface ConnectionData {
+    'First Name': string;
+    'Last Name': string;
+    'Profile URL': string;
+    'Connected On': string;
 }
 
 interface PositionData {
@@ -48,33 +71,22 @@ async function parseCSV<T>(readable: Readable): Promise<T[]> {
     });
 }
 
-// Helper function to get user profile from auth session
-async function getUserProfile(userId: string) {
-    const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-
-    if (error) {
-        throw new Error('Failed to get user profile');
-    }
-
-    return profile;
-}
+// Removed unused getUserProfile function
 
 // Helper function to process Profile.csv
-async function processProfileData(profileData: any, userId: string) {
+async function processProfileData(profileData: ProfileData, userId: string) {
     const { data, error } = await supabase
         .from('profiles')
         .upsert({
             user_id: userId,
             first_name: profileData['First Name'],
             last_name: profileData['Last Name'],
+            email_address: profileData['Email Address'],
             headline: profileData['Headline'],
             summary: profileData['Summary'],
             industry: profileData['Industry'],
-            location: profileData['Geo Location']
+            location: profileData['Geo Location'],
+            linkedin_url_slug: getSlugFromLinkedInUrl(profileData['Profile URL'])
         }, {
             onConflict: 'user_id'
         })
@@ -89,7 +101,7 @@ async function processProfileData(profileData: any, userId: string) {
 }
 
 // Helper function to process Positions.csv
-async function processPositions(positions: any[], profileId: string) {
+async function processPositions(positions: PositionData[], profileId: string) {
     const formattedPositions = positions.map(position => ({
         profile_id: profileId,
         company_name: position['Company Name'],
@@ -112,7 +124,7 @@ async function processPositions(positions: any[], profileId: string) {
 }
 
 // Helper function to process Education.csv
-async function processEducation(education: any[], profileId: string) {
+async function processEducation(education: EducationData[], profileId: string) {
     const formattedEducation = education.map(edu => ({
         profile_id: profileId,
         school_name: edu['School Name'],
@@ -134,8 +146,46 @@ async function processEducation(education: any[], profileId: string) {
     }
 }
 
+// Helper function to process Connections.csv
+async function processConnections(connections: ConnectionData[], userProfileId: string) {
+    for (const connection of connections) {
+        // Create or get shadow profile for the connection
+        const { data: shadowProfile, error: shadowError } = await supabase
+            .from('profiles')
+            .upsert({
+                first_name: connection['First Name'],
+                last_name: connection['Last Name'],
+                linkedin_url_slug: getSlugFromLinkedInUrl(connection['Profile URL'])
+            }, {
+                onConflict: 'linkedin_url_slug'
+            })
+            .select()
+            .single();
+
+        if (shadowError) {
+            console.error('Error creating shadow profile:', shadowError);
+            continue;
+        }
+
+        // Create connection relationship
+        const { error: connectionError } = await supabase
+            .from('connections')
+            .upsert({
+                user_profile_id: userProfileId,
+                connection_profile_id: shadowProfile.id,
+                connected_on: connection['Connected On']
+            }, {
+                onConflict: 'user_profile_id,connection_profile_id'
+            });
+
+        if (connectionError) {
+            console.error('Error creating connection:', connectionError);
+        }
+    }
+}
+
 // Helper function to process Skills.csv
-async function processSkills(skills: any[], profileId: string) {
+async function processSkills(skills: SkillData[], profileId: string) {
     const formattedSkills = skills.map(skill => ({
         profile_id: profileId,
         name: skill['Name'] || skill['Skill Name'] // Handle different possible column names
@@ -186,9 +236,10 @@ export async function POST(request: NextRequest) {
             let positionsData: PositionData[] = [];
             let educationData: EducationData[] = [];
             let skillsData: SkillData[] = [];
+            let connectionsData: ConnectionData[] = [];
 
             // Track which files we've found
-            const requiredFiles = new Set(['Profile.csv']);
+            const requiredFiles = new Set(['Profile.csv', 'Connections.csv']);
             const foundFiles = new Set<string>();
 
             for (const entry of directory.files) {
@@ -218,14 +269,17 @@ export async function POST(request: NextRequest) {
                             case 'Skills.csv':
                                 skillsData = await parseCSV<SkillData>(stream);
                                 break;
+                            case 'Connections.csv':
+                                connectionsData = await parseCSV<ConnectionData>(stream);
+                                break;
                         }
                     } catch (error) {
                         console.error(`Error parsing ${entry.path}:`, error);
                         // Remove from foundFiles if parsing failed
                         foundFiles.delete(entry.path);
                     }
+                }
             }
-        }
 
             // Check if all required files were found
             const missingFiles = Array.from(requiredFiles).filter(file => !foundFiles.has(file));
@@ -248,7 +302,8 @@ export async function POST(request: NextRequest) {
                 await Promise.all([
                     positionsData.length > 0 && processPositions(positionsData, profile.id),
                     educationData.length > 0 && processEducation(educationData, profile.id),
-                    skillsData.length > 0 && processSkills(skillsData, profile.id)
+                    skillsData.length > 0 && processSkills(skillsData, profile.id),
+                    connectionsData.length > 0 && processConnections(connectionsData, profile.id)
                 ].filter(Boolean));
 
                 return NextResponse.json({ 
@@ -259,6 +314,10 @@ export async function POST(request: NextRequest) {
                 console.error('Error processing related data:', error);
                 throw new Error(`Failed to process related data: ${error instanceof Error ? error.message : String(error)}`);
             }
+        } catch (error) {
+            console.error('Error processing ZIP file:', error);
+            return NextResponse.json({ error: 'Failed to process ZIP file' }, { status: 500 });
+        }
 
     } catch (error) {
         console.error('Error processing LinkedIn data:', error);

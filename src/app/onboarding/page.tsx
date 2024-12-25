@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Flex, Box, Button, Text, Heading } from '@radix-ui/themes';
-import { supabase } from '@/lib/supabase';
+// Removed unused supabase import
 
 export default function OnboardingPage() {
     const [isUploading, setIsUploading] = useState(false);
@@ -111,7 +111,7 @@ export default function OnboardingPage() {
                             Processing your data... It will be ready in approximately {countdown} minutes.
                         </Text>
                         <Text size="2" color="gray">
-                            We'll send you an email when it's done.
+                            We&apos;ll send you an email when it&apos;s done.
                         </Text>
                     </Box>
                 )}
