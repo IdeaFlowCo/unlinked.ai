@@ -1,11 +1,11 @@
 -- Create tables for LinkedIn data
 begin;
 
--- Drop existing tables
-drop table if exists profiles cascade;
+-- Drop existing tables (commented out for safety)
+-- drop table if exists profiles cascade;
 
 -- Create new tables
-create table profiles (
+create table if not exists profiles (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users on delete cascade,
   first_name text,

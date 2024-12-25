@@ -3,7 +3,10 @@ const path = require('path');
 const fetch = require('node-fetch');
 
 async function executeSql(sql) {
-  const serviceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZybm5oaWZ5ZXZtZmtheW9lbnlrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczNTA5MzQwMCwiZXhwIjoyMDUwNjY5NDAwfQ.ZLIj0Ue6wm64Ba3Ml7i5AMZnSX7U6NJk19AqCKVZ6Iw';
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY environment variable is not set');
+  }
   
   const options = {
     method: 'POST',
@@ -20,7 +23,7 @@ async function executeSql(sql) {
   };
 
   console.log('Executing SQL:', sql);
-  const response = await fetch('https://frnnhifyevmfkayoenyk.supabase.co/rest/v1/rpc/sql', {
+  const response = await fetch('https://db.unlinked.ai/rest/v1/rpc/sql', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
