@@ -1,11 +1,15 @@
 -- Create tables for LinkedIn data
 begin;
 
--- Drop existing tables (commented out for safety)
--- drop table if exists profiles cascade;
+-- Drop existing tables
+drop table if exists connections cascade;
+drop table if exists skills cascade;
+drop table if exists education cascade;
+drop table if exists positions cascade;
+drop table if exists profiles cascade;
 
 -- Create new tables
-create table if not exists profiles (
+create table profiles (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users on delete cascade,
   first_name text,
@@ -19,7 +23,7 @@ create table if not exists profiles (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
-create table if not exists positions (
+create table positions (
   id uuid default gen_random_uuid() primary key,
   profile_id uuid references profiles(id) on delete cascade,
   company_name text,
@@ -31,7 +35,7 @@ create table if not exists positions (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
-create table if not exists education (
+create table education (
   id uuid default gen_random_uuid() primary key,
   profile_id uuid references profiles(id) on delete cascade,
   school_name text,
@@ -43,14 +47,14 @@ create table if not exists education (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
-create table if not exists skills (
+create table skills (
   id uuid default gen_random_uuid() primary key,
   profile_id uuid references profiles(id) on delete cascade,
   name text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
-create table if not exists connections (
+create table connections (
   id uuid default gen_random_uuid() primary key,
   user_profile_id uuid references profiles(id) on delete cascade, -- who uploaded
   connection_profile_id uuid references profiles(id) on delete cascade, -- shadow or real
@@ -59,12 +63,12 @@ create table if not exists connections (
 );
 
 -- Create indexes for common queries
-create index if not exists idx_profiles_user_id on profiles(user_id);
-create index if not exists idx_profiles_linkedin_url_slug on profiles(linkedin_url_slug);
-create index if not exists idx_positions_profile_id on positions(profile_id);
-create index if not exists idx_education_profile_id on education(profile_id);
-create index if not exists idx_skills_profile_id on skills(profile_id);
-create index if not exists idx_connections_user_profile_id on connections(user_profile_id);
-create index if not exists idx_connections_connection_profile_id on connections(connection_profile_id);
+create index idx_profiles_user_id on profiles(user_id);
+create index idx_profiles_linkedin_url_slug on profiles(linkedin_url_slug);
+create index idx_positions_profile_id on positions(profile_id);
+create index idx_education_profile_id on education(profile_id);
+create index idx_skills_profile_id on skills(profile_id);
+create index idx_connections_user_profile_id on connections(user_profile_id);
+create index idx_connections_connection_profile_id on connections(connection_profile_id);
 
 commit;
