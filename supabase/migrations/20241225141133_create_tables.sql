@@ -10,11 +10,12 @@ create table profiles (
   user_id uuid references auth.users on delete cascade,
   first_name text,
   last_name text,
+  email_address text,
   headline text,
   summary text,
   industry text,
   location text,
-  linkedin_url_slug text,
+  linkedin_url_slug text unique,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
@@ -54,9 +55,6 @@ create table if not exists connections (
   user_profile_id uuid references profiles(id) on delete cascade, -- who uploaded
   connection_profile_id uuid references profiles(id) on delete cascade, -- shadow or real
   connected_on text, -- storing as text for MVP
-  email_address text,
-  company text,
-  position text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
