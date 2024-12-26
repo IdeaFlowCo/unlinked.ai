@@ -109,6 +109,7 @@ export default function AuthPage() {
                     )}
 
                     <Button
+                        type="submit"
                         size="3"
                         variant="surface"
                         disabled={loading}
