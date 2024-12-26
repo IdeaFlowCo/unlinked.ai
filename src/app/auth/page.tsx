@@ -54,7 +54,7 @@ export default function AuthPage() {
             if (signInError) throw signInError;
             if (!signInData?.user) throw new Error('No user data returned');
 
-            window.location.href = '/dashboard';
+            window.location.href = '/profile';
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An error occurred');
             setLoading(false);
