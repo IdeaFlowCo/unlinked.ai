@@ -42,13 +42,26 @@ export default function AuthPage() {
                 const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
                     email: formData.email,
                     password: formData.password,
+                    options: {
+                        emailRedirectTo: `${window.location.origin}/auth/callback`,
+                        data: {
+                            email_confirmed: true // Disable email confirmation requirement
+                        }
+                    }
                 });
 
                 if (signUpError) throw signUpError;
                 if (!signUpData?.user) throw new Error('No user data returned');
 
+                // Handle email confirmation status
+                if (signUpData.user.confirmation_sent_at && !signUpData.user.email_confirmed_at) {
+                    setError('Please check your email for confirmation instructions.');
+                    setLoading(false);
+                    return;
+                }
+
+                // If email confirmation is not required or already confirmed, proceed to onboarding
                 window.location.href = '/onboarding';
-                return;
             }
 
             if (signInError) throw signInError;
@@ -103,9 +116,16 @@ export default function AuthPage() {
                     />
 
                     {error && (
-                        <Text color="red" size="2">
-                            {error}
-                        </Text>
+                        <Box mb="4">
+                            <Text color="red" size="2">
+                                {error}
+                            </Text>
+                            {error.includes('check your email') && (
+                                <Text size="2" style={{ marginTop: '8px' }}>
+                                    Please check your email for confirmation instructions.
+                                </Text>
+                            )}
+                        </Box>
                     )}
 
                     <Button
