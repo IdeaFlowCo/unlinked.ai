@@ -21,11 +21,18 @@ import AdmZip from 'adm-zip';
 interface ProfileData {
     'First Name': string;
     'Last Name': string;
-    'Email Address'?: string; // Optional since it might not be present in all CSVs
+    'Maiden Name'?: string;
+    'Email Address'?: string;
     'Headline': string;
     'Summary': string;
     'Industry': string;
     'Geo Location': string;
+    'Address'?: string;
+    'Birth Date'?: string;
+    'Zip Code'?: string;
+    'Twitter Handles'?: string;
+    'Websites'?: string;
+    'Instant Messengers'?: string;
     'Profile URL': string;
 }
 
@@ -34,6 +41,8 @@ interface ConnectionData {
     'Last Name': string;
     'Profile URL': string;
     'Connected On': string;
+    'Company'?: string;
+    'Position'?: string;
 }
 
 interface PositionData {
@@ -81,11 +90,19 @@ async function processProfileData(profileData: ProfileData, userId: string) {
             user_id: userId,
             first_name: profileData['First Name'],
             last_name: profileData['Last Name'],
+            maiden_name: profileData['Maiden Name'],
             email_address: profileData['Email Address'],
             headline: profileData['Headline'],
             summary: profileData['Summary'],
             industry: profileData['Industry'],
             location: profileData['Geo Location'],
+            address: profileData['Address'],
+            birth_date: profileData['Birth Date'],
+            zip_code: profileData['Zip Code'],
+            geo_location: profileData['Geo Location'],
+            twitter_handles: profileData['Twitter Handles'],
+            websites: profileData['Websites'],
+            instant_messengers: profileData['Instant Messengers'],
             linkedin_url_slug: getSlugFromLinkedInUrl(profileData['Profile URL'])
         }, {
             onConflict: 'user_id'
@@ -155,7 +172,9 @@ async function processConnections(connections: ConnectionData[], userProfileId: 
             .upsert({
                 first_name: connection['First Name'],
                 last_name: connection['Last Name'],
-                linkedin_url_slug: getSlugFromLinkedInUrl(connection['Profile URL'])
+                linkedin_url_slug: getSlugFromLinkedInUrl(connection['Profile URL']),
+                current_company: connection['Company'],
+                current_position: connection['Position']
             }, {
                 onConflict: 'linkedin_url_slug'
             })
