@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Flex, Box, Text, Heading, ScrollArea } from '@radix-ui/themes';
+import { Flex, Box, Text, Heading, ScrollArea, Skeleton, Link as RadixLink } from '@radix-ui/themes';
 import { MagnifyingGlassIcon } from '@radix-ui/react-icons';
+import Link from 'next/link';
 import type { ChangeEvent } from 'react';
 
 interface Profile {
@@ -14,6 +15,7 @@ interface Profile {
     summary: string;
     industry: string;
     location: string;
+    linkedin_url?: string;
 }
 
 interface ConnectionResponse {
@@ -137,8 +139,74 @@ export default function ProfilePage() {
 
     if (loading) {
         return (
-            <Box p="6">
-                <Text>Loading profile...</Text>
+            <Box className="max-w-4xl mx-auto" p="6">
+                {/* Profile Header Skeleton */}
+                <Flex direction="column" gap="4" mb="6">
+                    <Skeleton height="48px" width="60%" /> {/* Name */}
+                    <Skeleton height="28px" width="40%" /> {/* Headline */}
+                    <Skeleton height="20px" width="30%" /> {/* Location */}
+                    <Skeleton height="60px" width="100%" /> {/* Summary */}
+                </Flex>
+
+                {/* Work Experience Skeleton */}
+                <Box mb="8">
+                    <Heading size="6" mb="4">Work Experience</Heading>
+                    <Flex direction="column" gap="4">
+                        {[1, 2, 3].map((_, index) => (
+                            <Box key={index}>
+                                <Skeleton height="24px" width="40%" mb="2" /> {/* Title */}
+                                <Skeleton height="20px" width="30%" mb="2" /> {/* Company */}
+                                <Skeleton height="16px" width="25%" mb="2" /> {/* Dates */}
+                                <Skeleton height="40px" width="90%" /> {/* Description */}
+                            </Box>
+                        ))}
+                    </Flex>
+                </Box>
+
+                {/* Education Skeleton */}
+                <Box mb="8">
+                    <Heading size="6" mb="4">Education</Heading>
+                    <Flex direction="column" gap="4">
+                        {[1, 2].map((_, index) => (
+                            <Box key={index}>
+                                <Skeleton height="24px" width="45%" mb="2" /> {/* School */}
+                                <Skeleton height="20px" width="35%" mb="2" /> {/* Degree */}
+                                <Skeleton height="16px" width="25%" mb="2" /> {/* Dates */}
+                                <Skeleton height="32px" width="80%" /> {/* Activities */}
+                            </Box>
+                        ))}
+                    </Flex>
+                </Box>
+
+                {/* Connections Skeleton */}
+                <Box>
+                    <Flex justify="between" align="center" mb="4">
+                        <Heading size="6">Connections</Heading>
+                        <Box style={{ width: '300px' }}>
+                            <Box className="relative">
+                                <Skeleton height="40px" width="100%" /> {/* Search input */}
+                            </Box>
+                        </Box>
+                    </Flex>
+                    <ScrollArea style={{ height: '400px' }}>
+                        <Flex direction="column" gap="3">
+                            {[1, 2, 3, 4].map((_, index) => (
+                                <Box
+                                    key={index}
+                                    p="3"
+                                    style={{
+                                        border: '1px solid var(--gray-a5)',
+                                        borderRadius: 'var(--radius-3)',
+                                    }}
+                                >
+                                    <Skeleton height="24px" width="40%" mb="2" /> {/* Name */}
+                                    <Skeleton height="20px" width="60%" mb="2" /> {/* Headline */}
+                                    <Skeleton height="16px" width="30%" /> {/* Location */}
+                                </Box>
+                            ))}
+                        </Flex>
+                    </ScrollArea>
+                </Box>
             </Box>
         );
     }
@@ -229,26 +297,33 @@ export default function ProfilePage() {
                 <ScrollArea style={{ height: '400px' }}>
                     <Flex direction="column" gap="3">
                         {filteredConnections.map((connection, index) => (
-                            <Box
+                            <Link
+                                href={`/profile/${connection.profile.id}`}
+                                style={{ textDecoration: 'none', color: 'inherit' }}
                                 key={index}
-                                p="3"
-                                style={{
-                                    border: '1px solid var(--gray-a5)',
-                                    borderRadius: 'var(--radius-3)',
-                                }}
                             >
-                                <Text weight="bold">
-                                    <a href={`/profile/${connection.profile.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                                <Box
+                                    p="3"
+                                    className="connection-card"
+                                >
+                                    <Text weight="bold">
                                         {connection.profile.first_name} {connection.profile.last_name}
-                                    </a>
-                                </Text>
-                                {connection.profile.headline && (
-                                    <Text size="2" color="gray">{connection.profile.headline}</Text>
-                                )}
-                                {connection.profile.location && (
-                                    <Text size="2">{connection.profile.location}</Text>
-                                )}
-                            </Box>
+                                    </Text>
+                                    {connection.profile.headline && (
+                                        <Text size="2" color="gray">{connection.profile.headline}</Text>
+                                    )}
+                                    {connection.profile.location && (
+                                        <Text size="2">{connection.profile.location}</Text>
+                                    )}
+                                    {connection.profile.linkedin_url && (
+                                        <RadixLink asChild>
+                                            <a href={connection.profile.linkedin_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                                                <Text size="2" color="blue" style={{ marginTop: '8px' }}>View on LinkedIn</Text>
+                                            </a>
+                                        </RadixLink>
+                                    )}
+                                </Box>
+                            </Link>
                         ))}
                     </Flex>
                 </ScrollArea>
