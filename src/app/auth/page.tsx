@@ -2,7 +2,7 @@
 
 import { Flex, Box, TextField, Button, Text, Heading } from '@radix-ui/themes';
 import { useState, type ChangeEvent, type FormEvent } from 'react';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client';
 
 interface FormData {
     email: string;
@@ -36,7 +36,8 @@ export default function AuthPage() {
         try {
             console.log('Starting authentication attempt');
             // First try to sign in
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            const supabase = createClient();
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
                 email: formData.email,
                 password: formData.password,
             });
@@ -44,7 +45,8 @@ export default function AuthPage() {
             // If sign in fails due to invalid user, try to sign up
             console.log('Sign in result:', { signInError });
             if (signInError?.message.includes('Invalid login credentials')) {
-                const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+                const supabase = createClient();
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
                     email: formData.email,
                     password: formData.password,
                     options: {
@@ -87,6 +89,7 @@ export default function AuthPage() {
 
     const handleGoogleSignIn = async () => {
         try {
+            const supabase = createClient();
             const { error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
