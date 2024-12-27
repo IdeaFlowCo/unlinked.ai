@@ -29,24 +29,59 @@ export default function AuthPage() {
         e.preventDefault();
         console.log('Form submission started');
         console.log('Form data:', { email: formData.email });
+        console.log('Window location:', window.location.href);
+        console.log('Environment check:', {
+            NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+            hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        });
         
         setLoading(true);
         setError(null);
 
         try {
             console.log('Creating Supabase client...');
-            const supabase = createClient();
+            let supabase;
+            try {
+                supabase = createClient();
+            } catch (clientError) {
+                console.error('Failed to create Supabase client:', clientError);
+                throw clientError;
+            }
             
-            console.log('Starting sign-in attempt...');
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            console.log('Starting sign-in attempt with credentials:', {
                 email: formData.email,
-                password: formData.password,
+                passwordLength: formData.password.length
             });
+            let signInData;
+            let signInError;
+            
+            try {
+                const result = await supabase.auth.signInWithPassword({
+                    email: formData.email,
+                    password: formData.password,
+                });
+                
+                signInData = result.data;
+                signInError = result.error;
 
-            console.log('Sign in attempt result:', { 
-                success: !!signInData?.user,
-                error: signInError?.message || null 
-            });
+                console.log('Sign in attempt result:', { 
+                    success: !!signInData?.user,
+                    error: signInError?.message || null,
+                    response: signInData
+                });
+
+                if (signInError) {
+                    console.error('Detailed sign in error:', {
+                        message: signInError.message,
+                        status: signInError.status,
+                        name: signInError.name,
+                        stack: signInError.stack
+                    });
+                }
+            } catch (networkError) {
+                console.error('Network or unexpected error during sign in:', networkError);
+                throw networkError;
+            }
 
             // If sign in fails due to invalid credentials, try sign up
             if (signInError?.message.includes('Invalid login credentials')) {
