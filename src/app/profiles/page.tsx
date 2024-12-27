@@ -1,25 +1,15 @@
 import { createClient } from '@/utils/supabase/server'
-import { Database } from '@/utils/supabase/types'
-import Link from 'next/link'
-import { Container, Heading, Text, Card, Flex } from '@radix-ui/themes'
+import { Container, Heading, Text, Flex } from '@radix-ui/themes'
+import { PersonIcon } from '@radix-ui/react-icons'
+import ProfileGrid from '@/components/ProfileGrid'
 
 export default async function ProfilesIndex() {
   try {
-    console.log('Environment variables:', {
-      url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    })
-
     const supabase = await createClient()
-    console.log('Supabase client created successfully')
-
     const { data: profiles, error } = await supabase
       .from('profiles')
       .select('*')
       .order('last_name')
-    
-    console.log('Server-side profiles data:', profiles)
-    console.log('Server-side error if any:', error)
 
     if (error) {
       console.error('Error fetching profiles:', error)
@@ -44,18 +34,15 @@ export default async function ProfilesIndex() {
 
     return (
       <Container size="3">
-        <Heading size="7">Profiles ({profiles.length})</Heading>
-        <Flex direction="column" gap="3" mt="4">
-          {profiles.map((p: Database['public']['Tables']['profiles']['Row']) => (
-            <Card key={p.id}>
-              <Link href={`/profiles/${p.id}`}>
-                <Text>
-                  {p.first_name} {p.last_name} - {p.headline}
-                </Text>
-              </Link>
-            </Card>
-          ))}
+        {/* Header with Network Directory */}
+        <Flex gap="2" align="center" mb="6">
+          <PersonIcon width="24" height="24" />
+          <Heading size="6">Network Directory</Heading>
+          <Text size="2" color="gray">({profiles.length} professionals)</Text>
         </Flex>
+
+        {/* Client-side Profile Grid with Search */}
+        <ProfileGrid profiles={profiles} />
       </Container>
     )
   } catch (e) {
