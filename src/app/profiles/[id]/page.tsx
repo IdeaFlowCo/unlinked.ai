@@ -1,6 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
-import { Container, Heading, Text, Card, Flex, Box, Grid, Avatar } from '@radix-ui/themes'
-import { BackpackIcon as BriefcaseIcon, StarIcon, PersonIcon as UsersIcon } from '@radix-ui/react-icons'
+import { Container, Heading, Text, Card, Flex, Box, Grid, Avatar, Badge } from '@radix-ui/themes'
+import { BackpackIcon as BriefcaseIcon, StarIcon, PersonIcon as UsersIcon, BookmarkIcon } from '@radix-ui/react-icons'
 import Link from 'next/link'
 
 interface PageProps {
@@ -115,51 +115,55 @@ export default async function ProfileDetail({ params }: PageProps) {
   return (
     <Container size="3">
       {/* Profile Header */}
-      <Card size="4" style={{ marginBottom: 'var(--space-6)' }}>
-        <Flex gap="6" align="start">
-          <Avatar
-            size="7"
-            src={`https://api.dicebear.com/7.x/initials/svg?seed=${profile.first_name} ${profile.last_name}`}
-            fallback={`${profile.first_name[0]}${profile.last_name[0]}`}
-            radius="full"
-          />
-          <Box style={{ flex: '1' }}>
-            <Heading size="7" mb="1">
-              {profile.first_name} {profile.last_name}
-            </Heading>
-            <Text size="4" mb="2" weight="medium">
-              {profile.headline}
+      <Card size="4" mb="6">
+        <Flex direction="column" align="start" gap="5">
+          <Flex gap="4" align="center" width="100%">
+            <Avatar
+              size="7"
+              src={`https://api.dicebear.com/7.x/initials/svg?seed=${profile.first_name} ${profile.last_name}`}
+              fallback={`${profile.first_name[0]}${profile.last_name[0]}`}
+              radius="full"
+            />
+            <Box>
+              <Heading size="7">
+                {profile.first_name} {profile.last_name}
+              </Heading>
+              <Text size="4" color="gray" mt="1">
+                {profile.headline}
+              </Text>
+            </Box>
+          </Flex>
+
+          <Badge size="2" variant="soft">{profile.industry}</Badge>
+
+          {profile.summary && (
+            <Text size="3" style={{ lineHeight: '1.5' }}>
+              {profile.summary}
             </Text>
-            <Text size="3" color="gray">
-              {profile.industry}
-            </Text>
-          </Box>
+          )}
         </Flex>
-        {profile.summary && (
-          <Box mt="5">
-            <Text size="3">{profile.summary}</Text>
-          </Box>
-        )}
       </Card>
 
       <Grid columns={{ initial: '1', md: '2' }} gap="6">
         {/* Left Column */}
         <Box>
           {/* Positions */}
-          <Card size="3" style={{ marginBottom: 'var(--space-6)' }}>
+          <Card size="3" mb="6">
             <Flex gap="2" align="center" mb="4">
-              <BriefcaseIcon width="18" height="18" />
-              <Heading size="5">Experience</Heading>
+              <BriefcaseIcon width="20" height="20" />
+              <Heading size="4">Experience</Heading>
             </Flex>
             <Flex direction="column" gap="4">
               {positions?.map((pos, index) => (
-                <Box key={index}>
-                  <Text size="3" weight="medium">{pos.title}</Text>
-                  <Text size="3" color="gray">{pos.companies.name}</Text>
-                  <Text size="2" color="gray">
-                    {pos.started_on} - {pos.finished_on || 'Present'}
-                  </Text>
-                </Box>
+                <Card key={index} size="2" variant="surface">
+                  <Box>
+                    <Heading size="3">{pos.title}</Heading>
+                    <Text size="3" color="gray" mt="1">{pos.companies.name}</Text>
+                    <Text size="2" color="gray" mt="1">
+                      {pos.started_on} - {pos.finished_on || 'Present'}
+                    </Text>
+                  </Box>
+                </Card>
               ))}
             </Flex>
           </Card>
@@ -167,18 +171,20 @@ export default async function ProfileDetail({ params }: PageProps) {
           {/* Education */}
           <Card size="3">
             <Flex gap="2" align="center" mb="4">
-
-              <Heading size="5">Education</Heading>
+              <BookmarkIcon width="20" height="20" />
+              <Heading size="4">Education</Heading>
             </Flex>
             <Flex direction="column" gap="4">
               {education?.map((edu, index) => (
-                <Box key={index}>
-                  <Text size="3" weight="medium">{edu.degree_name}</Text>
-                  <Text size="3" color="gray">{edu.institutions.name}</Text>
-                  <Text size="2" color="gray">
-                    {edu.started_on} - {edu.finished_on || 'Present'}
-                  </Text>
-                </Box>
+                <Card key={index} size="2" variant="surface">
+                  <Box>
+                    <Heading size="3">{edu.degree_name}</Heading>
+                    <Text size="3" color="gray" mt="1">{edu.institutions.name}</Text>
+                    <Text size="2" color="gray" mt="1">
+                      {edu.started_on} - {edu.finished_on || 'Present'}
+                    </Text>
+                  </Box>
+                </Card>
               ))}
             </Flex>
           </Card>
@@ -187,23 +193,16 @@ export default async function ProfileDetail({ params }: PageProps) {
         {/* Right Column */}
         <Box>
           {/* Skills */}
-          <Card size="3" style={{ marginBottom: 'var(--space-6)' }}>
+          <Card size="3" mb="6">
             <Flex gap="2" align="center" mb="4">
-              <StarIcon width="18" height="18" />
-              <Heading size="5">Skills</Heading>
+              <StarIcon width="20" height="20" />
+              <Heading size="4">Skills</Heading>
             </Flex>
             <Flex gap="2" wrap="wrap">
               {skills?.map((skill, index) => (
-                <Box 
-                  key={index}
-                  p="2"
-                  style={{ 
-                    backgroundColor: 'var(--gray-a3)',
-                    borderRadius: 'var(--radius-2)'
-                  }}
-                >
-                  <Text size="2">{skill.name}</Text>
-                </Box>
+                <Badge key={index} size="2" variant="soft">
+                  {skill.name}
+                </Badge>
               ))}
             </Flex>
           </Card>
@@ -211,8 +210,8 @@ export default async function ProfileDetail({ params }: PageProps) {
           {/* Connections */}
           <Card size="3">
             <Flex gap="2" align="center" mb="4">
-              <UsersIcon width="18" height="18" />
-              <Heading size="5">Network</Heading>
+              <UsersIcon width="20" height="20" />
+              <Heading size="4">Network</Heading>
             </Flex>
             <Flex direction="column" gap="3">
               {connections?.map((conn, index) => {
