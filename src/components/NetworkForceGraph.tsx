@@ -95,33 +95,33 @@ export default function NetworkForceGraph({
             return sourceId === node.id || targetId === node.id;
           }).length;
           
-          // Base size varies by node type (reduced base sizes)
-          const baseSize = node.type === 'person' ? 5 : node.type === 'company' ? 6 : 7;
+          // Base size varies by node type (larger base sizes)
+          const baseSize = node.type === 'person' ? 10 : node.type === 'company' ? 12 : 14;
           
-          // Use logarithmic scale for more subtle growth
-          const sizeMultiplier = Math.log2(connectionCount + 1) * 1.2;
+          // Use logarithmic scale with enhanced multiplier
+          const sizeMultiplier = Math.log2(connectionCount + 1) * 1.5;
           const size = baseSize + sizeMultiplier;
           
           ctx.font = `${fontSize}px Sans-Serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          // Set color based on node type using Radix UI theme colors
+          // Set color based on node type using distinct Radix UI theme colors
           switch (node.type) {
             case 'person':
-              ctx.fillStyle = '#7c66dc'; // violet-9
+              ctx.fillStyle = '#7c66dc'; // vibrant violet
               // Draw circle for person
               ctx.beginPath();
               ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI);
               ctx.fill();
               break;
             case 'company':
-              ctx.fillStyle = '#6e56cf'; // violet-10
+              ctx.fillStyle = '#4f3ecc'; // deeper violet
               // Draw square for company
               ctx.fillRect(node.x! - size, node.y! - size, size * 2, size * 2);
               break;
             case 'institution':
-              ctx.fillStyle = '#6547c7'; // violet-11
+              ctx.fillStyle = '#a07ffa'; // lighter lavender
               // Draw triangle for institution
               ctx.beginPath();
               ctx.moveTo(node.x!, node.y! - size);
@@ -144,14 +144,14 @@ export default function NetworkForceGraph({
         linkColor={(link: Link) => {
           switch (link.type) {
             case 'works_at':
-              return 'rgba(120, 80, 250, 0.08)' // Very subtle violet for work relationships
+              return 'rgba(120, 80, 250, 0.3)' // More visible violet for work relationships
             case 'studied_at':
-              return 'rgba(80, 120, 250, 0.08)' // Very subtle blue for education
+              return 'rgba(80, 120, 250, 0.3)' // More visible blue for education
             default:
-              return 'rgba(167, 139, 250, 0.08)' // Very subtle default for connections
+              return 'rgba(167, 139, 250, 0.3)' // More visible default for connections
           }
         }}
-        linkWidth={0.2} // Even thinner lines for better visual balance
+        linkWidth={1} // Thicker lines for better visibility
         onLinkClick={() => {}}  // Disable link interactions
         linkDirectionalParticles={0}
         onNodeClick={(node: Node) => onNodeClick?.(node)}
