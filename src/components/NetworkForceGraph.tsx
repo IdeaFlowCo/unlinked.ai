@@ -56,13 +56,13 @@ export default function NetworkForceGraph({
         nodeColor={(node: Node) => {
           switch (node.type) {
             case 'person':
-              return 'var(--blue-9)'
+              return '#0091FF'  // blue
             case 'company':
-              return 'var(--green-9)'
+              return '#30A46C'  // green
             case 'institution':
-              return 'var(--amber-9)'
+              return '#FFA03C'  // amber
             default:
-              return 'var(--gray-9)'
+              return '#8E8E93'  // gray
           }
         }}
         linkColor={() => 'var(--gray-8)'}

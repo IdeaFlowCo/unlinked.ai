@@ -15,12 +15,12 @@ export default function ProfilesIndex() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
   const [data, setData] = useState<{
-    profiles: any[]
-    companies: any[]
-    institutions: any[]
-    positions: any[]
-    education: any[]
-    connections: any[]
+    profiles: Database['public']['Tables']['profiles']['Row'][]
+    companies: Database['public']['Tables']['companies']['Row'][]
+    institutions: Database['public']['Tables']['institutions']['Row'][]
+    positions: Database['public']['Tables']['positions']['Row'][]
+    education: Database['public']['Tables']['education']['Row'][]
+    connections: Database['public']['Tables']['connections']['Row'][]
   }>({
     profiles: [],
     companies: [],
@@ -73,7 +73,7 @@ export default function ProfilesIndex() {
     }
 
     fetchData()
-  }, [])
+  }, [supabase])
 
   if (loading) {
     return (
@@ -193,65 +193,24 @@ export default function ProfilesIndex() {
           />
         </Box>
 
-        <NetworkForceGraph 
-          data={{ nodes, links }} 
-          width={1200}
-          height={800}
-          onNodeClick={(node) => {
-            if (node.type === 'person') {
-              window.location.href = `/profiles/${node.data.id}`
-            }
+        <Box
+          style={{
+            width: '100%',
+            height: '800px',
+            position: 'relative'
           }}
-        />
-      </Container>
-    )
-    return (
-      <Container size="3">
-        <Box mb="6">
-          <Flex gap="2" align="center" mb="4">
-            <PersonIcon width="24" height="24" />
-            <Heading size="6">Network Graph</Heading>
-            <Text size="2" color="gray">
-              ({data.profiles?.length || 0} professionals, {data.companies?.length || 0} companies, {data.institutions?.length || 0} institutions)
-            </Text>
-          </Flex>
-
-          <SearchInput
-            onSearch={async (query) => {
-              try {
-                const response = await fetch('/api/search', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ query })
-                })
-
-                if (!response.ok) {
-                  const error = await response.json()
-                  throw new Error(error.message || 'Search failed')
-                }
-
-                const { profiles: searchResults } = await response.json()
-                // TODO: Update graph to highlight matching nodes once OpenAI integration is complete
-                console.log('Search results:', searchResults)
-              } catch (error) {
-                console.error('Search error:', error)
-                throw error
+        >
+          <NetworkForceGraph 
+            data={{ nodes, links }} 
+            width={window.innerWidth - 100}
+            height={800}
+            onNodeClick={(node) => {
+              if (node.type === 'person') {
+                window.location.href = `/profiles/${node.data.id}`
               }
             }}
-            placeholder="Search professionals by name, title, or company..."
           />
         </Box>
-
-        <NetworkForceGraph 
-          data={{ nodes, links }} 
-          width={1200}
-          height={800}
-          onNodeClick={(node) => {
-            if (node.type === 'person') {
-              window.location.href = `/profiles/${node.data.id}`
-            }
-          }}
-        />
       </Container>
     )
 }
