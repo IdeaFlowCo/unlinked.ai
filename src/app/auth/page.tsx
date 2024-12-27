@@ -27,10 +27,12 @@ export default function AuthPage() {
 
     const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        console.log('Form submitted');
         setLoading(true);
         setError(null);
 
         try {
+            console.log('Starting authentication attempt');
             // First try to sign in
             const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
                 email: formData.email,
@@ -38,6 +40,7 @@ export default function AuthPage() {
             });
 
             // If sign in fails due to invalid user, try to sign up
+            console.log('Sign in result:', { signInError });
             if (signInError?.message.includes('Invalid login credentials')) {
                 const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
                     email: formData.email,
@@ -63,7 +66,7 @@ export default function AuthPage() {
             }
 
             if (signInError) {
-                console.error('Sign in error:', signInError);
+                console.log('Sign in error:', signInError);
                 throw signInError;
             }
             
