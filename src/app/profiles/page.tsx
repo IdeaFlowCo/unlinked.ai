@@ -1,7 +1,7 @@
 'use client'
 
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { Container, Heading, Text, Flex, Box } from '@radix-ui/themes'
+import { Container, Heading, Text, Flex, Box, Card } from '@radix-ui/themes'
 import { PersonIcon } from '@radix-ui/react-icons'
 import dynamic from 'next/dynamic'
 import { useEffect, useState } from 'react'
@@ -193,24 +193,26 @@ export default function ProfilesIndex() {
           />
         </Box>
 
-        <Box
-          style={{
-            width: '100%',
-            height: '800px',
-            position: 'relative'
-          }}
-        >
-          <NetworkForceGraph 
-            data={{ nodes, links }} 
-            width={window.innerWidth - 100}
-            height={800}
-            onNodeClick={(node) => {
-              if (node.type === 'person') {
-                window.location.href = `/profiles/${node.data.id}`
-              }
+        <Card size="3" style={{ width: '100%' }}>
+          <Box
+            style={{
+              width: '100%',
+              height: '800px',
+              position: 'relative',
+              overflow: 'hidden'
             }}
-          />
-        </Box>
+          >
+            <NetworkForceGraph 
+              data={{ nodes, links }} 
+              height={800}
+              onNodeClick={(node) => {
+                if (node.type === 'person') {
+                  window.location.href = `/profiles/${node.data.id}`
+                }
+              }}
+            />
+          </Box>
+        </Card>
       </Container>
     )
 }

@@ -54,12 +54,10 @@ export default function ProfileGrid({ profiles }: ProfileGridProps) {
                   </Text>
                   {p.headline && (
                     <Text as="div" size="2" color="gray" style={{ 
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      lineHeight: '1.3'
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: '1.3',
+                      maxHeight: '3.9em',  // 3 lines of text
+                      overflow: 'hidden'
                     }}>
                       {p.headline}
                     </Text>
