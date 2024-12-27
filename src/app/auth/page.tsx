@@ -29,33 +29,39 @@ export default function AuthPage() {
         e.preventDefault();
         console.log('Form submission started');
         console.log('Form data:', { email: formData.email });
-        console.log('Environment check:', {
-            url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-            hasKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-            origin: window.location.origin
-        });
+        
         setLoading(true);
         setError(null);
 
         try {
-            console.log('Starting authentication attempt');
-            // First try to sign in
+            console.log('Creating Supabase client...');
             const supabase = createClient();
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            
+            console.log('Starting sign-in attempt...');
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
                 email: formData.email,
                 password: formData.password,
             });
 
-            // If sign in fails due to invalid user, try to sign up
-            console.log('Sign in result:', { signInError });
+            console.log('Sign in attempt result:', { 
+                success: !!signInData?.user,
+                error: signInError?.message || null 
+            });
+
+            // If sign in fails due to invalid credentials, try sign up
             if (signInError?.message.includes('Invalid login credentials')) {
-                const supabase = createClient();
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+                console.log('Sign in failed, attempting sign up...');
+                const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
                     email: formData.email,
                     password: formData.password,
                     options: {
                         emailRedirectTo: `${window.location.origin}/auth/callback`,
                     }
+                });
+
+                console.log('Sign up attempt result:', {
+                    success: !!signUpData?.user,
+                    error: signUpError?.message || null
                 });
 
                 if (signUpError) {
@@ -68,13 +74,13 @@ export default function AuthPage() {
                     throw new Error('No user data returned from signup');
                 }
 
-                // Proceed directly to onboarding since email confirmation is disabled
+                console.log('Sign up successful, redirecting to onboarding...');
                 window.location.href = '/onboarding';
                 return;
             }
 
             if (signInError) {
-                console.log('Sign in error:', signInError);
+                console.error('Sign in error:', signInError);
                 throw signInError;
             }
             
@@ -83,7 +89,7 @@ export default function AuthPage() {
                 throw new Error('No user data returned from signin');
             }
 
-            // Successful sign in, redirect to profile
+            console.log('Sign in successful, redirecting to profile...');
             window.location.href = '/profile';
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An error occurred');
