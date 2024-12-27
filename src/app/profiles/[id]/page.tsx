@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { Container, Heading, Text, Card, Flex } from '@radix-ui/themes'
+import Link from 'next/link'
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -63,6 +64,43 @@ export default async function ProfileDetail({ params }: PageProps) {
       name: string;
     }[]>()
 
+  // Query connections
+  const { data: connections } = await supabase
+    .from('connections')
+    .select(`
+      profile_id_a,
+      profile_id_b,
+      profile_a:profiles!connections_profile_id_a_fkey (
+        id,
+        first_name,
+        last_name,
+        headline
+      ),
+      profile_b:profiles!connections_profile_id_b_fkey (
+        id,
+        first_name,
+        last_name,
+        headline
+      )
+    `)
+    .or(`profile_id_a.eq.${resolvedParams.id},profile_id_b.eq.${resolvedParams.id}`)
+    .returns<{
+      profile_id_a: string;
+      profile_id_b: string;
+      profile_a: {
+        id: string;
+        first_name: string;
+        last_name: string;
+        headline: string;
+      };
+      profile_b: {
+        id: string;
+        first_name: string;
+        last_name: string;
+        headline: string;
+      };
+    }[]>()
+
   if (!profile) {
     return (
       <Container size="2">
@@ -114,6 +152,29 @@ export default async function ProfileDetail({ params }: PageProps) {
             <Text>{sk.name}</Text>
           </Card>
         ))}
+      </Flex>
+
+      {/* Connections */}
+      <Heading size="5" mt="5">Connections</Heading>
+      <Flex direction="column" gap="2">
+        {connections?.map((conn, index) => {
+          const isA = conn.profile_id_a === resolvedParams.id
+          const connectedProfile = isA ? conn.profile_b : conn.profile_a
+          return (
+            <Card key={index} asChild>
+              <Link href={`/profiles/${connectedProfile.id}`}>
+                <Text size="4">
+                  {connectedProfile.first_name} {connectedProfile.last_name}
+                </Text>
+                {connectedProfile.headline && (
+                  <Text size="2" color="gray">
+                    {connectedProfile.headline}
+                  </Text>
+                )}
+              </Link>
+            </Card>
+          )
+        })}
       </Flex>
     </Container>
   )
