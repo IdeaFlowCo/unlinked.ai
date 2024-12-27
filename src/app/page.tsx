@@ -1,15 +1,10 @@
-import { createClient } from '@/utils/supabase/server'
+// import { createClient } from '@/utils/supabase/server'
 import { Container, Flex, Box, Text, Card, Grid, Button, Heading } from '@radix-ui/themes'
 import { MagnifyingGlassIcon, UploadIcon, PersonIcon } from '@radix-ui/react-icons'
-import { redirect } from 'next/navigation'
 
-export default async function LandingPage({
-    searchParams,
-}: {
-    searchParams: { [key: string]: string | string[] | undefined }
-}) {
-    const supabase = await createClient()
-    const { data } = await supabase.auth.getUser()
+export default async function LandingPage() {
+    // const supabase = await createClient()
+    // const { data } = await supabase.auth.getUser()
 
     const features = [
         {

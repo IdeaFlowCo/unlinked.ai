@@ -1,6 +1,7 @@
 import { Flex, Box, TextField, Button, Text, Heading, Container, Card } from '@radix-ui/themes';
 import { loginOrSignup, signInWithGoogle } from './actions';
 import { PersonIcon } from '@radix-ui/react-icons';
+import Link from 'next/link';
 
 export default function AuthPage() {
     return (
@@ -66,9 +67,9 @@ export default function AuthPage() {
 
                 <Box style={{ textAlign: 'center' }}>
                     <Text size="2">
-                        <a href="/?skip=true" className="underline">
+                        <Link href="/?skip=true" className="underline">
                             Skip to explore unlinked.ai
-                        </a>
+                        </Link>
                     </Text>
                 </Box>
             </Flex>
