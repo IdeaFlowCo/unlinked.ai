@@ -15,6 +15,11 @@ export default async function Header() {
             </Link>
 
             <Flex align="center" gap="4">
+                <Link href="/profiles">
+                    <Button size="2" variant="soft">
+                        Browse Profiles
+                    </Button>
+                </Link>
                 {data.user ? (
                     <Flex align="center" gap="4">
                         <span>{data.user.email}</span>
