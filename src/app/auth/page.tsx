@@ -31,20 +31,14 @@ export default function AuthPage() {
         setError(null);
 
         try {
-            console.log('Attempting authentication...');
-            
             // First try to sign in
             const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
                 email: formData.email,
                 password: formData.password,
             });
 
-            console.log('Sign in attempt result:', { signInData, signInError });
-
             // If sign in fails due to invalid user, try to sign up
             if (signInError?.message.includes('Invalid login credentials')) {
-                console.log('Sign in failed, attempting signup...');
-                
                 const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
                     email: formData.email,
                     password: formData.password,
@@ -52,8 +46,6 @@ export default function AuthPage() {
                         emailRedirectTo: `${window.location.origin}/auth/callback`,
                     }
                 });
-
-                console.log('Sign up attempt result:', { signUpData, signUpError });
 
                 if (signUpError) {
                     console.error('Sign up error:', signUpError);
