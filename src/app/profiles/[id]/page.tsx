@@ -1,35 +1,67 @@
 import { createClient } from '@/utils/supabase/server'
 import { Container, Heading, Text, Card, Flex } from '@radix-ui/themes'
 
-export default async function ProfileDetail({
-  params,
-}: {
-  params: { id: string }
-}) {
+interface PageProps {
+  params: Promise<{ id: string }>
+}
+
+export default async function ProfileDetail({ params }: PageProps) {
+  const resolvedParams = await params
   const supabase = await createClient()
 
   // Query the profile
   const { data: profile } = await supabase
     .from('profiles')
     .select('id, first_name, last_name, headline, industry, summary')
-    .eq('id', params.id)
+    .eq('id', resolvedParams.id)
     .single()
 
   // Query positions, education, skills
   const { data: positions } = await supabase
     .from('positions')
-    .select('title, started_on, finished_on, companies ( name )')
-    .eq('profile_id', params.id)
+    .select(`
+      title,
+      started_on,
+      finished_on,
+      companies (
+        name
+      )
+    `)
+    .eq('profile_id', resolvedParams.id)
+    .returns<{
+      title: string;
+      started_on: string;
+      finished_on: string | null;
+      companies: { name: string };
+    }[]>()
 
   const { data: education } = await supabase
     .from('education')
-    .select('degree_name, started_on, finished_on, institutions ( name )')
-    .eq('profile_id', params.id)
+    .select(`
+      degree_name,
+      started_on,
+      finished_on,
+      institutions (
+        name
+      )
+    `)
+    .eq('profile_id', resolvedParams.id)
+    .returns<{
+      degree_name: string;
+      started_on: string;
+      finished_on: string | null;
+      institutions: { name: string };
+    }[]>()
 
   const { data: skills } = await supabase
     .from('skills')
-    .select('name')
-    .eq('profile_id', params.id)
+    .select(`
+      name
+    `)
+    .eq('profile_id', resolvedParams.id)
+    .returns<{
+      name: string;
+    }[]>()
 
   if (!profile) {
     return (
@@ -59,7 +91,7 @@ export default async function ProfileDetail({
       <Flex direction="column" gap="2">
         {positions?.map((pos, index) => (
           <Card key={index}>
-            <Text size="4">{pos.title} at {pos.companies?.name}</Text>
+            <Text size="4">{pos.title} at {pos.companies.name}</Text>
           </Card>
         ))}
       </Flex>
@@ -69,7 +101,7 @@ export default async function ProfileDetail({
       <Flex direction="column" gap="2">
         {education?.map((edu, index) => (
           <Card key={index}>
-            <Text size="4">{edu.degree_name} at {edu.institutions?.name}</Text>
+            <Text size="4">{edu.degree_name} at {edu.institutions.name}</Text>
           </Card>
         ))}
       </Flex>
