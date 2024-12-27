@@ -31,42 +31,56 @@ export default function AuthPage() {
         setError(null);
 
         try {
+            console.log('Attempting authentication...');
+            
             // First try to sign in
             const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
                 email: formData.email,
                 password: formData.password,
             });
 
+            console.log('Sign in attempt result:', { signInData, signInError });
+
             // If sign in fails due to invalid user, try to sign up
             if (signInError?.message.includes('Invalid login credentials')) {
+                console.log('Sign in failed, attempting signup...');
+                
                 const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
                     email: formData.email,
                     password: formData.password,
                     options: {
                         emailRedirectTo: `${window.location.origin}/auth/callback`,
-                        data: {
-                            email_confirmed: true // Disable email confirmation requirement
-                        }
                     }
                 });
 
-                if (signUpError) throw signUpError;
-                if (!signUpData?.user) throw new Error('No user data returned');
+                console.log('Sign up attempt result:', { signUpData, signUpError });
 
-                // Handle email confirmation status
-                if (signUpData.user.confirmation_sent_at && !signUpData.user.email_confirmed_at) {
-                    setError('Please check your email for confirmation instructions.');
-                    setLoading(false);
-                    return;
+                if (signUpError) {
+                    console.error('Sign up error:', signUpError);
+                    throw signUpError;
+                }
+                
+                if (!signUpData?.user) {
+                    console.error('No user data returned from signup');
+                    throw new Error('No user data returned from signup');
                 }
 
-                // If email confirmation is not required or already confirmed, proceed to onboarding
+                // Proceed directly to onboarding since email confirmation is disabled
                 window.location.href = '/onboarding';
+                return;
             }
 
-            if (signInError) throw signInError;
-            if (!signInData?.user) throw new Error('No user data returned');
+            if (signInError) {
+                console.error('Sign in error:', signInError);
+                throw signInError;
+            }
+            
+            if (!signInData?.user) {
+                console.error('No user data returned from signin');
+                throw new Error('No user data returned from signin');
+            }
 
+            // Successful sign in, redirect to profile
             window.location.href = '/profile';
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An error occurred');

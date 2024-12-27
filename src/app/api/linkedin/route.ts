@@ -43,6 +43,7 @@ interface ConnectionData {
     'Connected On': string;
     'Company'?: string;
     'Position'?: string;
+    // Note: Email is intentionally excluded as it belongs in profiles
 }
 
 interface PositionData {
