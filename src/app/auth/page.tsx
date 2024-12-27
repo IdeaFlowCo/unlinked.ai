@@ -27,7 +27,9 @@ export default function AuthPage() {
 
     const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        console.log('Form submitted');
+        console.log('Form submitted with data:', { email: formData.email });
+        console.log('Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+        console.log('Supabase key present:', !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
         setLoading(true);
         setError(null);
 
