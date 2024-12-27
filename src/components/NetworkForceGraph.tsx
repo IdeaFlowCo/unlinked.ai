@@ -1,3 +1,5 @@
+'use client'
+
 import React from 'react'
 import { ForceGraph2D } from 'react-force-graph'
 import { Database } from '@/utils/supabase/types'
