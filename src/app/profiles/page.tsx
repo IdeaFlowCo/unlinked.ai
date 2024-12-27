@@ -1,15 +1,39 @@
-import { createClient } from '@/utils/supabase/server'
+'use client'
+
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { Container, Heading, Text, Flex, Box } from '@radix-ui/themes'
 import { PersonIcon } from '@radix-ui/react-icons'
-import NetworkForceGraph from '@/components/NetworkForceGraph'
-import SearchInput from '@/components/SearchInput'
+import dynamic from 'next/dynamic'
+import { useEffect, useState } from 'react'
+import { Database } from '@/utils/supabase/types'
 
-export default async function ProfilesIndex() {
-  try {
-    const supabase = await createClient()
-    
-    // Fetch all necessary data in parallel
-    const [
+const NetworkForceGraph = dynamic(() => import('@/components/NetworkForceGraph'), { ssr: false })
+const SearchInput = dynamic(() => import('@/components/SearchInput'), { ssr: false })
+
+export default function ProfilesIndex() {
+  const supabase = createClientComponentClient<Database>()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+  const [data, setData] = useState<{
+    profiles: any[]
+    companies: any[]
+    institutions: any[]
+    positions: any[]
+    education: any[]
+    connections: any[]
+  }>({
+    profiles: [],
+    companies: [],
+    institutions: [],
+    positions: [],
+    education: [],
+    connections: []
+  })
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [
       { data: profiles, error: profilesError },
       { data: companies, error: companiesError },
       { data: institutions, error: institutionsError },
@@ -25,35 +49,57 @@ export default async function ProfilesIndex() {
       supabase.from('connections').select('*')
     ])
 
-    // Check for any errors
-    const errors = {
-      profiles: profilesError,
-      companies: companiesError,
-      institutions: institutionsError,
-      positions: positionsError,
-      education: educationError,
-      connections: connectionsError
+        if (profilesError) throw profilesError
+        if (companiesError) throw companiesError
+        if (institutionsError) throw institutionsError
+        if (positionsError) throw positionsError
+        if (educationError) throw educationError
+        if (connectionsError) throw connectionsError
+
+        setData({
+          profiles: profiles || [],
+          companies: companies || [],
+          institutions: institutions || [],
+          positions: positions || [],
+          education: education || [],
+          connections: connections || []
+        })
+      } catch (e) {
+        console.error('Error fetching data:', e)
+        setError(e as Error)
+      } finally {
+        setLoading(false)
+      }
     }
 
-    const hasError = Object.entries(errors).find(([_, err]) => err)
-    if (hasError) {
-      const [source, err] = hasError
-      console.error(`Error fetching ${source}:`, err)
-      return (
-        <Container size="3">
-          <Heading size="7">Network Graph</Heading>
-          <Text color="red">
-            Database error: {err?.message || 'Unknown error occurred'}
-          </Text>
-          <Text size="2" color="gray">Please check server logs for details.</Text>
-        </Container>
-      )
-    }
+    fetchData()
+  }, [])
+
+  if (loading) {
+    return (
+      <Container size="3">
+        <Heading size="7">Network Graph</Heading>
+        <Text>Loading network data...</Text>
+      </Container>
+    )
+  }
+
+  if (error) {
+    return (
+      <Container size="3">
+        <Heading size="7">Network Graph</Heading>
+        <Text color="red">
+          Database error: {error.message || 'Unknown error occurred'}
+        </Text>
+        <Text size="2" color="gray">Please check browser console for details.</Text>
+      </Container>
+    )
+  }
 
     // Transform data into graph structure
     const nodes = [
       // Profile nodes
-      ...(profiles?.map(profile => ({
+      ...(data.profiles?.map(profile => ({
         id: `profile-${profile.id}`,
         name: `${profile.first_name} ${profile.last_name}`,
         type: 'person' as const,
@@ -61,7 +107,7 @@ export default async function ProfilesIndex() {
       })) || []),
       
       // Company nodes
-      ...(companies?.map(company => ({
+      ...(data.companies?.map(company => ({
         id: `company-${company.id}`,
         name: company.name,
         type: 'company' as const,
@@ -69,7 +115,7 @@ export default async function ProfilesIndex() {
       })) || []),
       
       // Institution nodes
-      ...(institutions?.map(institution => ({
+      ...(data.institutions?.map(institution => ({
         id: `institution-${institution.id}`,
         name: institution.name,
         type: 'institution' as const,
@@ -79,32 +125,32 @@ export default async function ProfilesIndex() {
 
     const links = [
       // Profile-Profile connections
-      ...(connections?.map(connection => ({
+      ...(data.connections?.map(connection => ({
         source: `profile-${connection.profile_id_a}`,
         target: `profile-${connection.profile_id_b}`,
         type: 'connected_to' as const
       })) || []),
       
       // Profile-Company positions
-      ...(positions?.map(position => ({
+      ...(data.positions?.map(position => ({
         source: `profile-${position.profile_id}`,
         target: `company-${position.company_id}`,
         type: 'works_at' as const
       })) || []),
       
       // Profile-Institution education
-      ...(education?.map(edu => ({
+      ...(data.education?.map(edu => ({
         source: `profile-${edu.profile_id}`,
         target: `institution-${edu.institution_id}`,
         type: 'studied_at' as const
       })) || [])
     ]
 
-    if (!nodes.length) {
+    if (!data.profiles.length) {
       return (
         <Container size="3">
           <Heading size="7">Network Graph</Heading>
-          <Text>No data found in the database.</Text>
+          <Text>No profiles found in the database.</Text>
           <Text size="2" color="gray">Environment: {process.env.NODE_ENV}</Text>
         </Container>
       )
@@ -117,7 +163,7 @@ export default async function ProfilesIndex() {
             <PersonIcon width="24" height="24" />
             <Heading size="6">Network Graph</Heading>
             <Text size="2" color="gray">
-              ({profiles?.length || 0} professionals, {companies?.length || 0} companies, {institutions?.length || 0} institutions)
+              ({data.profiles?.length || 0} professionals, {data.companies?.length || 0} companies, {data.institutions?.length || 0} institutions)
             </Text>
           </Flex>
 
@@ -159,14 +205,53 @@ export default async function ProfilesIndex() {
         />
       </Container>
     )
-  } catch (e) {
-    console.error('Unexpected error:', e)
     return (
       <Container size="3">
-        <Heading size="7">Profiles</Heading>
-        <Text color="red">An unexpected error occurred.</Text>
-        <Text size="2" color="gray">Error: {(e as Error).message}</Text>
+        <Box mb="6">
+          <Flex gap="2" align="center" mb="4">
+            <PersonIcon width="24" height="24" />
+            <Heading size="6">Network Graph</Heading>
+            <Text size="2" color="gray">
+              ({data.profiles?.length || 0} professionals, {data.companies?.length || 0} companies, {data.institutions?.length || 0} institutions)
+            </Text>
+          </Flex>
+
+          <SearchInput
+            onSearch={async (query) => {
+              try {
+                const response = await fetch('/api/search', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ query })
+                })
+
+                if (!response.ok) {
+                  const error = await response.json()
+                  throw new Error(error.message || 'Search failed')
+                }
+
+                const { profiles: searchResults } = await response.json()
+                // TODO: Update graph to highlight matching nodes once OpenAI integration is complete
+                console.log('Search results:', searchResults)
+              } catch (error) {
+                console.error('Search error:', error)
+                throw error
+              }
+            }}
+            placeholder="Search professionals by name, title, or company..."
+          />
+        </Box>
+
+        <NetworkForceGraph 
+          data={{ nodes, links }} 
+          width={1200}
+          height={800}
+          onNodeClick={(node) => {
+            if (node.type === 'person') {
+              window.location.href = `/profiles/${node.data.id}`
+            }
+          }}
+        />
       </Container>
     )
-  }
 }
