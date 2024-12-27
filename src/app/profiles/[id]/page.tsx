@@ -1,15 +1,11 @@
 import { createClient } from '@/utils/supabase/server'
 import { Container, Heading, Text, Card, Flex } from '@radix-ui/themes'
 
-interface PageProps {
-  params: {
-    id: string
-  }
-  searchParams: { [key: string]: string | string[] | undefined }
-}
-
-export default async function ProfileDetail(props: PageProps) {
-  const { params } = props
+export default async function ProfileDetail({
+  params,
+}: {
+  params: { id: string }
+}) {
   const supabase = await createClient()
 
   // Query the profile
