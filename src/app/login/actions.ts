@@ -13,37 +13,33 @@ export async function loginOrSignup(formData: FormData) {
         password: formData.get('password') as string,
     }
 
-    console.log('Attempting sign in for:', data.email)
+    console.log('Attempting sign in:', data.email)
     
-    // First try to sign in
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword(data)
+    // Try to sign in first
+    const { error: signInError } = await supabase.auth.signInWithPassword(data)
 
-    // If sign in fails with invalid credentials, try to sign up
-    if (signInError && signInError.status === 400) {
-        console.log('Sign in failed, attempting signup:', signInError.message)
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp(data)
+    // If sign in succeeds, redirect to profiles
+    if (!signInError) {
+        console.log('Sign in successful, redirecting to profiles')
+        return redirect('/profiles')
+    }
 
-        if (signUpError) {
-            console.error('Sign up error:', signUpError.message)
-            return redirect('/error')
-        }
+    // If sign in fails for any reason, attempt signup
+    console.log('Sign in failed, attempting signup:', signInError.message)
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp(data)
 
-        if (signUpData.user) {
-            console.log('Signup successful:', signUpData)
-            // After successful signup, try to sign in immediately
-            const { error: autoSignInError } = await supabase.auth.signInWithPassword(data)
-            
-            if (autoSignInError) {
-                console.error('Auto sign in after signup failed:', autoSignInError.message)
-                return redirect('/error')
-            }
-        }
-    } else if (signInError) {
-        // Handle other sign in errors
-        console.error('Sign in error:', signInError.message)
+    if (signUpError) {
+        console.error('Sign up error:', signUpError.message)
         return redirect('/error')
     }
 
+    if (!signUpData.user) {
+        console.error('Sign up failed: No user data')
+        return redirect('/error')
+    }
+    
+    // After successful signup, redirect to profiles
+    console.log('Signup successful, redirecting to profiles')
     revalidatePath('/profiles', 'layout')
     return redirect('/profiles')
 }
