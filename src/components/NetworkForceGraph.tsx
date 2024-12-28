@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { ForceGraph2D } from 'react-force-graph'
-import type { NodeObject, GraphData } from 'react-force-graph'
+import type { NodeObject } from 'react-force-graph'
 import { Database } from '@/utils/supabase/types'
 import { Box } from '@radix-ui/themes'
 import * as HoverCard from '@radix-ui/react-hover-card'
