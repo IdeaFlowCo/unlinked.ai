@@ -104,10 +104,10 @@ export default function ProfilesIndex() {
         name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed Profile',
         type: 'person' as const,
         data: profile,
-        x: undefined,
-        y: undefined,
-        vx: undefined,
-        vy: undefined,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
         fx: null,
         fy: null
       })) || []),
@@ -118,10 +118,10 @@ export default function ProfilesIndex() {
         name: company.name || 'Unnamed Company',
         type: 'company' as const,
         data: company,
-        x: undefined,
-        y: undefined,
-        vx: undefined,
-        vy: undefined,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
         fx: null,
         fy: null
       })) || []),
@@ -132,22 +132,24 @@ export default function ProfilesIndex() {
         name: institution.name || 'Unnamed Institution',
         type: 'institution' as const,
         data: institution,
-        x: undefined,
-        y: undefined,
-        vx: undefined,
-        vy: undefined,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
         fx: null,
         fy: null
       })) || [])
     ]
 
     // Create a lookup map for nodes by ID
-    const nodeMap = nodes.reduce((acc, node) => {
-      acc[node.id] = node;
+    const nodeMap = nodes.reduce<Record<string, Node>>((acc, node) => {
+      if (node.id) {
+        acc[node.id] = node;
+      }
       return acc;
-    }, {} as Record<string, Node>);
+    }, {});
 
-    const links = [
+    const links: Link[] = [
       // Profile-Profile connections
       ...(data.connections?.map(connection => {
         const sourceId = `profile-${connection.profile_id_a}`;

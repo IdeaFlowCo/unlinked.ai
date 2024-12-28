@@ -12,36 +12,33 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-export interface Node extends NodeObject {
+export type Node = {
   id: string
-  name: string
-  type: 'person' | 'company' | 'institution'
-  data: Profile | Company | Institution
   x?: number
   y?: number
   vx?: number
   vy?: number
   fx?: number | null
   fy?: number | null
-  __indexColor?: string
   index?: number
-  [key: string]: string | number | null | undefined | Profile | Company | Institution | boolean | NodeObject
+  name: string
+  type: 'person' | 'company' | 'institution'
+  data: Profile | Company | Institution
+  __indexColor?: string
+  [key: string]: any
 }
 
-export interface Link extends LinkObject {
-  source: string | Node
-  target: string | Node
+export type Link = {
+  source: string | number
+  target: string | number
   type: 'works_at' | 'studied_at' | 'connected_to'
-  [key: string]: string | number | null | undefined | Node | boolean | LinkObject
+  [key: string]: any
 }
 
-interface NetworkData extends GraphData {
-  nodes: Node[]
-  links: Link[]
-}
+type NetworkData = GraphData
 
 interface NetworkForceGraphProps {
-  data: NetworkData
+  data: GraphData
   height?: number
   width?: number
   onNodeClick?: (node: Node) => void
@@ -85,8 +82,8 @@ export default function NetworkForceGraph({
       }}
     >
       <ForceGraph2D
-        graphData={data}
-        nodeLabel={(node: NodeObject) => `${(node as Node).name} (${(node as Node).type})`}
+        graphData={data as GraphData}
+        nodeLabel={(node) => `${(node as Node).name} (${(node as Node).type})`}
         onNodeHover={(node, event) => {
           setHoveredNode(node as Node | null);
           if (event) {
