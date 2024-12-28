@@ -2,33 +2,28 @@
 
 import React from 'react'
 import { ForceGraph2D } from 'react-force-graph'
+import type { NodeObject as ForceGraphNode } from 'react-force-graph'
 import { Database } from '@/utils/supabase/types'
 import { Box } from '@radix-ui/themes'
 import * as HoverCard from '@radix-ui/react-hover-card'
-import * as d3 from 'd3'
-
-type ForceSimulation = d3.Simulation<d3.SimulationNodeDatum, undefined>
+import { forceManyBody, forceLink, forceCenter, Simulation } from 'd3-force'
 
 type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-interface Node {
+interface Node extends ForceGraphNode {
   id: string
   name: string
   type: 'person' | 'company' | 'institution'
   data: Profile | Company | Institution
-  x?: number
-  y?: number
-  vx?: number
-  vy?: number
-  index?: number
 }
 
 interface Link {
-  source: string | Node
-  target: string | Node
+  source: Node
+  target: Node
   type: 'works_at' | 'studied_at' | 'connected_to'
+  [key: string]: any  // Allow additional properties required by ForceGraph2D
 }
 
 interface NetworkData {
@@ -81,15 +76,15 @@ export default function NetworkForceGraph({
     >
       <ForceGraph2D
         graphData={data}
-        nodeLabel={(node: Node) => `${node.name} (${node.type})`}
+        nodeLabel={(node: ForceGraphNode) => `${(node as Node).name} (${(node as Node).type})`}
         onNodeHover={(node, event) => {
           setHoveredNode(node as Node | null);
           if (event) {
             setMousePosition({ x: event.pageX, y: event.pageY });
           }
         }}
-        nodeCanvasObject={(node: Node, ctx, globalScale) => {
-          const label = node.name;
+        nodeCanvasObject={(node: ForceGraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+          const label = (node as Node).name;
           const fontSize = 12/globalScale;
           // Use a consistent base size for all nodes
           const size = 8;
@@ -99,7 +94,7 @@ export default function NetworkForceGraph({
           ctx.textBaseline = 'middle';
           
           // Set color based on node type
-          switch (node.type) {
+          switch ((node as Node).type) {
             case 'person':
               ctx.fillStyle = '#7c66dc'; // vibrant violet
               break;
@@ -122,7 +117,7 @@ export default function NetworkForceGraph({
           ctx.fillStyle = 'var(--gray-12)';
           ctx.fillText(label, node.x!, node.y! + size + fontSize);
         }}
-        linkColor={(link: Link) => {
+        linkColor={(link) => {
           switch (link.type) {
             case 'works_at':
               return 'rgba(120, 80, 250, 0.3)' // More visible violet for work relationships
@@ -135,7 +130,7 @@ export default function NetworkForceGraph({
         linkWidth={1} // Thicker lines for better visibility
         onLinkClick={() => {}}  // Disable link interactions
         linkDirectionalParticles={0}
-        onNodeClick={(node: Node) => onNodeClick?.(node)}
+        onNodeClick={(node: ForceGraphNode) => onNodeClick?.(node as Node)}
         width={containerWidth}
         height={window.innerHeight}
         nodeRelSize={12}
@@ -143,10 +138,10 @@ export default function NetworkForceGraph({
         warmupTicks={200}
         cooldownTime={5000}
         d3VelocityDecay={0.1}
-        d3Force={(force: ForceSimulation) => {
-          force.force('charge', d3.forceManyBody().strength(-1500))
-               .force('link', d3.forceLink().distance(250))
-               .force('center', d3.forceCenter().strength(0.03));
+        d3Force={(force: Simulation<ForceGraphNode, undefined>) => {
+          force.force('charge', forceManyBody().strength(-1500))
+               .force('link', forceLink().distance(250))
+               .force('center', forceCenter().strength(0.03));
         }}
       />
       {hoveredNode && (
