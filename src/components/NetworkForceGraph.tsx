@@ -3,29 +3,12 @@
 import React from 'react'
 import { ForceGraph2D } from 'react-force-graph'
 import type { NodeObject } from 'react-force-graph'
-import { Database } from '@/utils/supabase/types'
+import type { Node, NodeWithData, CustomGraphData, Link, Profile } from '../types/graph'
 import { Box } from '@radix-ui/themes'
 import * as HoverCard from '@radix-ui/react-hover-card'
 import { forceManyBody, forceLink, forceCenter, Simulation } from 'd3-force'
 
-type Profile = Database['public']['Tables']['profiles']['Row']
-type Company = Database['public']['Tables']['companies']['Row']
-type Institution = Database['public']['Tables']['institutions']['Row']
-
-export type Node = Omit<NodeObject, '__data'> & {
-  name: string
-  type: 'person' | 'company' | 'institution'
-  data?: Profile | Company | Institution
-  [key: string]: string | number | null | undefined | Profile | Company | Institution
-}
-
-export type Link = {
-  source: string | number | NodeObject
-  target: string | number | NodeObject
-  type: 'works_at' | 'studied_at' | 'connected_to'
-  [key: string]: string | number | NodeObject | undefined
-}
-
+// Component props interface
 interface NetworkForceGraphProps {
   data: {
     nodes: Node[]
@@ -74,7 +57,7 @@ export default function NetworkForceGraph({
       }}
     >
       <ForceGraph2D
-        graphData={data}
+        graphData={data as CustomGraphData}
         nodeLabel={(node) => `${(node as Node).name} (${(node as Node).type})`}
         onNodeHover={(node, event) => {
           setHoveredNode(node as Node | null);
@@ -82,7 +65,7 @@ export default function NetworkForceGraph({
             setMousePosition({ x: event.pageX as number, y: event.pageY as number });
           }
         }}
-        nodeCanvasObject={(node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number) => {
+        nodeCanvasObject={(node: Node, ctx: CanvasRenderingContext2D, globalScale: number) => {
           const label = (node as Node).name;
           const fontSize = 12/globalScale;
           // Use a consistent base size for all nodes
@@ -129,7 +112,7 @@ export default function NetworkForceGraph({
         linkWidth={1} // Thicker lines for better visibility
         onLinkClick={() => {}}  // Disable link interactions
         linkDirectionalParticles={0}
-        onNodeClick={(node: NodeObject) => onNodeClick?.(node as Node)}
+        onNodeClick={(node: Node) => onNodeClick?.(node)}
         width={containerWidth}
         height={height || window.innerHeight}
         nodeRelSize={12}
@@ -164,9 +147,9 @@ export default function NetworkForceGraph({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ fontWeight: 500, color: 'var(--violet-12)' }}>{hoveredNode.name}</div>
               <div style={{ color: 'var(--gray-11)', fontSize: '0.9em' }}>Type: {hoveredNode.type}</div>
-              {hoveredNode.type === 'person' && hoveredNode.data && (hoveredNode.data as Profile).headline && (
+              {hoveredNode.type === 'person' && (hoveredNode as NodeWithData).__data && ((hoveredNode as NodeWithData).__data as Profile).headline && (
                 <div style={{ color: 'var(--gray-11)', fontSize: '0.9em' }}>
-                  {(hoveredNode.data as Profile).headline}
+                  {((hoveredNode as NodeWithData).__data as Profile).headline}
                 </div>
               )}
             </div>

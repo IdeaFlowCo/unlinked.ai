@@ -6,7 +6,7 @@ import { PersonIcon, MagnifyingGlassIcon, DotsHorizontalIcon } from '@radix-ui/r
 import dynamic from 'next/dynamic'
 import { useEffect, useState } from 'react'
 import { Database } from '@/utils/supabase/types'
-import type { Node, Link } from '@/components/NetworkForceGraph'
+import type { Node, Link, NodeWithData, BaseNode } from '../../types/graph'
 
 type Profile = Database['public']['Tables']['profiles']['Row']
 
@@ -101,55 +101,77 @@ export default function ProfilesIndex() {
     // Transform data into graph structure
     const nodes: Node[] = [
       // Profile nodes
-      ...(data.profiles?.map(profile => ({
-        id: `profile-${profile.id}`,
-        name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed Profile',
-        type: 'person' as const,
-        __data: profile.id,
-        data: profile,
-        x: Math.random() * 1000,
-        y: Math.random() * 1000,
-        vx: 0,
-        vy: 0,
-        fx: undefined,
-        fy: undefined,
-        index: undefined,
-        radius: 8
-      })) || []),
+      ...(data.profiles?.map(profile => {
+        // Create base node that satisfies NodeObject constraints
+        // Create node with base properties first
+        const baseNode: BaseNode = {
+          id: `profile-${profile.id}`,
+          x: Math.random() * 1000,
+          y: Math.random() * 1000,
+          vx: 0,
+          vy: 0,
+          fx: null,
+          fy: null
+        };
+
+        // Add custom properties
+        const node: Node = {
+          ...baseNode,
+          name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed Profile',
+          type: 'person' as const
+        };
+
+        // Store profile data
+        Object.assign(node, { __data: profile });
+        
+        return node;
+      }) || []),
       
       // Company nodes
-      ...(data.companies?.map(company => ({
-        id: `company-${company.id}`,
-        name: company.name || 'Unnamed Company',
-        type: 'company' as const,
-        __data: company.id,
-        data: company,
-        x: Math.random() * 1000,
-        y: Math.random() * 1000,
-        vx: 0,
-        vy: 0,
-        fx: undefined,
-        fy: undefined,
-        index: undefined,
-        radius: 8
-      })) || []),
+      ...(data.companies?.map(company => {
+        const baseNode: BaseNode = {
+          id: `company-${company.id}`,
+          x: Math.random() * 1000,
+          y: Math.random() * 1000,
+          vx: 0,
+          vy: 0,
+          fx: null,
+          fy: null
+        };
+
+        const node: Node = {
+          ...baseNode,
+          name: company.name || 'Unnamed Company',
+          type: 'company' as const
+        };
+
+        Object.assign(node, { __data: company });
+        
+        return node;
+      }) || []),
       
       // Institution nodes
-      ...(data.institutions?.map(institution => ({
-        id: `institution-${institution.id}`,
-        name: institution.name || 'Unnamed Institution',
-        type: 'institution' as const,
-        __data: institution.id,
-        data: institution,
-        x: Math.random() * 1000,
-        y: Math.random() * 1000,
-        vx: 0,
-        vy: 0,
-        fx: undefined,
-        fy: undefined,
-        index: undefined,
-        radius: 8
-      })) || [])
+      ...(data.institutions?.map(institution => {
+        const baseNode: BaseNode = {
+          id: `institution-${institution.id}`,
+          x: Math.random() * 1000,
+          y: Math.random() * 1000,
+          vx: 0,
+          vy: 0,
+          fx: null,
+          fy: null
+        };
+
+        const node: Node = {
+          ...baseNode,
+          name: institution.name || 'Unnamed Institution',
+          type: 'institution' as const
+        };
+
+        Object.assign(node, { __data: institution });
+        
+        return node;
+      }) || [])
     ]
 
     // Create a lookup map for nodes by ID
@@ -166,11 +188,12 @@ export default function ProfilesIndex() {
         const sourceId = `profile-${connection.profile_id_a}`;
         const targetId = `profile-${connection.profile_id_b}`;
         if (nodeMap[sourceId] && nodeMap[targetId]) {
-          return {
-            source: sourceId,
-            target: targetId,
-            type: 'connected_to' as const
+          const link: Link = {
+            source: nodeMap[sourceId],
+            target: nodeMap[targetId],
+            type: 'connection'
           };
+          return link;
         }
         return null;
       }).filter((link): link is NonNullable<typeof link> => link !== null) || []),
@@ -180,11 +203,12 @@ export default function ProfilesIndex() {
         const sourceId = `profile-${position.profile_id}`;
         const targetId = `company-${position.company_id}`;
         if (nodeMap[sourceId] && nodeMap[targetId]) {
-          return {
-            source: sourceId,
-            target: targetId,
-            type: 'works_at' as const
+          const link: Link = {
+            source: nodeMap[sourceId],
+            target: nodeMap[targetId],
+            type: 'position'
           };
+          return link;
         }
         return null;
       }).filter((link): link is NonNullable<typeof link> => link !== null) || []),
@@ -194,11 +218,12 @@ export default function ProfilesIndex() {
         const sourceId = `profile-${edu.profile_id}`;
         const targetId = `institution-${edu.institution_id}`;
         if (nodeMap[sourceId] && nodeMap[targetId]) {
-          return {
-            source: sourceId,
-            target: targetId,
-            type: 'studied_at' as const
+          const link: Link = {
+            source: nodeMap[sourceId],
+            target: nodeMap[targetId],
+            type: 'education'
           };
+          return link;
         }
         return null;
       }).filter((link): link is NonNullable<typeof link> => link !== null) || [])
@@ -231,7 +256,8 @@ export default function ProfilesIndex() {
             height={typeof window !== 'undefined' ? window.innerHeight : 800}
             onNodeClick={(node) => {
               if (node.type === 'person') {
-                window.location.href = `/profiles/${(node.data as Profile).id}`
+                const profileData = (node as NodeWithData).__data as Profile;
+                window.location.href = `/profiles/${profileData.id}`
               }
             }}
           />
