@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { Box, Table, Avatar, Text } from '@radix-ui/themes'
-import { Node } from '@/types/graph'
+import { Node, Profile } from '@/types/graph'
 import { useRouter } from 'next/navigation'
 
 interface ProfileListProps {
@@ -18,7 +18,7 @@ export default function ProfileList({ nodes, onProfileClick }: ProfileListProps)
         <Table.Header>
           <Table.Row>
             <Table.ColumnHeaderCell>Professional</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Industry</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>Position &amp; Company</Table.ColumnHeaderCell>
           </Table.Row>
         </Table.Header>
 
@@ -44,13 +44,26 @@ export default function ProfileList({ nodes, onProfileClick }: ProfileListProps)
                   />
                   <Box>
                     <Text weight="medium">{node.name}</Text>
-                    {node.__data?.headline && (
-                      <Text size="2" color="gray">{node.__data.headline}</Text>
+                    {(node.__data as Profile)?.headline && (
+                      <Text size="2" color="gray">{(node.__data as Profile).headline}</Text>
                     )}
                   </Box>
                 </Box>
               </Table.Cell>
-              <Table.Cell>{node.__data?.industry || 'Not specified'}</Table.Cell>
+              <Table.Cell>
+                {(() => {
+                  const position = (node.__data as Profile)?.positions?.[0];
+                  if (!position) return 'Position/Company Not Specified';
+                  return (
+                    <Box>
+                      <Text weight="medium">{position.title}</Text>
+                      {position.companies?.name && (
+                        <Text size="2" color="gray">{position.companies.name}</Text>
+                      )}
+                    </Box>
+                  );
+                })()}
+              </Table.Cell>
             </Table.Row>
           ))}
         </Table.Body>

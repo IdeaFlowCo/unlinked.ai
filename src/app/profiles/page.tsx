@@ -18,14 +18,15 @@ export default function ProfilesIndex() {
       const supabase = createClient()
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('*, positions:positions(*, companies(*))')
       
       if (profilesError) throw profilesError
 
       const profileNodes = profiles.map(profile => ({
         id: profile.id,
-        name: `${profile.first_name} ${profile.last_name}`,
-        type: 'person' as const
+        name: `${profile.first_name} ${profile.last_name}`.trim() || 'Unnamed Profile',
+        type: 'person' as const,
+        __data: profile
       }))
 
       setNodes(profileNodes)

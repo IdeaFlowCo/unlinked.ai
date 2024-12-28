@@ -3,7 +3,14 @@ import { loginOrSignup, signInWithGoogle } from './actions';
 import { PersonIcon } from '@radix-ui/react-icons';
 import Link from 'next/link';
 
-export default function AuthPage() {
+interface PageProps {
+    searchParams?: { [key: string]: string | string[] | undefined }
+}
+
+export default function AuthPage({
+    searchParams,
+}: PageProps) {
+    const error = searchParams?.error
     return (
         <Container size="1">
             <Flex direction="column" align="center" gap="6" py="9">
@@ -16,14 +23,20 @@ export default function AuthPage() {
                 </Box>
 
                 <Card size="4" style={{ width: '100%' }}>
-                    <form>
+                    <form action={loginOrSignup}>
                         <Flex direction="column" gap="5">
+                            {error && (
+                                <Text color="red" size="2">
+                                    {error}
+                                </Text>
+                            )}
                             <TextField.Root
                                 size="3"
                                 type="email"
                                 name="email"
                                 placeholder="Email address"
                                 required
+                                autoComplete="email"
                             />
 
                             <TextField.Root
@@ -32,12 +45,13 @@ export default function AuthPage() {
                                 name="password"
                                 placeholder="Password"
                                 required
+                                autoComplete="current-password"
                             />
 
                             <Button
                                 size="3"
                                 variant="solid"
-                                formAction={loginOrSignup}
+                                type="submit"
                                 style={{ width: '100%' }}
                             >
                                 Continue
