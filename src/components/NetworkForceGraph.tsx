@@ -5,6 +5,9 @@ import { ForceGraph2D } from 'react-force-graph'
 import { Database } from '@/utils/supabase/types'
 import { Box } from '@radix-ui/themes'
 import * as HoverCard from '@radix-ui/react-hover-card'
+import * as d3 from 'd3'
+
+type ForceSimulation = d3.Simulation<d3.SimulationNodeDatum, undefined>
 
 type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
@@ -136,17 +139,14 @@ export default function NetworkForceGraph({
         width={containerWidth}
         height={window.innerHeight}
         nodeRelSize={12}
-        nodeVal={node => 1}
+        nodeVal={() => 1}
         warmupTicks={200}
         cooldownTime={5000}
         d3VelocityDecay={0.1}
-        d3Force={(force) => {
-          // @ts-ignore - using force-graph's built-in types
-          force.force('charge').strength(-1500);
-          // @ts-ignore - using force-graph's built-in types
-          force.force('link').distance(250);
-          // @ts-ignore - using force-graph's built-in types
-          force.force('center').strength(0.03);
+        d3Force={(force: ForceSimulation) => {
+          force.force('charge', d3.forceManyBody().strength(-1500))
+               .force('link', d3.forceLink().distance(250))
+               .force('center', d3.forceCenter().strength(0.03));
         }}
       />
       {hoveredNode && (

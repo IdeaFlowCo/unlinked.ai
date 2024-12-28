@@ -1,7 +1,7 @@
 'use client'
 
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { Container, Heading, Text, Flex, Box, Card, TextField, IconButton } from '@radix-ui/themes'
+import { Container, Heading, Text, Flex, Box, TextField, IconButton } from '@radix-ui/themes'
 import { PersonIcon, MagnifyingGlassIcon, DotsHorizontalIcon } from '@radix-ui/react-icons'
 import dynamic from 'next/dynamic'
 import { useEffect, useState } from 'react'
