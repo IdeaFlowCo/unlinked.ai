@@ -12,7 +12,7 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-interface Node extends NodeObject {
+interface Node extends Omit<NodeObject, 'id'> {
   id: string
   name: string
   type: 'person' | 'company' | 'institution'
@@ -24,14 +24,14 @@ interface Node extends NodeObject {
   fx?: number | null
   fy?: number | null
   __indexColor?: string
-  [key: string]: any // Required by ForceGraph2D
+  [key: string]: string | number | null | undefined | Profile | Company | Institution
 }
 
 interface Link extends LinkObject {
   source: Node
   target: Node
   type: 'works_at' | 'studied_at' | 'connected_to'
-  [key: string]: any // Required by ForceGraph2D
+  [key: string]: string | number | NodeObject | undefined
 }
 
 interface NetworkData {
