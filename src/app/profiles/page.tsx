@@ -12,6 +12,8 @@ export default function ProfilesIndex() {
   const [data, setData] = useState<CustomGraphData>({ nodes: [], links: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
+  const [view, setView] = useState<'graph' | 'list'>('graph')
+  const [searchQuery, setSearchQuery] = useState('')
 
   const loadData = useCallback(async () => {
     try {
@@ -77,9 +79,6 @@ export default function ProfilesIndex() {
       </Container>
     )
   }
-
-  const [view, setView] = useState<'graph' | 'list'>('graph')
-  const [searchQuery, setSearchQuery] = useState('')
 
   const filteredNodes = data.nodes.filter(node => 
     node.name.toLowerCase().includes(searchQuery.toLowerCase())
