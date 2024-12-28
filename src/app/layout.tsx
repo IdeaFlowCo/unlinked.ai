@@ -1,28 +1,30 @@
-import '@radix-ui/themes/styles.css';
-import { Theme, Box } from '@radix-ui/themes';
-import type { Metadata } from 'next';
-import Header from '@/components/header';
+// app/layout.tsx
+import '@radix-ui/themes/styles.css'
+import { Box } from '@radix-ui/themes'
+import type { Metadata } from 'next'
+import Providers from './providers'
+import Header from '@/components/header'
 
 export const metadata: Metadata = {
-  title: 'AI LinkedIn',
+  title: 'unlinked.ai',
   description: 'AI-powered LinkedIn tool',
-};
+}
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: React.ReactNode
 }) {
   return (
     <html lang="en">
       <body>
-        <Theme accentColor="violet" grayColor="mauve" radius="small" scaling="110%">
+        <Providers>
           <Box>
             <Header />
             {children}
           </Box>
-        </Theme>
+        </Providers>
       </body>
     </html>
-  );
+  )
 }
