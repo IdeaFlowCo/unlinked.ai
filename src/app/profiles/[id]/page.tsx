@@ -2,13 +2,11 @@ import { Container, Heading, Text, Card, Box, Avatar, Flex, Grid } from '@radix-
 import { createClient } from '@/utils/supabase/server'
 import Link from 'next/link'
 
-interface PageProps {
-  params: { id: string }
-}
-
 export default async function ProfileDetail({
   params,
-}: PageProps) {
+}: {
+  params: { id: string }
+}) {
   if (!params) {
     throw new Error('No params provided')
   }
