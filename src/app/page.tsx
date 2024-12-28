@@ -12,6 +12,9 @@ export default async function LandingPage() {
                         <Heading size="9" align="center">
                             unlinked.ai
                         </Heading>
+                        <Heading size="4" weight="regular" color="gray">
+                            your ai-powered supernetwork
+                        </Heading>
                         <Flex gap="4" mt="4">
                             <Button size="4" asChild>
                                 <Link href="/onboarding">
@@ -19,7 +22,7 @@ export default async function LandingPage() {
                                     <UploadIcon />
                                 </Link>
                             </Button>
-                            <Button size="4" asChild>
+                            <Button size="4" asChild variant="soft">
                                 <Link href="/profiles">
                                     Browse Profiles
                                     <PersonIcon />
