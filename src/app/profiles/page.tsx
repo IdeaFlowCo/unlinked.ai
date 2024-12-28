@@ -2,13 +2,14 @@
 
 import React, { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { Container, Heading, Text, Card, Flex, Box } from '@radix-ui/themes'
-import { PersonIcon } from '@radix-ui/react-icons'
+import { Container, Text, Card, Flex, Box, SegmentedControl } from '@radix-ui/themes'
+import { CustomGraphData, Node } from '@/types/graph'
 import NetworkForceGraph from '@/components/NetworkForceGraph'
 import SearchInput from '@/components/SearchInput'
+import ProfileList from '@/components/ProfileList'
 
 export default function ProfilesIndex() {
-  const [data, setData] = useState({ nodes: [], links: [] })
+  const [data, setData] = useState<CustomGraphData>({ nodes: [], links: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
@@ -23,7 +24,7 @@ export default function ProfilesIndex() {
 
       const { data: connections, error: connectionsError } = await supabase
         .from('connections')
-        .select('profile_id_a, profile_b(*), profile_a(*)')
+        .select('profile_id_a, profile_id_b')
       
       if (connectionsError) throw connectionsError
 
@@ -31,12 +32,13 @@ export default function ProfilesIndex() {
       const nodes = profiles.map(profile => ({
         id: profile.id,
         name: `${profile.first_name} ${profile.last_name}`,
-        type: 'person'
+        type: 'person' as const
       }))
 
       const links = connections.map(conn => ({
         source: conn.profile_id_a,
-        target: conn.profile_b.id
+        target: conn.profile_id_b,
+        type: 'connection' as const
       }))
 
       setData({ nodes, links })
@@ -54,9 +56,9 @@ export default function ProfilesIndex() {
   if (loading) {
     return (
       <Container size="3">
-        <Card size="4">
-          <Flex direction="column" align="center" gap="3" py="8">
-            <Heading size="6">Loading...</Heading>
+        <Card size="2">
+          <Flex direction="column" gap="3" p="4" align="center">
+            <Text size="3">Loading...</Text>
           </Flex>
         </Card>
       </Container>
@@ -66,45 +68,61 @@ export default function ProfilesIndex() {
   if (error) {
     return (
       <Container size="3">
-        <Card size="4">
-          <Flex direction="column" align="center" gap="3" py="8">
-            <Heading size="6" color="red">Error</Heading>
-            <Text>{error.message}</Text>
+        <Card size="2">
+          <Flex direction="column" gap="3" p="4" align="center">
+            <Text size="3" color="red">Error loading data</Text>
+            <Text size="2" color="gray">{error.message}</Text>
           </Flex>
         </Card>
       </Container>
     )
   }
 
+  const [view, setView] = useState<'graph' | 'list'>('graph')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredNodes = data.nodes.filter(node => 
+    node.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const filteredData = {
+    nodes: filteredNodes,
+    links: data.links.filter(link => 
+      filteredNodes.some(n => n.id === link.source) && 
+      filteredNodes.some(n => n.id === link.target)
+    )
+  }
+
   return (
     <Container size="3">
-      <Box mb="8">
-        <Flex justify="between" align="center" mb="6">
-          <Flex align="center" gap="3">
-            <PersonIcon width="24" height="24" />
-            <Heading size="7">Network Directory</Heading>
-          </Flex>
-          <Text size="3" color="gray">
-            {data.nodes.length} professionals
-          </Text>
-        </Flex>
-
+      <Box mb="4">
         <Card size="2">
-          <Flex gap="3" align="center">
+          <Flex direction="column" gap="3">
             <SearchInput 
               onSearch={async (query) => {
-                // TODO: Implement search
-                console.log('Search:', query)
+                setSearchQuery(query)
               }}
-              placeholder="Search professionals by name, title, or company..."
+              placeholder="Search professionals by name..."
             />
+            <SegmentedControl.Root defaultValue={view} onValueChange={(value) => setView(value as 'graph' | 'list')}>
+              <SegmentedControl.Item value="graph">Graph View</SegmentedControl.Item>
+              <SegmentedControl.Item value="list">List View</SegmentedControl.Item>
+            </SegmentedControl.Root>
           </Flex>
         </Card>
       </Box>
 
-      <Card size="4" style={{ height: 'calc(100vh - 300px)' }}>
-        <NetworkForceGraph data={data} />
+      <Card size="4" style={{ height: 'calc(100vh - 200px)' }}>
+        {view === 'graph' ? (
+          <NetworkForceGraph data={filteredData} />
+        ) : (
+          <ProfileList nodes={filteredNodes} />
+        )}
       </Card>
+
+      <Text size="2" color="gray" mt="2" align="center">
+        {filteredNodes.length} professionals
+      </Text>
     </Container>
   )
 }

@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
 export async function loginOrSignup(formData: FormData) {
+    console.log('Starting loginOrSignup')
     const supabase = await createClient()
 
     const data = {
@@ -12,22 +13,39 @@ export async function loginOrSignup(formData: FormData) {
         password: formData.get('password') as string,
     }
 
+    console.log('Attempting sign in for:', data.email)
+    
     // First try to sign in
-    const { error: signInError } = await supabase.auth.signInWithPassword(data)
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword(data)
 
-    // If sign in fails due to no user, try to sign up
-    if (signInError?.message?.includes('Invalid login credentials')) {
-        const { error: signUpError } = await supabase.auth.signUp(data)
+    // If sign in fails with invalid credentials, try to sign up
+    if (signInError && signInError.status === 400) {
+        console.log('Sign in failed, attempting signup:', signInError.message)
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp(data)
 
         if (signUpError) {
-            redirect('/error')
+            console.error('Sign up error:', signUpError.message)
+            return redirect('/error')
+        }
+
+        if (signUpData.user) {
+            console.log('Signup successful:', signUpData)
+            // After successful signup, try to sign in immediately
+            const { error: autoSignInError } = await supabase.auth.signInWithPassword(data)
+            
+            if (autoSignInError) {
+                console.error('Auto sign in after signup failed:', autoSignInError.message)
+                return redirect('/error')
+            }
         }
     } else if (signInError) {
-        redirect('/error')
+        // Handle other sign in errors
+        console.error('Sign in error:', signInError.message)
+        return redirect('/error')
     }
 
-    revalidatePath('/', 'layout')
-    redirect('/')
+    revalidatePath('/profiles', 'layout')
+    return redirect('/profiles')
 }
 
 export async function signInWithGoogle() {
