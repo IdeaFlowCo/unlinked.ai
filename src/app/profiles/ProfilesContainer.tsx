@@ -15,7 +15,7 @@ interface ProfilesContainerProps {
 }
 
 export default function ProfilesContainer({ initialProfiles }: ProfilesContainerProps) {
-    const [searchQuery, setSearchQuery] = useState('')
+    const [searchQuery] = useState('')
     const { ref, inView } = useInView()
     const supabase = createClient()
 
