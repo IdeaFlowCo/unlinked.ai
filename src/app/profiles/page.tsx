@@ -6,6 +6,7 @@ import { PersonIcon, MagnifyingGlassIcon, DotsHorizontalIcon } from '@radix-ui/r
 import dynamic from 'next/dynamic'
 import { useEffect, useState } from 'react'
 import { Database } from '@/utils/supabase/types'
+import type { Node, Link } from '@/components/NetworkForceGraph'
 
 const NetworkForceGraph = dynamic(() => import('@/components/NetworkForceGraph'), { ssr: false })
 
@@ -96,53 +97,98 @@ export default function ProfilesIndex() {
   }
 
     // Transform data into graph structure
-    const nodes = [
+    const nodes: Node[] = [
       // Profile nodes
       ...(data.profiles?.map(profile => ({
         id: `profile-${profile.id}`,
-        name: `${profile.first_name} ${profile.last_name}`,
+        name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed Profile',
         type: 'person' as const,
-        data: profile
+        data: profile,
+        x: undefined,
+        y: undefined,
+        vx: undefined,
+        vy: undefined,
+        fx: null,
+        fy: null
       })) || []),
       
       // Company nodes
       ...(data.companies?.map(company => ({
         id: `company-${company.id}`,
-        name: company.name,
+        name: company.name || 'Unnamed Company',
         type: 'company' as const,
-        data: company
+        data: company,
+        x: undefined,
+        y: undefined,
+        vx: undefined,
+        vy: undefined,
+        fx: null,
+        fy: null
       })) || []),
       
       // Institution nodes
       ...(data.institutions?.map(institution => ({
         id: `institution-${institution.id}`,
-        name: institution.name,
+        name: institution.name || 'Unnamed Institution',
         type: 'institution' as const,
-        data: institution
+        data: institution,
+        x: undefined,
+        y: undefined,
+        vx: undefined,
+        vy: undefined,
+        fx: null,
+        fy: null
       })) || [])
     ]
 
+    // Create a lookup map for nodes by ID
+    const nodeMap = nodes.reduce((acc, node) => {
+      acc[node.id] = node;
+      return acc;
+    }, {} as Record<string, Node>);
+
     const links = [
       // Profile-Profile connections
-      ...(data.connections?.map(connection => ({
-        source: `profile-${connection.profile_id_a}`,
-        target: `profile-${connection.profile_id_b}`,
-        type: 'connected_to' as const
-      })) || []),
+      ...(data.connections?.map(connection => {
+        const sourceId = `profile-${connection.profile_id_a}`;
+        const targetId = `profile-${connection.profile_id_b}`;
+        if (nodeMap[sourceId] && nodeMap[targetId]) {
+          return {
+            source: nodeMap[sourceId],
+            target: nodeMap[targetId],
+            type: 'connected_to' as const
+          };
+        }
+        return null;
+      }).filter((link): link is NonNullable<typeof link> => link !== null) || []),
       
       // Profile-Company positions
-      ...(data.positions?.map(position => ({
-        source: `profile-${position.profile_id}`,
-        target: `company-${position.company_id}`,
-        type: 'works_at' as const
-      })) || []),
+      ...(data.positions?.map(position => {
+        const sourceId = `profile-${position.profile_id}`;
+        const targetId = `company-${position.company_id}`;
+        if (nodeMap[sourceId] && nodeMap[targetId]) {
+          return {
+            source: nodeMap[sourceId],
+            target: nodeMap[targetId],
+            type: 'works_at' as const
+          };
+        }
+        return null;
+      }).filter((link): link is NonNullable<typeof link> => link !== null) || []),
       
       // Profile-Institution education
-      ...(data.education?.map(edu => ({
-        source: `profile-${edu.profile_id}`,
-        target: `institution-${edu.institution_id}`,
-        type: 'studied_at' as const
-      })) || [])
+      ...(data.education?.map(edu => {
+        const sourceId = `profile-${edu.profile_id}`;
+        const targetId = `institution-${edu.institution_id}`;
+        if (nodeMap[sourceId] && nodeMap[targetId]) {
+          return {
+            source: nodeMap[sourceId],
+            target: nodeMap[targetId],
+            type: 'studied_at' as const
+          };
+        }
+        return null;
+      }).filter((link): link is NonNullable<typeof link> => link !== null) || [])
     ]
 
     if (!data.profiles.length) {

@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { ForceGraph2D } from 'react-force-graph'
-import type { NodeObject, LinkObject } from 'react-force-graph'
+import type { NodeObject, LinkObject, GraphData } from 'react-force-graph'
 import { Database } from '@/utils/supabase/types'
 import { Box } from '@radix-ui/themes'
 import * as HoverCard from '@radix-ui/react-hover-card'
@@ -12,7 +12,7 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-interface Node extends Omit<NodeObject, 'id'> {
+export interface Node extends NodeObject {
   id: string
   name: string
   type: 'person' | 'company' | 'institution'
@@ -24,17 +24,18 @@ interface Node extends Omit<NodeObject, 'id'> {
   fx?: number | null
   fy?: number | null
   __indexColor?: string
-  [key: string]: string | number | null | undefined | Profile | Company | Institution
+  index?: number
+  [key: string]: any
 }
 
-interface Link extends LinkObject {
-  source: Node
-  target: Node
+export interface Link extends LinkObject {
+  source: string | Node
+  target: string | Node
   type: 'works_at' | 'studied_at' | 'connected_to'
-  [key: string]: string | number | NodeObject | undefined
+  [key: string]: any
 }
 
-interface NetworkData {
+interface NetworkData extends GraphData {
   nodes: Node[]
   links: Link[]
 }
