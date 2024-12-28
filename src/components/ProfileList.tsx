@@ -1,8 +1,9 @@
 'use client'
 
 import React from 'react'
-import { Box, Table, Avatar } from '@radix-ui/themes'
+import { Box, Table, Avatar, Text } from '@radix-ui/themes'
 import { Node } from '@/types/graph'
+import { useRouter } from 'next/navigation'
 
 interface ProfileListProps {
   nodes: Node[];
@@ -10,13 +11,14 @@ interface ProfileListProps {
 }
 
 export default function ProfileList({ nodes, onProfileClick }: ProfileListProps) {
+  const router = useRouter()
   return (
     <Box style={{ height: '100%', overflowY: 'auto' }}>
       <Table.Root>
         <Table.Header>
           <Table.Row>
-            <Table.ColumnHeaderCell>Name</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Type</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>Professional</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>Industry</Table.ColumnHeaderCell>
           </Table.Row>
         </Table.Header>
 
@@ -24,7 +26,13 @@ export default function ProfileList({ nodes, onProfileClick }: ProfileListProps)
           {nodes.map((node) => (
             <Table.Row 
               key={node.id}
-              onClick={() => onProfileClick?.(node)}
+              onClick={() => {
+                if (onProfileClick) {
+                  onProfileClick(node);
+                } else {
+                  router.push(`/profiles/${node.id}`);
+                }
+              }}
               style={{ cursor: onProfileClick ? 'pointer' : 'default' }}
             >
               <Table.Cell>
@@ -34,10 +42,15 @@ export default function ProfileList({ nodes, onProfileClick }: ProfileListProps)
                     src={`https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(node.name)}`}
                     fallback={node.name[0]}
                   />
-                  {node.name}
+                  <Box>
+                    <Text weight="medium">{node.name}</Text>
+                    {node.__data?.headline && (
+                      <Text size="2" color="gray">{node.__data.headline}</Text>
+                    )}
+                  </Box>
                 </Box>
               </Table.Cell>
-              <Table.Cell>{node.type}</Table.Cell>
+              <Table.Cell>{node.__data?.industry || 'Not specified'}</Table.Cell>
             </Table.Row>
           ))}
         </Table.Body>
