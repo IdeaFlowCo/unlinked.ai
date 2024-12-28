@@ -25,14 +25,14 @@ export interface Node extends NodeObject {
   fy?: number | null
   __indexColor?: string
   index?: number
-  [key: string]: any
+  [key: string]: string | number | null | undefined | Profile | Company | Institution | boolean | NodeObject
 }
 
 export interface Link extends LinkObject {
   source: string | Node
   target: string | Node
   type: 'works_at' | 'studied_at' | 'connected_to'
-  [key: string]: any
+  [key: string]: string | number | null | undefined | Node | boolean | LinkObject
 }
 
 interface NetworkData extends GraphData {

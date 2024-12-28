@@ -154,8 +154,8 @@ export default function ProfilesIndex() {
         const targetId = `profile-${connection.profile_id_b}`;
         if (nodeMap[sourceId] && nodeMap[targetId]) {
           return {
-            source: nodeMap[sourceId],
-            target: nodeMap[targetId],
+            source: sourceId,
+            target: targetId,
             type: 'connected_to' as const
           };
         }
@@ -168,8 +168,8 @@ export default function ProfilesIndex() {
         const targetId = `company-${position.company_id}`;
         if (nodeMap[sourceId] && nodeMap[targetId]) {
           return {
-            source: nodeMap[sourceId],
-            target: nodeMap[targetId],
+            source: sourceId,
+            target: targetId,
             type: 'works_at' as const
           };
         }
@@ -182,8 +182,8 @@ export default function ProfilesIndex() {
         const targetId = `institution-${edu.institution_id}`;
         if (nodeMap[sourceId] && nodeMap[targetId]) {
           return {
-            source: nodeMap[sourceId],
-            target: nodeMap[targetId],
+            source: sourceId,
+            target: targetId,
             type: 'studied_at' as const
           };
         }
