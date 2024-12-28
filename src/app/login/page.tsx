@@ -20,16 +20,16 @@ export default function AuthPage() {
                         <Flex direction="column" gap="5">
                             <TextField.Root
                                 size="3"
-                                name="email"
                                 type="email"
+                                name="email"
                                 placeholder="Email address"
                                 required
                             />
 
                             <TextField.Root
                                 size="3"
-                                name="password"
                                 type="password"
+                                name="password"
                                 placeholder="Password"
                                 required
                             />
