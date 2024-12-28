@@ -12,8 +12,7 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-export type Node = Omit<NodeObject, 'id'> & {
-  id: string
+export type Node = NodeObject & {
   name: string
   type: 'person' | 'company' | 'institution'
   __data?: Profile | Company | Institution // Use __data to avoid index signature conflict

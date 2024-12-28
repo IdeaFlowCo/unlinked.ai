@@ -9,8 +9,6 @@ import { Database } from '@/utils/supabase/types'
 import type { Node, Link } from '@/components/NetworkForceGraph'
 
 type Profile = Database['public']['Tables']['profiles']['Row']
-type Company = Database['public']['Tables']['companies']['Row']
-type Institution = Database['public']['Tables']['institutions']['Row']
 
 const NetworkForceGraph = dynamic(() => import('@/components/NetworkForceGraph'), { ssr: false })
 
