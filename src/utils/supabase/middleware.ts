@@ -31,6 +31,11 @@ export async function updateSession(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser()
 
+    // Set auth header based on session status
+    if (user) {
+        supabaseResponse.headers.set('x-supabase-auth', 'authenticated')
+    }
+
     // Check if this is the first visit (no skip parameter in cookie)
     const hasSkipped = request.cookies.get('skipped')
     const isSkipRequest = request.nextUrl.searchParams.get('skip') === 'true'
