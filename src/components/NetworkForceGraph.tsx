@@ -12,12 +12,19 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-interface Node extends Omit<ForceGraphNode, 'id'> {
+interface Node {
   id: string
   name: string
   type: 'person' | 'company' | 'institution'
   data: Profile | Company | Institution
-  [key: string]: string | number | boolean | null | undefined | Node | Profile | Company | Institution | ForceGraphNode[keyof ForceGraphNode]
+  x?: number
+  y?: number
+  vx?: number
+  vy?: number
+  fx?: number | null
+  fy?: number | null
+  __indexColor?: string
+  [key: string]: string | number | boolean | null | undefined | Node | Profile | Company | Institution | undefined
 }
 
 interface Link {
@@ -32,13 +39,11 @@ type NetworkData = GraphData<Node, Link>
 interface NetworkForceGraphProps {
   data: NetworkData
   onNodeClick?: (node: Node) => void
-  height?: number
 }
 
 export default function NetworkForceGraph({ 
   data,
-  onNodeClick,
-  height = 600
+  onNodeClick
 }: NetworkForceGraphProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = React.useState(0);

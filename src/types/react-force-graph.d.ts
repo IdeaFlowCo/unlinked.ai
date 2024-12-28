@@ -2,7 +2,7 @@ declare module 'react-force-graph' {
   import { Component } from 'react'
   import { Simulation, SimulationNodeDatum } from 'd3-force'
   
-  export interface NodeObject<NodeData = unknown> extends SimulationNodeDatum {
+  export interface NodeObject extends SimulationNodeDatum {
     id?: string
     x?: number
     y?: number
@@ -14,38 +14,38 @@ declare module 'react-force-graph' {
     [key: string]: string | number | null | undefined
   }
   
-  export interface LinkObject<NodeData = unknown, LinkData = unknown> {
-    source: string | number | NodeObject<NodeData>
-    target: string | number | NodeObject<NodeData>
-    [key: string]: string | number | NodeObject<NodeData> | undefined
+  export interface LinkObject {
+    source: string | number | NodeObject
+    target: string | number | NodeObject
+    [key: string]: string | number | NodeObject | undefined
   }
   
-  export interface GraphData<NodeData = any, LinkData = any> {
-    nodes: NodeObject<NodeData>[]
-    links: LinkObject<NodeData, LinkData>[]
+  export interface GraphData {
+    nodes: NodeObject[]
+    links: LinkObject[]
   }
   
-  export interface ForceGraphProps<NodeData = any, LinkData = any> {
-    graphData: GraphData<NodeData, LinkData>
+  export interface ForceGraphProps {
+    graphData: GraphData
     nodeId?: string
     linkSource?: string
     linkTarget?: string
-    nodeLabel?: string | ((node: NodeObject<NodeData>) => string)
-    nodeVal?: number | ((node: NodeObject<NodeData>) => number)
+    nodeLabel?: string | ((node: NodeObject) => string)
+    nodeVal?: number | ((node: NodeObject) => number)
     nodeRelSize?: number
-    nodeColor?: string | ((node: NodeObject<NodeData>) => string)
-    nodeAutoColorBy?: string | ((node: NodeObject<NodeData>) => string | null)
-    linkLabel?: string | ((link: LinkObject<NodeData, LinkData>) => string)
-    linkVisibility?: boolean | ((link: LinkObject<NodeData, LinkData>) => boolean)
-    linkColor?: string | ((link: LinkObject<NodeData, LinkData>) => string)
-    linkWidth?: number | ((link: LinkObject<NodeData, LinkData>) => number)
-    linkDirectionalArrowLength?: number | ((link: LinkObject<NodeData, LinkData>) => number)
-    linkDirectionalArrowColor?: string | ((link: LinkObject<NodeData, LinkData>) => string)
-    linkDirectionalArrowRelPos?: number | ((link: LinkObject<NodeData, LinkData>) => number)
-    linkDirectionalParticles?: number | ((link: LinkObject<NodeData, LinkData>) => number)
-    linkDirectionalParticleSpeed?: number | ((link: LinkObject<NodeData, LinkData>) => number)
-    linkDirectionalParticleWidth?: number | ((link: LinkObject<NodeData, LinkData>) => number)
-    linkDirectionalParticleColor?: string | ((link: LinkObject<NodeData, LinkData>) => string)
+    nodeColor?: string | ((node: NodeObject) => string)
+    nodeAutoColorBy?: string | ((node: NodeObject) => string | null)
+    linkLabel?: string | ((link: LinkObject) => string)
+    linkVisibility?: boolean | ((link: LinkObject) => boolean)
+    linkColor?: string | ((link: LinkObject) => string)
+    linkWidth?: number | ((link: LinkObject) => number)
+    linkDirectionalArrowLength?: number | ((link: LinkObject) => number)
+    linkDirectionalArrowColor?: string | ((link: LinkObject) => string)
+    linkDirectionalArrowRelPos?: number | ((link: LinkObject) => number)
+    linkDirectionalParticles?: number | ((link: LinkObject) => number)
+    linkDirectionalParticleSpeed?: number | ((link: LinkObject) => number)
+    linkDirectionalParticleWidth?: number | ((link: LinkObject) => number)
+    linkDirectionalParticleColor?: string | ((link: LinkObject) => string)
     dagMode?: string
     dagLevelDistance?: number
     dagNodeFilter?: (node: NodeObject<NodeData>) => boolean
@@ -73,11 +73,11 @@ declare module 'react-force-graph' {
     cooldownTime?: number
     onEngineStop?: () => void
     onEngineTick?: () => void
-    d3Force?: string | ((force: Simulation<NodeObject<NodeData>, undefined>) => void)
+    d3Force?: string | ((force: Simulation<NodeObject, undefined>) => void)
   }
   
-  export class ForceGraph2D<NodeData = any, LinkData = any> extends Component<ForceGraphProps<NodeData, LinkData>> {}
-  export class ForceGraph3D<NodeData = any, LinkData = any> extends Component<ForceGraphProps<NodeData, LinkData>> {}
-  export class ForceGraphVR<NodeData = any, LinkData = any> extends Component<ForceGraphProps<NodeData, LinkData>> {}
-  export class ForceGraphAR<NodeData = any, LinkData = any> extends Component<ForceGraphProps<NodeData, LinkData>> {}
+  export class ForceGraph2D extends Component<ForceGraphProps> {}
+  export class ForceGraph3D extends Component<ForceGraphProps> {}
+  export class ForceGraphVR extends Component<ForceGraphProps> {}
+  export class ForceGraphAR extends Component<ForceGraphProps> {}
 }
