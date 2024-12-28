@@ -1,8 +1,8 @@
 import { Flex, Box, TextField, Button, Text, Heading, Container, Card } from '@radix-ui/themes';
-import { login, signup, signInWithGoogle } from './actions';
+import { signup, signInWithGoogle } from '@/app/auth/actions';
 import Link from 'next/link';
 
-export default async function AuthPage({
+export default async function SignUpPage({
     searchParams
 }: {
     searchParams: Promise<{ error?: string }>
@@ -33,6 +33,24 @@ export default async function AuthPage({
                         <Flex direction="column" gap="5">
                             <TextField.Root
                                 size="3"
+                                type="text"
+                                name="firstName"
+                                placeholder="First Name"
+                                required
+                                autoComplete="given-name"
+                            />
+
+                            <TextField.Root
+                                size="3"
+                                type="text"
+                                name="lastName"
+                                placeholder="Last Name"
+                                required
+                                autoComplete="family-name"
+                            />
+
+                            <TextField.Root
+                                size="3"
                                 type="email"
                                 name="email"
                                 placeholder="Email address"
@@ -46,28 +64,27 @@ export default async function AuthPage({
                                 name="password"
                                 placeholder="Password"
                                 required
-                                autoComplete="current-password"
+                                autoComplete="new-password"
                             />
-
 
                             <Button
                                 size="3"
                                 variant="solid"
-                                formAction={login}
-                                style={{ width: '100%' }}
-                            >
-                                Sign In
-                            </Button>
-
-                            <Button
-                                size="3"
-                                variant="outline"
                                 formAction={signup}
                                 style={{ width: '100%' }}
                             >
-                                Sign Up
+                                Create Account
                             </Button>
 
+                            <Link href="/auth/login" style={{ width: '100%' }}>
+                                <Button
+                                    size="3"
+                                    variant="outline"
+                                    style={{ width: '100%' }}
+                                >
+                                    Sign In Instead
+                                </Button>
+                            </Link>
                         </Flex>
                     </form>
 

@@ -46,7 +46,7 @@ export async function updateSession(request: NextRequest) {
     //     // redirect them to the login page. This ensures protected routes are not accessible
     //     // without authentication.
     //     const url = request.nextUrl.clone()
-    //     url.pathname = '/login'
+    //     url.pathname = '/auth/login'
     //     return NextResponse.redirect(url)
     // }
 
