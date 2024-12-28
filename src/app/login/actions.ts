@@ -13,19 +13,30 @@ export async function loginOrSignup(formData: FormData) {
         password: formData.get('password') as string,
     }
 
-    console.log('Attempting sign in:', data.email)
+    console.log('Checking if user exists:', data.email)
     
-    // Try to sign in first
-    const { error: signInError } = await supabase.auth.signInWithPassword(data)
+    // Check if user exists in profiles table
+    const { data: existingUser } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', data.email)
+        .single()
 
-    // If sign in succeeds, redirect to profiles
-    if (!signInError) {
+    if (existingUser) {
+        console.log('User exists, attempting sign in')
+        const { error: signInError } = await supabase.auth.signInWithPassword(data)
+
+        if (signInError) {
+            console.error('Sign in error:', signInError.message)
+            return redirect('/error')
+        }
+
         console.log('Sign in successful, redirecting to profiles')
         return redirect('/profiles')
     }
 
-    // If sign in fails for any reason, attempt signup
-    console.log('Sign in failed, attempting signup:', signInError.message)
+    // User doesn't exist, attempt signup
+    console.log('User does not exist, attempting signup')
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp(data)
 
     if (signUpError) {
