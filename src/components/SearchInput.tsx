@@ -12,17 +12,17 @@ interface SearchInputProps {
 export default function SearchInput({ onSearch, placeholder = "Search..." }: SearchInputProps) {
   return (
     <Box style={{ width: '100%' }}>
-      <TextField.Root size="3">
+      <TextField.Root
+        size="3"
+        placeholder={placeholder}
+        onChange={(e) => {
+          const value = e.target.value
+          onSearch(value).catch(console.error)
+        }}
+      >
         <TextField.Slot>
           <MagnifyingGlassIcon height="16" width="16" />
         </TextField.Slot>
-        <input
-          placeholder={placeholder}
-          onChange={(e) => {
-            const value = e.target.value
-            onSearch(value).catch(console.error)
-          }}
-        />
       </TextField.Root>
     </Box>
   )
