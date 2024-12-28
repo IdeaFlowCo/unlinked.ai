@@ -8,6 +8,10 @@ import { useEffect, useState } from 'react'
 import { Database } from '@/utils/supabase/types'
 import type { Node, Link } from '@/components/NetworkForceGraph'
 
+type Profile = Database['public']['Tables']['profiles']['Row']
+type Company = Database['public']['Tables']['companies']['Row']
+type Institution = Database['public']['Tables']['institutions']['Row']
+
 const NetworkForceGraph = dynamic(() => import('@/components/NetworkForceGraph'), { ssr: false })
 
 export default function ProfilesIndex() {
@@ -103,7 +107,7 @@ export default function ProfilesIndex() {
         id: `profile-${profile.id}`,
         name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed Profile',
         type: 'person' as const,
-        data: profile,
+        __data: profile,
         x: 0,
         y: 0,
         vx: 0,
@@ -117,7 +121,7 @@ export default function ProfilesIndex() {
         id: `company-${company.id}`,
         name: company.name || 'Unnamed Company',
         type: 'company' as const,
-        data: company,
+        __data: company,
         x: 0,
         y: 0,
         vx: 0,
@@ -131,7 +135,7 @@ export default function ProfilesIndex() {
         id: `institution-${institution.id}`,
         name: institution.name || 'Unnamed Institution',
         type: 'institution' as const,
-        data: institution,
+        __data: institution,
         x: 0,
         y: 0,
         vx: 0,
@@ -220,7 +224,7 @@ export default function ProfilesIndex() {
             height={typeof window !== 'undefined' ? window.innerHeight : 800}
             onNodeClick={(node) => {
               if (node.type === 'person') {
-                window.location.href = `/profiles/${node.data.id}`
+                window.location.href = `/profiles/${(node.__data as Profile).id}`
               }
             }}
           />

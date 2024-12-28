@@ -12,10 +12,11 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-export type Node = NodeObject & {
+export type Node = Omit<NodeObject, 'id'> & {
+  id: string
   name: string
   type: 'person' | 'company' | 'institution'
-  data: Profile | Company | Institution
+  __data?: Profile | Company | Institution // Use __data to avoid index signature conflict
 }
 
 export type Link = {
@@ -160,9 +161,9 @@ export default function NetworkForceGraph({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ fontWeight: 500, color: 'var(--violet-12)' }}>{hoveredNode.name}</div>
               <div style={{ color: 'var(--gray-11)', fontSize: '0.9em' }}>Type: {hoveredNode.type}</div>
-              {hoveredNode.type === 'person' && (hoveredNode.data as Profile).headline && (
+              {hoveredNode.type === 'person' && hoveredNode.__data && (hoveredNode.__data as Profile).headline && (
                 <div style={{ color: 'var(--gray-11)', fontSize: '0.9em' }}>
-                  {(hoveredNode.data as Profile).headline}
+                  {(hoveredNode.__data as Profile).headline}
                 </div>
               )}
             </div>
