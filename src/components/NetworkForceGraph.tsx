@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { ForceGraph2D } from 'react-force-graph'
-import type { NodeObject as ForceGraphNode } from 'react-force-graph'
+import type { NodeObject as ForceGraphNode, GraphData } from 'react-force-graph'
 import { Database } from '@/utils/supabase/types'
 import { Box } from '@radix-ui/themes'
 import * as HoverCard from '@radix-ui/react-hover-card'
@@ -12,24 +12,22 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-interface Node extends ForceGraphNode {
+interface Node extends Omit<ForceGraphNode, 'id'> {
   id: string
   name: string
   type: 'person' | 'company' | 'institution'
   data: Profile | Company | Institution
+  [key: string]: string | number | boolean | null | undefined | Node | Profile | Company | Institution | ForceGraphNode[keyof ForceGraphNode]
 }
 
 interface Link {
   source: Node
   target: Node
   type: 'works_at' | 'studied_at' | 'connected_to'
-  [key: string]: any  // Allow additional properties required by ForceGraph2D
+  [key: string]: string | Node | number | boolean | undefined  // Allow additional properties required by ForceGraph2D
 }
 
-interface NetworkData {
-  nodes: Node[]
-  links: Link[]
-}
+type NetworkData = GraphData<Node, Link>
 
 interface NetworkForceGraphProps {
   data: NetworkData
@@ -80,7 +78,7 @@ export default function NetworkForceGraph({
         onNodeHover={(node, event) => {
           setHoveredNode(node as Node | null);
           if (event) {
-            setMousePosition({ x: event.pageX, y: event.pageY });
+            setMousePosition({ x: event.pageX as number, y: event.pageY as number });
           }
         }}
         nodeCanvasObject={(node: ForceGraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {

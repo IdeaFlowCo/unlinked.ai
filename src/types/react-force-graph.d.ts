@@ -2,7 +2,7 @@ declare module 'react-force-graph' {
   import { Component } from 'react'
   import { Simulation, SimulationNodeDatum } from 'd3-force'
   
-  export interface NodeObject<NodeData = any> extends SimulationNodeDatum {
+  export interface NodeObject<NodeData = unknown> extends SimulationNodeDatum {
     id?: string
     x?: number
     y?: number
@@ -11,13 +11,13 @@ declare module 'react-force-graph' {
     fx?: number | null
     fy?: number | null
     __indexColor?: string
-    [key: string]: any
+    [key: string]: string | number | null | undefined
   }
   
-  export interface LinkObject<NodeData = any, LinkData = any> {
+  export interface LinkObject<NodeData = unknown, LinkData = unknown> {
     source: string | number | NodeObject<NodeData>
     target: string | number | NodeObject<NodeData>
-    [key: string]: any
+    [key: string]: string | number | NodeObject<NodeData> | undefined
   }
   
   export interface GraphData<NodeData = any, LinkData = any> {
