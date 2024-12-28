@@ -105,7 +105,8 @@ export default function ProfilesIndex() {
         id: `profile-${profile.id}`,
         name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed Profile',
         type: 'person' as const,
-        __data: profile,
+        __data: profile.id,
+        data: profile,
         x: Math.random() * 1000,
         y: Math.random() * 1000,
         vx: 0,
@@ -121,7 +122,8 @@ export default function ProfilesIndex() {
         id: `company-${company.id}`,
         name: company.name || 'Unnamed Company',
         type: 'company' as const,
-        __data: company,
+        __data: company.id,
+        data: company,
         x: Math.random() * 1000,
         y: Math.random() * 1000,
         vx: 0,
@@ -137,7 +139,8 @@ export default function ProfilesIndex() {
         id: `institution-${institution.id}`,
         name: institution.name || 'Unnamed Institution',
         type: 'institution' as const,
-        __data: institution,
+        __data: institution.id,
+        data: institution,
         x: Math.random() * 1000,
         y: Math.random() * 1000,
         vx: 0,
@@ -228,7 +231,7 @@ export default function ProfilesIndex() {
             height={typeof window !== 'undefined' ? window.innerHeight : 800}
             onNodeClick={(node) => {
               if (node.type === 'person') {
-                window.location.href = `/profiles/${(node.__data as Profile).id}`
+                window.location.href = `/profiles/${(node.data as Profile).id}`
               }
             }}
           />
