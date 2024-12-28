@@ -2,17 +2,15 @@
 
 import React, { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { Container, Text, Card, Flex, Box, SegmentedControl } from '@radix-ui/themes'
-import { CustomGraphData, Node } from '@/types/graph'
-import NetworkForceGraph from '@/components/NetworkForceGraph'
+import { Container, Text, Card, Flex, Box } from '@radix-ui/themes'
+import { Node } from '@/types/graph'
 import SearchInput from '@/components/SearchInput'
 import ProfileList from '@/components/ProfileList'
 
 export default function ProfilesIndex() {
-  const [data, setData] = useState<CustomGraphData>({ nodes: [], links: [] })
+  const [nodes, setNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
-  const [view, setView] = useState<'graph' | 'list'>('graph')
   const [searchQuery, setSearchQuery] = useState('')
 
   const loadData = useCallback(async () => {
@@ -24,26 +22,13 @@ export default function ProfilesIndex() {
       
       if (profilesError) throw profilesError
 
-      const { data: connections, error: connectionsError } = await supabase
-        .from('connections')
-        .select('profile_id_a, profile_id_b')
-      
-      if (connectionsError) throw connectionsError
-
-      // Transform data for the graph
-      const nodes = profiles.map(profile => ({
+      const profileNodes = profiles.map(profile => ({
         id: profile.id,
         name: `${profile.first_name} ${profile.last_name}`,
         type: 'person' as const
       }))
 
-      const links = connections.map(conn => ({
-        source: conn.profile_id_a,
-        target: conn.profile_id_b,
-        type: 'connection' as const
-      }))
-
-      setData({ nodes, links })
+      setNodes(profileNodes)
     } catch (e) {
       setError(e as Error)
     } finally {
@@ -80,48 +65,43 @@ export default function ProfilesIndex() {
     )
   }
 
-  const filteredNodes = data.nodes.filter(node => 
+  const filteredNodes = nodes.filter(node => 
     node.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const filteredData = {
-    nodes: filteredNodes,
-    links: data.links.filter(link => 
-      filteredNodes.some(n => n.id === link.source) && 
-      filteredNodes.some(n => n.id === link.target)
-    )
-  }
-
   return (
-    <Container size="3">
-      <Box mb="4">
-        <Card size="2">
-          <Flex direction="column" gap="3">
-            <SearchInput 
-              onSearch={async (query) => {
-                setSearchQuery(query)
-              }}
-              placeholder="Search professionals by name..."
-            />
-            <SegmentedControl.Root defaultValue={view} onValueChange={(value) => setView(value as 'graph' | 'list')}>
-              <SegmentedControl.Item value="graph">Graph View</SegmentedControl.Item>
-              <SegmentedControl.Item value="list">List View</SegmentedControl.Item>
-            </SegmentedControl.Root>
+    <>
+      <Box style={{ 
+        position: 'sticky', 
+        top: '64px', // Account for main header height
+        backgroundColor: 'var(--color-background)', 
+        zIndex: 9, // Below main header
+        borderBottom: '1px solid var(--gray-4)',
+        padding: '16px 0'
+      }}>
+        <Container size="3">
+          <Flex gap="4" align="center">
+            <Box style={{ flex: 1 }}>
+              <SearchInput 
+                onSearch={async (query) => {
+                  setSearchQuery(query)
+                }}
+                placeholder="Search professionals by name..."
+              />
+            </Box>
           </Flex>
-        </Card>
+        </Container>
       </Box>
 
-      <Card size="4" style={{ height: 'calc(100vh - 200px)' }}>
-        {view === 'graph' ? (
-          <NetworkForceGraph data={filteredData} />
-        ) : (
+      <Container size="3">
+        <Box style={{ height: 'calc(100vh - 140px)', marginTop: '16px' }}>
           <ProfileList nodes={filteredNodes} />
-        )}
-      </Card>
+        </Box>
 
-      <Text size="2" color="gray" mt="2" align="center">
-        {filteredNodes.length} professionals
-      </Text>
-    </Container>
+        <Text size="2" color="gray" mt="2" align="center">
+          {filteredNodes.length} professionals
+        </Text>
+      </Container>
+    </>
   )
 }
