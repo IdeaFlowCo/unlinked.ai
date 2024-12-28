@@ -1,7 +1,7 @@
 // components/header.tsx
 import { Flex, Heading, Link, Button, Text, Box } from '@radix-ui/themes'
 import { createClient } from '@/utils/supabase/server'
-import { signOut } from '@/app/login/actions'
+import { signOut } from '@/app/auth/actions'
 
 interface HeaderProps {
     showSearch?: boolean
@@ -43,7 +43,7 @@ export default async function Header({ showSearch = false }: HeaderProps) {
                             </form>
                         </Flex>
                     ) : (
-                        <Link href="/login">
+                        <Link href="/auth/login">
                             <Button size="3" variant="soft">
                                 Sign in
                             </Button>
