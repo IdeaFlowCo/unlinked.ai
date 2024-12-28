@@ -13,7 +13,8 @@ export default function SearchBar({ placeholder = "Search...", onChange }: Searc
   return (
     <Box style={{ maxWidth: '400px' }}>
       <TextField.Root 
-        size="2" 
+        size="3" 
+        variant="soft"
         placeholder={placeholder}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange?.(e.target.value)}
       >

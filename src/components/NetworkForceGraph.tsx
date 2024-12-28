@@ -106,36 +106,25 @@ export default function NetworkForceGraph({
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          // Set color based on node type using distinct Radix UI theme colors
+          // Set color based on node type and draw circle for all nodes
           switch (node.type) {
             case 'person':
               ctx.fillStyle = '#7c66dc'; // vibrant violet
-              // Draw circle for person
-              ctx.beginPath();
-              ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI);
-              ctx.fill();
               break;
             case 'company':
               ctx.fillStyle = '#4f3ecc'; // deeper violet
-              // Draw square for company
-              ctx.fillRect(node.x! - size, node.y! - size, size * 2, size * 2);
               break;
             case 'institution':
               ctx.fillStyle = '#a07ffa'; // lighter lavender
-              // Draw triangle for institution
-              ctx.beginPath();
-              ctx.moveTo(node.x!, node.y! - size);
-              ctx.lineTo(node.x! + size, node.y! + size);
-              ctx.lineTo(node.x! - size, node.y! + size);
-              ctx.closePath();
-              ctx.fill();
               break;
             default:
               ctx.fillStyle = '#8e8e93'; // gray-8
-              ctx.beginPath();
-              ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI);
-              ctx.fill();
           }
+          
+          // Draw circle for all node types
+          ctx.beginPath();
+          ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI);
+          ctx.fill();
           
           // Draw label below node
           ctx.fillStyle = 'var(--gray-12)';

@@ -49,21 +49,23 @@ export default function ProfileGrid({ profiles }: ProfileGridProps) {
                   radius="full"
                 />
                 <Box>
-                  <Text as="div" size="2" weight="medium">
+                  <Text as="div" size="2" weight="medium" mb="1">
                     {p.first_name} {p.last_name}
                   </Text>
                   {p.headline && (
                     <Text as="div" size="2" color="gray" style={{ 
                       whiteSpace: 'pre-wrap',
-                      lineHeight: '1.3',
-                      maxHeight: '3.9em',  // 3 lines of text
-                      overflow: 'hidden'
+                      lineHeight: '1.5',
+                      marginBottom: '8px'
                     }}>
                       {p.headline}
                     </Text>
                   )}
                   {p.industry && (
-                    <Text as="div" size="1" color="gray" mt="1">
+                    <Text as="div" size="1" color="gray" style={{
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: '1.4'
+                    }}>
                       {p.industry}
                     </Text>
                   )}
