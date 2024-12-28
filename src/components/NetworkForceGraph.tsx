@@ -27,7 +27,10 @@ export type Link = {
 }
 
 interface NetworkForceGraphProps {
-  data: GraphData
+  data: {
+    nodes: Node[]
+    links: Link[]
+  }
   height?: number
   width?: number
   onNodeClick?: (node: Node) => void
@@ -71,7 +74,7 @@ export default function NetworkForceGraph({
       }}
     >
       <ForceGraph2D
-        graphData={data as GraphData}
+        graphData={data}
         nodeLabel={(node) => `${(node as Node).name} (${(node as Node).type})`}
         onNodeHover={(node, event) => {
           setHoveredNode(node as Node | null);

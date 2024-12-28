@@ -108,12 +108,14 @@ export default function ProfilesIndex() {
         name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Unnamed Profile',
         type: 'person' as const,
         __data: profile,
-        x: 0,
-        y: 0,
+        x: Math.random() * 1000,
+        y: Math.random() * 1000,
         vx: 0,
         vy: 0,
-        fx: null,
-        fy: null
+        fx: undefined,
+        fy: undefined,
+        index: undefined,
+        radius: 8
       })) || []),
       
       // Company nodes
@@ -122,12 +124,14 @@ export default function ProfilesIndex() {
         name: company.name || 'Unnamed Company',
         type: 'company' as const,
         __data: company,
-        x: 0,
-        y: 0,
+        x: Math.random() * 1000,
+        y: Math.random() * 1000,
         vx: 0,
         vy: 0,
-        fx: null,
-        fy: null
+        fx: undefined,
+        fy: undefined,
+        index: undefined,
+        radius: 8
       })) || []),
       
       // Institution nodes
@@ -136,12 +140,14 @@ export default function ProfilesIndex() {
         name: institution.name || 'Unnamed Institution',
         type: 'institution' as const,
         __data: institution,
-        x: 0,
-        y: 0,
+        x: Math.random() * 1000,
+        y: Math.random() * 1000,
         vx: 0,
         vy: 0,
-        fx: null,
-        fy: null
+        fx: undefined,
+        fy: undefined,
+        index: undefined,
+        radius: 8
       })) || [])
     ]
 
