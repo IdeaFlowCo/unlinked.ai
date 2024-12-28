@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { ForceGraph2D } from 'react-force-graph'
-import type { NodeObject as ForceGraphNode, GraphData } from 'react-force-graph'
+import type { NodeObject, LinkObject } from 'react-force-graph'
 import { Database } from '@/utils/supabase/types'
 import { Box } from '@radix-ui/themes'
 import * as HoverCard from '@radix-ui/react-hover-card'
@@ -12,7 +12,7 @@ type Profile = Database['public']['Tables']['profiles']['Row']
 type Company = Database['public']['Tables']['companies']['Row']
 type Institution = Database['public']['Tables']['institutions']['Row']
 
-interface Node {
+interface Node extends NodeObject {
   id: string
   name: string
   type: 'person' | 'company' | 'institution'
@@ -24,25 +24,31 @@ interface Node {
   fx?: number | null
   fy?: number | null
   __indexColor?: string
-  [key: string]: string | number | boolean | null | undefined | Node | Profile | Company | Institution | undefined
+  [key: string]: any // Required by ForceGraph2D
 }
 
-interface Link {
+interface Link extends LinkObject {
   source: Node
   target: Node
   type: 'works_at' | 'studied_at' | 'connected_to'
-  [key: string]: string | Node | number | boolean | undefined  // Allow additional properties required by ForceGraph2D
+  [key: string]: any // Required by ForceGraph2D
 }
 
-type NetworkData = GraphData<Node, Link>
+interface NetworkData {
+  nodes: Node[]
+  links: Link[]
+}
 
 interface NetworkForceGraphProps {
   data: NetworkData
+  height?: number
+  width?: number
   onNodeClick?: (node: Node) => void
 }
 
 export default function NetworkForceGraph({ 
   data,
+  height,
   onNodeClick
 }: NetworkForceGraphProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -79,14 +85,14 @@ export default function NetworkForceGraph({
     >
       <ForceGraph2D
         graphData={data}
-        nodeLabel={(node: ForceGraphNode) => `${(node as Node).name} (${(node as Node).type})`}
+        nodeLabel={(node: NodeObject) => `${(node as Node).name} (${(node as Node).type})`}
         onNodeHover={(node, event) => {
           setHoveredNode(node as Node | null);
           if (event) {
             setMousePosition({ x: event.pageX as number, y: event.pageY as number });
           }
         }}
-        nodeCanvasObject={(node: ForceGraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+        nodeCanvasObject={(node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number) => {
           const label = (node as Node).name;
           const fontSize = 12/globalScale;
           // Use a consistent base size for all nodes
@@ -133,15 +139,15 @@ export default function NetworkForceGraph({
         linkWidth={1} // Thicker lines for better visibility
         onLinkClick={() => {}}  // Disable link interactions
         linkDirectionalParticles={0}
-        onNodeClick={(node: ForceGraphNode) => onNodeClick?.(node as Node)}
+        onNodeClick={(node: NodeObject) => onNodeClick?.(node as Node)}
         width={containerWidth}
-        height={window.innerHeight}
+        height={height || window.innerHeight}
         nodeRelSize={12}
         nodeVal={() => 1}
         warmupTicks={200}
         cooldownTime={5000}
         d3VelocityDecay={0.1}
-        d3Force={(force: Simulation<ForceGraphNode, undefined>) => {
+        d3Force={(force: Simulation<NodeObject, undefined>) => {
           force.force('charge', forceManyBody().strength(-1500))
                .force('link', forceLink().distance(250))
                .force('center', forceCenter().strength(0.03));

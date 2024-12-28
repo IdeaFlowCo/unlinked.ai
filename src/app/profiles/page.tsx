@@ -169,7 +169,7 @@ export default function ProfilesIndex() {
         }}>
           <NetworkForceGraph 
             data={{ nodes, links }} 
-            height={window.innerHeight}
+            height={typeof window !== 'undefined' ? window.innerHeight : 800}
             onNodeClick={(node) => {
               if (node.type === 'person') {
                 window.location.href = `/profiles/${node.data.id}`
