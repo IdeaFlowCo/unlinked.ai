@@ -3,13 +3,11 @@ import { loginOrSignup, signInWithGoogle } from './actions';
 import { PersonIcon } from '@radix-ui/react-icons';
 import Link from 'next/link';
 
-interface PageProps {
-    searchParams?: { [key: string]: string | string[] | undefined }
-}
-
 export default function AuthPage({
-    searchParams,
-}: PageProps) {
+    searchParams = {},
+}: {
+    searchParams?: { [key: string]: string | undefined }
+}) {
     const error = searchParams?.error
     return (
         <Container size="1">
