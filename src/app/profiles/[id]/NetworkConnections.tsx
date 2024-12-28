@@ -18,7 +18,6 @@ export default function NetworkConnections({ profileId }: { profileId: string })
         fetchNextPage,
         hasNextPage,
         isFetchingNextPage,
-        status,
     } = useInfiniteQuery({
         queryKey: ['connections', profileId],
         queryFn: async ({ pageParam = 0 }) => {
@@ -49,7 +48,7 @@ export default function NetworkConnections({ profileId }: { profileId: string })
 
     return (
         <Flex direction="column" gap="3">
-            {data?.pages.map((page, i) => (
+            {data?.pages.map((page) => (
                 page.map(conn => {
                     const connectedProfile = conn.profile_id_a === profileId
                         ? conn.profile_b

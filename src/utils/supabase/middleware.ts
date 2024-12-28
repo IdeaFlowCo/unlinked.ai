@@ -15,7 +15,7 @@ export async function updateSession(request: NextRequest) {
                     return request.cookies.getAll()
                 },
                 setAll(cookiesToSet) {
-                    cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+                    cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
                     supabaseResponse = NextResponse.next({
                         request,
                     })
@@ -37,18 +37,18 @@ export async function updateSession(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser()
 
-    // if (
-    //     !user &&
-    //     !request.nextUrl.pathname.startsWith('/login') &&
-    //     !request.nextUrl.pathname.startsWith('/auth')
-    // ) {
-    //     // If there is no authenticated user and the request is not for the login or auth pages,
-    //     // redirect them to the login page. This ensures protected routes are not accessible
-    //     // without authentication.
-    //     const url = request.nextUrl.clone()
-    //     url.pathname = '/auth/login'
-    //     return NextResponse.redirect(url)
-    // }
+    if (
+        !user &&
+        !request.nextUrl.pathname.startsWith('/login') &&
+        !request.nextUrl.pathname.startsWith('/auth')
+    ) {
+        //     // If there is no authenticated user and the request is not for the login or auth pages,
+        //     // redirect them to the login page. This ensures protected routes are not accessible
+        //     // without authentication.
+        //     const url = request.nextUrl.clone()
+        //     url.pathname = '/auth/login'
+        //     return NextResponse.redirect(url)
+    }
 
     // IMPORTANT: You *must* return the supabaseResponse object as it is.
     // If you're creating a new response object with NextResponse.next() make sure to:
