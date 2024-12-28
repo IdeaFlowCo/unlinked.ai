@@ -1,14 +1,13 @@
 'use client'
 
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { Container, Heading, Text, Flex, Box, Card } from '@radix-ui/themes'
-import { PersonIcon } from '@radix-ui/react-icons'
+import { Container, Heading, Text, Flex, Box, Card, TextField, IconButton } from '@radix-ui/themes'
+import { PersonIcon, MagnifyingGlassIcon, DotsHorizontalIcon } from '@radix-ui/react-icons'
 import dynamic from 'next/dynamic'
 import { useEffect, useState } from 'react'
 import { Database } from '@/utils/supabase/types'
 
 const NetworkForceGraph = dynamic(() => import('@/components/NetworkForceGraph'), { ssr: false })
-const SearchInput = dynamic(() => import('@/components/SearchInput'), { ssr: false })
 
 export default function ProfilesIndex() {
   const supabase = createClientComponentClient<Database>()
@@ -157,8 +156,43 @@ export default function ProfilesIndex() {
     }
 
     return (
-      <Container size="3">
-        <Box mb="6">
+      <>
+        {/* Full viewport graph container */}
+        <Box style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 0,
+          background: 'var(--gray-1)'
+        }}>
+          <NetworkForceGraph 
+            data={{ nodes, links }} 
+            height={window.innerHeight}
+            onNodeClick={(node) => {
+              if (node.type === 'person') {
+                window.location.href = `/profiles/${node.data.id}`
+              }
+            }}
+          />
+        </Box>
+
+        {/* Floating search and stats container */}
+        <Box style={{
+          position: 'fixed',
+          top: 'calc(64px + 1rem)', // Header height + spacing
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '95%',
+          maxWidth: '1200px',
+          zIndex: 1,
+          padding: '1.5rem',
+          background: 'rgba(255, 255, 255, 0.95)',
+          backdropFilter: 'blur(12px)',
+          borderRadius: 'var(--radius-4)',
+          boxShadow: 'var(--shadow-5)'
+        }}>
           <Flex gap="2" align="center" mb="4">
             <PersonIcon width="24" height="24" />
             <Heading size="6">Network Graph</Heading>
@@ -167,52 +201,43 @@ export default function ProfilesIndex() {
             </Text>
           </Flex>
 
-          <SearchInput
-            onSearch={async (query) => {
-              try {
-                const response = await fetch('/api/search', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ query })
-                })
+          <Box style={{ width: '100%' }}>
+            <TextField.Root 
+              size="3"
+              placeholder="Search professionals by name, title, or company..."
+              onChange={async (e) => {
+                try {
+                  const response = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: e.target.value })
+                  })
 
-                if (!response.ok) {
-                  const error = await response.json()
-                  throw new Error(error.message || 'Search failed')
-                }
+                  if (!response.ok) {
+                    const error = await response.json()
+                    throw new Error(error.message || 'Search failed')
+                  }
 
-                const { profiles: searchResults } = await response.json()
-                // TODO: Update graph to highlight matching nodes once OpenAI integration is complete
-                console.log('Search results:', searchResults)
-              } catch (error) {
-                console.error('Search error:', error)
-                throw error
-              }
-            }}
-            placeholder="Search professionals by name, title, or company..."
-          />
-        </Box>
-
-        <Card size="3" style={{ width: '100%' }}>
-          <Box
-            style={{
-              width: '100%',
-              height: '800px',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <NetworkForceGraph 
-              data={{ nodes, links }} 
-              height={800}
-              onNodeClick={(node) => {
-                if (node.type === 'person') {
-                  window.location.href = `/profiles/${node.data.id}`
+                  const { profiles: searchResults } = await response.json()
+                  // TODO: Update graph to highlight matching nodes once OpenAI integration is complete
+                  console.log('Search results:', searchResults)
+                } catch (error) {
+                  console.error('Search error:', error)
+                  throw error
                 }
               }}
-            />
+            >
+              <TextField.Slot>
+                <MagnifyingGlassIcon height="16" width="16" />
+              </TextField.Slot>
+              <TextField.Slot pr="3">
+                <IconButton size="2" variant="ghost">
+                  <DotsHorizontalIcon height="16" width="16" />
+                </IconButton>
+              </TextField.Slot>
+            </TextField.Root>
           </Box>
-        </Card>
-      </Container>
+        </Box>
+      </>
     )
 }

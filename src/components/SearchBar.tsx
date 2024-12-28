@@ -1,25 +1,27 @@
 'use client'
 
 import React from 'react'
-import { Box, TextField } from '@radix-ui/themes'
-import { MagnifyingGlassIcon } from '@radix-ui/react-icons'
+import { Box, TextField, IconButton } from '@radix-ui/themes'
+import { MagnifyingGlassIcon, DotsHorizontalIcon } from '@radix-ui/react-icons'
 
 interface SearchBarProps {
   placeholder?: string;
-  onChange?: (value: string) => void;
 }
 
-export default function SearchBar({ placeholder = "Search...", onChange }: SearchBarProps) {
+export default function SearchBar({ placeholder = "Search the docs..." }: SearchBarProps) {
   return (
-    <Box style={{ maxWidth: '400px' }}>
+    <Box maxWidth="300px">
       <TextField.Root 
-        size="3" 
-        variant="soft"
+        size="3"
         placeholder={placeholder}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange?.(e.target.value)}
       >
         <TextField.Slot>
           <MagnifyingGlassIcon height="16" width="16" />
+        </TextField.Slot>
+        <TextField.Slot pr="3">
+          <IconButton size="2" variant="ghost">
+            <DotsHorizontalIcon height="16" width="16" />
+          </IconButton>
         </TextField.Slot>
       </TextField.Root>
     </Box>

@@ -67,13 +67,13 @@ export default function NetworkForceGraph({
     <Box
       ref={containerRef}
       style={{
-        width: '100%',
-        maxWidth: '100%',
-        height: height,
-        border: '1px solid var(--gray-5)',
-        borderRadius: 'var(--radius-3)',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         overflow: 'hidden',
-        margin: '0 auto'
+        background: 'var(--gray-1)'
       }}
     >
       <ForceGraph2D
@@ -88,25 +88,14 @@ export default function NetworkForceGraph({
         nodeCanvasObject={(node: Node, ctx, globalScale) => {
           const label = node.name;
           const fontSize = 12/globalScale;
-          // Calculate node size based on connections and type
-          const connectionCount = data.links.filter(link => {
-            const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
-            const targetId = typeof link.target === 'object' ? link.target.id : link.target;
-            return sourceId === node.id || targetId === node.id;
-          }).length;
-          
-          // Base size varies by node type (larger base sizes)
-          const baseSize = node.type === 'person' ? 10 : node.type === 'company' ? 12 : 14;
-          
-          // Use logarithmic scale with enhanced multiplier
-          const sizeMultiplier = Math.log2(connectionCount + 1) * 1.5;
-          const size = baseSize + sizeMultiplier;
+          // Use a consistent base size for all nodes
+          const size = 8;
           
           ctx.font = `${fontSize}px Sans-Serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          // Set color based on node type and draw circle for all nodes
+          // Set color based on node type
           switch (node.type) {
             case 'person':
               ctx.fillStyle = '#7c66dc'; // vibrant violet
@@ -145,7 +134,20 @@ export default function NetworkForceGraph({
         linkDirectionalParticles={0}
         onNodeClick={(node: Node) => onNodeClick?.(node)}
         width={containerWidth}
-        height={height}
+        height={window.innerHeight}
+        nodeRelSize={12}
+        nodeVal={node => 1}
+        warmupTicks={200}
+        cooldownTime={5000}
+        d3VelocityDecay={0.1}
+        d3Force={(force) => {
+          // @ts-ignore - using force-graph's built-in types
+          force.force('charge').strength(-1500);
+          // @ts-ignore - using force-graph's built-in types
+          force.force('link').distance(250);
+          // @ts-ignore - using force-graph's built-in types
+          force.force('center').strength(0.03);
+        }}
       />
       {hoveredNode && (
         <HoverCard.Root open={true}>
