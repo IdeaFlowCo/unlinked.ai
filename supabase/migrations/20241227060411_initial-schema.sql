@@ -2,6 +2,14 @@
 create extension if not exists vector;
 
 -- Core tables
+create table user_uploads (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid references auth.users not null,
+    file_name text not null,
+    file_content text not null,
+    created_at timestamp with time zone default now()
+);
+
 create table profiles (
     id uuid primary key, --references auth.users on delete cascade,
     first_name text,
