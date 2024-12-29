@@ -77,11 +77,17 @@ export default function LinkedInUpload() {
     try {
       setUploadStatus('uploading');
       
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new Error('Please sign in to upload files');
+      }
+
       for (const file of selectedFiles) {
         const content = await file.text();
         const { error } = await supabase
           .from('user_uploads')
           .insert({
+            user_id: user.id,
             file_name: file.name,
             file_content: content,
           });
@@ -94,7 +100,7 @@ export default function LinkedInUpload() {
     } catch (error) {
       console.error('Upload error:', error);
       setUploadStatus('error');
-      setErrorMessage('Failed to upload files. Please try again.');
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to upload files. Please try again.');
     }
   };
 
