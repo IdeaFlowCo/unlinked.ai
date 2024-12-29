@@ -24,7 +24,12 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
                         fallback={fullName[0]}
                     />
                     <Box>
-                        <Heading size="6" mb="1">{fullName}</Heading>
+                        <Flex align="center" gap="2" mb="1">
+                            <Heading size="6">{fullName}</Heading>
+                            {profile.is_shadow && (
+                                <Badge variant="solid" color="gray">Shadow Profile</Badge>
+                            )}
+                        </Flex>
                         <Text size="3" color="gray" mb="4">{profile.headline}</Text>
                         {profile.summary && (
                             <Text size="2" color="gray">{profile.summary}</Text>

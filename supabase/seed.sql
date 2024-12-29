@@ -73,12 +73,3 @@ INSERT INTO connections (profile_id_a, profile_id_b) VALUES
     ('b2b2b2b2-2222-2222-2222-b2b2b2b2b2b2', 'e5e5e5e5-5555-5555-5555-e5e5e5e5e5e5'),
     ('c3c3c3c3-3333-3333-3333-c3c3c3c3c3c3', 'f6f6f6f6-6666-6666-6666-f6f6f6f6f6f6'),
     ('d4d4d4d4-4444-4444-4444-d4d4d4d4d4d4', 'e5e5e5e5-5555-5555-5555-e5e5e5e5e5e5');
-
--- Generate embeddings
-DO $$
-BEGIN
-  UPDATE profiles SET embedding = (
-    SELECT array_agg(random())::vector(1536)
-    FROM generate_series(1, 1536)
-  );
-END $$;
