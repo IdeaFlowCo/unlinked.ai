@@ -1,0 +1,6 @@
+First Name,Last Name,Billing Country,Postal Code,Transaction Made At,Payment Method Type,Invoice Number,Description,Tax Amount,Sub Total,Total Amount,Currency Code
+Gaurav,Talreja,US,94303,11/01/24 12:54 AM UTC,PAYPAL,10944984669,Premium Career,0.00,179.91,179.91,USD
+Gaurav,Talreja,CA,V6B 2Z3,08/11/24 07:06 AM UTC,CARD,10924822430,Premium Business,0.00,0.00,0.00,CAD
+Gaurav,Talreja,CA,V6B 2Z3,07/07/24 08:35 PM UTC,CARD,10118912478,Premium Business,2.86,23.81,26.67,CAD
+Gaurav,Talreja,CA,V6B 2Z3,06/07/24 08:35 PM UTC,CARD,10114616650,Premium Business,2.86,23.81,26.67,CAD
+Gaurav,Talreja,CA,V6B 2Z3,05/07/24 08:38 PM UTC,CARD,10911592219,Premium Business,2.86,23.81,26.67,CAD

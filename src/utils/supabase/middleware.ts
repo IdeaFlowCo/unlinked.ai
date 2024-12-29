@@ -37,18 +37,8 @@ export async function updateSession(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser()
 
-    if (
-        !user &&
-        !request.nextUrl.pathname.startsWith('/login') &&
-        !request.nextUrl.pathname.startsWith('/auth')
-    ) {
-        //     // If there is no authenticated user and the request is not for the login or auth pages,
-        //     // redirect them to the login page. This ensures protected routes are not accessible
-        //     // without authentication.
-        //     const url = request.nextUrl.clone()
-        //     url.pathname = '/auth/login'
-        //     return NextResponse.redirect(url)
-    }
+    // Auth checks moved to individual protected pages
+    // This was removed because it triggered on all pages due to header requests
 
     // IMPORTANT: You *must* return the supabaseResponse object as it is.
     // If you're creating a new response object with NextResponse.next() make sure to:

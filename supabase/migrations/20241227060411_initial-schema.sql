@@ -1,20 +1,31 @@
 -- Enable vector extension
 create extension if not exists vector;
 
+-- Grant schema access to authenticated users
+grant usage on schema public to authenticated;
+grant all on all tables in schema public to authenticated;
+grant all on all sequences in schema public to authenticated;
+grant all on all routines in schema public to authenticated;
+
 -- Core tables
 create table user_uploads (
     id uuid primary key default gen_random_uuid(),
     user_id uuid references auth.users not null,
     file_name text not null,
-    file_content text not null,
+    file_content bytea not null,
     created_at timestamp with time zone default now()
 );
+
+-- Disable RLS for user_uploads table
+alter table user_uploads disable row level security;
 
 create table profiles (
     id uuid primary key, --references auth.users on delete cascade,
     first_name text,
     last_name text,
     headline text,
+    linkedin_slug text unique,
+    is_shadow boolean default false,
     summary text,
     industry text,
     embedding vector(1536),
@@ -22,11 +33,17 @@ create table profiles (
     updated_at timestamp with time zone default now()
 );
 
+-- Disable RLS for profiles table
+alter table profiles disable row level security;
+
 create table companies (
     id uuid primary key default gen_random_uuid(),
     name text not null unique,
     created_at timestamp with time zone default now()
 );
+
+-- Disable RLS for companies table
+alter table companies disable row level security;
 
 create table positions (
     id uuid primary key default gen_random_uuid(),
@@ -45,6 +62,9 @@ create table institutions (
     created_at timestamp with time zone default now()
 );
 
+-- Disable RLS for institutions table
+alter table institutions disable row level security;
+
 create table education (
     id uuid primary key default gen_random_uuid(),
     profile_id uuid references profiles(id) on delete cascade,
@@ -55,12 +75,18 @@ create table education (
     created_at timestamp with time zone default now()
 );
 
+-- Disable RLS for education table
+alter table education disable row level security;
+
 create table skills (
     id uuid primary key default gen_random_uuid(),
     profile_id uuid references profiles(id) on delete cascade,
     name text not null,
     created_at timestamp with time zone default now()
 );
+
+-- Disable RLS for skills table
+alter table skills disable row level security;
 
 create table connections (
     id uuid primary key default gen_random_uuid(),
@@ -70,6 +96,9 @@ create table connections (
     unique(profile_id_a, profile_id_b),
     check (profile_id_a < profile_id_b)
 );
+
+-- Disable RLS for connections table
+alter table connections disable row level security;
 
 -- Find paths between profiles with configurable max length
 create or replace function get_paths(

@@ -7,31 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          operationName?: string
-          query?: string
-          variables?: Json
-          extensions?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       companies: {
@@ -207,22 +182,24 @@ export type Database = {
           headline: string | null
           id: string
           industry: string | null
+          is_shadow: boolean | null
           last_name: string | null
+          linkedin_slug: string | null
           summary: string | null
           updated_at: string | null
-          user_id: string | null
         }
         Insert: {
           created_at?: string | null
           embedding?: string | null
           first_name?: string | null
           headline?: string | null
-          id?: string
+          id: string
           industry?: string | null
+          is_shadow?: boolean | null
           last_name?: string | null
+          linkedin_slug?: string | null
           summary?: string | null
           updated_at?: string | null
-          user_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -231,10 +208,11 @@ export type Database = {
           headline?: string | null
           id?: string
           industry?: string | null
+          is_shadow?: boolean | null
           last_name?: string | null
+          linkedin_slug?: string | null
           summary?: string | null
           updated_at?: string | null
-          user_id?: string | null
         }
         Relationships: []
       }
@@ -266,6 +244,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_uploads: {
+        Row: {
+          created_at: string | null
+          file_content: string
+          file_name: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          file_content: string
+          file_name: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          file_content?: string
+          file_name?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
       }
     }
     Views: {
