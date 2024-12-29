@@ -151,6 +151,33 @@ export type Database = {
         }
         Relationships: []
       }
+      onboarding_state: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          current_step: number
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          current_step?: number
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          current_step?: number
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       positions: {
         Row: {
           company_id: string | null
@@ -202,39 +229,39 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string | null
-          embedding: string | null
           first_name: string | null
           headline: string | null
           id: string
           industry: string | null
+          is_shadow: boolean | null
           last_name: string | null
+          linkedin_slug: string | null
           summary: string | null
           updated_at: string | null
-          user_id: string | null
         }
         Insert: {
           created_at?: string | null
-          embedding?: string | null
           first_name?: string | null
           headline?: string | null
-          id?: string
+          id: string
           industry?: string | null
+          is_shadow?: boolean | null
           last_name?: string | null
+          linkedin_slug?: string | null
           summary?: string | null
           updated_at?: string | null
-          user_id?: string | null
         }
         Update: {
           created_at?: string | null
-          embedding?: string | null
           first_name?: string | null
           headline?: string | null
           id?: string
           industry?: string | null
+          is_shadow?: boolean | null
           last_name?: string | null
+          linkedin_slug?: string | null
           summary?: string | null
           updated_at?: string | null
-          user_id?: string | null
         }
         Relationships: []
       }
@@ -267,6 +294,30 @@ export type Database = {
           },
         ]
       }
+      uploads: {
+        Row: {
+          created_at: string | null
+          file_name: string
+          file_path: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          file_name: string
+          file_path: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          file_name?: string
+          file_path?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -285,23 +336,6 @@ export type Database = {
             }
             Returns: unknown
           }
-      get_path_details: {
-        Args: {
-          path: string[]
-        }
-        Returns: Json
-      }
-      get_paths: {
-        Args: {
-          start_profile_id: string
-          end_profile_id: string
-          max_length?: number
-        }
-        Returns: {
-          path: string[]
-          length: number
-        }[]
-      }
       halfvec_avg: {
         Args: {
           "": number[]
@@ -400,19 +434,6 @@ export type Database = {
             }
             Returns: unknown
           }
-      search_profiles: {
-        Args: {
-          query_embedding: string
-          match_threshold?: number
-          match_count?: number
-        }
-        Returns: {
-          id: string
-          name: string
-          headline: string
-          similarity: number
-        }[]
-      }
       sparsevec_out: {
         Args: {
           "": unknown
