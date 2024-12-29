@@ -89,7 +89,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
         for (const [path, zipEntry] of Object.entries(contents.files)) {
             if (!zipEntry.dir) {
                 const fileName = path.split('/').pop();
-                if (fileName && ([...REQUIRED_FILES, ...OPTIONAL_FILES] as const).includes(fileName as any)) {
+                if (fileName && ([...REQUIRED_FILES, ...OPTIONAL_FILES] as readonly string[]).includes(fileName)) {
                     const content = await zipEntry.async('blob');
                     csvFiles.push(new File([content], fileName, { type: 'text/csv' }) as ProcessedFile);
                 }

@@ -2,7 +2,6 @@
 import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 import OnboardingFlow from './onboarding-flow';
-import { Container, Theme } from '@radix-ui/themes';
 
 export const dynamic = 'force-dynamic';
 
