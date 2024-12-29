@@ -2,8 +2,9 @@
 
 import { useState, type ChangeEvent } from 'react';
 import { Button, Text, Card } from '@radix-ui/themes';
-import { createBrowserClient } from '@supabase/ssr';
 import JSZip from 'jszip';
+import { processLinkedInUpload } from '@/utils/linkedin/database';
+import { createClient } from '@/utils/supabase/client';
 
 const REQUIRED_FILES = ['Profile.csv', 'Connections.csv'];
 const OPTIONAL_FILES = ['Positions.csv', 'Education.csv', 'Skills.csv'];
@@ -13,10 +14,7 @@ export default function LinkedInUpload() {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
   
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createClient();
 
   const validateFiles = (files: File[]): boolean => {
     const fileNames = files.map(f => f.name);
@@ -79,21 +77,29 @@ export default function LinkedInUpload() {
       
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new Error('Please sign in to upload files');
+        throw new Error('Sign-in state could not be verified. Please refresh and try again.');
       }
 
+      const uploadedFiles = [];
       for (const file of selectedFiles) {
-        const content = await file.text();
-        const { error } = await supabase
-          .from('user_uploads')
-          .insert({
-            user_id: user.id,
-            file_name: file.name,
-            file_content: content,
+        // Upload file to linkedin bucket with user_id prefix
+        const filePath = `${user.id}/${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('linkedin')
+          .upload(filePath, file, {
+            contentType: 'text/csv',
+            upsert: true
           });
           
-        if (error) throw error;
+        if (uploadError) throw uploadError;
+
+        // Get text content for processing
+        const textContent = await file.text();
+        uploadedFiles.push({ name: file.name, content: textContent });
       }
+      
+      // Temporarily comment out processing for testing
+      // await processLinkedInUpload(user.id, uploadedFiles);
       
       setUploadStatus('success');
       setSelectedFiles([]);
