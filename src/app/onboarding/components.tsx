@@ -28,11 +28,8 @@ export function StepIndicator({ currentStep, step }: StepIndicatorProps): JSX.El
       >
         {currentStep > step ? <CheckIcon className="w-4 h-4" /> : step}
       </Badge>
-      <Box className="flex-1">
+      <Box className="flex-2">
         <Text size="2" weight="bold">
-          Step {step}
-        </Text>
-        <Text size="1" color="gray">
           {step === 1 ? 'Export Data' : step === 2 ? 'Wait for Download' : 'Upload Files'}
         </Text>
       </Box>
@@ -186,7 +183,7 @@ export function SuccessStep({ onComplete }: SuccessStepProps): JSX.Element {
           Your LinkedIn data has been successfully uploaded.
         </Text>
         <Button size="3" onClick={onComplete}>
-          Continue to Dashboard
+          Continue to Profiles
         </Button>
       </Flex>
     </Card>

@@ -196,7 +196,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
     return (
         <Flex direction="column" gap="6" className="py-8">
             {/* Progress steps */}
-            <Flex gap="4" align="center" justify="between" mb="6">
+            <Flex gap="4" align="center" justify="center">
                 {([1, 2, 3] as const).map((step) => (
                     <StepIndicator
                         key={step}
