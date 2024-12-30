@@ -19,20 +19,20 @@ export default async function Header({ showSearch = false }: HeaderProps) {
             top: 0,
             zIndex: 10
         }}>
-            <Flex px="4" py="2" justify="between" align="center">
+            <Flex px={{ initial: '2', sm: '4' }} py="2" justify="between" align="center" wrap="wrap" gap="2">
                 <Link href="/" className="no-underline">
-                    <Heading as="h1" size="5">
+                    <Heading as="h1" size={{ initial: '4', sm: '5' }}>
                         unlinked.ai
                     </Heading>
                 </Link>
                 {showSearch && (
-                    <Box style={{ flex: 1, maxWidth: '600px', margin: '0 24px' }}>
+                    <Box style={{ flex: 1, maxWidth: '600px', margin: '0 12px' }}>
                         <div id="search-container" style={{ width: '100%' }} />
                     </Box>
                 )}
-                <Flex align="center" gap="4">
+                <Flex align="center" gap={{ initial: '2', sm: '4' }}>
                     {data.user ? (
-                        <Flex align="center" gap="4">
+                        <Flex align="center" gap={{ initial: '2', sm: '4' }} wrap="wrap">
                             <Link href={`/profiles/${data.user.id}`} className="no-underline">
                                 <Text size="2" color="gray">Hello {data.user.email || 'there'}</Text>
                             </Link>
@@ -43,11 +43,18 @@ export default async function Header({ showSearch = false }: HeaderProps) {
                             </form>
                         </Flex>
                     ) : (
-                        <Link href="/auth/login">
-                            <Button size="3" variant="soft">
-                                Sign in
-                            </Button>
-                        </Link>
+                        <Flex gap={{ initial: '2', sm: '4' }} wrap="wrap">
+                            <Link href="/auth/login">
+                                <Button size={{ initial: '2', sm: '3' }} variant="soft">
+                                    Sign in
+                                </Button>
+                            </Link>
+                            <Link href="/auth/signup">
+                                <Button size={{ initial: '2', sm: '3' }} variant="solid">
+                                    Create account
+                                </Button>
+                            </Link>
+                        </Flex>
                     )}
                 </Flex>
             </Flex>
