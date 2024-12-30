@@ -104,7 +104,5 @@ create table onboarding_state (
 create trigger handle_updated_at before update on onboarding_state
   for each row execute procedure moddatetime (updated_at);
 
-
-
 create index on connections(profile_id_a);
 create index on connections(profile_id_b);

@@ -65,19 +65,24 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
 
         const { error } = await supabase
             .from('onboarding_state')
-            .upsert({
-                user_id: userId,
-                current_step: newStep,
-                completed_at: newStep === 4 ? new Date().toISOString() : null,
-                updated_at: new Date().toISOString()
-            });
+            .upsert(
+                {
+                    user_id: userId,
+                    current_step: newStep,
+                    completed_at: newStep === 4 ? new Date().toISOString() : null,
+                    updated_at: new Date().toISOString()
+                },
+                {
+                    onConflict: 'user_id'
+                }
+            );
 
         if (error) {
             console.error('Failed to update onboarding state:', error);
         }
 
         if (newStep === 4) {
-            router.push('/dashboard');
+            router.push('/profiles');
         }
     };
 
