@@ -7,6 +7,7 @@ import { createClient } from '@/utils/supabase/client'
 import { Text, Card, Flex } from '@radix-ui/themes'
 import type { Profile } from '@/components/ProfileList'
 import ProfileList from '@/components/ProfileList'
+import SearchInput from '@/components/SearchInput'
 
 const PAGE_SIZE = 10
 
@@ -15,7 +16,7 @@ interface ProfilesContainerProps {
 }
 
 export default function ProfilesContainer({ initialProfiles }: ProfilesContainerProps) {
-    const [searchQuery] = useState('')
+    const [searchQuery, setSearchQuery] = useState('')
     const { ref, inView } = useInView()
     const supabase = createClient()
 
@@ -81,6 +82,24 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
 
     return (
         <>
+            <Flex
+                direction="column"
+                gap="4"
+                style={{
+                    position: 'sticky',
+                    top: 0,
+                    backgroundColor: 'var(--color-background)',
+                    padding: '16px 0',
+                    zIndex: 10,
+                }}
+            >
+                <SearchInput
+                    onSearch={async (query: string) => {
+                        setSearchQuery(query)
+                    }}
+                    placeholder="Search professionals..."
+                />
+            </Flex>
             <ProfileList profiles={allProfiles} />
             <div ref={ref} style={{ padding: '20px', textAlign: 'center' }}>
                 {isFetchingNextPage ? (
