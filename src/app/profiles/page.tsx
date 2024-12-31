@@ -20,10 +20,10 @@ export default async function ProfilesPage() {
       )
     `)
     .order('created_at', { ascending: false })
-    .range(0, 9) // First 10 items only (0-9)
+    .range(0, 9)
 
   return (
-    <Container size="3">
+    <Container size="3" style={{ marginTop: '65px' }}>
       <ProfilesContainer initialProfiles={initialProfiles || []} />
     </Container>
   )

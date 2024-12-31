@@ -64,7 +64,7 @@ export async function signInWithGoogle() {
     if (session.data.session?.user) {
         const { data: profile } = await supabase
             .from('profiles')
-            .select('id')
+            .select('user_id')
             .eq('user_id', session.data.session.user.id)
             .single()
 

@@ -7,7 +7,7 @@ export const REQUIRED_FILES = ['Profile.csv', 'Connections.csv'] as const;
 export const OPTIONAL_FILES = ['Positions.csv', 'Education.csv', 'Skills.csv'] as const;
 
 export interface ProcessedFile extends File {
-    readonly name: typeof REQUIRED_FILES[number] | typeof OPTIONAL_FILES[number];
+    readonly name: string;
 }
 
 export interface OnboardingState {

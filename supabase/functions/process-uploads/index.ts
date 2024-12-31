@@ -38,16 +38,17 @@ function extractSlugFromUrl(url?: string | null): string | null {
     }
 }
 
-// Create your Supabase client (using service_role in an Edge Function is safe)
+// Create the Supabase client (using service_role in an Edge Function is safe)
 const supabase = createSupabaseClient(
     Deno.env.get("SUPABASE_URL") ?? "",
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
 );
 
 /**
- * Upsert the user's own Profile from "Profile.csv".
+ * Upsert the Profile row (the non-shadow user's own profile) from Profile.csv.
+ * Uses the existing "profile_id" from the uploads table.
  */
-async function processProfileCsv(userId: string, csvText: string) {
+async function processProfileCsv(profileId: string, csvText: string) {
     const parsed = Papa.parse<string[]>(csvText, { header: true });
     if (parsed.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
         const row = parsed.data[0];
@@ -55,40 +56,40 @@ async function processProfileCsv(userId: string, csvText: string) {
         const linkedInSlug = linkedInUrl ? extractSlugFromUrl(linkedInUrl) : null;
 
         try {
-            // First, check if there's an existing shadow profile with this LinkedIn slug
+            // If there's a shadow profile using this slug, we won't delete or override it
+            // but we can unify the new profile data. (Optional logic shown below.)
             if (linkedInSlug) {
-                const { data: existingShadow } = await supabase
+                const { error: shadowErr } = await supabase
                     .from("profiles")
-                    .select("id")
+                    .select("id, is_shadow")
                     .eq("linkedin_slug", linkedInSlug)
-                    .eq("is_shadow", true)
                     .maybeSingle();
-
-                if (existingShadow) {
-                    // If found, delete the shadow profile since we're about to claim this identity
-                    await supabase
-                        .from("profiles")
-                        .delete()
-                        .eq("id", existingShadow.id);
+                if (shadowErr) {
+                    console.error("Error checking existing shadow profile:", shadowErr);
                 }
             }
 
-            // Now update the user's real profile
+            // Upsert the current profile using the primary key (id = profileId).
+            // "onConflict" is set to "id" so that future inserts with the same PK will update.
             const { error } = await supabase
                 .from("profiles")
-                .update({
-                    first_name: row["First Name"] || null,
-                    last_name: row["Last Name"] || null,
-                    headline: row["Headline"] || null,
-                    summary: row["Summary"] || null,
-                    industry: row["Industry"] || null,
-                    linkedin_slug: linkedInSlug,
-                    is_shadow: false, // Ensure it's marked as a real profile
-                })
-                .eq("id", userId);
-
+                .upsert(
+                    {
+                        id: profileId,
+                        linkedin_slug: linkedInSlug,
+                        is_shadow: false,
+                        first_name: row["First Name"] || null,
+                        last_name: row["Last Name"] || null,
+                        headline: row["Headline"] || null,
+                        summary: row["Summary"] || null,
+                        industry: row["Industry"] || null
+                    },
+                    {
+                        onConflict: "id"
+                    }
+                );
             if (error) {
-                console.error("Error updating user profile from Profile.csv:", error);
+                console.error("Error upserting user profile from Profile.csv:", error);
             }
         } catch (err) {
             console.error("Exception updating user profile from Profile.csv:", err);
@@ -97,11 +98,11 @@ async function processProfileCsv(userId: string, csvText: string) {
 }
 
 /**
- * Upsert Education.csv rows for the user.
- *  1) Upsert an institution record (by name).
- *  2) Insert a row into "education" linking that institution to the user’s profile.
+ * Upsert Education.csv rows for the profile.
+ *  1) Upsert or create an institution record (by name).
+ *  2) Insert a row into "education" linking that institution to this profile.
  */
-async function processEducationCsv(userId: string, csvText: string) {
+async function processEducationCsv(profileId: string, csvText: string) {
     const parsed = Papa.parse<string[]>(csvText, { header: true });
     if (parsed.data && Array.isArray(parsed.data)) {
         for (const row of parsed.data) {
@@ -111,7 +112,6 @@ async function processEducationCsv(userId: string, csvText: string) {
             let startedOn = row["Start Date"]?.trim() || null;
             let finishedOn = row["End Date"]?.trim() || null;
 
-            // Attempt to parse dates
             if (startedOn) {
                 try {
                     startedOn = new Date(startedOn).toISOString().slice(0, 10);
@@ -128,7 +128,7 @@ async function processEducationCsv(userId: string, csvText: string) {
             }
 
             try {
-                // 1) Upsert institution
+                // Upsert the institution first
                 const { data: instData, error: instError } = await supabase
                     .from("institutions")
                     .upsert({ name: schoolName })
@@ -140,15 +140,18 @@ async function processEducationCsv(userId: string, csvText: string) {
                     continue;
                 }
                 const institutionId = instData?.id;
+                if (!institutionId) continue;
 
-                // 2) Insert an education row
-                const { error: eduError } = await supabase.from("education").insert({
-                    profile_id: userId,
-                    institution_id: institutionId,
-                    degree_name: degreeName,
-                    started_on: startedOn,
-                    finished_on: finishedOn,
-                });
+                // Insert the education record
+                const { error: eduError } = await supabase
+                    .from("education")
+                    .insert({
+                        profile_id: profileId,
+                        institution_id: institutionId,
+                        degree_name: degreeName,
+                        started_on: startedOn,
+                        finished_on: finishedOn
+                    });
                 if (eduError && !eduError.message.includes("duplicate key")) {
                     console.error("Error inserting education row:", eduError);
                 }
@@ -160,9 +163,9 @@ async function processEducationCsv(userId: string, csvText: string) {
 }
 
 /**
- * Upsert Positions.csv rows for the user.
+ * Upsert Positions.csv rows for the profile.
  */
-async function processPositionsCsv(userId: string, csvText: string) {
+async function processPositionsCsv(profileId: string, csvText: string) {
     const parsed = Papa.parse<string[]>(csvText, { header: true });
     if (parsed.data && Array.isArray(parsed.data)) {
         for (const row of parsed.data) {
@@ -189,7 +192,7 @@ async function processPositionsCsv(userId: string, csvText: string) {
             }
 
             try {
-                // 1) Upsert the company
+                // Upsert the company by name
                 const { data: compData, error: compError } = await supabase
                     .from("companies")
                     .upsert({ name: companyName })
@@ -201,16 +204,19 @@ async function processPositionsCsv(userId: string, csvText: string) {
                     continue;
                 }
                 const companyId = compData?.id;
+                if (!companyId) continue;
 
-                // 2) Insert position
-                const { error: posError } = await supabase.from("positions").insert({
-                    profile_id: userId,
-                    company_id: companyId,
-                    title,
-                    description,
-                    started_on: startedOn,
-                    finished_on: finishedOn,
-                });
+                // Insert the position record
+                const { error: posError } = await supabase
+                    .from("positions")
+                    .insert({
+                        profile_id: profileId,
+                        company_id: companyId,
+                        title,
+                        description,
+                        started_on: startedOn,
+                        finished_on: finishedOn
+                    });
                 if (posError && !posError.message.includes("duplicate key")) {
                     console.error("Error inserting position row:", posError);
                 }
@@ -222,9 +228,9 @@ async function processPositionsCsv(userId: string, csvText: string) {
 }
 
 /**
- * Upsert Skills.csv rows for the user.
+ * Upsert Skills.csv rows for the profile.
  */
-async function processSkillsCsv(userId: string, csvText: string) {
+async function processSkillsCsv(profileId: string, csvText: string) {
     const parsed = Papa.parse<string[]>(csvText, { header: true });
     if (parsed.data && Array.isArray(parsed.data)) {
         for (const row of parsed.data) {
@@ -232,10 +238,12 @@ async function processSkillsCsv(userId: string, csvText: string) {
             if (!skillName) continue;
 
             try {
-                const { error } = await supabase.from("skills").insert({
-                    profile_id: userId,
-                    name: skillName,
-                });
+                const { error } = await supabase
+                    .from("skills")
+                    .insert({
+                        profile_id: profileId,
+                        name: skillName
+                    });
                 if (error && !error.message.includes("duplicate key")) {
                     console.error("Error inserting skill row:", error);
                 }
@@ -247,26 +255,14 @@ async function processSkillsCsv(userId: string, csvText: string) {
 }
 
 /**
- * Process Connections.csv rows for the user.
+ * Process Connections.csv rows for this profile in a more efficient, bulk-oriented manner.
  */
-async function processConnectionsCsv(userId: string, csvText: string) {
-    // Skip the "Notes:" lines at the top of the LinkedIn export
-    const csvLines = csvText.split('\n');
-    const actualCsvText = csvLines.slice(2).join('\n');  // Skip first two lines
+async function processConnectionsCsv(profileId: string, csvText: string) {
+    // 1) Clean up CSV text (skip "Notes:" lines).
+    const csvLines = csvText.split("\n");
+    const actualCsvText = csvLines.slice(2).join("\n");
 
-    const { data: ownerProfile, error: ownerErr } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .single();
-
-    console.log("Owner profile check:", { userId, found: !!ownerProfile, error: ownerErr });
-
-    if (ownerErr || !ownerProfile) {
-        console.error(`Cannot find user profile for userId "${userId}". Skipping connections.`);
-        return;
-    }
-
+    // 2) Parse CSV data.
     const parsed = Papa.parse<string[]>(actualCsvText, {
         header: true,
         skipEmptyLines: true
@@ -278,117 +274,222 @@ async function processConnectionsCsv(userId: string, csvText: string) {
         errors: parsed.errors
     });
 
-    if (parsed.data && Array.isArray(parsed.data)) {
-        for (const row of parsed.data) {
-            if (!row["First Name"] && !row["Last Name"] && !row["URL"]) {
-                continue;
-            }
+    if (!parsed.data || !Array.isArray(parsed.data) || parsed.data.length === 0) {
+        return;
+    }
 
-            // Log each connection attempt
-            console.log("Processing connection:", {
-                firstName: row["First Name"]?.trim() || null,
-                lastName: row["Last Name"]?.trim() || null,
-                url: row["URL"]?.trim() || null
-            });
-
+    // 3) Filter out empty rows and prepare a typed array of connections to process
+    const allConnections = parsed.data
+        .map((row) => {
             const firstName = row["First Name"]?.trim() || null;
             const lastName = row["Last Name"]?.trim() || null;
             const linkedInUrl = row["URL"]?.trim() || null;
+            const company = row["Company"]?.trim() || null;
+            const position = row["Position"]?.trim() || null;
+
+            if (!firstName && !lastName && !linkedInUrl) return null;
 
             let connectionSlug: string | null = null;
-            if (linkedInUrl) connectionSlug = extractSlugFromUrl(linkedInUrl);
-
-            try {
-                let connectionProfileId: string | null = null;
-
-                // If there's a LinkedIn slug, look for an existing profile with that slug
-                if (connectionSlug) {
-                    const { data: existingProfile, error: existErr } = await supabase
-                        .from("profiles")
-                        .select("id, is_shadow")
-                        .eq("linkedin_slug", connectionSlug)
-                        .maybeSingle();
-
-                    if (!existErr && existingProfile) {
-                        connectionProfileId = existingProfile.id;
-
-                        // If this is a shadow profile, update it with any new information
-                        if (existingProfile.is_shadow) {
-                            const company = row["Company"]?.trim() || null;
-                            const position = row["Position"]?.trim() || null;
-                            const headline = company && position ? `${position} at ${company}` : null;
-
-                            await supabase
-                                .from("profiles")
-                                .update({
-                                    first_name: firstName || undefined,  // Only update if we have a value
-                                    last_name: lastName || undefined,
-                                    headline: headline || undefined,
-                                })
-                                .eq("id", existingProfile.id);
-                        }
-                    }
-                }
-
-                // If no matching profile found, create a "shadow" profile
-                if (!connectionProfileId) {
-                    const newId = crypto.randomUUID();
-                    const company = row["Company"]?.trim() || null;
-                    const position = row["Position"]?.trim() || null;
-                    const headline = company && position ? `${position} at ${company}` : null;
-
-                    const { data: newProfile, error: newProfErr } = await supabase
-                        .from("profiles")
-                        .insert({
-                            id: newId,
-                            first_name: firstName,
-                            last_name: lastName,
-                            linkedin_slug: connectionSlug || null,
-                            headline: headline,
-                            is_shadow: true,
-                        })
-                        .select("id")
-                        .single();
-
-                    if (newProfErr) {
-                        console.error("Error creating shadow profile:", newProfErr);
-                        continue;
-                    }
-                    connectionProfileId = newProfile?.id;
-                }
-
-                // Insert a row in "connections", ensuring (profile_id_a < profile_id_b)
-                if (connectionProfileId) {
-                    const sorted = [ownerProfile.id, connectionProfileId].sort();
-                    const [profile_id_a, profile_id_b] = sorted;
-
-                    // Check if connection already exists (in either direction)
-                    const { data: existingConn, error: connCheckErr } = await supabase
-                        .from("connections")
-                        .select("id")
-                        .or(`profile_id_a.eq.${profile_id_a},profile_id_a.eq.${profile_id_b}`)
-                        .or(`profile_id_b.eq.${profile_id_b},profile_id_b.eq.${profile_id_a}`)
-                        .maybeSingle();
-
-                    if (connCheckErr) {
-                        console.error("Error checking for existing connection:", connCheckErr);
-                        continue;
-                    }
-
-                    // Insert if none exists
-                    if (!existingConn) {
-                        const { error: connInsertErr } = await supabase.from("connections").insert({
-                            profile_id_a,
-                            profile_id_b,
-                        });
-                        if (connInsertErr) {
-                            console.error("Error inserting new connection:", connInsertErr);
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error("Exception creating connection:", err);
+            if (linkedInUrl) {
+                connectionSlug = extractSlugFromUrl(linkedInUrl);
             }
+
+            return {
+                firstName,
+                lastName,
+                slug: connectionSlug,
+                company,
+                position
+            };
+        })
+        .filter(Boolean) as {
+            firstName: string | null;
+            lastName: string | null;
+            slug: string | null;
+            company: string | null;
+            position: string | null;
+        }[];
+
+    if (allConnections.length === 0) {
+        return;
+    }
+
+    // 4) Collect all unique slugs
+    const slugToRowData: Record<
+        string,
+        { firstName: string | null; lastName: string | null; company: string | null; position: string | null }[]
+    > = {};
+    for (const conn of allConnections) {
+        if (conn.slug) {
+            if (!slugToRowData[conn.slug]) {
+                slugToRowData[conn.slug] = [];
+            }
+            slugToRowData[conn.slug].push({
+                firstName: conn.firstName,
+                lastName: conn.lastName,
+                company: conn.company,
+                position: conn.position
+            });
+        }
+    }
+    const allSlugs = Object.keys(slugToRowData).filter(Boolean);
+
+    // 5) Fetch existing shadow profiles (or normal profiles) in a single query
+    let existingProfiles: { id: string; linkedin_slug: string; is_shadow: boolean }[] = [];
+    if (allSlugs.length > 0) {
+        const { data: fetchedProfiles, error: fetchError } = await supabase
+            .from("profiles")
+            .select("id, linkedin_slug, is_shadow")
+            .in("linkedin_slug", allSlugs);
+
+        if (fetchError) {
+            console.error("Error fetching existing profiles by slug:", fetchError);
+        } else if (fetchedProfiles) {
+            existingProfiles = fetchedProfiles;
+        }
+    }
+
+    // Build a map for slug => { id: string, is_shadow: boolean }
+    const slugToExistingProfile = new Map<string, { id: string; is_shadow: boolean }>();
+    for (const p of existingProfiles) {
+        slugToExistingProfile.set(p.linkedin_slug, { id: p.id, is_shadow: p.is_shadow });
+    }
+
+    // 6) Separate new slugs from existing slugs
+    //    Also gather shadow-profiles that may need to be updated
+    const newSlugRows: {
+        slug: string;
+        firstName: string | null;
+        lastName: string | null;
+        headline: string | null;
+    }[] = [];
+    const shadowUpdates: { id: string; firstName: string | null; lastName: string | null; headline: string | null }[] =
+        [];
+
+    for (const slug of allSlugs) {
+        const existing = slugToExistingProfile.get(slug);
+        if (existing) {
+            // This slug already has a profile. If it's shadow, we want to update fields with any new info
+            if (existing.is_shadow) {
+                // For each row that contributed this slug, pick a "best guess" at data
+                // e.g., last non-null or the first row's data. For simplicity, we’ll just take the first row’s data.
+                const rowData = slugToRowData[slug][0];
+                const headline =
+                    rowData.company && rowData.position ? `${rowData.position} at ${rowData.company}` : null;
+                shadowUpdates.push({
+                    id: existing.id,
+                    firstName: rowData.firstName,
+                    lastName: rowData.lastName,
+                    headline
+                });
+            }
+        } else {
+            // New shadow profile needed. We'll just use the first row's data for that slug.
+            const rowData = slugToRowData[slug][0];
+            const headline =
+                rowData.company && rowData.position ? `${rowData.position} at ${rowData.company}` : null;
+            newSlugRows.push({
+                slug,
+                firstName: rowData.firstName,
+                lastName: rowData.lastName,
+                headline
+            });
+        }
+    }
+
+    // 7) Update shadow profiles in chunks
+    const updateBatchSize = 100;
+    for (let i = 0; i < shadowUpdates.length; i += updateBatchSize) {
+        const batch = shadowUpdates.slice(i, i + updateBatchSize);
+        // Supabase doesn't do a "bulk update by ID" natively, so we do one at a time here
+        // Or we can do an RLS-allowed RPC to handle this in one statement. For now, just for-loop it:
+        await Promise.all(
+            batch.map(async (update) => {
+                const { error } = await supabase
+                    .from("profiles")
+                    .update({
+                        first_name: update.firstName || undefined,
+                        last_name: update.lastName || undefined,
+                        headline: update.headline || undefined
+                    })
+                    .eq("id", update.id);
+                if (error) {
+                    console.error("Error updating shadow profile:", update.id, error);
+                }
+            })
+        );
+    }
+
+    // 8) Bulk-insert new shadow profiles in chunks
+    //    Then we'll refetch them to build up the slug => ID map
+    let newProfilesMap = new Map<string, string>(); // slug => newly created profileId
+    if (newSlugRows.length > 0) {
+        const insertBatchSize = 500; // you can tweak based on Supabase limits
+        for (let i = 0; i < newSlugRows.length; i += insertBatchSize) {
+            const batch = newSlugRows.slice(i, i + insertBatchSize).map((item) => ({
+                id: crypto.randomUUID(),
+                user_id: null,
+                first_name: item.firstName,
+                last_name: item.lastName,
+                linkedin_slug: item.slug,
+                headline: item.headline,
+                is_shadow: true
+            }));
+
+            // Insert in bulk
+            const { data: inserted, error: insertError } = await supabase
+                .from("profiles")
+                .insert(batch)
+                .select("id, linkedin_slug");
+            if (insertError) {
+                console.error("Error creating new shadow profiles:", insertError);
+                continue;
+            }
+            // Merge into newProfilesMap
+            if (inserted && Array.isArray(inserted)) {
+                for (const rec of inserted) {
+                    if (rec.linkedin_slug) {
+                        newProfilesMap.set(rec.linkedin_slug, rec.id);
+                    }
+                }
+            }
+        }
+    }
+
+    // 9) Merge new profile IDs into existing slug map
+    for (const [slug, profileId] of newProfilesMap.entries()) {
+        slugToExistingProfile.set(slug, { id: profileId, is_shadow: true });
+    }
+
+    // 10) Build the final list of (profile_id_a, profile_id_b) for connections
+    //     Then do a bulk upsert on “connections”
+    const connectionRecords: { profile_id_a: string; profile_id_b: string }[] = [];
+    for (const conn of allConnections) {
+        let connProfileId: string | null = null;
+        // If we have a slug for them, use existing profile or new; if no slug, we can't connect them
+        if (conn.slug) {
+            const found = slugToExistingProfile.get(conn.slug);
+            if (found) {
+                connProfileId = found.id;
+            }
+        }
+        // If no slug was found, we skip, or you could create a truly unknown profile
+        if (!connProfileId) continue;
+
+        // Sort the pair to satisfy the CHECK (profile_id_a < profile_id_b)
+        const sorted = [profileId, connProfileId].sort();
+        connectionRecords.push({ profile_id_a: sorted[0], profile_id_b: sorted[1] });
+    }
+
+    // 11) Upsert connections in chunks
+    const connBatchSize = 500; // adjust as needed
+    for (let i = 0; i < connectionRecords.length; i += connBatchSize) {
+        const batch = connectionRecords.slice(i, i + connBatchSize);
+        const { error: connUpsertErr } = await supabase
+            .from("connections")
+            .upsert(batch, { onConflict: "profile_id_a,profile_id_b" });
+        if (connUpsertErr) {
+            console.error("Error bulk-upserting connections:", connUpsertErr);
         }
     }
 }
@@ -397,13 +498,13 @@ async function processConnectionsCsv(userId: string, csvText: string) {
  * Orchestrates the file parsing and DB updates for a single "uploads" record.
  */
 async function handleNewUpload(upload: {
+    profile_id: string;
     file_name: string;
     file_path: string;
-    user_id: string;
 }) {
-    console.log(`Processing file "${upload.file_name}" for user_id "${upload.user_id}"…`);
+    console.log(`Processing file "${upload.file_name}" for profile_id "${upload.profile_id}"…`);
 
-    // Download CSV from the "linkedin" storage bucket
+    // Download the CSV from Storage
     const { data: downloadedFile, error: downloadErr } = await supabase.storage
         .from("linkedin")
         .download(upload.file_path);
@@ -414,23 +515,24 @@ async function handleNewUpload(upload: {
     }
 
     const csvText = await downloadedFile.text();
+    const profileId = upload.profile_id;
 
     // Dispatch to the correct processor
     switch (upload.file_name) {
         case "Profile.csv":
-            await processProfileCsv(upload.user_id, csvText);
+            await processProfileCsv(profileId, csvText);
             break;
         case "Education.csv":
-            await processEducationCsv(upload.user_id, csvText);
+            await processEducationCsv(profileId, csvText);
             break;
         case "Positions.csv":
-            await processPositionsCsv(upload.user_id, csvText);
+            await processPositionsCsv(profileId, csvText);
             break;
         case "Skills.csv":
-            await processSkillsCsv(upload.user_id, csvText);
+            await processSkillsCsv(profileId, csvText);
             break;
         case "Connections.csv":
-            await processConnectionsCsv(upload.user_id, csvText);
+            await processConnectionsCsv(profileId, csvText);
             break;
         default:
             console.log(`File "${upload.file_name}" is not recognized for special processing; skipping.`);
@@ -439,15 +541,15 @@ async function handleNewUpload(upload: {
 }
 
 /**
- * Main request handler via Deno.serve.
- * Expects a JSON payload from Supabase webhooks, something like:
- * {
- *   "type": "INSERT",
- *   "table": "uploads",
- *   "schema": "public",
- *   "record": { ...the new row... },
- *   "old_record": null
- * }
+ * Main request handler via Deno.serve
+ * Expects a JSON payload from Supabase webhooks, with shape:
+ *  {
+ *    "type": "INSERT" | "UPDATE" | "DELETE",
+ *    "table": "uploads",
+ *    "schema": "public",
+ *    "record": { ...the new uploads row... },
+ *    "old_record": null
+ *  }
  */
 Deno.serve(async (req) => {
     if (req.method !== "POST") {

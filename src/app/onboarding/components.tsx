@@ -3,7 +3,7 @@
 
 import React, { JSX } from 'react';
 import { Card, Text, Button, Flex, Badge, Box } from '@radix-ui/themes';
-import type { Step } from './types';
+import { LINKEDIN_EXPORT_URL, type Step, REQUIRED_FILES, OPTIONAL_FILES } from './types';
 import {
   ArrowRightIcon,
   UploadIcon,
@@ -24,42 +24,105 @@ export function StepIndicator({ currentStep, step }: StepIndicatorProps): JSX.El
       <Badge
         size="2"
         variant={currentStep >= step ? 'solid' : 'soft'}
-        className="w-8 h-8 rounded-full flex items-center justify-center"
+        style={{
+          width: '32px',
+          height: '32px',
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'all 0.2s ease'
+        }}
       >
         {currentStep > step ? <CheckIcon className="w-4 h-4" /> : step}
       </Badge>
-      <Box className="flex-2">
-        <Text size="2" weight="bold">
+      <Box style={{ flex: 2 }}>
+        <Text
+          size={{ initial: '1', sm: '2' }}
+          weight="bold"
+          style={{ whiteSpace: 'nowrap' }}
+        >
           {step === 1 ? 'Export Data' : step === 2 ? 'Wait for Download' : 'Upload Files'}
         </Text>
       </Box>
-      {step < 3 && <ArrowRightIcon className="text-gray-400 w-5 h-5" />}
+      {step < 3 && (
+        <ArrowRightIcon
+          style={{
+            color: 'var(--gray-8)',
+            width: '20px',
+            height: '20px'
+          }}
+        />
+      )}
     </Flex>
   );
 }
 
 interface ExportStepProps {
-  onNext: () => void;
+  onNext: (step?: number) => void;
 }
+
+// Common card styling
+const cardStyles = {
+  width: '100%',
+  maxWidth: '600px',
+  margin: '0 auto',
+  transition: 'transform 0.2s ease',
+  ':hover': {
+    transform: 'translateY(-2px)'
+  }
+};
 
 export function ExportStep({ onNext }: ExportStepProps): JSX.Element {
   return (
-    <Card size="3" className="w-full max-w-xl mx-auto">
-      <Flex direction="column" gap="4" align="center" p="6">
-        <DownloadIcon className="w-10 h-10 text-blue-500" />
-        <Text size="6" weight="bold" align="center">
+    <Card size="3" style={cardStyles}>
+      <Flex direction="column" gap="4" align="center" p={{ initial: '4', sm: '6' }}>
+        <Box style={{
+          background: 'var(--accent-2)',
+          padding: '16px',
+          borderRadius: '50%',
+        }}>
+          <DownloadIcon
+            width="32"
+            height="32"
+            style={{ color: 'var(--accent-9)' }}
+          />
+        </Box>
+        <Text size={{ initial: '5', sm: '6' }} weight="bold" align="center">
           Export Your LinkedIn Data
         </Text>
-        <Text size="2" align="center" color="gray">
-          First, you&apos;ll need to request your data from LinkedIn. This process typically takes 24 hours.
+        <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
+          Request your data from LinkedIn to unlock the full potential of unlinked.ai
         </Text>
-        <Button
-          size="3"
-          onClick={onNext}
+        <Flex
+          direction="column"
+          gap="3"
+          style={{ width: '100%', maxWidth: '320px' }}
         >
-          <ExternalLinkIcon width="16" height="16" />
-          Start LinkedIn Export
-        </Button>
+          <Button
+            size="3"
+            onClick={() => {
+              window.open(LINKEDIN_EXPORT_URL, '_blank', 'noopener,noreferrer');
+              onNext();
+            }}
+            style={{
+              width: '100%',
+              background: 'var(--accent-9)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <ExternalLinkIcon width="16" height="16" />
+            Start LinkedIn Export
+          </Button>
+          <Button
+            size="2"
+            variant="soft"
+            onClick={() => onNext(3)}
+            style={{ width: '100%' }}
+          >
+            Skip to upload
+          </Button>
+        </Flex>
       </Flex>
     </Card>
   );
@@ -67,26 +130,28 @@ export function ExportStep({ onNext }: ExportStepProps): JSX.Element {
 
 interface WaitingStepProps {
   countdown: string;
-  onNext: () => void;
+  onNext: (step?: number) => void;
 }
 
 export function WaitingStep({ countdown, onNext }: WaitingStepProps): JSX.Element {
   return (
     <Card size="3" className="w-full max-w-xl mx-auto">
       <Flex direction="column" gap="4" align="center" p="6">
-        <TimerIcon className="w-10 h-10 text-blue-500" />
+        <TimerIcon className="w-12 h-12" style={{ color: 'var(--accent-9)' }} />
         <Text size="6" weight="bold" align="center">
           Waiting for LinkedIn Export
         </Text>
-        <Text size="8" weight="bold" color="blue">
+        <Text size="8" weight="bold" style={{ color: 'var(--accent-9)' }}>
           {countdown}
         </Text>
         <Text size="2" align="center" color="gray">
           LinkedIn is preparing your data. You&apos;ll receive an email when it&apos;s ready.
         </Text>
-        <Button size="3" variant="soft" onClick={onNext}>
-          I Have My Data
-        </Button>
+        <Flex direction="column" gap="3" style={{ width: '100%', maxWidth: '280px' }}>
+          <Button size="3" onClick={() => onNext()} style={{ width: '100%' }}>
+            I Have My Data
+          </Button>
+        </Flex>
       </Flex>
     </Card>
   );
@@ -110,23 +175,40 @@ export function UploadStep({
   onDragOver
 }: UploadStepProps): JSX.Element {
   return (
-    <Card size="3" className="w-full max-w-xl mx-auto">
+    <Card size="3" style={cardStyles}>
       <Flex
         direction="column"
         gap="4"
         align="center"
-        p="6"
-        className="border-2 border-dashed border-gray-200 rounded-lg"
-        style={{ background: 'var(--gray-1)' }}
+        p={{ initial: '4', sm: '6' }}
+        style={{
+          border: '2px dashed var(--accent-6)',
+          borderRadius: 'var(--radius-4)',
+          background: 'var(--gray-1)',
+          transition: 'all 0.2s ease-in-out',
+        }}
         onDrop={onDrop}
         onDragOver={onDragOver}
       >
-        <UploadIcon className="w-10 h-10 text-blue-500" />
-        <Text size="6" weight="bold" align="center">
+        <Box style={{
+          background: 'var(--accent-2)',
+          padding: '16px',
+          borderRadius: '50%',
+          marginBottom: '8px'
+        }}>
+          <UploadIcon
+            width="32"
+            height="32"
+            style={{ color: 'var(--accent-9)' }}
+          />
+        </Box>
+
+        <Text size={{ initial: '5', sm: '6' }} weight="bold" align="center">
           Upload Your LinkedIn Data
         </Text>
-        <Text size="2" align="center" color="gray">
-          Drag and drop your LinkedIn data export ZIP file or CSV files here
+
+        <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
+          Drag and drop your LinkedIn data export or select files manually
         </Text>
 
         <input
@@ -138,28 +220,52 @@ export function UploadStep({
           id="file-upload"
         />
 
-        <Button
-          size="3"
-          onClick={() => document.getElementById('file-upload')?.click()}
-          disabled={uploadStatus === 'uploading'}
+        <Flex
+          direction="column"
+          gap="3"
+          style={{ width: '100%', maxWidth: '320px' }}
         >
-          {uploadStatus === 'uploading' ? 'Uploading...' : 'Select Files'}
-        </Button>
+          <Button
+            size="3"
+            onClick={() => document.getElementById('file-upload')?.click()}
+            disabled={uploadStatus === 'uploading'}
+            style={{
+              width: '100%',
+              background: uploadStatus === 'uploading' ? 'var(--accent-8)' : 'var(--accent-9)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            {uploadStatus === 'uploading' ? (
+              <Flex gap="2" align="center">
+                <span className="loading-spinner" />
+                Uploading...
+              </Flex>
+            ) : (
+              <>
+                <UploadIcon width="16" height="16" />
+                Select Files
+              </>
+            )}
+          </Button>
+        </Flex>
 
         {errorMessage && (
-          <Text color="red" size="2">
+          <Text color="red" size="2" style={{ marginTop: 'var(--space-2)' }}>
             {errorMessage}
           </Text>
         )}
 
         {selectedFiles.length > 0 && (
-          <Flex direction="column" gap="2" className="w-full">
+          <Flex direction="column" gap="2" style={{ width: '100%', maxWidth: '280px' }}>
             <Text size="2" weight="bold">Selected files:</Text>
-            {selectedFiles.map((file, index) => (
-              <Text key={index} size="2" color="gray">
-                {file.name}
-              </Text>
-            ))}
+            {selectedFiles
+              .filter(file => REQUIRED_FILES.includes(file.name as typeof REQUIRED_FILES[number]) ||
+                OPTIONAL_FILES.includes(file.name as typeof OPTIONAL_FILES[number]))
+              .map((file, index) => (
+                <Text key={index} size="2" color="gray">
+                  {file.name}
+                </Text>
+              ))}
           </Flex>
         )}
       </Flex>
@@ -175,14 +281,14 @@ export function SuccessStep({ onComplete }: SuccessStepProps): JSX.Element {
   return (
     <Card size="3" className="w-full max-w-xl mx-auto">
       <Flex direction="column" gap="4" align="center" p="6">
-        <CheckIcon className="w-10 h-10 text-green-500" />
+        <CheckIcon className="w-12 h-12" style={{ color: 'var(--accent-9)' }} />
         <Text size="6" weight="bold" align="center">
           Upload Complete!
         </Text>
         <Text size="2" align="center" color="gray">
           Your LinkedIn data has been successfully uploaded.
         </Text>
-        <Button size="3" onClick={onComplete}>
+        <Button size="3" onClick={onComplete} style={{ width: '100%', maxWidth: '280px' }}>
           Continue to Profiles
         </Button>
       </Flex>
