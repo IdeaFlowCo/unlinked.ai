@@ -18,8 +18,8 @@
  *
  * This code expects the "record" field to contain the new row from the "uploads" table.
  */
-import { createClient as createSupabaseClient } from "supabase-js";
-import Papa from "papaparse";
+import { createClient as createSupabaseClient } from "npm:@supabase/supabase-js@2";
+import Papa from "npm:papaparse@5.3.2";
 
 /**
  * Utility to extract a LinkedIn slug from a URL.
@@ -311,6 +311,22 @@ async function processConnectionsCsv(userId: string, csvText: string) {
 
                     if (!existErr && existingProfile) {
                         connectionProfileId = existingProfile.id;
+
+                        // If this is a shadow profile, update it with any new information
+                        if (existingProfile.is_shadow) {
+                            const company = row["Company"]?.trim() || null;
+                            const position = row["Position"]?.trim() || null;
+                            const headline = company && position ? `${position} at ${company}` : null;
+
+                            await supabase
+                                .from("profiles")
+                                .update({
+                                    first_name: firstName || undefined,  // Only update if we have a value
+                                    last_name: lastName || undefined,
+                                    headline: headline || undefined,
+                                })
+                                .eq("id", existingProfile.id);
+                        }
                     }
                 }
 
@@ -346,19 +362,20 @@ async function processConnectionsCsv(userId: string, csvText: string) {
                     const sorted = [ownerProfile.id, connectionProfileId].sort();
                     const [profile_id_a, profile_id_b] = sorted;
 
-                    // Check if connection already exists
+                    // Check if connection already exists (in either direction)
                     const { data: existingConn, error: connCheckErr } = await supabase
                         .from("connections")
                         .select("id")
-                        .eq("profile_id_a", profile_id_a)
-                        .eq("profile_id_b", profile_id_b)
+                        .or(`profile_id_a.eq.${profile_id_a},profile_id_a.eq.${profile_id_b}`)
+                        .or(`profile_id_b.eq.${profile_id_b},profile_id_b.eq.${profile_id_a}`)
                         .maybeSingle();
 
                     if (connCheckErr) {
                         console.error("Error checking for existing connection:", connCheckErr);
                         continue;
                     }
-                    // Insert if none
+
+                    // Insert if none exists
                     if (!existingConn) {
                         const { error: connInsertErr } = await supabase.from("connections").insert({
                             profile_id_a,
