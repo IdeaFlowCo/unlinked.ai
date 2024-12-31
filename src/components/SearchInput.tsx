@@ -1,48 +1,37 @@
 'use client'
 
-import React, { useCallback, useMemo } from 'react'
+import React from 'react'
 import { TextField } from '@radix-ui/themes'
 import { MagnifyingGlassIcon } from '@radix-ui/react-icons'
-import debounce from 'lodash/debounce'
 
 interface SearchInputProps {
-  onSearch: (query: string) => Promise<void>
+  onSearch: (query: string) => void
+  value?: string
   placeholder?: string
-  disabled?: boolean
+  isLoading?: boolean
 }
 
 export default function SearchInput({
   onSearch,
-  placeholder = 'Search...',
-  disabled = false
+  value = '',
+  placeholder = '',
+  isLoading = false
 }: SearchInputProps) {
-  // Create a memoized debounced search function
-  const debouncedSearch = useCallback(
-    (query: string) => {
-      return onSearch(query)
-    },
-    [onSearch]
-  )
-
-  // Initialize the debounced function outside the callback
-  const debouncedSearchWithDelay = useMemo(
-    () => debounce(debouncedSearch, 300),
-    [debouncedSearch]
-  )
-
   return (
     <TextField.Root
-      size="3"
+      value={value}
+      onChange={(e) => onSearch(e.target.value)}
       placeholder={placeholder}
-      disabled={disabled}
-      onChange={(e) => {
-        const value = e.target.value
-        void debouncedSearchWithDelay(value)
-      }}
     >
       <TextField.Slot>
         <MagnifyingGlassIcon height="16" width="16" />
       </TextField.Slot>
+
+      {isLoading && (
+        <TextField.Slot>
+          <div className="loading-spinner-small" />
+        </TextField.Slot>
+      )}
     </TextField.Root>
   )
 }

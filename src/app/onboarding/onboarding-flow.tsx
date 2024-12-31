@@ -13,8 +13,6 @@ import type {
 } from './types';
 import {
     REQUIRED_FILES,
-    OPTIONAL_FILES,
-    LINKEDIN_EXPORT_URL
 } from './types';
 import {
     StepIndicator,
@@ -56,20 +54,17 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
         return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     };
 
-    const handleStepChange = async (newStep: Step): Promise<void> => {
-        setCurrentStep(newStep);
-
-        if (newStep === 2) {
-            window.open(LINKEDIN_EXPORT_URL, '_blank', 'noopener,noreferrer');
-        }
+    const handleStepChange = async (targetStep?: number): Promise<void> => {
+        const nextStep = targetStep ?? (currentStep + 1);
+        setCurrentStep(nextStep as Step);
 
         const { error } = await supabase
             .from('onboarding_state')
             .upsert(
                 {
                     user_id: userId,
-                    current_step: newStep,
-                    completed_at: newStep === 4 ? new Date().toISOString() : null,
+                    current_step: nextStep,
+                    completed_at: nextStep === 4 ? new Date().toISOString() : null,
                     updated_at: new Date().toISOString()
                 },
                 {
@@ -81,7 +76,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
             console.error('Failed to update onboarding state:', error);
         }
 
-        if (newStep === 4) {
+        if (nextStep === 4) {
             router.push('/profiles');
         }
     };
@@ -94,7 +89,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
         for (const [path, zipEntry] of Object.entries(contents.files)) {
             if (!zipEntry.dir) {
                 const fileName = path.split('/').pop();
-                if (fileName && ([...REQUIRED_FILES, ...OPTIONAL_FILES] as readonly string[]).includes(fileName)) {
+                if (fileName && fileName.endsWith('.csv')) {
                     const content = await zipEntry.async('blob');
                     csvFiles.push(new File([content], fileName, { type: 'text/csv' }) as ProcessedFile);
                 }
@@ -151,18 +146,28 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
         try {
             setUploadStatus('uploading');
 
-            // Sort files to ensure correct order: Profile.csv first, then Connections.csv, then others
+            const { data: profileData, error: profileError } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('user_id', userId)
+                .single();
+
+            if (profileError || !profileData) {
+                throw new Error('Could not find user profile');
+            }
+
+            // Sort files to ensure Profile.csv and Connections.csv are processed first
             const sortedFiles = [...files].sort((a, b) => {
                 if (a.name === 'Profile.csv') return -1;
                 if (b.name === 'Profile.csv') return 1;
                 if (a.name === 'Connections.csv') return -1;
                 if (b.name === 'Connections.csv') return 1;
-                return 0;
+                return a.name.localeCompare(b.name); // Alphabetical order for remaining files
             });
 
-            // Upload files to storage and create upload records in sequence
+            // Upload all files in the sorted order
             for (const file of sortedFiles) {
-                const filePath = `${userId}/${file.name}`;
+                const filePath = `${profileData.id}/${file.name}`;
 
                 const { error: uploadError } = await supabase.storage
                     .from('linkedin')
@@ -176,9 +181,9 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
                 const { error: recordError } = await supabase
                     .from('uploads')
                     .insert({
+                        profile_id: profileData.id,
                         file_name: file.name,
-                        file_path: filePath,
-                        user_id: userId
+                        file_path: filePath
                     });
 
                 if (recordError) throw recordError;
@@ -194,9 +199,29 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
     };
 
     return (
-        <Flex direction="column" gap="6" className="py-8">
+        <Flex
+            direction="column"
+            gap="6"
+            p={{ initial: '4', sm: '6' }}
+            style={{
+                maxWidth: '1200px',
+                margin: '0 auto',
+                width: '100%'
+            }}
+        >
             {/* Progress steps */}
-            <Flex gap="4" align="center" justify="center">
+            <Flex
+                gap={{ initial: '2', sm: '4' }}
+                align="center"
+                justify="center"
+                wrap="wrap"
+                style={{
+                    background: 'var(--gray-1)',
+                    padding: 'var(--space-4)',
+                    borderRadius: 'var(--radius-3)',
+                    boxShadow: 'var(--shadow-1)'
+                }}
+            >
                 {([1, 2, 3] as const).map((step) => (
                     <StepIndicator
                         key={step}

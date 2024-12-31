@@ -17,7 +17,8 @@ CREATE POLICY "All profiles are viewable by everyone"
 
 CREATE POLICY "Users can update own profile" 
     ON profiles FOR UPDATE 
-    USING (auth.uid() = id);
+    TO authenticated 
+    USING (auth.uid() = user_id);
 
 -- Companies policies
 CREATE POLICY "Companies are viewable by everyone" 
@@ -38,7 +39,12 @@ CREATE POLICY "Positions are viewable by everyone"
 
 CREATE POLICY "Users can manage their own positions" 
     ON positions FOR ALL 
-    USING (auth.uid() = profile_id);
+    TO authenticated 
+    USING (EXISTS (
+        SELECT 1 FROM profiles 
+        WHERE profiles.id = positions.profile_id 
+        AND profiles.user_id = auth.uid()
+    ));
 
 -- Institutions policies
 CREATE POLICY "Institutions are viewable by everyone" 
@@ -59,7 +65,12 @@ CREATE POLICY "Education entries are viewable by everyone"
 
 CREATE POLICY "Users can manage their own education entries" 
     ON education FOR ALL 
-    USING (auth.uid() = profile_id);
+    TO authenticated 
+    USING (EXISTS (
+        SELECT 1 FROM profiles 
+        WHERE profiles.id = education.profile_id 
+        AND profiles.user_id = auth.uid()
+    ));
 
 -- Skills policies
 CREATE POLICY "Skills are viewable by everyone" 
@@ -69,32 +80,46 @@ CREATE POLICY "Skills are viewable by everyone"
 
 CREATE POLICY "Users can manage their own skills" 
     ON skills FOR ALL 
-    USING (auth.uid() = profile_id);
+    TO authenticated 
+    USING (EXISTS (
+        SELECT 1 FROM profiles 
+        WHERE profiles.id = skills.profile_id 
+        AND profiles.user_id = auth.uid()
+    ));
 
 -- Connections policies
-CREATE POLICY "Connections are viewable by connected users" 
+CREATE POLICY "Connections are viewable by everyone" 
     ON connections FOR SELECT 
-    TO authenticated 
-    USING (
-        auth.uid() = profile_id_a OR 
-        auth.uid() = profile_id_b
-    );
+    TO PUBLIC 
+    USING (true);
 
-CREATE POLICY "Users can create their own connections" 
+CREATE POLICY "Users can create connections through their profile" 
     ON connections FOR INSERT 
     TO authenticated 
-    WITH CHECK (auth.uid() = profile_id_a);
+    WITH CHECK (EXISTS (
+        SELECT 1 FROM profiles 
+        WHERE profiles.id = connections.profile_id_a 
+        AND profiles.user_id = auth.uid()
+    ));
 
 -- Uploads policies
 CREATE POLICY "Users can view their own uploads" 
     ON uploads FOR SELECT 
     TO authenticated 
-    USING (auth.uid() = user_id);
+    USING (EXISTS (
+        SELECT 1 FROM profiles 
+        WHERE profiles.id = uploads.profile_id 
+        AND profiles.user_id = auth.uid()
+    ));
 
 CREATE POLICY "Users can manage their own uploads" 
     ON uploads FOR ALL 
     TO authenticated 
-    USING (auth.uid() = user_id);
+    USING (EXISTS (
+        SELECT 1 FROM profiles 
+        WHERE profiles.id = uploads.profile_id 
+        AND profiles.user_id = auth.uid()
+    ));
 
 -- Onboarding state policies
 CREATE POLICY "Users can view their own onboarding state" 
@@ -112,11 +137,7 @@ CREATE POLICY "System can create onboarding state"
     TO authenticated 
     WITH CHECK (auth.uid() = user_id);
 
--- Grant necessary permissions to authenticated and anon roles
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
-GRANT USAGE ON SCHEMA public TO anon, authenticated;
-
+-- Storage policies
 CREATE POLICY "Allow authenticated users to upload files"
 ON storage.objects FOR INSERT 
 TO authenticated
@@ -130,5 +151,8 @@ ON storage.objects FOR SELECT
 TO public
 USING (bucket_id = 'linkedin');
 
--- Give access to authenticated users to use the linkedin bucket
+-- Grant necessary permissions to authenticated and anon roles
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT ALL ON storage.objects TO authenticated;
