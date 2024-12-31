@@ -279,6 +279,5 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.process-uploads]
 enabled = true
-verify_jwt = false
-import_map = "./functions/process-uploads/deno.json"
+verify_jwt = true
 entrypoint = "./functions/process-uploads/index.ts"
