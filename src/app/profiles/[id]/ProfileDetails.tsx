@@ -30,10 +30,12 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
                                 <Badge variant="solid" color="gray">Shadow Profile</Badge>
                             )}
                         </Flex>
-                        <Text size="3" color="gray" mb="4">{profile.headline}</Text>
-                        {profile.summary && (
-                            <Text size="2" color="gray">{profile.summary}</Text>
-                        )}
+                        <Flex direction="column" gap="2">
+                            <Text size="3" color="gray">{profile.headline}</Text>
+                            {profile.summary && (
+                                <Text size="2" color="gray">{profile.summary}</Text>
+                            )}
+                        </Flex>
                     </Box>
                 </Flex>
             </Card>
