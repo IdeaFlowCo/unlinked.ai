@@ -8,21 +8,16 @@ import { createClient } from '@/utils/supabase/server'
 export async function login(formData: FormData) {
     const supabase = await createClient()
 
-    // type-casting here for convenience
-    // in practice, you should validate your inputs
-    const data = {
+    const { error } = await supabase.auth.signInWithPassword({
         email: formData.get('email') as string,
         password: formData.get('password') as string,
-    }
-
-    const { error } = await supabase.auth.signInWithPassword(data)
+    })
 
     if (error) {
         redirect('/error')
     }
 
-    revalidatePath('/', 'layout')
-    redirect('/')
+    redirect('/profiles')
 }
 
 export async function signup(formData: FormData) {
@@ -40,11 +35,10 @@ export async function signup(formData: FormData) {
     })
 
     if (error) {
-        redirect('/error')
+        return redirect('/error')
     }
 
-    revalidatePath('/', 'layout')
-    redirect('/')
+    return redirect('/onboarding')
 }
 
 export async function signInWithGoogle() {
@@ -70,7 +64,7 @@ export async function signInWithGoogle() {
     if (session.data.session?.user) {
         const { data: profile } = await supabase
             .from('profiles')
-            .select('id')
+            .select('user_id')
             .eq('user_id', session.data.session.user.id)
             .single()
 
@@ -86,10 +80,11 @@ export async function signInWithGoogle() {
             if (profileError) {
                 return redirect('/error')
             }
+
+            return redirect('/onboarding');
         }
     }
 
-    revalidatePath('/profiles', 'layout')
     return redirect('/profiles')
 }
 
@@ -97,5 +92,5 @@ export async function signOut() {
     const supabase = await createClient()
     await supabase.auth.signOut()
     revalidatePath('/', 'layout')
-    redirect('/auth/login')
+    redirect('/')
 }

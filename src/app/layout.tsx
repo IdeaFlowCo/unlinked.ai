@@ -19,7 +19,10 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <Providers>
-          <Box>
+          <Box style={{
+            minHeight: '100vh',
+            background: 'linear-gradient(to bottom, var(--gray-1), white)'
+          }}>
             <Header />
             {children}
           </Box>
