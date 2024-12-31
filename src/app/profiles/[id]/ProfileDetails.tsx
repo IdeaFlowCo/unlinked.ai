@@ -17,18 +17,37 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
 
     return (
         <Flex direction="column" gap="6">
-            <Card size="4">
-                <Flex gap="4" p="6">
+            <Card size="4" className="profile-hero-card">
+                <Flex gap="6" p="6">
                     <Avatar
-                        size="6"
+                        size="7"
                         fallback={fullName[0]}
+                        style={{
+                            border: '3px solid var(--accent-6)',
+                            backgroundColor: 'var(--accent-2)'
+                        }}
                     />
                     <Box>
-                        <Heading size="6" mb="1">{fullName}</Heading>
-                        <Text size="3" color="gray" mb="4">{profile.headline}</Text>
-                        {profile.summary && (
-                            <Text size="2" color="gray">{profile.summary}</Text>
-                        )}
+                        <Flex align="center" gap="3" mb="2">
+                            <Heading size="6" style={{
+                                background: 'linear-gradient(to right, var(--accent-9), var(--accent-11))',
+                                WebkitBackgroundClip: 'text',
+                                WebkitTextFillColor: 'transparent'
+                            }}>
+                                {fullName}
+                            </Heading>
+                            {profile.is_shadow && (
+                                <Badge variant="soft" color="gray">Shadow Profile</Badge>
+                            )}
+                        </Flex>
+                        <Flex direction="column" gap="2">
+                            <Text size="3" weight="medium" color="gray">{profile.headline}</Text>
+                            {profile.summary && (
+                                <Text size="2" color="gray" style={{ lineHeight: '1.6' }}>
+                                    {profile.summary}
+                                </Text>
+                            )}
+                        </Flex>
                     </Box>
                 </Flex>
             </Card>
