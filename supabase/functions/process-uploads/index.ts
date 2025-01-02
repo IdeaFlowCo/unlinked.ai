@@ -52,23 +52,8 @@ async function processProfileCsv(profileId: string, csvText: string) {
     const parsed = Papa.parse<string[]>(csvText, { header: true });
     if (parsed.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
         const row = parsed.data[0];
-        const linkedInUrl = row["Profile URL"]?.trim() || null;
-        const linkedInSlug = linkedInUrl ? extractSlugFromUrl(linkedInUrl) : null;
 
         try {
-            // If there's a shadow profile using this slug, we won't delete or override it
-            // but we can unify the new profile data. (Optional logic shown below.)
-            if (linkedInSlug) {
-                const { error: shadowErr } = await supabase
-                    .from("profiles")
-                    .select("id, is_shadow")
-                    .eq("linkedin_slug", linkedInSlug)
-                    .maybeSingle();
-                if (shadowErr) {
-                    console.error("Error checking existing shadow profile:", shadowErr);
-                }
-            }
-
             // Upsert the current profile using the primary key (id = profileId).
             // "onConflict" is set to "id" so that future inserts with the same PK will update.
             const { error } = await supabase
@@ -76,8 +61,6 @@ async function processProfileCsv(profileId: string, csvText: string) {
                 .upsert(
                     {
                         id: profileId,
-                        linkedin_slug: linkedInSlug,
-                        is_shadow: false,
                         first_name: row["First Name"] || null,
                         last_name: row["Last Name"] || null,
                         headline: row["Headline"] || null,
@@ -88,9 +71,7 @@ async function processProfileCsv(profileId: string, csvText: string) {
                         onConflict: "id"
                     }
                 );
-            if (error) {
-                console.error("Error upserting user profile from Profile.csv:", error);
-            }
+
         } catch (err) {
             console.error("Exception updating user profile from Profile.csv:", err);
         }
