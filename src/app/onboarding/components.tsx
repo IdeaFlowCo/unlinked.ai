@@ -111,10 +111,10 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
           />
         </Box>
         <Text size={{ initial: '5', sm: '6' }} weight="bold" align="center">
-          Hey! What's your LinkedIn URL?
+          Hey! What&apos;s your LinkedIn URL?
         </Text>
         <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
-          Just paste your profile link below and we'll get started 😊
+          Just paste your profile link below and we&apos;ll get started 😊
         </Text>
         <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: '320px' }}>
           <Flex direction="column" gap="3">
