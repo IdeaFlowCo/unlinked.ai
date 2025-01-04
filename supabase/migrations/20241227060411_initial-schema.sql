@@ -8,25 +8,50 @@ CREATE TABLE profiles (
     last_name TEXT,
     headline TEXT,
     linkedin_slug TEXT UNIQUE,
-    is_shadow BOOLEAN DEFAULT false,
     summary TEXT,
     industry TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE FUNCTION public.handle_new_user()
+CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $$
+DECLARE
+    existing_profile_id UUID;
+    shadow_slug TEXT;
 BEGIN
-    INSERT INTO public.profiles (user_id, first_name, last_name)
+    shadow_slug := NEW.raw_user_meta_data ->> 'linkedin_slug';
+
+    IF shadow_slug IS NOT NULL THEN
+        SELECT id
+          INTO existing_profile_id
+          FROM public.profiles
+         WHERE linkedin_slug = shadow_slug
+           AND user_id IS NULL
+         LIMIT 1;
+
+        IF existing_profile_id IS NOT NULL THEN
+            UPDATE public.profiles
+               SET user_id = NEW.id,
+                   first_name = NEW.raw_user_meta_data ->> 'first_name',
+                   last_name = NEW.raw_user_meta_data ->> 'last_name'
+             WHERE id = existing_profile_id;
+
+            RETURN NEW;
+        END IF;
+    END IF;
+
+    INSERT INTO public.profiles (user_id, first_name, last_name, linkedin_slug)
     VALUES (
         NEW.id,
         NEW.raw_user_meta_data ->> 'first_name',
-        NEW.raw_user_meta_data ->> 'last_name'
+        NEW.raw_user_meta_data ->> 'last_name',
+        shadow_slug
     );
+
     RETURN NEW;
 END;
 $$;

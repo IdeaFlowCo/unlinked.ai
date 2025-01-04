@@ -36,7 +36,7 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
                             }}>
                                 {fullName}
                             </Heading>
-                            {profile.is_shadow && (
+                            {profile.user_id === null && (
                                 <Badge variant="soft" color="gray">Shadow Profile</Badge>
                             )}
                         </Flex>
