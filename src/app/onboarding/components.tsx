@@ -18,6 +18,53 @@ interface StepIndicatorProps {
   step: 1 | 2 | 3;
 }
 
+// Common card styling
+const cardStyles = {
+  width: '100%',
+  maxWidth: '480px',  // Slightly smaller for better readability
+  margin: '0 auto',
+  transition: 'all 0.2s ease',
+  background: 'var(--color-background)',
+  border: '1px solid var(--gray-4)',
+  ':hover': {
+    transform: 'translateY(-2px)',
+    boxShadow: 'var(--shadow-3)'
+  }
+};
+
+// Common icon container styling
+const iconContainerStyles = {
+  background: 'var(--accent-2)',
+  padding: '20px',
+  borderRadius: '50%',
+  marginBottom: '8px',
+  transition: 'all 0.2s ease',
+  border: '1px solid var(--accent-3)',
+  ':hover': {
+    transform: 'scale(1.05)',
+    background: 'var(--accent-3)'
+  }
+};
+
+// Common input styling
+const inputStyles = {
+  width: '100%',
+  padding: '12px 16px',
+  borderRadius: 'var(--radius-3)',
+  border: '1px solid var(--gray-5)',
+  fontSize: 'var(--font-size-2)',
+  transition: 'all 0.2s ease',
+  background: 'var(--color-background)',
+  ':focus': {
+    outline: 'none',
+    borderColor: 'var(--accent-8)',
+    boxShadow: '0 0 0 2px var(--accent-a4)'
+  },
+  ':hover': {
+    borderColor: 'var(--gray-8)'
+  }
+};
+
 export function StepIndicator({ currentStep, step }: StepIndicatorProps): JSX.Element {
   return (
     <Flex align="center" gap="3" className="flex-1">
@@ -25,21 +72,22 @@ export function StepIndicator({ currentStep, step }: StepIndicatorProps): JSX.El
         size="2"
         variant={currentStep >= step ? 'solid' : 'soft'}
         style={{
-          width: '32px',
-          height: '32px',
+          width: '36px',
+          height: '36px',
           borderRadius: '50%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transition: 'all 0.2s ease'
+          transition: 'all 0.2s ease',
+          border: currentStep >= step ? 'none' : '1px solid var(--gray-5)'
         }}
       >
-        {currentStep > step ? <CheckIcon className="w-4 h-4" /> : step}
+        {currentStep > step ? <CheckIcon className="w-5 h-5" /> : step}
       </Badge>
       <Box style={{ flex: 2 }}>
         <Text
-          size={{ initial: '1', sm: '2' }}
-          weight="bold"
+          size={{ initial: '2', sm: '3' }}
+          weight="medium"
           style={{ whiteSpace: 'nowrap' }}
         >
           {step === 1 ? 'connect' : step === 2 ? 'wait' : 'upload'}
@@ -49,8 +97,8 @@ export function StepIndicator({ currentStep, step }: StepIndicatorProps): JSX.El
         <ArrowRightIcon
           style={{
             color: 'var(--gray-8)',
-            width: '20px',
-            height: '20px'
+            width: '24px',
+            height: '24px'
           }}
         />
       )}
@@ -64,17 +112,6 @@ interface ExportStepProps {
   isProcessing?: boolean;
   error?: string;
 }
-
-// Common card styling
-const cardStyles = {
-  width: '100%',
-  maxWidth: '600px',
-  margin: '0 auto',
-  transition: 'transform 0.2s ease',
-  ':hover': {
-    transform: 'translateY(-2px)'
-  }
-};
 
 export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: ExportStepProps): JSX.Element {
   const [url, setUrl] = React.useState('');
@@ -99,24 +136,22 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
 
   return (
     <Card size="3" style={cardStyles}>
-      <Flex direction="column" gap="4" align="center" p={{ initial: '4', sm: '6' }}>
-        <Box style={{
-          background: 'var(--accent-2)',
-          padding: '16px',
-          borderRadius: '50%',
-        }}>
+      <Flex direction="column" gap="5" align="center" p={{ initial: '5', sm: '7' }}>
+        <Box style={iconContainerStyles}>
           <DownloadIcon
             width="32"
             height="32"
             style={{ color: 'var(--accent-9)' }}
           />
         </Box>
-        <Text size={{ initial: '5', sm: '6' }} weight="bold" align="center">
-          hey! what&apos;s your linkedin url?
-        </Text>
-        <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
-          paste your profile link below and we&apos;ll get started 😊
-        </Text>
+        <Flex direction="column" gap="3" style={{ textAlign: 'center' }}>
+          <Text size={{ initial: '6', sm: '7' }} weight="bold">
+            hey! what&apos;s your linkedin url?
+          </Text>
+          <Text size="2" color="gray" style={{ maxWidth: '320px', lineHeight: '1.5' }}>
+            paste your profile link below and we&apos;ll get started 😊
+          </Text>
+        </Flex>
         <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: '320px' }}>
           <Flex direction="column" gap="3">
             <input
@@ -124,17 +159,11 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="your linkedin profile url"
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: 'var(--radius-2)',
-                border: '1px solid var(--gray-6)',
-                fontSize: 'var(--font-size-2)'
-              }}
+              style={inputStyles}
               required
             />
             {error && (
-              <Text color="red" size="2">
+              <Text color="red" size="2" style={{ marginTop: '-4px' }}>
                 {error}
               </Text>
             )}
@@ -145,27 +174,28 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
               style={{
                 width: '100%',
                 background: 'var(--accent-9)',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                height: '44px'
               }}
             >
               {isProcessing ? (
-                <Flex gap="2" align="center">
+                <Flex gap="2" align="center" justify="center">
                   <span className="loading-spinner" />
                   processing...
                 </Flex>
               ) : (
                 <>
-                  <ExternalLinkIcon width="16" height="16" />
+                  <ExternalLinkIcon width="18" height="18" />
                   export your data
                 </>
               )}
             </Button>
             <Button
-              size="2"
+              size="3"
               variant="soft"
               onClick={handleSkip}
               disabled={isProcessing || !url}
-              style={{ width: '100%' }}
+              style={{ width: '100%', height: '44px' }}
             >
               skip to upload
             </Button>
@@ -178,23 +208,25 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
 
 export function WaitingStep({ countdown, onNext }: { countdown: string; onNext: () => void }): JSX.Element {
   return (
-    <Card size="3" className="w-full max-w-xl mx-auto">
-      <Flex direction="column" gap="4" align="center" p="6">
-        <TimerIcon className="w-12 h-12" style={{ color: 'var(--accent-9)' }} />
-        <Text size="6" weight="bold" align="center">
-          waiting for your data
-        </Text>
-        <Text size="8" weight="bold" style={{ color: 'var(--accent-9)' }}>
-          {countdown}
-        </Text>
-        <Text size="2" align="center" color="gray">
-          linkedin is preparing your data. you&apos;ll get an email when it&apos;s ready 📧
-        </Text>
-        <Flex direction="column" gap="3" style={{ width: '100%', maxWidth: '280px' }}>
-          <Button size="3" onClick={onNext} style={{ width: '100%' }}>
-            i have my data
-          </Button>
+    <Card size="3" style={cardStyles}>
+      <Flex direction="column" gap="5" align="center" p={{ initial: '5', sm: '7' }}>
+        <Box style={iconContainerStyles}>
+          <TimerIcon width="32" height="32" style={{ color: 'var(--accent-9)' }} />
+        </Box>
+        <Flex direction="column" gap="3" style={{ textAlign: 'center' }}>
+          <Text size={{ initial: '6', sm: '7' }} weight="bold">
+            waiting for your data
+          </Text>
+          <Text size="8" weight="bold" style={{ color: 'var(--accent-9)', letterSpacing: '0.05em' }}>
+            {countdown}
+          </Text>
+          <Text size="2" color="gray" style={{ maxWidth: '320px', lineHeight: '1.5' }}>
+            linkedin is preparing your data. you&apos;ll get an email when it&apos;s ready 📧
+          </Text>
         </Flex>
+        <Button size="3" onClick={onNext} style={{ width: '100%', maxWidth: '280px', height: '44px' }}>
+          i have my data
+        </Button>
       </Flex>
     </Card>
   );
@@ -219,24 +251,19 @@ export function UploadStep({
     <Card size="3" style={cardStyles}>
       <Flex
         direction="column"
-        gap="4"
+        gap="5"
         align="center"
-        p={{ initial: '4', sm: '6' }}
+        p={{ initial: '5', sm: '7' }}
         style={{
           border: '2px dashed var(--accent-6)',
           borderRadius: 'var(--radius-4)',
-          background: 'var(--gray-1)',
+          background: 'var(--accent-1)',
           transition: 'all 0.2s ease-in-out',
         }}
         onDrop={onDrop}
         onDragOver={onDragOver}
       >
-        <Box style={{
-          background: 'var(--accent-2)',
-          padding: '16px',
-          borderRadius: '50%',
-          marginBottom: '8px'
-        }}>
+        <Box style={iconContainerStyles}>
           <UploadIcon
             width="32"
             height="32"
@@ -244,13 +271,14 @@ export function UploadStep({
           />
         </Box>
 
-        <Text size={{ initial: '5', sm: '6' }} weight="bold" align="center">
-          upload your linkedin data
-        </Text>
-
-        <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
-          drag and drop your files here, or click to browse 📂
-        </Text>
+        <Flex direction="column" gap="3" style={{ textAlign: 'center' }}>
+          <Text size={{ initial: '6', sm: '7' }} weight="bold">
+            upload your linkedin data
+          </Text>
+          <Text size="2" color="gray" style={{ maxWidth: '320px', lineHeight: '1.5' }}>
+            drag and drop your files here, or click to browse 📂
+          </Text>
+        </Flex>
 
         <input
           type="file"
@@ -273,17 +301,18 @@ export function UploadStep({
             style={{
               width: '100%',
               background: uploadStatus === 'uploading' ? 'var(--accent-8)' : 'var(--accent-9)',
-              transition: 'all 0.2s ease'
+              transition: 'all 0.2s ease',
+              height: '44px'
             }}
           >
             {uploadStatus === 'uploading' ? (
-              <Flex gap="2" align="center">
+              <Flex gap="2" align="center" justify="center">
                 <span className="loading-spinner" />
                 uploading...
               </Flex>
             ) : (
               <>
-                <UploadIcon width="16" height="16" />
+                <UploadIcon width="18" height="18" />
                 select files
               </>
             )}
@@ -297,13 +326,13 @@ export function UploadStep({
         )}
 
         {selectedFiles.length > 0 && (
-          <Flex direction="column" gap="2" style={{ width: '100%', maxWidth: '280px' }}>
-            <Text size="2" weight="bold">selected files:</Text>
+          <Flex direction="column" gap="3" style={{ width: '100%', maxWidth: '320px' }}>
+            <Text size="2" weight="medium">selected files:</Text>
             {selectedFiles
               .filter(file => REQUIRED_FILES.includes(file.name as typeof REQUIRED_FILES[number]) ||
                 OPTIONAL_FILES.includes(file.name as typeof OPTIONAL_FILES[number]))
               .map((file, index) => (
-                <Text key={index} size="2" color="gray">
+                <Text key={index} size="2" color="gray" style={{ fontFamily: 'var(--font-mono)' }}>
                   {file.name}
                 </Text>
               ))}
@@ -316,16 +345,20 @@ export function UploadStep({
 
 export function SuccessStep({ onComplete }: { onComplete: () => void }): JSX.Element {
   return (
-    <Card size="3" className="w-full max-w-xl mx-auto">
-      <Flex direction="column" gap="4" align="center" p="6">
-        <CheckIcon className="w-12 h-12" style={{ color: 'var(--accent-9)' }} />
-        <Text size="6" weight="bold" align="center">
-          all done! 🎉
-        </Text>
-        <Text size="2" align="center" color="gray">
-          your linkedin data has been uploaded successfully
-        </Text>
-        <Button size="3" onClick={onComplete} style={{ width: '100%', maxWidth: '280px' }}>
+    <Card size="3" style={cardStyles}>
+      <Flex direction="column" gap="5" align="center" p={{ initial: '5', sm: '7' }}>
+        <Box style={iconContainerStyles}>
+          <CheckIcon width="32" height="32" style={{ color: 'var(--accent-9)' }} />
+        </Box>
+        <Flex direction="column" gap="3" style={{ textAlign: 'center' }}>
+          <Text size={{ initial: '6', sm: '7' }} weight="bold">
+            all done! 🎉
+          </Text>
+          <Text size="2" color="gray" style={{ maxWidth: '320px', lineHeight: '1.5' }}>
+            your linkedin data has been uploaded successfully
+          </Text>
+        </Flex>
+        <Button size="3" onClick={onComplete} style={{ width: '100%', maxWidth: '280px', height: '44px' }}>
           continue to profiles
         </Button>
       </Flex>

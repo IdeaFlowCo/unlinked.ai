@@ -65,7 +65,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
             // Call the secure database function to claim the profile
             const { error } = await supabase
                 .rpc('claim_linkedin_profile', {
-                    linkedin_slug: slug
+                    input_slug: slug
                 });
 
             if (error) {
