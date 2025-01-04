@@ -67,12 +67,12 @@ export default async function Header({ showSearch = false }: HeaderProps) {
                         <Flex gap={{ initial: '2', sm: '4' }} wrap="wrap">
                             <Link href="/auth/login">
                                 <Button size={{ initial: '2', sm: '3' }} variant="soft">
-                                    Sign in
+                                    sign in
                                 </Button>
                             </Link>
                             <Link href="/auth/signup">
                                 <Button size={{ initial: '2', sm: '3' }} variant="solid">
-                                    Create account
+                                    create account
                                 </Button>
                             </Link>
                         </Flex>
