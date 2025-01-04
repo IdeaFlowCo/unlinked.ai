@@ -13,7 +13,7 @@ type Profile = Database['public']['Tables']['profiles']['Row'] & {
 }
 
 export default function ProfileDetails({ profile }: { profile: Profile }) {
-    const fullName = `${profile.first_name} ${profile.last_name}`.trim()
+    const fullName = profile.full_name?.trim() || 'Unnamed Profile'
 
     return (
         <Flex direction="column" gap="6">
@@ -21,7 +21,7 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
                 <Flex gap="6" p="6">
                     <Avatar
                         size="7"
-                        fallback={fullName[0]}
+                        fallback={fullName.charAt(0).toUpperCase()}
                         style={{
                             border: '3px solid var(--accent-6)',
                             backgroundColor: 'var(--accent-2)'

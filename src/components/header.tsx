@@ -14,7 +14,7 @@ export default async function Header({ showSearch = false }: HeaderProps) {
     // Get the user's profile if they're logged in
     const { data: profile } = user ? await supabase
         .from('profiles')
-        .select('id, first_name')
+        .select('id, full_name')
         .eq('user_id', user.id)
         .single() : { data: null }
 
@@ -55,7 +55,7 @@ export default async function Header({ showSearch = false }: HeaderProps) {
                     {user ? (
                         <Flex align="center" gap={{ initial: '2', sm: '4' }} wrap="wrap">
                             <Link href={`/profiles/${profile!.id}`} className="no-underline">
-                                <Text size="2" color="gray">Hello {profile?.first_name || 'there'}</Text>
+                                <Text size="2" color="gray">Hello {profile?.full_name || 'there'}</Text>
                             </Link>
                             <form>
                                 <Button size="2" variant="soft" formAction={signOut}>
