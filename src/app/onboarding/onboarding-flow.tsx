@@ -127,6 +127,34 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
         }
     };
 
+    const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const items = event.dataTransfer.items;
+        if (!items) return;
+
+        // Check if a folder is being dropped
+        const isFolder = Array.from(items).some(item => {
+            const entry = item.webkitGetAsEntry?.();
+            return entry?.isDirectory;
+        });
+
+        if (isFolder) {
+            // If it's a folder, use the folder input
+            document.getElementById('folder-upload')?.click();
+        } else {
+            // If it's files, handle them directly
+            const files = event.dataTransfer.files;
+            handleFileSelect(files);
+        }
+    };
+
+    const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
     const processZipFile = async (file: File): Promise<ProcessedFile[]> => {
         const zip = new JSZip();
         const contents = await zip.loadAsync(file);
@@ -135,7 +163,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
         for (const [path, zipEntry] of Object.entries(contents.files)) {
             if (!zipEntry.dir) {
                 const fileName = path.split('/').pop();
-                if (fileName && fileName.endsWith('.csv')) {
+                if (fileName && fileName.endsWith('.csv') && !fileName.startsWith('._')) {
                     const content = await zipEntry.async('blob');
                     csvFiles.push(new File([content], fileName, { type: 'text/csv' }) as ProcessedFile);
                 }
@@ -145,44 +173,36 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
         return csvFiles;
     };
 
-    const handleDragOver = (event: React.DragEvent<HTMLDivElement>): void => {
-        event.preventDefault();
-        event.stopPropagation();
-    };
-
-    const handleDrop = async (event: React.DragEvent<HTMLDivElement>): Promise<void> => {
-        event.preventDefault();
-        event.stopPropagation();
-        await handleFileSelect(event.dataTransfer.files);
-    };
-
-    const handleFileSelect = async (fileList: FileList | null): Promise<void> => {
-        if (!fileList?.length) return;
+    const handleFileSelect = async (files: FileList | null) => {
+        if (!files?.length) return;
 
         setErrorMessage('');
-        const processedFiles: ProcessedFile[] = [];
-
         try {
-            for (const file of Array.from(fileList)) {
+            let newFiles: ProcessedFile[] = [];
+
+            // Process each file
+            for (const file of Array.from(files)) {
                 if (file.name.endsWith('.zip')) {
                     const extractedFiles = await processZipFile(file);
-                    processedFiles.push(...extractedFiles);
-                } else if (file.name.endsWith('.csv')) {
-                    processedFiles.push(file as ProcessedFile);
+                    newFiles.push(...extractedFiles);
+                } else if (file.name.endsWith('.csv') && !file.name.startsWith('._')) {
+                    newFiles.push(file as ProcessedFile);
                 }
             }
 
-            const fileNames = processedFiles.map(f => f.name);
+            // Add new files to the selection
+            const updatedFiles = [...selectedFiles, ...newFiles];
+            setSelectedFiles(updatedFiles);
+
+            // Check if we have all required files
+            const fileNames = updatedFiles.map(f => f.name);
             const hasRequiredFiles = REQUIRED_FILES.every(required =>
                 fileNames.includes(required)
             );
 
-            if (!hasRequiredFiles) {
-                throw new Error(`Missing required files. Please ensure you have ${REQUIRED_FILES.join(' and ')}`);
+            if (hasRequiredFiles) {
+                await uploadFiles(updatedFiles);
             }
-
-            setSelectedFiles(processedFiles);
-            await uploadFiles(processedFiles);
         } catch (error) {
             setErrorMessage(error instanceof Error ? error.message : 'Error processing files');
         }

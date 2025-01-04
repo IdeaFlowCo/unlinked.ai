@@ -24,20 +24,20 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
     const { ref, inView } = useInView()
     const supabase = createClient()
 
-    const debouncedSetSearchWithCancel = useCallback(
+    const debouncedSetSearch = useCallback(
         debounce((value: string) => {
             startTransition(() => {
-                setDebouncedQuery(value)
-            })
+                setDebouncedQuery(value);
+            });
         }, DEBOUNCE_MS),
-        [startTransition]
-    )
+        [setDebouncedQuery, startTransition]
+    );
 
     useEffect(() => {
         return () => {
-            debouncedSetSearchWithCancel.cancel()
-        }
-    }, [debouncedSetSearchWithCancel])
+            debouncedSetSearch.cancel();
+        };
+    }, [debouncedSetSearch]);
 
     const {
         data,
@@ -131,7 +131,7 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
                 <SearchInput
                     onSearch={(query: string) => {
                         setSearchQuery(query)
-                        debouncedSetSearchWithCancel(query)
+                        debouncedSetSearch(query)
                     }}
                     value={searchQuery}
                     placeholder="Search professionals..."
