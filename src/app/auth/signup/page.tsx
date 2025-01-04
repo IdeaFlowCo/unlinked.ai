@@ -36,15 +36,12 @@ export default async function SignUpPage({
                                     size="3"
                                     type="text"
                                     name="fullName"
-                                    placeholder="Full Name (First and Last)"
+                                    placeholder="Ayn Rand"
                                     required
                                     autoComplete="name"
                                     pattern="^[a-zA-Z\s\-']{2,100}$"
                                     title="Please enter your full name (first and last name) using only letters, spaces, hyphens, and apostrophes"
                                 />
-                                <Text as="p" size="1" color="gray" mt="1">
-                                    Enter your full name as you&apos;d like it displayed (e.g., &quot;John Smith&quot;)
-                                </Text>
                             </Box>
 
                             <TextField.Root
