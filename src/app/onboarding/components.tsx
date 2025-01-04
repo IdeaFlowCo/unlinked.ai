@@ -86,6 +86,16 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
     }
   };
 
+  const handleSkip = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!url) {
+      setUrl('');  // Clear any partial input
+      return;
+    }
+    await onLinkedInUrl(url);
+    onNext(3);
+  };
+
   return (
     <Card size="3" style={cardStyles}>
       <Flex direction="column" gap="4" align="center" p={{ initial: '4', sm: '6' }}>
@@ -101,10 +111,10 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
           />
         </Box>
         <Text size={{ initial: '5', sm: '6' }} weight="bold" align="center">
-          Export Your LinkedIn Data
+          Hey! What's your LinkedIn URL?
         </Text>
         <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
-          First, let&apos;s connect your LinkedIn profile. Then we&apos;ll help you export your data.
+          Just paste your profile link below and we'll get started 😊
         </Text>
         <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: '320px' }}>
           <Flex direction="column" gap="3">
@@ -130,7 +140,7 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
             <Button
               size="3"
               type="submit"
-              disabled={isProcessing}
+              disabled={isProcessing || !url}
               style={{
                 width: '100%',
                 background: 'var(--accent-9)',
@@ -145,17 +155,18 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
               ) : (
                 <>
                   <ExternalLinkIcon width="16" height="16" />
-                  Continue
+                  Continue to Export
                 </>
               )}
             </Button>
             <Button
               size="2"
               variant="soft"
-              onClick={() => onNext(3)}
+              onClick={handleSkip}
+              disabled={isProcessing || !url}
               style={{ width: '100%' }}
             >
-              Skip to upload
+              Skip to Upload
             </Button>
           </Flex>
         </form>
