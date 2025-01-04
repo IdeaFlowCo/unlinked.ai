@@ -27,15 +27,63 @@ interface Props {
     userId: string;
 }
 
+function extractSlugFromUrl(url: string): string | null {
+    try {
+        const path = new URL(url).pathname;
+        const segments = path.split("/").filter(Boolean);
+        if (segments.length >= 2 && segments[0] === "in") {
+            return segments[1];
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Element {
     const [currentStep, setCurrentStep] = useState<Step>(initialStep);
     const [countdown, setCountdown] = useState<number>(24 * 60 * 60);
     const [selectedFiles, setSelectedFiles] = useState<ProcessedFile[]>([]);
     const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
     const [errorMessage, setErrorMessage] = useState<string>('');
+    const [isProcessingUrl, setIsProcessingUrl] = useState(false);
+    const [urlError, setUrlError] = useState<string>();
 
     const supabase = createClient();
     const router = useRouter();
+
+    const handleLinkedInUrl = async (url: string) => {
+        setIsProcessingUrl(true);
+        setUrlError(undefined);
+
+        try {
+            const slug = extractSlugFromUrl(url);
+            if (!slug) {
+                throw new Error('Invalid LinkedIn URL format');
+            }
+
+            // Call the secure database function to claim the profile
+            const { error } = await supabase
+                .rpc('claim_linkedin_profile', {
+                    linkedin_slug: slug
+                });
+
+            if (error) {
+                if (error.message === 'Profile already claimed') {
+                    throw new Error('This LinkedIn profile is already connected to another account');
+                }
+                throw error;
+            }
+
+            // Proceed to next step
+            handleStepChange(2);
+        } catch (error) {
+            console.error('Error processing LinkedIn URL:', error);
+            setUrlError(error instanceof Error ? error.message : 'Failed to process LinkedIn URL');
+        } finally {
+            setIsProcessingUrl(false);
+        }
+    };
 
     useEffect(() => {
         let timer: NodeJS.Timeout;
@@ -233,7 +281,12 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
 
             {/* Step content */}
             {currentStep === 1 && (
-                <ExportStep onNext={() => void handleStepChange(2)} />
+                <ExportStep
+                    onNext={handleStepChange}
+                    onLinkedInUrl={handleLinkedInUrl}
+                    isProcessing={isProcessingUrl}
+                    error={urlError}
+                />
             )}
 
             {currentStep === 2 && (

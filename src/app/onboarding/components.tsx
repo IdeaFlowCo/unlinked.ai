@@ -3,7 +3,7 @@
 
 import React, { JSX } from 'react';
 import { Card, Text, Button, Flex, Badge, Box } from '@radix-ui/themes';
-import { LINKEDIN_EXPORT_URL, type Step, REQUIRED_FILES, OPTIONAL_FILES } from './types';
+import { type Step, REQUIRED_FILES, OPTIONAL_FILES } from './types';
 import {
   ArrowRightIcon,
   UploadIcon,
@@ -60,6 +60,9 @@ export function StepIndicator({ currentStep, step }: StepIndicatorProps): JSX.El
 
 interface ExportStepProps {
   onNext: (step?: number) => void;
+  onLinkedInUrl: (url: string) => Promise<void>;
+  isProcessing?: boolean;
+  error?: string;
 }
 
 // Common card styling
@@ -73,7 +76,16 @@ const cardStyles = {
   }
 };
 
-export function ExportStep({ onNext }: ExportStepProps): JSX.Element {
+export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: ExportStepProps): JSX.Element {
+  const [url, setUrl] = React.useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (url) {
+      await onLinkedInUrl(url);
+    }
+  };
+
   return (
     <Card size="3" style={cardStyles}>
       <Flex direction="column" gap="4" align="center" p={{ initial: '4', sm: '6' }}>
@@ -92,37 +104,61 @@ export function ExportStep({ onNext }: ExportStepProps): JSX.Element {
           Export Your LinkedIn Data
         </Text>
         <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
-          Request your data from LinkedIn to unlock the full potential of unlinked.ai
+          First, let&apos;s connect your LinkedIn profile. Then we&apos;ll help you export your data.
         </Text>
-        <Flex
-          direction="column"
-          gap="3"
-          style={{ width: '100%', maxWidth: '320px' }}
-        >
-          <Button
-            size="3"
-            onClick={() => {
-              window.open(LINKEDIN_EXPORT_URL, '_blank', 'noopener,noreferrer');
-              onNext();
-            }}
-            style={{
-              width: '100%',
-              background: 'var(--accent-9)',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <ExternalLinkIcon width="16" height="16" />
-            Start LinkedIn Export
-          </Button>
-          <Button
-            size="2"
-            variant="soft"
-            onClick={() => onNext(3)}
-            style={{ width: '100%' }}
-          >
-            Skip to upload
-          </Button>
-        </Flex>
+        <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: '320px' }}>
+          <Flex direction="column" gap="3">
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Your LinkedIn Profile URL"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-2)',
+                border: '1px solid var(--gray-6)',
+                fontSize: 'var(--font-size-2)'
+              }}
+              required
+            />
+            {error && (
+              <Text color="red" size="2">
+                {error}
+              </Text>
+            )}
+            <Button
+              size="3"
+              type="submit"
+              disabled={isProcessing}
+              style={{
+                width: '100%',
+                background: 'var(--accent-9)',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              {isProcessing ? (
+                <Flex gap="2" align="center">
+                  <span className="loading-spinner" />
+                  Processing...
+                </Flex>
+              ) : (
+                <>
+                  <ExternalLinkIcon width="16" height="16" />
+                  Continue
+                </>
+              )}
+            </Button>
+            <Button
+              size="2"
+              variant="soft"
+              onClick={() => onNext(3)}
+              style={{ width: '100%' }}
+            >
+              Skip to upload
+            </Button>
+          </Flex>
+        </form>
       </Flex>
     </Card>
   );

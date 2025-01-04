@@ -1,3 +1,66 @@
+-- Function to securely claim a profile
+CREATE OR REPLACE FUNCTION claim_linkedin_profile(linkedin_slug TEXT)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    target_profile_id uuid;
+    user_profile_id uuid;
+BEGIN
+    -- Get the unclaimed profile with this slug
+    SELECT id INTO target_profile_id
+    FROM profiles
+    WHERE profiles.linkedin_slug = claim_linkedin_profile.linkedin_slug
+    AND profiles.user_id IS NULL
+    FOR UPDATE SKIP LOCKED;
+
+    -- Get the user's current profile
+    SELECT id INTO user_profile_id
+    FROM profiles
+    WHERE user_id = auth.uid()
+    LIMIT 1;
+
+    -- If an unclaimed profile exists
+    IF target_profile_id IS NOT NULL THEN
+        -- Update the unclaimed profile with the user's ID
+        UPDATE profiles
+        SET user_id = auth.uid()
+        WHERE id = target_profile_id;
+
+        -- Delete the user's temporary profile if it exists
+        -- This deletion is done with elevated privileges via SECURITY DEFINER
+        IF user_profile_id IS NOT NULL AND user_profile_id != target_profile_id THEN
+            DELETE FROM profiles WHERE id = user_profile_id;
+        END IF;
+
+        RETURN target_profile_id;
+    ELSE
+        -- If no unclaimed profile exists, update the user's profile with the slug
+        -- First check if slug is already claimed
+        IF EXISTS (
+            SELECT 1 FROM profiles
+            WHERE linkedin_slug = claim_linkedin_profile.linkedin_slug
+            AND user_id IS NOT NULL
+        ) THEN
+            RAISE EXCEPTION 'Profile already claimed';
+        END IF;
+
+        -- Update user's profile with the slug
+        UPDATE profiles
+        SET linkedin_slug = claim_linkedin_profile.linkedin_slug
+        WHERE id = user_profile_id
+        RETURNING id INTO target_profile_id;
+
+        RETURN target_profile_id;
+    END IF;
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION claim_linkedin_profile TO authenticated;
+
 -- Enable RLS on all tables
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
