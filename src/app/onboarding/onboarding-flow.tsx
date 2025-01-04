@@ -52,7 +52,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
     const supabase = createClient();
     const router = useRouter();
 
-    const handleLinkedInUrl = async (url: string) => {
+    const handleLinkedInUrl = async (url: string): Promise<void> => {
         setIsProcessingUrl(true);
         setUrlError(undefined);
 
@@ -74,12 +74,10 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
                 }
                 throw error;
             }
-
-            // Proceed to next step
-            handleStepChange(2);
         } catch (error) {
             console.error('Error processing LinkedIn URL:', error);
             setUrlError(error instanceof Error ? error.message : 'Failed to process LinkedIn URL');
+            throw error; // Re-throw to prevent navigation
         } finally {
             setIsProcessingUrl(false);
         }
