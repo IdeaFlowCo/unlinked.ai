@@ -4,8 +4,7 @@ CREATE EXTENSION IF NOT EXISTS moddatetime WITH SCHEMA extensions;
 CREATE TABLE profiles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES auth.users (id) ON DELETE CASCADE,
-    first_name TEXT,
-    last_name TEXT,
+    full_name TEXT,
     headline TEXT,
     linkedin_slug TEXT UNIQUE,
     is_shadow BOOLEAN DEFAULT false,
@@ -21,11 +20,13 @@ LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-    INSERT INTO public.profiles (user_id, first_name, last_name)
+    INSERT INTO public.profiles (user_id, full_name)
     VALUES (
         NEW.id,
-        NEW.raw_user_meta_data ->> 'first_name',
-        NEW.raw_user_meta_data ->> 'last_name'
+        COALESCE(
+            NEW.raw_user_meta_data ->> 'full_name',
+            NEW.raw_app_meta_data ->> 'full_name'
+        )
     );
     RETURN NEW;
 END;
@@ -35,7 +36,6 @@ CREATE TRIGGER on_auth_user_created
 AFTER INSERT ON auth.users
 FOR EACH ROW
 EXECUTE PROCEDURE public.handle_new_user();
-
 
 CREATE TABLE companies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
