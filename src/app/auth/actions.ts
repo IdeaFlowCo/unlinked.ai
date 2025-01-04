@@ -44,12 +44,10 @@ export async function signup(formData: FormData) {
 
 export async function signInWithGoogle() {
     const supabase = await createClient()
-    const headersList = await headers()
-    const origin = headersList.get('origin')
     const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-            redirectTo: `${origin}/auth/callback`,
+            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
             queryParams: {
                 access_type: 'offline',
                 prompt: 'consent',
