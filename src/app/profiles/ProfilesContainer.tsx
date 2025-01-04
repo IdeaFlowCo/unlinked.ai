@@ -2,7 +2,7 @@
 'use client'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { useInView } from 'react-intersection-observer'
-import { useEffect, useState, useCallback, useTransition } from 'react'
+import { useEffect, useState, useCallback, useTransition, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { Text, Card, Flex, Badge } from '@radix-ui/themes'
 import debounce from 'lodash/debounce'
@@ -25,19 +25,24 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
     const supabase = createClient()
 
     const debouncedSetSearch = useCallback(
-        debounce((value: string) => {
+        (value: string) => {
             startTransition(() => {
                 setDebouncedQuery(value);
             });
-        }, DEBOUNCE_MS),
-        [setDebouncedQuery, startTransition]
+        },
+        [startTransition, setDebouncedQuery]
+    );
+
+    const debouncedSearch = useMemo(
+        () => debounce(debouncedSetSearch, DEBOUNCE_MS),
+        [debouncedSetSearch]
     );
 
     useEffect(() => {
         return () => {
-            debouncedSetSearch.cancel();
+            debouncedSearch.cancel();
         };
-    }, [debouncedSetSearch]);
+    }, [debouncedSearch]);
 
     const {
         data,
@@ -131,7 +136,7 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
                 <SearchInput
                     onSearch={(query: string) => {
                         setSearchQuery(query)
-                        debouncedSetSearch(query)
+                        debouncedSearch(query)
                     }}
                     value={searchQuery}
                     placeholder="Search professionals..."

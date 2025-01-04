@@ -178,7 +178,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
 
         setErrorMessage('');
         try {
-            let newFiles: ProcessedFile[] = [];
+            const newFiles: ProcessedFile[] = [];
 
             // Process each file
             for (const file of Array.from(files)) {
