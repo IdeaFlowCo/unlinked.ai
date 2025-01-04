@@ -1,6 +1,6 @@
 // app/profiles/[id]/NetworkConnections.tsx
 'use client'
-import { Card, Text, Avatar, Box, Flex } from '@radix-ui/themes'
+import { Card, Text, Avatar, Box, Flex, Heading } from '@radix-ui/themes'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { createClient } from '@/utils/supabase/client'
 import Link from 'next/link'
@@ -48,6 +48,9 @@ export default function NetworkConnections({ profileId }: { profileId: string })
 
     return (
         <Flex direction="column" gap="3">
+            <Heading as="h2" size="5" mb="2">
+                Connections
+            </Heading>
             {data?.pages.map((page) => (
                 page.map(conn => {
                     const connectedProfile = conn.profile_id_a === profileId
