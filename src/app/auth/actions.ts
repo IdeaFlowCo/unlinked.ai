@@ -24,13 +24,31 @@ export async function login(formData: FormData) {
 export async function signup(formData: FormData) {
     const supabase = await createClient()
 
+    const fullName = (formData.get('fullName') as string)?.trim()
+
+    // Validate full name
+    if (!fullName) {
+        return redirect(`/auth/signup?error=${encodeURIComponent('Full name is required')}`)
+    }
+    if (fullName.length < 2) {
+        return redirect(`/auth/signup?error=${encodeURIComponent('Name must be at least 2 characters')}`)
+    }
+    if (!fullName.includes(' ')) {
+        return redirect(`/auth/signup?error=${encodeURIComponent('Please enter both first and last name')}`)
+    }
+    if (fullName.length > 100) {
+        return redirect(`/auth/signup?error=${encodeURIComponent('Name is too long')}`)
+    }
+    if (!/^[a-zA-Z\s\-']+$/.test(fullName)) {
+        return redirect(`/auth/signup?error=${encodeURIComponent('Name contains invalid characters')}`)
+    }
+
     const { error } = await supabase.auth.signUp({
         email: formData.get('email') as string,
         password: formData.get('password') as string,
         options: {
             data: {
-                first_name: formData.get('firstName') as string,
-                last_name: formData.get('lastName') as string,
+                full_name: fullName,
             },
         },
     })

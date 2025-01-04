@@ -55,7 +55,7 @@ export default function NetworkConnections({ profileId }: { profileId: string })
                         : conn.profile_a
                     if (!connectedProfile) return null
 
-                    const fullName = `${connectedProfile.first_name} ${connectedProfile.last_name}`.trim()
+                    const fullName = connectedProfile.full_name?.trim() || 'Unnamed Profile'
 
                     return (
                         <Card key={conn.id} asChild>
@@ -63,7 +63,7 @@ export default function NetworkConnections({ profileId }: { profileId: string })
                                 <Flex gap="3" align="center" p="3">
                                     <Avatar
                                         size="3"
-                                        fallback={fullName[0]}
+                                        fallback={fullName.charAt(0).toUpperCase()}
                                     />
                                     <Box>
                                         <Text as="div" size="2" weight="bold">

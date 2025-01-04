@@ -33,7 +33,7 @@ export default function ProfileList({ profiles }: ProfileListProps) {
               <Flex gap="4" p="3">
                 <Avatar
                   size="5"
-                  fallback={`${profile.first_name?.[0]}${profile.last_name?.[0]}`}
+                  fallback={profile.full_name?.[0] || '?'}
                   style={{
                     border: '2px solid var(--accent-6)',
                     backgroundColor: 'var(--accent-2)'
@@ -46,7 +46,7 @@ export default function ProfileList({ profiles }: ProfileListProps) {
                       WebkitBackgroundClip: 'text',
                       WebkitTextFillColor: 'transparent'
                     }}>
-                      {`${profile.first_name} ${profile.last_name}`.trim() || 'Unnamed Profile'}
+                      {profile.full_name?.trim() || 'Unnamed Profile'}
                     </Text>
                     {profile.is_shadow && (
                       <Badge size="1" variant="soft" color="gray">Shadow</Badge>

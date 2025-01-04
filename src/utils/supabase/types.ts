@@ -229,12 +229,11 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string | null
-          first_name: string | null
+          full_name: string | null
           headline: string | null
           id: string
           industry: string | null
           is_shadow: boolean | null
-          last_name: string | null
           linkedin_slug: string | null
           summary: string | null
           updated_at: string | null
@@ -242,12 +241,11 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
-          first_name?: string | null
+          full_name?: string | null
           headline?: string | null
           id?: string
           industry?: string | null
           is_shadow?: boolean | null
-          last_name?: string | null
           linkedin_slug?: string | null
           summary?: string | null
           updated_at?: string | null
@@ -255,12 +253,11 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
-          first_name?: string | null
+          full_name?: string | null
           headline?: string | null
           id?: string
           industry?: string | null
           is_shadow?: boolean | null
-          last_name?: string | null
           linkedin_slug?: string | null
           summary?: string | null
           updated_at?: string | null

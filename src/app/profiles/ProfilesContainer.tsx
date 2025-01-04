@@ -24,14 +24,6 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
     const { ref, inView } = useInView()
     const supabase = createClient()
 
-    // Debounced search handler
-    const debouncedSetSearch = useCallback((value: string) => {
-        startTransition(() => {
-            setDebouncedQuery(value)
-        })
-    }, [startTransition])
-
-    // Clear debounced search on unmount
     const debouncedSetSearchWithCancel = useCallback(
         debounce((value: string) => {
             startTransition(() => {
@@ -75,8 +67,7 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
 
             if (debouncedQuery) {
                 query.or(
-                    `first_name.ilike.%${debouncedQuery}%,` +
-                    `last_name.ilike.%${debouncedQuery}%,` +
+                    `full_name.ilike.%${debouncedQuery}%,` +
                     `headline.ilike.%${debouncedQuery}%`
                 )
             }
@@ -85,10 +76,12 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
             if (error) throw error
             return data
         },
-        initialData: debouncedQuery ? undefined : {
-            pages: [initialProfiles],
-            pageParams: [0]
-        },
+        initialData: debouncedQuery
+            ? undefined
+            : {
+                pages: [initialProfiles],
+                pageParams: [0]
+            },
         getNextPageParam: (lastPage, pages) =>
             lastPage.length === PAGE_SIZE ? pages.length : undefined,
         initialPageParam: 0,
@@ -100,11 +93,11 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
         }
     }, [inView, fetchNextPage, hasNextPage, isFetchingNextPage])
 
-    // Remove duplicates from results
     const allProfiles = data?.pages
         .flat()
-        .filter((profile, index, self) =>
-            index === self.findIndex(p => p.id === profile.id)
+        .filter(
+            (profile, index, self) =>
+                index === self.findIndex((p) => p.id === profile.id)
         ) || []
 
     if (error) {
@@ -138,7 +131,7 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
                 <SearchInput
                     onSearch={(query: string) => {
                         setSearchQuery(query)
-                        debouncedSetSearch(query)
+                        debouncedSetSearchWithCancel(query)
                     }}
                     value={searchQuery}
                     placeholder="Search professionals..."

@@ -78,8 +78,7 @@ async function processProfileCsv(profileId: string, csvText: string) {
                         id: profileId,
                         linkedin_slug: linkedInSlug,
                         is_shadow: false,
-                        first_name: row["First Name"] || null,
-                        last_name: row["Last Name"] || null,
+                        full_name: `${row["First Name"] || ''} ${row["Last Name"] || ''}`.trim() || null,
                         headline: row["Headline"] || null,
                         summary: row["Summary"] || null,
                         industry: row["Industry"] || null
@@ -408,9 +407,8 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
                 const { error } = await supabase
                     .from("profiles")
                     .update({
-                        first_name: update.firstName || undefined,
-                        last_name: update.lastName || undefined,
-                        headline: update.headline || undefined
+                        full_name: update.firstName && update.lastName ? `${update.firstName} ${update.lastName}`.trim() : undefined,
+                        headline: update.headline
                     })
                     .eq("id", update.id);
                 if (error) {
@@ -429,8 +427,7 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
             const batch = newSlugRows.slice(i, i + insertBatchSize).map((item) => ({
                 id: crypto.randomUUID(),
                 user_id: null,
-                first_name: item.firstName,
-                last_name: item.lastName,
+                full_name: `${item.firstName} ${item.lastName}`.trim(),
                 linkedin_slug: item.slug,
                 headline: item.headline,
                 is_shadow: true
