@@ -56,14 +56,21 @@ async function processProfileCsv(profileId: string, csvText: string) {
         const linkedInSlug = linkedInUrl ? extractSlugFromUrl(linkedInUrl) : null;
 
         try {
+            // First get the existing profile to check if linkedin_slug exists
+            const { data: existingProfile } = await supabase
+                .from("profiles")
+                .select("linkedin_slug")
+                .eq("id", profileId)
+                .single();
+
             // Upsert the current profile using the primary key (id = profileId).
-            // "onConflict" is set to "id" so that future inserts with the same PK will update.
+            // Don't override linkedin_slug if it already exists
             const { error } = await supabase
                 .from("profiles")
                 .upsert(
                     {
                         id: profileId,
-                        linkedin_slug: linkedInSlug,
+                        linkedin_slug: existingProfile?.linkedin_slug || linkedInSlug,
                         full_name: `${row["First Name"] || ''} ${row["Last Name"] || ''}`.trim() || null,
                         headline: row["Headline"] || null,
                         summary: row["Summary"] || null,
