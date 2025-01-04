@@ -7,7 +7,6 @@ CREATE TABLE profiles (
     full_name TEXT,
     headline TEXT,
     linkedin_slug TEXT UNIQUE,
-    is_shadow BOOLEAN DEFAULT false,
     summary TEXT,
     industry TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
