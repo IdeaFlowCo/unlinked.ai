@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { createClient } from '@/utils/supabase/server'
+import { headers } from 'next/headers'
 
 export async function login(formData: FormData) {
     const supabase = await createClient()
@@ -14,7 +15,7 @@ export async function login(formData: FormData) {
     })
 
     if (error) {
-        redirect('/error')
+        redirect(`/auth/login?error=${encodeURIComponent(error.message)}`)
     }
 
     redirect('/profiles')
@@ -35,7 +36,7 @@ export async function signup(formData: FormData) {
     })
 
     if (error) {
-        return redirect('/error')
+        return redirect(`/auth/signup?error=${encodeURIComponent(error.message)}`)
     }
 
     return redirect('/onboarding')
@@ -44,48 +45,25 @@ export async function signup(formData: FormData) {
 export async function signInWithGoogle() {
     const supabase = await createClient()
 
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: {
-            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
-        }
     })
 
     if (error) {
-        return redirect('/error')
+        const currentPath = new URL((await headers()).get('referer') || '').pathname
+        const redirectPath = currentPath.startsWith('/auth/signup') ? '/auth/signup' : '/auth/login'
+        return redirect(`${redirectPath}?error=${encodeURIComponent(error.message)}`)
     }
 
-    if (data.url) {
-        return redirect(data.url)
-    }
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // Create profile if this is first sign in
-    const session = await supabase.auth.getSession()
-    if (session.data.session?.user) {
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('user_id')
-            .eq('user_id', session.data.session.user.id)
-            .single()
+    const { data: onboardingState } = await supabase
+        .from('onboarding_state')
+        .select('completed_at')
+        .eq('user_id', user?.id)
+        .single()
 
-        if (!profile) {
-            const { error: profileError } = await supabase
-                .from('profiles')
-                .insert({
-                    user_id: session.data.session.user.id,
-                    first_name: '',
-                    last_name: ''
-                })
-
-            if (profileError) {
-                return redirect('/error')
-            }
-
-            return redirect('/onboarding');
-        }
-    }
-
-    return redirect('/profiles')
+    return redirect(onboardingState?.completed_at ? '/profiles' : '/onboarding')
 }
 
 export async function signOut() {
