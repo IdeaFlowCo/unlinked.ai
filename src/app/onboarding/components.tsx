@@ -83,6 +83,7 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
     e.preventDefault();
     if (url) {
       await onLinkedInUrl(url);
+      onNext(2);  // Go to export step
     }
   };
 
@@ -93,7 +94,7 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
       return;
     }
     await onLinkedInUrl(url);
-    onNext(3);
+    onNext(3);  // Skip to upload step
   };
 
   return (
