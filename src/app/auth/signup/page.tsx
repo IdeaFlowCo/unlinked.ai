@@ -36,7 +36,7 @@ export default async function SignUpPage({
                                     size="3"
                                     type="text"
                                     name="fullName"
-                                    placeholder="Ayn Rand"
+                                    placeholder="full name"
                                     required
                                     autoComplete="name"
                                     pattern="^[a-zA-Z\s\-']{2,100}$"
@@ -48,7 +48,7 @@ export default async function SignUpPage({
                                 size="3"
                                 type="email"
                                 name="email"
-                                placeholder="Email address"
+                                placeholder="email address"
                                 required
                                 autoComplete="email"
                             />
@@ -57,10 +57,10 @@ export default async function SignUpPage({
                                 size="3"
                                 type="password"
                                 name="password"
-                                placeholder="Password"
+                                placeholder="password"
                                 required
                                 autoComplete="new-password"
-                                minLength={8}
+                                minLength={6}
                             />
 
                             <Button
@@ -69,7 +69,7 @@ export default async function SignUpPage({
                                 formAction={signup}
                                 style={{ width: '100%' }}
                             >
-                                Create Account
+                                create account
                             </Button>
 
                             <Link href="/auth/login" style={{ width: '100%' }}>
@@ -78,7 +78,7 @@ export default async function SignUpPage({
                                     variant="outline"
                                     style={{ width: '100%' }}
                                 >
-                                    Sign In Instead
+                                    sign in instead
                                 </Button>
                             </Link>
                         </Flex>
@@ -99,7 +99,7 @@ export default async function SignUpPage({
                             formAction={signInWithGoogle}
                             style={{ width: '100%' }}
                         >
-                            Google
+                            google
                         </Button>
                     </form>
                 </Card>

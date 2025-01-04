@@ -35,7 +35,7 @@ export default async function SignInPage({
                                 size="3"
                                 type="email"
                                 name="email"
-                                placeholder="Email address"
+                                placeholder="email address"
                                 required
                                 autoComplete="email"
                             />
@@ -44,7 +44,7 @@ export default async function SignInPage({
                                 size="3"
                                 type="password"
                                 name="password"
-                                placeholder="Password"
+                                placeholder="password"
                                 required
                                 autoComplete="current-password"
                             />
@@ -55,7 +55,7 @@ export default async function SignInPage({
                                 formAction={login}
                                 style={{ width: '100%' }}
                             >
-                                Sign In
+                                sign in
                             </Button>
 
                             <Link href="/auth/signup" style={{ width: '100%' }}>
@@ -64,7 +64,7 @@ export default async function SignInPage({
                                     variant="outline"
                                     style={{ width: '100%' }}
                                 >
-                                    Create Account
+                                    sign up instead
                                 </Button>
                             </Link>
                         </Flex>
@@ -85,7 +85,7 @@ export default async function SignInPage({
                             formAction={signInWithGoogle}
                             style={{ width: '100%' }}
                         >
-                            Google
+                            google
                         </Button>
                     </form>
                 </Card>
