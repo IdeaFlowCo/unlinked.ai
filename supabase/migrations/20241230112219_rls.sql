@@ -1,5 +1,5 @@
 -- Function to securely claim a profile
-CREATE OR REPLACE FUNCTION claim_linkedin_profile(linkedin_slug TEXT)
+CREATE FUNCTION claim_linkedin_profile(input_slug TEXT)
 RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -12,8 +12,8 @@ BEGIN
     -- Get the unclaimed profile with this slug
     SELECT id INTO target_profile_id
     FROM profiles
-    WHERE profiles.linkedin_slug = claim_linkedin_profile.linkedin_slug
-    AND profiles.user_id IS NULL
+    WHERE linkedin_slug = input_slug
+    AND user_id IS NULL
     FOR UPDATE SKIP LOCKED;
 
     -- Get the user's current profile
@@ -41,7 +41,7 @@ BEGIN
         -- First check if slug is already claimed
         IF EXISTS (
             SELECT 1 FROM profiles
-            WHERE linkedin_slug = claim_linkedin_profile.linkedin_slug
+            WHERE linkedin_slug = input_slug
             AND user_id IS NOT NULL
         ) THEN
             RAISE EXCEPTION 'Profile already claimed';
@@ -49,7 +49,7 @@ BEGIN
 
         -- Update user's profile with the slug
         UPDATE profiles
-        SET linkedin_slug = claim_linkedin_profile.linkedin_slug
+        SET linkedin_slug = input_slug
         WHERE id = user_profile_id
         RETURNING id INTO target_profile_id;
 
