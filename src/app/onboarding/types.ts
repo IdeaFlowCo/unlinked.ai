@@ -10,8 +10,8 @@ export interface ExportStepProps {
 }
 
 export const LINKEDIN_EXPORT_URL = 'https://www.linkedin.com/psettings/member-data' as const;
-export const REQUIRED_FILES = ['Profile.csv', 'Connections.csv'] as const;
-export const OPTIONAL_FILES = ['Positions.csv', 'Education.csv', 'Skills.csv'] as const;
+export const REQUIRED_FILES = ['Connections.csv'] as const;
+export const OPTIONAL_FILES = ['Profile.csv', 'Positions.csv', 'Education.csv', 'Skills.csv'] as const;
 
 export interface ProcessedFile extends File {
     readonly name: string;

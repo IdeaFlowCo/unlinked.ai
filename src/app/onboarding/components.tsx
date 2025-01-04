@@ -260,9 +260,11 @@ export function UploadStep({
           borderRadius: 'var(--radius-4)',
           background: 'var(--accent-1)',
           transition: 'all 0.2s ease-in-out',
+          cursor: 'pointer'
         }}
         onDrop={onDrop}
         onDragOver={onDragOver}
+        onClick={() => document.getElementById('file-upload')?.click()}
       >
         <Box style={iconContainerStyles}>
           <UploadIcon
@@ -272,14 +274,16 @@ export function UploadStep({
           />
         </Box>
 
-        <Flex direction="column" gap="3" style={{ textAlign: 'center' }}>
-          <Text size={{ initial: '6', sm: '7' }} weight="bold">
-            upload your linkedin data
-          </Text>
-          <Text size="2" color="gray" style={{ maxWidth: '320px', lineHeight: '1.5' }}>
-            drag and drop your files here, or click to browse 📂
-          </Text>
-        </Flex>
+        <input
+          type="file"
+          accept=".csv,.zip"
+          multiple
+          // @ts-expect-error - webkitdirectory is a non-standard attribute
+          webkitdirectory=""
+          onChange={(e) => onFileSelect(e.target.files)}
+          style={{ display: 'none' }}
+          id="folder-upload"
+        />
 
         <input
           type="file"
@@ -290,34 +294,20 @@ export function UploadStep({
           id="file-upload"
         />
 
-        <Flex
-          direction="column"
-          gap="3"
-          style={{ width: '100%', maxWidth: '320px' }}
-        >
-          <Button
-            size="3"
-            onClick={() => document.getElementById('file-upload')?.click()}
-            disabled={uploadStatus === 'uploading'}
-            style={{
-              width: '100%',
-              background: uploadStatus === 'uploading' ? 'var(--accent-8)' : 'var(--accent-9)',
-              transition: 'all 0.2s ease',
-              height: '44px'
-            }}
-          >
+        <Flex direction="column" gap="3" style={{ textAlign: 'center' }}>
+          <Text size={{ initial: '6', sm: '7' }} weight="bold">
+            upload your linkedin data
+          </Text>
+          <Text size="2" color="gray" style={{ maxWidth: '320px', lineHeight: '1.5' }}>
             {uploadStatus === 'uploading' ? (
               <Flex gap="2" align="center" justify="center">
                 <span className="loading-spinner" />
-                uploading...
+                uploading files...
               </Flex>
             ) : (
-              <>
-                <UploadIcon width="18" height="18" />
-                select files
-              </>
+              <>drag and drop files or folder here, or click to select files 📂</>
             )}
-          </Button>
+          </Text>
         </Flex>
 
         {errorMessage && (
@@ -326,19 +316,45 @@ export function UploadStep({
           </Text>
         )}
 
-        {selectedFiles.length > 0 && (
-          <Flex direction="column" gap="3" style={{ width: '100%', maxWidth: '320px' }}>
-            <Text size="2" weight="medium">selected files:</Text>
-            {selectedFiles
-              .filter(file => REQUIRED_FILES.includes(file.name as typeof REQUIRED_FILES[number]) ||
-                OPTIONAL_FILES.includes(file.name as typeof OPTIONAL_FILES[number]))
-              .map((file, index) => (
-                <Text key={index} size="2" color="gray" style={{ fontFamily: 'var(--font-mono)' }}>
-                  {file.name}
-                </Text>
-              ))}
-          </Flex>
-        )}
+        <Flex direction="column" gap="4" style={{ width: '100%', maxWidth: '320px' }}>
+          <Box>
+            <Text size="2" weight="medium" color="gray" mb="2">required files:</Text>
+            {REQUIRED_FILES.map((fileName) => {
+              const isUploaded = selectedFiles.some(file => file.name === fileName);
+              return (
+                <Flex key={fileName} align="center" gap="2" mb="1">
+                  {isUploaded ? (
+                    <CheckIcon style={{ color: 'var(--accent-9)' }} />
+                  ) : (
+                    <div style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--gray-8)' }} />
+                  )}
+                  <Text size="2" style={{ fontFamily: 'var(--font-mono)' }}>
+                    {fileName}
+                  </Text>
+                </Flex>
+              );
+            })}
+          </Box>
+
+          <Box>
+            <Text size="2" weight="medium" color="gray" mb="2">optional files:</Text>
+            {OPTIONAL_FILES.map((fileName) => {
+              const isUploaded = selectedFiles.some(file => file.name === fileName);
+              return (
+                <Flex key={fileName} align="center" gap="2" mb="1">
+                  {isUploaded ? (
+                    <CheckIcon style={{ color: 'var(--accent-9)' }} />
+                  ) : (
+                    <div style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--gray-8)' }} />
+                  )}
+                  <Text size="2" style={{ fontFamily: 'var(--font-mono)' }}>
+                    {fileName}
+                  </Text>
+                </Flex>
+              );
+            })}
+          </Box>
+        </Flex>
       </Flex>
     </Card>
   );
