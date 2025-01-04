@@ -411,33 +411,33 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
         );
     }
 
-    // 8) Bulk-insert new unclaimed profiles in chunks
+    // 8) Bulk-upsert new unclaimed profiles in chunks (note: no "id" included)
     let newProfilesMap = new Map<string, string>(); // slug => newly created profileId
     if (newSlugRows.length > 0) {
-        const insertBatchSize = 500; // you can tweak based on Supabase limits
+        const insertBatchSize = 500; // tweak as needed
         for (let i = 0; i < newSlugRows.length; i += insertBatchSize) {
+            // IMPORTANT: omit 'id' so we don't overwrite an existing row's PK
             const batch = newSlugRows.slice(i, i + insertBatchSize).map((item) => ({
-                id: crypto.randomUUID(),
                 user_id: null,
-                full_name: `${item.firstName} ${item.lastName}`.trim(),
                 linkedin_slug: item.slug,
-                headline: item.headline
+                full_name: `${item.firstName ?? ""} ${item.lastName ?? ""}`.trim(),
+                headline: item.headline,
             }));
 
-            // Upsert in bulk instead of plain insert
-            const { data: inserted, error: insertError } = await supabase
+            // Use upsert on linkedin_slug
+            const { data: upserted, error: upsertError } = await supabase
                 .from("profiles")
                 .upsert(batch, { onConflict: "linkedin_slug" })
                 .select("id, linkedin_slug");
 
-            if (insertError) {
-                console.error("Error creating/updating new unclaimed profiles:", insertError);
+            if (upsertError) {
+                console.error("Error creating/updating new unclaimed profiles:", upsertError);
                 continue;
             }
 
-            // Merge into newProfilesMap
-            if (inserted && Array.isArray(inserted)) {
-                for (const rec of inserted) {
+            // Populate newProfilesMap (includes updated rows and newly inserted rows)
+            if (Array.isArray(upserted)) {
+                for (const rec of upserted) {
                     if (rec.linkedin_slug) {
                         newProfilesMap.set(rec.linkedin_slug, rec.id);
                     }

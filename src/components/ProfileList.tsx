@@ -54,7 +54,7 @@ export default function ProfileList({ profiles }: ProfileListProps) {
                   </Text>
                   {!profile.user_id && (
                     <Badge size="1" variant="soft" color="gray">
-                      unclaimed
+                      Shadow
                     </Badge>
                   )}
                   {currentPosition && (

@@ -36,12 +36,9 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
                             }}>
                                 {fullName}
                             </Heading>
-                            <Text size="6" weight="bold" mb="1">
-                                {profile.full_name}
-                            </Text>
                             {!profile.user_id && (
                                 <Badge size="1" variant="soft" color="gray">
-                                    unclaimed
+                                    Shadow
                                 </Badge>
                             )}
                         </Flex>
