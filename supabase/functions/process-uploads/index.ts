@@ -411,31 +411,34 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
         );
     }
 
-    // 8) Bulk-upsert new unclaimed profiles in chunks (note: no "id" included)
+    // 8) Bulk-upsert new unclaimed profiles in chunks (omit user_id for existing entries)
     let newProfilesMap = new Map<string, string>(); // slug => newly created profileId
     if (newSlugRows.length > 0) {
         const insertBatchSize = 500; // tweak as needed
         for (let i = 0; i < newSlugRows.length; i += insertBatchSize) {
-            // IMPORTANT: omit 'id' so we don't overwrite an existing row's PK
+            // IMPORTANT: omit 'user_id' so we don’t overwrite existing user_ids with null
             const batch = newSlugRows.slice(i, i + insertBatchSize).map((item) => ({
-                user_id: null,
+                // note: do NOT specify 'id' or 'user_id'
                 linkedin_slug: item.slug,
                 full_name: `${item.firstName ?? ""} ${item.lastName ?? ""}`.trim(),
                 headline: item.headline,
             }));
 
-            // Use upsert on linkedin_slug
+            // Use upsert on linkedin_slug, updating only the specified columns
             const { data: upserted, error: upsertError } = await supabase
                 .from("profiles")
-                .upsert(batch, { onConflict: "linkedin_slug" })
-                .select("id, linkedin_slug");
+                .upsert(batch, {
+                    onConflict: "linkedin_slug",
+                    updateColumns: ["full_name", "headline", "summary", "industry"],
+                })
+                .select("id, linkedin_slug, user_id");
 
             if (upsertError) {
                 console.error("Error creating/updating new unclaimed profiles:", upsertError);
                 continue;
             }
 
-            // Populate newProfilesMap (includes updated rows and newly inserted rows)
+            // Populate newProfilesMap (includes updated & newly inserted rows)
             if (Array.isArray(upserted)) {
                 for (const rec of upserted) {
                     if (rec.linkedin_slug) {
