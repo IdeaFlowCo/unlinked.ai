@@ -316,11 +316,11 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
     const allSlugs = Object.keys(slugToRowData).filter(Boolean);
 
     // 5) Fetch existing shadow profiles (or normal profiles) in a single query
-    let existingProfiles: { id: string; linkedin_slug: string; is_shadow: boolean }[] = [];
+    let existingProfiles: { id: string; linkedin_slug: string; user_id: string | null }[] = [];
     if (allSlugs.length > 0) {
         const { data: fetchedProfiles, error: fetchError } = await supabase
             .from("profiles")
-            .select("id, linkedin_slug, is_shadow")
+            .select("id, linkedin_slug, user_id")
             .in("linkedin_slug", allSlugs);
 
         if (fetchError) {
@@ -330,10 +330,13 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
         }
     }
 
-    // Build a map for slug => { id: string, is_shadow: boolean }
-    const slugToExistingProfile = new Map<string, { id: string; is_shadow: boolean }>();
+    // Build a map for slug => { id: string, isShadow: boolean }
+    const slugToExistingProfile = new Map<string, { id: string; isShadow: boolean }>();
     for (const p of existingProfiles) {
-        slugToExistingProfile.set(p.linkedin_slug, { id: p.id, is_shadow: p.is_shadow });
+        slugToExistingProfile.set(p.linkedin_slug, {
+            id: p.id,
+            isShadow: p.user_id === null
+        });
     }
 
     // 6) Separate new slugs from existing slugs
@@ -350,10 +353,8 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
     for (const slug of allSlugs) {
         const existing = slugToExistingProfile.get(slug);
         if (existing) {
-            // This slug already has a profile. If it's shadow, we want to update fields with any new info
-            if (existing.is_shadow) {
-                // For each row that contributed this slug, pick a "best guess" at data
-                // e.g., last non-null or the first row's data. For simplicity, we’ll just take the first row’s data.
+            // If it's a shadow profile, we can optionally update best-guess fields
+            if (existing.isShadow) {
                 const rowData = slugToRowData[slug][0];
                 const headline =
                     rowData.company && rowData.position ? `${rowData.position} at ${rowData.company}` : null;
@@ -364,8 +365,9 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
                     headline
                 });
             }
+            // If the profile is NOT shadow (user_id is not null), we do nothing for creation
         } else {
-            // New shadow profile needed. We'll just use the first row's data for that slug.
+            // We only need to create a new shadow profile if no profile (shadow or user-linked) exists for that slug
             const rowData = slugToRowData[slug][0];
             const headline =
                 rowData.company && rowData.position ? `${rowData.position} at ${rowData.company}` : null;
@@ -382,8 +384,7 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
     const updateBatchSize = 100;
     for (let i = 0; i < shadowUpdates.length; i += updateBatchSize) {
         const batch = shadowUpdates.slice(i, i + updateBatchSize);
-        // Supabase doesn't do a "bulk update by ID" natively, so we do one at a time here
-        // Or we can do an RLS-allowed RPC to handle this in one statement. For now, just for-loop it:
+        // Update each shadow profile individually or via Promise.all
         await Promise.all(
             batch.map(async (update) => {
                 const { error } = await supabase
@@ -401,11 +402,11 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
         );
     }
 
-    // 8) Bulk-insert new shadow profiles in chunks
-    //    Then we'll refetch them to build up the slug => ID map
+    // 8) Bulk-insert NEW shadow profiles in chunks, ignoring duplicates to avoid
+    //    collisions with existing non-shadow profiles.
     let newProfilesMap = new Map<string, string>(); // slug => newly created profileId
     if (newSlugRows.length > 0) {
-        const insertBatchSize = 500; // you can tweak based on Supabase limits
+        const insertBatchSize = 500;
         for (let i = 0; i < newSlugRows.length; i += insertBatchSize) {
             const batch = newSlugRows.slice(i, i + insertBatchSize).map((item) => ({
                 id: crypto.randomUUID(),
@@ -413,22 +414,35 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
                 first_name: item.firstName,
                 last_name: item.lastName,
                 linkedin_slug: item.slug,
-                headline: item.headline,
-                is_shadow: true
+                headline: item.headline
             }));
 
-            // Insert in bulk
-            const { data: inserted, error: insertError } = await supabase
+            // Insert in bulk, ignoring duplicates if they already exist
+            const { error: insertError } = await supabase
                 .from("profiles")
-                .insert(batch)
-                .select("id, linkedin_slug");
+                .upsert(batch, {
+                    onConflict: "linkedin_slug",
+                    ignoreDuplicates: true
+                });
+
             if (insertError) {
                 console.error("Error creating new shadow profiles:", insertError);
                 continue;
             }
-            // Merge into newProfilesMap
-            if (inserted && Array.isArray(inserted)) {
-                for (const rec of inserted) {
+
+            // After upsert, refetch any slugs we attempted to insert
+            const slugsInBatch = batch.map((item) => item.linkedin_slug);
+            const { data: insertedOrExisting, error: fetchAfterInsertErr } = await supabase
+                .from("profiles")
+                .select("id, linkedin_slug")
+                .in("linkedin_slug", slugsInBatch);
+
+            if (fetchAfterInsertErr) {
+                console.error("Error fetching profiles after insert:", fetchAfterInsertErr);
+                continue;
+            }
+            if (insertedOrExisting && Array.isArray(insertedOrExisting)) {
+                for (const rec of insertedOrExisting) {
                     if (rec.linkedin_slug) {
                         newProfilesMap.set(rec.linkedin_slug, rec.id);
                     }
@@ -439,7 +453,7 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
 
     // 9) Merge new profile IDs into existing slug map
     for (const [slug, profileId] of newProfilesMap.entries()) {
-        slugToExistingProfile.set(slug, { id: profileId, is_shadow: true });
+        slugToExistingProfile.set(slug, { id: profileId, isShadow: true });
     }
 
     // 10) Build the final list of (profile_id_a, profile_id_b) for connections
@@ -447,14 +461,12 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
     const connectionRecords: { profile_id_a: string; profile_id_b: string }[] = [];
     for (const conn of allConnections) {
         let connProfileId: string | null = null;
-        // If we have a slug for them, use existing profile or new; if no slug, we can't connect them
         if (conn.slug) {
             const found = slugToExistingProfile.get(conn.slug);
             if (found) {
                 connProfileId = found.id;
             }
         }
-        // If no slug was found, we skip, or you could create a truly unknown profile
         if (!connProfileId) continue;
 
         // Sort the pair to satisfy the CHECK (profile_id_a < profile_id_b)
@@ -463,7 +475,7 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
     }
 
     // 11) Upsert connections in chunks
-    const connBatchSize = 500; // adjust as needed
+    const connBatchSize = 500;
     for (let i = 0; i < connectionRecords.length; i += connBatchSize) {
         const batch = connectionRecords.slice(i, i + connBatchSize);
         const { error: connUpsertErr } = await supabase

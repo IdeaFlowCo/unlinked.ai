@@ -233,7 +233,7 @@ export default function OnboardingFlow({ initialStep, userId }: Props): JSX.Elem
 
             {/* Step content */}
             {currentStep === 1 && (
-                <ExportStep onNext={() => void handleStepChange(2)} />
+                <ExportStep onNext={handleStepChange} />
             )}
 
             {currentStep === 2 && (

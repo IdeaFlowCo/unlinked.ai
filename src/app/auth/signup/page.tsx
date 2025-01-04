@@ -67,6 +67,14 @@ export default async function SignUpPage({
                                 autoComplete="new-password"
                             />
 
+                            <TextField.Root
+                                size="3"
+                                type="url"
+                                name="linkedInUrl"
+                                placeholder="LinkedIn Profile URL (required)"
+                                required
+                            />
+
                             <Button
                                 size="3"
                                 variant="solid"

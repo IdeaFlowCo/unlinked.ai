@@ -48,7 +48,7 @@ export default function ProfileList({ profiles }: ProfileListProps) {
                     }}>
                       {`${profile.first_name} ${profile.last_name}`.trim() || 'Unnamed Profile'}
                     </Text>
-                    {profile.is_shadow && (
+                    {profile.user_id === null && (
                       <Badge size="1" variant="soft" color="gray">Shadow</Badge>
                     )}
                   </Flex>
