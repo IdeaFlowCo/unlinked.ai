@@ -42,7 +42,7 @@ export function StepIndicator({ currentStep, step }: StepIndicatorProps): JSX.El
           weight="bold"
           style={{ whiteSpace: 'nowrap' }}
         >
-          {step === 1 ? 'Export Data' : step === 2 ? 'Wait for Download' : 'Upload Files'}
+          {step === 1 ? 'connect' : step === 2 ? 'wait' : 'upload'}
         </Text>
       </Box>
       {step < 3 && (
@@ -111,10 +111,10 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
           />
         </Box>
         <Text size={{ initial: '5', sm: '6' }} weight="bold" align="center">
-          Hey! What&apos;s your LinkedIn URL?
+          hey! what&apos;s your linkedin url?
         </Text>
         <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
-          Just paste your profile link below and we&apos;ll get started 😊
+          paste your profile link below and we&apos;ll get started 😊
         </Text>
         <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: '320px' }}>
           <Flex direction="column" gap="3">
@@ -122,7 +122,7 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="Your LinkedIn Profile URL"
+              placeholder="your linkedin profile url"
               style={{
                 width: '100%',
                 padding: '8px 12px',
@@ -150,12 +150,12 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
               {isProcessing ? (
                 <Flex gap="2" align="center">
                   <span className="loading-spinner" />
-                  Processing...
+                  processing...
                 </Flex>
               ) : (
                 <>
                   <ExternalLinkIcon width="16" height="16" />
-                  Continue to Export
+                  export your data
                 </>
               )}
             </Button>
@@ -166,7 +166,7 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
               disabled={isProcessing || !url}
               style={{ width: '100%' }}
             >
-              Skip to Upload
+              skip to upload
             </Button>
           </Flex>
         </form>
@@ -175,42 +175,28 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
   );
 }
 
-interface WaitingStepProps {
-  countdown: string;
-  onNext: (step?: number) => void;
-}
-
-export function WaitingStep({ countdown, onNext }: WaitingStepProps): JSX.Element {
+export function WaitingStep({ countdown, onNext }: { countdown: string; onNext: () => void }): JSX.Element {
   return (
     <Card size="3" className="w-full max-w-xl mx-auto">
       <Flex direction="column" gap="4" align="center" p="6">
         <TimerIcon className="w-12 h-12" style={{ color: 'var(--accent-9)' }} />
         <Text size="6" weight="bold" align="center">
-          Waiting for LinkedIn Export
+          waiting for your data
         </Text>
         <Text size="8" weight="bold" style={{ color: 'var(--accent-9)' }}>
           {countdown}
         </Text>
         <Text size="2" align="center" color="gray">
-          LinkedIn is preparing your data. You&apos;ll receive an email when it&apos;s ready.
+          linkedin is preparing your data. you&apos;ll get an email when it&apos;s ready 📧
         </Text>
         <Flex direction="column" gap="3" style={{ width: '100%', maxWidth: '280px' }}>
-          <Button size="3" onClick={() => onNext()} style={{ width: '100%' }}>
-            I Have My Data
+          <Button size="3" onClick={onNext} style={{ width: '100%' }}>
+            i have my data
           </Button>
         </Flex>
       </Flex>
     </Card>
   );
-}
-
-interface UploadStepProps {
-  uploadStatus: 'idle' | 'uploading' | 'success' | 'error';
-  errorMessage: string;
-  selectedFiles: File[];
-  onFileSelect: (files: FileList | null) => void;
-  onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
-  onDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
 }
 
 export function UploadStep({
@@ -220,7 +206,14 @@ export function UploadStep({
   onFileSelect,
   onDrop,
   onDragOver
-}: UploadStepProps): JSX.Element {
+}: {
+  uploadStatus: 'idle' | 'uploading' | 'success' | 'error';
+  errorMessage: string;
+  selectedFiles: File[];
+  onFileSelect: (files: FileList | null) => void;
+  onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
+}): JSX.Element {
   return (
     <Card size="3" style={cardStyles}>
       <Flex
@@ -251,11 +244,11 @@ export function UploadStep({
         </Box>
 
         <Text size={{ initial: '5', sm: '6' }} weight="bold" align="center">
-          Upload Your LinkedIn Data
+          upload your linkedin data
         </Text>
 
         <Text size="2" align="center" color="gray" style={{ maxWidth: '400px' }}>
-          Drag and drop your LinkedIn data export or select files manually
+          drag and drop your files here, or click to browse 📂
         </Text>
 
         <input
@@ -285,12 +278,12 @@ export function UploadStep({
             {uploadStatus === 'uploading' ? (
               <Flex gap="2" align="center">
                 <span className="loading-spinner" />
-                Uploading...
+                uploading...
               </Flex>
             ) : (
               <>
                 <UploadIcon width="16" height="16" />
-                Select Files
+                select files
               </>
             )}
           </Button>
@@ -304,7 +297,7 @@ export function UploadStep({
 
         {selectedFiles.length > 0 && (
           <Flex direction="column" gap="2" style={{ width: '100%', maxWidth: '280px' }}>
-            <Text size="2" weight="bold">Selected files:</Text>
+            <Text size="2" weight="bold">selected files:</Text>
             {selectedFiles
               .filter(file => REQUIRED_FILES.includes(file.name as typeof REQUIRED_FILES[number]) ||
                 OPTIONAL_FILES.includes(file.name as typeof OPTIONAL_FILES[number]))
@@ -320,23 +313,19 @@ export function UploadStep({
   );
 }
 
-interface SuccessStepProps {
-  onComplete: () => void;
-}
-
-export function SuccessStep({ onComplete }: SuccessStepProps): JSX.Element {
+export function SuccessStep({ onComplete }: { onComplete: () => void }): JSX.Element {
   return (
     <Card size="3" className="w-full max-w-xl mx-auto">
       <Flex direction="column" gap="4" align="center" p="6">
         <CheckIcon className="w-12 h-12" style={{ color: 'var(--accent-9)' }} />
         <Text size="6" weight="bold" align="center">
-          Upload Complete!
+          all done! 🎉
         </Text>
         <Text size="2" align="center" color="gray">
-          Your LinkedIn data has been successfully uploaded.
+          your linkedin data has been uploaded successfully
         </Text>
         <Button size="3" onClick={onComplete} style={{ width: '100%', maxWidth: '280px' }}>
-          Continue to Profiles
+          continue to profiles
         </Button>
       </Flex>
     </Card>
