@@ -233,7 +233,6 @@ export type Database = {
           headline: string | null
           id: string
           industry: string | null
-          is_shadow: boolean | null
           linkedin_slug: string | null
           summary: string | null
           updated_at: string | null
@@ -245,7 +244,6 @@ export type Database = {
           headline?: string | null
           id?: string
           industry?: string | null
-          is_shadow?: boolean | null
           linkedin_slug?: string | null
           summary?: string | null
           updated_at?: string | null
@@ -257,7 +255,6 @@ export type Database = {
           headline?: string | null
           id?: string
           industry?: string | null
-          is_shadow?: boolean | null
           linkedin_slug?: string | null
           summary?: string | null
           updated_at?: string | null
@@ -331,7 +328,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      claim_linkedin_profile: {
+        Args: {
+          input_slug: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never

@@ -48,14 +48,14 @@ export default function ProfileList({ profiles }: ProfileListProps) {
                     }}>
                       {profile.full_name?.trim() || 'Unnamed Profile'}
                     </Text>
-                    {profile.is_shadow && (
-                      <Badge size="1" variant="soft" color="gray">Shadow</Badge>
-                    )}
                   </Flex>
-                  {profile.headline && (
-                    <Text as="div" size="2" color="gray" mb="1">
-                      {profile.headline}
-                    </Text>
+                  <Text size="2" color="gray">
+                    {profile.headline}
+                  </Text>
+                  {!profile.user_id && (
+                    <Badge size="1" variant="soft" color="gray">
+                      unclaimed
+                    </Badge>
                   )}
                   {currentPosition && (
                     <Flex align="center" gap="2" mb="1">

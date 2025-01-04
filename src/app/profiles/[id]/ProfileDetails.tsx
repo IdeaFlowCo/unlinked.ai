@@ -36,8 +36,13 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
                             }}>
                                 {fullName}
                             </Heading>
-                            {profile.is_shadow && (
-                                <Badge variant="soft" color="gray">Shadow Profile</Badge>
+                            <Text size="6" weight="bold" mb="1">
+                                {profile.full_name}
+                            </Text>
+                            {!profile.user_id && (
+                                <Badge size="1" variant="soft" color="gray">
+                                    unclaimed
+                                </Badge>
                             )}
                         </Flex>
                         <Flex direction="column" gap="2">

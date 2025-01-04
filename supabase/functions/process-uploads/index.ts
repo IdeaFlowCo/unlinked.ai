@@ -326,12 +326,12 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
     }
     const allSlugs = Object.keys(slugToRowData).filter(Boolean);
 
-    // 5) Fetch existing shadow profiles (or normal profiles) in a single query
-    let existingProfiles: { id: string; linkedin_slug: string; is_shadow: boolean }[] = [];
+    // 5) Fetch existing profiles (or normal profiles) in a single query
+    let existingProfiles: { id: string; linkedin_slug: string; user_id: string | null }[] = [];
     if (allSlugs.length > 0) {
         const { data: fetchedProfiles, error: fetchError } = await supabase
             .from("profiles")
-            .select("id, linkedin_slug, is_shadow")
+            .select("id, linkedin_slug, user_id")
             .in("linkedin_slug", allSlugs);
 
         if (fetchError) {
@@ -341,34 +341,34 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
         }
     }
 
-    // Build a map for slug => { id: string, is_shadow: boolean }
-    const slugToExistingProfile = new Map<string, { id: string; is_shadow: boolean }>();
+    // Build a map for slug => { id: string, user_id: string | null }
+    const slugToExistingProfile = new Map<string, { id: string; user_id: string | null }>();
     for (const p of existingProfiles) {
-        slugToExistingProfile.set(p.linkedin_slug, { id: p.id, is_shadow: p.is_shadow });
+        slugToExistingProfile.set(p.linkedin_slug, { id: p.id, user_id: p.user_id });
     }
 
     // 6) Separate new slugs from existing slugs
-    //    Also gather shadow-profiles that may need to be updated
+    //    Also gather unclaimed profiles that may need to be updated
     const newSlugRows: {
         slug: string;
         firstName: string | null;
         lastName: string | null;
         headline: string | null;
     }[] = [];
-    const shadowUpdates: { id: string; firstName: string | null; lastName: string | null; headline: string | null }[] =
+    const unclaimedUpdates: { id: string; firstName: string | null; lastName: string | null; headline: string | null }[] =
         [];
 
     for (const slug of allSlugs) {
         const existing = slugToExistingProfile.get(slug);
         if (existing) {
-            // This slug already has a profile. If it's shadow, we want to update fields with any new info
-            if (existing.is_shadow) {
+            // This slug already has a profile. If it's unclaimed, we want to update fields with any new info
+            if (!existing.user_id) {
                 // For each row that contributed this slug, pick a "best guess" at data
-                // e.g., last non-null or the first row's data. For simplicity, we’ll just take the first row’s data.
+                // e.g., last non-null or the first row's data. For simplicity, we'll just take the first row's data.
                 const rowData = slugToRowData[slug][0];
                 const headline =
                     rowData.company && rowData.position ? `${rowData.position} at ${rowData.company}` : null;
-                shadowUpdates.push({
+                unclaimedUpdates.push({
                     id: existing.id,
                     firstName: rowData.firstName,
                     lastName: rowData.lastName,
@@ -376,7 +376,7 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
                 });
             }
         } else {
-            // New shadow profile needed. We'll just use the first row's data for that slug.
+            // New unclaimed profile needed. We'll just use the first row's data for that slug.
             const rowData = slugToRowData[slug][0];
             const headline =
                 rowData.company && rowData.position ? `${rowData.position} at ${rowData.company}` : null;
@@ -389,10 +389,10 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
         }
     }
 
-    // 7) Update shadow profiles in chunks
+    // 7) Update unclaimed profiles in chunks
     const updateBatchSize = 100;
-    for (let i = 0; i < shadowUpdates.length; i += updateBatchSize) {
-        const batch = shadowUpdates.slice(i, i + updateBatchSize);
+    for (let i = 0; i < unclaimedUpdates.length; i += updateBatchSize) {
+        const batch = unclaimedUpdates.slice(i, i + updateBatchSize);
         // Supabase doesn't do a "bulk update by ID" natively, so we do one at a time here
         // Or we can do an RLS-allowed RPC to handle this in one statement. For now, just for-loop it:
         await Promise.all(
@@ -405,14 +405,13 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
                     })
                     .eq("id", update.id);
                 if (error) {
-                    console.error("Error updating shadow profile:", update.id, error);
+                    console.error("Error updating unclaimed profile:", update.id, error);
                 }
             })
         );
     }
 
-    // 8) Bulk-insert new shadow profiles in chunks
-    //    Then we'll refetch them to build up the slug => ID map
+    // 8) Bulk-insert new unclaimed profiles in chunks
     let newProfilesMap = new Map<string, string>(); // slug => newly created profileId
     if (newSlugRows.length > 0) {
         const insertBatchSize = 500; // you can tweak based on Supabase limits
@@ -422,19 +421,20 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
                 user_id: null,
                 full_name: `${item.firstName} ${item.lastName}`.trim(),
                 linkedin_slug: item.slug,
-                headline: item.headline,
-                is_shadow: true
+                headline: item.headline
             }));
 
-            // Insert in bulk
+            // Upsert in bulk instead of plain insert
             const { data: inserted, error: insertError } = await supabase
                 .from("profiles")
-                .insert(batch)
+                .upsert(batch, { onConflict: "linkedin_slug" })
                 .select("id, linkedin_slug");
+
             if (insertError) {
-                console.error("Error creating new shadow profiles:", insertError);
+                console.error("Error creating/updating new unclaimed profiles:", insertError);
                 continue;
             }
+
             // Merge into newProfilesMap
             if (inserted && Array.isArray(inserted)) {
                 for (const rec of inserted) {
@@ -448,11 +448,11 @@ async function processConnectionsCsv(profileId: string, csvText: string) {
 
     // 9) Merge new profile IDs into existing slug map
     for (const [slug, profileId] of newProfilesMap.entries()) {
-        slugToExistingProfile.set(slug, { id: profileId, is_shadow: true });
+        slugToExistingProfile.set(slug, { id: profileId, user_id: null });
     }
 
     // 10) Build the final list of (profile_id_a, profile_id_b) for connections
-    //     Then do a bulk upsert on “connections”
+    //     Then do a bulk upsert on "connections"
     const connectionRecords: { profile_id_a: string; profile_id_b: string }[] = [];
     for (const conn of allConnections) {
         let connProfileId: string | null = null;
