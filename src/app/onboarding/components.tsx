@@ -3,7 +3,7 @@
 
 import React, { JSX } from 'react';
 import { Card, Text, Button, Flex, Badge, Box } from '@radix-ui/themes';
-import { type Step, REQUIRED_FILES, OPTIONAL_FILES } from './types';
+import { type Step, REQUIRED_FILES, OPTIONAL_FILES, LINKEDIN_EXPORT_URL } from './types';
 import {
   ArrowRightIcon,
   UploadIcon,
@@ -177,6 +177,7 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
                 transition: 'all 0.2s ease',
                 height: '44px'
               }}
+              onClick={() => window.open(LINKEDIN_EXPORT_URL, '_blank')}
             >
               {isProcessing ? (
                 <Flex gap="2" align="center" justify="center">
