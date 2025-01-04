@@ -44,26 +44,28 @@ export async function signup(formData: FormData) {
 
 export async function signInWithGoogle() {
     const supabase = await createClient()
-
-    const { error } = await supabase.auth.signInWithOAuth({
+    const headersList = await headers()
+    const origin = headersList.get('origin')
+    const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
+        options: {
+            redirectTo: `${origin}/auth/callback`,
+            queryParams: {
+                access_type: 'offline',
+                prompt: 'consent',
+            },
+        },
     })
 
     if (error) {
         const currentPath = new URL((await headers()).get('referer') || '').pathname
         const redirectPath = currentPath.startsWith('/auth/signup') ? '/auth/signup' : '/auth/login'
-        return redirect(`${redirectPath}?error=${encodeURIComponent(error.message)}`)
+        redirect(`${redirectPath}?error=${encodeURIComponent(error.message)}`)
     }
 
-    const { data: { user } } = await supabase.auth.getUser()
-
-    const { data: onboardingState } = await supabase
-        .from('onboarding_state')
-        .select('completed_at')
-        .eq('user_id', user?.id)
-        .single()
-
-    return redirect(onboardingState?.completed_at ? '/profiles' : '/onboarding')
+    if (data.url) {
+        redirect(data.url)
+    }
 }
 
 export async function signOut() {
