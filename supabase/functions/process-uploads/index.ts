@@ -56,19 +56,6 @@ async function processProfileCsv(profileId: string, csvText: string) {
         const linkedInSlug = linkedInUrl ? extractSlugFromUrl(linkedInUrl) : null;
 
         try {
-            // If there's a shadow profile using this slug, we won't delete or override it
-            // but we can unify the new profile data. (Optional logic shown below.)
-            if (linkedInSlug) {
-                const { error: shadowErr } = await supabase
-                    .from("profiles")
-                    .select("id, is_shadow")
-                    .eq("linkedin_slug", linkedInSlug)
-                    .maybeSingle();
-                if (shadowErr) {
-                    console.error("Error checking existing shadow profile:", shadowErr);
-                }
-            }
-
             // Upsert the current profile using the primary key (id = profileId).
             // "onConflict" is set to "id" so that future inserts with the same PK will update.
             const { error } = await supabase
@@ -77,7 +64,6 @@ async function processProfileCsv(profileId: string, csvText: string) {
                     {
                         id: profileId,
                         linkedin_slug: linkedInSlug,
-                        is_shadow: false,
                         full_name: `${row["First Name"] || ''} ${row["Last Name"] || ''}`.trim() || null,
                         headline: row["Headline"] || null,
                         summary: row["Summary"] || null,
