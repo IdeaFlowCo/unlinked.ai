@@ -1,20 +1,28 @@
-import { Flex, Box, TextField, Button, Text, Heading, Container, Card } from '@radix-ui/themes';
-import { login, signInWithGoogle } from '@/app/auth/actions';
-import Link from 'next/link';
+import { Container, Flex, Box, Button, Heading, TextField, Text, Card } from '@radix-ui/themes'
+import Link from 'next/link'
+import { login, signInWithGoogle } from '@/app/auth/actions'
 
 export default async function SignInPage({
     searchParams
 }: {
-    searchParams: Promise<{ error?: string }>
+    searchParams: { error?: string }
 }) {
-    const params = await searchParams;
-    const error = params.error;
+    const error = searchParams.error;
 
     return (
         <Container size="1">
             <Flex direction="column" align="center" gap="6" py="9">
                 <Box mb="4" style={{ textAlign: 'center' }}>
-                    <Heading size="8" mt="4">unlinked.ai</Heading>
+                    <Heading
+                        size="8"
+                        style={{
+                            background: 'linear-gradient(to right, var(--accent-9), var(--accent-11))',
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                        }}
+                    >
+                        unlinked.ai
+                    </Heading>
                     <Text size="3" mt="2">
                         your ai-powered supernetwork
                     </Text>
@@ -99,5 +107,5 @@ export default async function SignInPage({
                 </Box>
             </Flex>
         </Container>
-    );
+    )
 }
