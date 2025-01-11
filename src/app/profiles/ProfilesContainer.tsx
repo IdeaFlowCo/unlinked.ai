@@ -122,15 +122,13 @@ export default function ProfilesContainer({ initialProfiles }: ProfilesContainer
                 gap="4"
                 style={{
                     position: 'sticky',
-                    top: 0,
-                    backgroundColor: 'var(--color-background)',
+                    top: 'var(--header-height)',
+                    backgroundColor: 'var(--color-page-background)',
                     backdropFilter: 'blur(10px)',
                     WebkitBackdropFilter: 'blur(10px)',
                     padding: '16px',
-                    zIndex: 10,
+                    zIndex: 9,
                     borderBottom: '1px solid var(--gray-4)',
-                    marginTop: '-65px',
-                    background: 'rgba(255, 255, 255, 0.8)',
                 }}
             >
                 <SearchInput
