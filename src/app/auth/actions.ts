@@ -90,3 +90,18 @@ export async function signOut() {
     revalidatePath('/', 'layout')
     redirect('/')
 }
+
+export async function resetPassword(formData: FormData) {
+    const supabase = await createClient()
+    const email = formData.get('email') as string
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/reset-password`,
+    })
+
+    if (error) {
+        return redirect(`/auth/login?error=${encodeURIComponent(error.message)}`)
+    }
+
+    return redirect('/auth/login?message=Check your email for password reset instructions')
+}

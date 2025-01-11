@@ -1,13 +1,15 @@
 import { Container, Flex, Box, Button, Heading, TextField, Text, Card } from '@radix-ui/themes'
 import Link from 'next/link'
-import { login, signInWithGoogle } from '@/app/auth/actions'
+import { login, signInWithGoogle, resetPassword } from '@/app/auth/actions'
 
 type SearchParams = { [key: string]: string | string[] | undefined }
 
 export default async function SignInPage(props: { searchParams: Promise<SearchParams> }) {
     const searchParams = await props.searchParams;
     const errorParam = searchParams.error;
+    const messageParam = searchParams.message;
     const error = Array.isArray(errorParam) ? errorParam[0] : errorParam;
+    const message = Array.isArray(messageParam) ? messageParam[0] : messageParam;
 
     return (
         <Container size="1">
@@ -36,6 +38,13 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                             </Text>
                         </Box>
                     )}
+                    {message && (
+                        <Box mb="4">
+                            <Text size="2" color="green" weight="medium">
+                                {decodeURIComponent(message)}
+                            </Text>
+                        </Box>
+                    )}
 
                     <form>
                         <Flex direction="column" gap="5">
@@ -56,6 +65,18 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                                 required
                                 autoComplete="current-password"
                             />
+
+                            <Button
+                                size="2"
+                                variant="ghost"
+                                formAction={resetPassword}
+                                formNoValidate
+                                style={{ paddingRight: 0, paddingTop: 0, paddingBottom: 0, paddingLeft: 12, width: '100%', justifyContent: 'flex-start' }}
+                            >
+                                <Text size="2" color="gray">
+                                    forgot password?
+                                </Text>
+                            </Button>
 
                             <Button
                                 size="3"
