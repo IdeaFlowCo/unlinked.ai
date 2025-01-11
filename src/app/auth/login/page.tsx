@@ -2,12 +2,12 @@ import { Container, Flex, Box, Button, Heading, TextField, Text, Card } from '@r
 import Link from 'next/link'
 import { login, signInWithGoogle } from '@/app/auth/actions'
 
-export default async function SignInPage({
-    searchParams
-}: {
-    searchParams: { error?: string }
-}) {
-    const error = searchParams.error;
+type SearchParams = { [key: string]: string | string[] | undefined }
+
+export default async function SignInPage(props: { searchParams: Promise<SearchParams> }) {
+    const searchParams = await props.searchParams;
+    const errorParam = searchParams.error;
+    const error = Array.isArray(errorParam) ? errorParam[0] : errorParam;
 
     return (
         <Container size="1">
