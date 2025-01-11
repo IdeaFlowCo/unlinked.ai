@@ -14,7 +14,16 @@ export default async function SignUpPage({
         <Container size="1">
             <Flex direction="column" align="center" gap="6" py="9">
                 <Box mb="4" style={{ textAlign: 'center' }}>
-                    <Heading size="8" mt="4">unlinked.ai</Heading>
+                    <Heading
+                        size="8"
+                        style={{
+                            background: 'linear-gradient(to right, var(--accent-9), var(--accent-11))',
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                        }}
+                    >
+                        unlinked.ai
+                    </Heading>
                     <Text size="3" mt="2">
                         your ai-powered supernetwork
                     </Text>
@@ -31,18 +40,16 @@ export default async function SignUpPage({
 
                     <form>
                         <Flex direction="column" gap="5">
-                            <Box>
-                                <TextField.Root
-                                    size="3"
-                                    type="text"
-                                    name="fullName"
-                                    placeholder="full name"
-                                    required
-                                    autoComplete="name"
-                                    pattern="^[a-zA-Z\s\-']{2,100}$"
-                                    title="Please enter your full name (first and last name) using only letters, spaces, hyphens, and apostrophes"
-                                />
-                            </Box>
+                            <TextField.Root
+                                size="3"
+                                type="text"
+                                name="fullName"
+                                placeholder="full name"
+                                required
+                                autoComplete="name"
+                                pattern="^[a-zA-Z\s\-']{2,100}$"
+                                title="Please enter your full name (first and last name) using only letters, spaces, hyphens, and apostrophes"
+                            />
 
                             <TextField.Root
                                 size="3"

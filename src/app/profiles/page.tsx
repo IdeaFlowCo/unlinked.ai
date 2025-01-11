@@ -23,7 +23,7 @@ export default async function ProfilesPage() {
     .range(0, 9)
 
   return (
-    <Container size="3" style={{ marginTop: '65px' }}>
+    <Container size="3">
       <ProfilesContainer initialProfiles={initialProfiles || []} />
     </Container>
   )

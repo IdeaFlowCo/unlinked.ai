@@ -1,7 +1,8 @@
 // components/header.tsx
-import { Flex, Heading, Link, Button, Text, Box } from '@radix-ui/themes'
+import { Flex, Heading, Link, Button, Text, Box, Avatar, HoverCard } from '@radix-ui/themes'
 import { createClient } from '@/utils/supabase/server'
 import { signOut } from '@/app/auth/actions'
+import { ExitIcon, PersonIcon, MagnifyingGlassIcon, EnterIcon, PlusIcon } from '@radix-ui/react-icons'
 
 interface HeaderProps {
     showSearch?: boolean
@@ -54,27 +55,114 @@ export default async function Header({ showSearch = false }: HeaderProps) {
                 <Flex align="center" gap={{ initial: '2', sm: '4' }}>
                     {user ? (
                         <Flex align="center" gap={{ initial: '2', sm: '4' }} wrap="wrap">
-                            <Link href={`/profiles/${profile!.id}`} className="no-underline">
-                                <Text size="2" color="gray">Hello {profile?.full_name || 'there'}</Text>
-                            </Link>
-                            <form>
-                                <Button size="2" variant="soft" formAction={signOut}>
-                                    Sign out
-                                </Button>
-                            </form>
+                            <HoverCard.Root>
+                                <HoverCard.Trigger>
+                                    <Link href="/profiles">
+                                        <Button size={{ initial: '3', sm: '3' }} variant="solid" style={{ width: '120px' }}>
+                                            <MagnifyingGlassIcon width="16" height="16" />
+                                        </Button>
+                                    </Link>
+                                </HoverCard.Trigger>
+                                <HoverCard.Content size="2">
+                                    <Text as="div" weight="bold">browse profiles</Text>
+                                    <Text as="div" color="gray" size="2">
+                                        find your next connection
+                                    </Text>
+                                </HoverCard.Content>
+                            </HoverCard.Root>
+
+                            <HoverCard.Root>
+                                <HoverCard.Trigger>
+                                    <Link href={`/profiles/${profile!.id}`} className="no-underline">
+                                        <Button size={{ initial: '3', sm: '3' }} variant="soft" style={{ width: '60px' }}>
+                                            <PersonIcon width="16" height="16" />
+                                        </Button>
+                                    </Link>
+                                </HoverCard.Trigger>
+                                <HoverCard.Content size="2">
+                                    <Flex gap="4">
+                                        <Avatar
+                                            size="3"
+                                            fallback={profile?.full_name?.[0] || '?'}
+                                            radius="full"
+                                        />
+                                        <Box>
+                                            <Text as="div" weight="bold">
+                                                {profile?.full_name || 'anonymous'}
+                                            </Text>
+                                            <Text as="div" color="gray" size="2">
+                                                view and customize your profile
+                                            </Text>
+                                        </Box>
+                                    </Flex>
+                                </HoverCard.Content>
+                            </HoverCard.Root>
+
+                            <HoverCard.Root>
+                                <HoverCard.Trigger>
+                                    <form>
+                                        <Button size={{ initial: '3', sm: '3' }} variant="soft" formAction={signOut}>
+                                            <ExitIcon width="16" height="16" />
+                                        </Button>
+                                    </form>
+                                </HoverCard.Trigger>
+                                <HoverCard.Content size="2">
+                                    <Text as="div" weight="bold">sign out</Text>
+                                    <Text as="div" color="gray" size="2">
+                                        see you next time!
+                                    </Text>
+                                </HoverCard.Content>
+                            </HoverCard.Root>
                         </Flex>
                     ) : (
                         <Flex gap={{ initial: '2', sm: '4' }} wrap="wrap">
-                            <Link href="/auth/login">
-                                <Button size={{ initial: '2', sm: '3' }} variant="soft">
-                                    sign in
-                                </Button>
-                            </Link>
-                            <Link href="/auth/signup">
-                                <Button size={{ initial: '2', sm: '3' }} variant="solid">
-                                    create account
-                                </Button>
-                            </Link>
+                            <HoverCard.Root>
+                                <HoverCard.Trigger>
+                                    <Link href="/profiles">
+                                        <Button size={{ initial: '3', sm: '3' }} variant="solid" style={{ width: '120px' }}>
+                                            <MagnifyingGlassIcon width="16" height="16" />
+                                        </Button>
+                                    </Link>
+                                </HoverCard.Trigger>
+                                <HoverCard.Content size="2">
+                                    <Text as="div" weight="bold">browse profiles</Text>
+                                    <Text as="div" color="gray" size="2">
+                                        find your next connection
+                                    </Text>
+                                </HoverCard.Content>
+                            </HoverCard.Root>
+
+                            <HoverCard.Root>
+                                <HoverCard.Trigger>
+                                    <Link href="/auth/login">
+                                        <Button size={{ initial: '3', sm: '3' }} variant="soft">
+                                            <EnterIcon width="16" height="16" />
+                                        </Button>
+                                    </Link>
+                                </HoverCard.Trigger>
+                                <HoverCard.Content size="2">
+                                    <Text as="div" weight="bold">sign in</Text>
+                                    <Text as="div" color="gray" size="2">
+                                        welcome back!
+                                    </Text>
+                                </HoverCard.Content>
+                            </HoverCard.Root>
+
+                            <HoverCard.Root>
+                                <HoverCard.Trigger>
+                                    <Link href="/auth/signup">
+                                        <Button size={{ initial: '3', sm: '3' }} variant="soft">
+                                            <PlusIcon width="16" height="16" />
+                                        </Button>
+                                    </Link>
+                                </HoverCard.Trigger>
+                                <HoverCard.Content size="2">
+                                    <Text as="div" weight="bold">create account</Text>
+                                    <Text as="div" color="gray" size="2">
+                                        join the community
+                                    </Text>
+                                </HoverCard.Content>
+                            </HoverCard.Root>
                         </Flex>
                     )}
                 </Flex>
