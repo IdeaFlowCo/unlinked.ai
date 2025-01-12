@@ -353,7 +353,12 @@ export default function EditProfileForm({ profile, onCancel, onSave }: EditProfi
                 padding: 'var(--space-3)',
                 zIndex: 9
             }}>
-                <Flex align="center" gap="3" justify="end" style={{ maxWidth: '1145px', margin: '0 auto', width: '100%', paddingInline: 'var(--space-5)' }}>
+                <Flex align="center" gap="3" justify="end" style={{
+                    maxWidth: '800px',
+                    margin: '0 auto',
+                    width: '100%',
+                    paddingInline: 'var(--space-3)'
+                }}>
                     <Button
                         type="button"
                         size={{ initial: '3', sm: '3' }}
@@ -368,7 +373,7 @@ export default function EditProfileForm({ profile, onCancel, onSave }: EditProfi
                         size={{ initial: '3', sm: '3' }}
                         variant="solid"
                         color="violet"
-                        style={{ width: '200px' }}
+                        style={{ width: '50px' }}
                         disabled={isLoading || !isDirty}
                         form="edit-profile-form"
                     >
@@ -378,11 +383,16 @@ export default function EditProfileForm({ profile, onCancel, onSave }: EditProfi
             </Box>
             <Box />
             <form id="edit-profile-form" onSubmit={handleSubmit(onSubmit)} noValidate>
-                <Flex direction="column" gap="6" style={{ marginTop: 0 }}>
+                <Flex direction="column" gap="6" style={{
+                    marginTop: 0,
+                    maxWidth: '800px',
+                    margin: '0 auto',
+                    padding: 'var(--space-3)'
+                }}>
                     <Card size="4" className="profile-hero-card">
                         <Flex gap="6" p="6">
                             <Avatar
-                                size="7"
+                                size="5"
                                 fallback={(profile.full_name?.charAt(0) || 'U').toUpperCase()}
                                 style={{
                                     border: '3px solid var(--accent-6)',
@@ -391,38 +401,60 @@ export default function EditProfileForm({ profile, onCancel, onSave }: EditProfi
                             />
                             <Box style={{ flex: 1 }}>
                                 <Flex align="center" gap="3" mb="2" justify="between">
-                                    <Flex align="center" gap="3">
-                                        <Heading size="6" style={{
-                                            background: 'linear-gradient(to right, var(--accent-9), var(--accent-11))',
-                                            WebkitBackgroundClip: 'text',
-                                            WebkitTextFillColor: 'transparent'
+                                    <Flex align="center" gap="3" wrap="wrap">
+                                        <Box style={{
+                                            maxWidth: '600px',
+                                            flex: 1,
+                                            minWidth: 0
                                         }}>
-                                            <Controller
-                                                name="full_name"
-                                                control={control}
-                                                render={({ field: { value, ...field } }) => (
-                                                    <input
-                                                        {...field}
-                                                        value={value || ''}
-                                                        placeholder="Your Name"
-                                                        style={{
-                                                            width: '100%',
-                                                            background: 'none',
-                                                            border: 'none',
-                                                            outline: 'none',
-                                                            padding: 0,
-                                                            margin: 0,
-                                                            fontSize: 'inherit',
-                                                            lineHeight: 'inherit',
-                                                            fontWeight: 'inherit',
-                                                            color: 'inherit',
-                                                            WebkitBackgroundClip: 'text',
-                                                            WebkitTextFillColor: 'transparent'
-                                                        }}
-                                                    />
-                                                )}
-                                            />
-                                        </Heading>
+                                            <Heading size="6" style={{
+                                                background: 'linear-gradient(to right, var(--accent-9), var(--accent-11))',
+                                                WebkitBackgroundClip: 'text',
+                                                WebkitTextFillColor: 'transparent',
+                                                width: '100%'
+                                            }}>
+                                                <Controller
+                                                    name="full_name"
+                                                    control={control}
+                                                    render={({ field: { value, onChange, ...field } }) => (
+                                                        <div
+                                                            {...field}
+                                                            contentEditable
+                                                            suppressContentEditableWarning
+                                                            onInput={(e) => {
+                                                                onChange(e.currentTarget.textContent);
+                                                                // Adjust height
+                                                                e.currentTarget.style.height = 'auto';
+                                                                e.currentTarget.style.height = e.currentTarget.scrollHeight + 'px';
+                                                            }}
+                                                            onBlur={(e) => {
+                                                                onChange(e.currentTarget.textContent);
+                                                            }}
+                                                            dangerouslySetInnerHTML={{ __html: value || 'Your Name' }}
+                                                            style={{
+                                                                width: '100%',
+                                                                background: 'none',
+                                                                border: 'none',
+                                                                outline: 'none',
+                                                                padding: 0,
+                                                                margin: 0,
+                                                                fontSize: 'inherit',
+                                                                lineHeight: '1.4',
+                                                                fontWeight: 'inherit',
+                                                                color: 'inherit',
+                                                                WebkitBackgroundClip: 'text',
+                                                                WebkitTextFillColor: 'transparent',
+                                                                whiteSpace: 'pre-wrap',
+                                                                wordBreak: 'break-word',
+                                                                minHeight: '1.4em',
+                                                                opacity: value ? 1 : 0.5,
+                                                                display: 'block'
+                                                            }}
+                                                        />
+                                                    )}
+                                                />
+                                            </Heading>
+                                        </Box>
                                         {!profile.user_id && (
                                             <Badge size="1" variant="soft" color="gray">
                                                 Shadow
@@ -581,8 +613,10 @@ export default function EditProfileForm({ profile, onCancel, onSave }: EditProfi
                                                                         fontSize: 'inherit',
                                                                         lineHeight: 'inherit',
                                                                         fontWeight: 'inherit',
-                                                                        color: 'inherit',
-                                                                        width: '130px'
+                                                                        color: 'var(--gray-11)',
+                                                                        width: '130px',
+                                                                        opacity: 1,
+                                                                        WebkitTextFillColor: 'var(--gray-11)'
                                                                     }}
                                                                 />
                                                             )}
@@ -605,8 +639,10 @@ export default function EditProfileForm({ profile, onCancel, onSave }: EditProfi
                                                                         fontSize: 'inherit',
                                                                         lineHeight: 'inherit',
                                                                         fontWeight: 'inherit',
-                                                                        color: 'inherit',
-                                                                        width: '130px'
+                                                                        color: 'var(--gray-11)',
+                                                                        width: '130px',
+                                                                        opacity: 1,
+                                                                        WebkitTextFillColor: 'var(--gray-11)'
                                                                     }}
                                                                 />
                                                             )}
@@ -760,8 +796,10 @@ export default function EditProfileForm({ profile, onCancel, onSave }: EditProfi
                                                                         fontSize: 'inherit',
                                                                         lineHeight: 'inherit',
                                                                         fontWeight: 'inherit',
-                                                                        color: 'inherit',
-                                                                        width: '130px'
+                                                                        color: 'var(--gray-11)',
+                                                                        width: '130px',
+                                                                        opacity: 1,
+                                                                        WebkitTextFillColor: 'var(--gray-11)'
                                                                     }}
                                                                 />
                                                             )}
@@ -784,8 +822,10 @@ export default function EditProfileForm({ profile, onCancel, onSave }: EditProfi
                                                                         fontSize: 'inherit',
                                                                         lineHeight: 'inherit',
                                                                         fontWeight: 'inherit',
-                                                                        color: 'inherit',
-                                                                        width: '130px'
+                                                                        color: 'var(--gray-11)',
+                                                                        width: '130px',
+                                                                        opacity: 1,
+                                                                        WebkitTextFillColor: 'var(--gray-11)'
                                                                     }}
                                                                 />
                                                             )}
