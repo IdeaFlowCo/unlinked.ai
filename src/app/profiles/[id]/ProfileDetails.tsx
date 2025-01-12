@@ -51,11 +51,16 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
     }
 
     return (
-        <Flex direction="column" gap="6">
+        <Flex direction="column" gap="6" style={{
+            maxWidth: '800px',
+            margin: '0 auto',
+            padding: 'var(--space-3)',
+            width: '100%'
+        }}>
             <Card size="4" className="profile-hero-card">
                 <Flex gap="6" p="6">
                     <Avatar
-                        size="7"
+                        size="5"
                         fallback={fullName.charAt(0).toUpperCase()}
                         style={{
                             border: '3px solid var(--accent-6)',
