@@ -67,6 +67,15 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                             />
 
                             <Button
+                                size="3"
+                                variant="solid"
+                                formAction={login}
+                                style={{ width: '100%' }}
+                            >
+                                sign in
+                            </Button>
+
+                            <Button
                                 size="2"
                                 variant="ghost"
                                 formAction={resetPassword}
@@ -76,15 +85,6 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                                 <Text size="2" color="gray">
                                     forgot password?
                                 </Text>
-                            </Button>
-
-                            <Button
-                                size="3"
-                                variant="solid"
-                                formAction={login}
-                                style={{ width: '100%' }}
-                            >
-                                sign in
                             </Button>
 
                             <Link href="/auth/signup" style={{ width: '100%' }}>
