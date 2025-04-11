@@ -56,7 +56,7 @@ export default function ProfilesContainer({
     return () => {
       debouncedSearch.cancel();
     };
-  }, [debouncedSearch]);
+  }, [debouncedSearch, isAISearchActive]);
 
   // Function to search with AI using our backend API
   const searchWithAI = async (query: string) => {
@@ -215,7 +215,7 @@ export default function ProfilesContainer({
         />
         {isAISearchActive && (
           <Badge size="2" color="iris">
-            Showing AI search results for "{searchQuery}"
+            Showing AI search results for &quot;{searchQuery}&quot;
           </Badge>
         )}
       </Flex>
