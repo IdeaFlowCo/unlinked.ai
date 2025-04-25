@@ -14,7 +14,6 @@ import { Text, Card, Flex, Badge, Button } from "@radix-ui/themes";
 import debounce from "lodash/debounce";
 import type { Profile } from "@/components/ProfileList";
 import ProfileList from "@/components/ProfileList";
-import SearchInput from "@/components/SearchInput";
 import { StarFilledIcon } from "@radix-ui/react-icons";
 
 const DEBOUNCE_MS = 300;
@@ -191,28 +190,38 @@ export default function ProfilesContainer({
           borderBottom: "1px solid var(--gray-4)",
         }}
       >
-        <SearchInput
-          onSearch={(query: string) => {
-            setSearchQuery(query);
-            debouncedSearch(query);
-          }}
-          value={searchQuery}
-          placeholder="Filter professionals..."
-          isLoading={isPending || isLoading}
-          searchWithAI={
-            <Button
-              variant="soft"
-              color="iris"
-              onClick={() => {
-                searchWithAI(searchQuery);
-              }}
-              disabled={isAISearchLoading || !searchQuery.trim()}
-            >
-              <StarFilledIcon />
-              {isAISearchLoading ? "Searching..." : "Search with AI"}
-            </Button>
-          }
-        />
+        <Flex gap="2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              const query = e.target.value;
+              setSearchQuery(query);
+              if (!isAISearchActive) {
+                debouncedSearch(query);
+              }
+            }}
+            placeholder="Filter professionals..."
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              borderRadius: "6px",
+              border: "1px solid var(--gray-6)",
+              fontSize: "14px",
+            }}
+          />
+          <Button
+            variant="soft"
+            color="iris"
+            onClick={() => {
+              searchWithAI(searchQuery);
+            }}
+            disabled={isAISearchLoading || !searchQuery.trim()}
+          >
+            <StarFilledIcon />
+            {isAISearchLoading ? "Searching..." : "Search with AI"}
+          </Button>
+        </Flex>
         {isAISearchActive && (
           <Badge size="2" color="iris">
             Showing AI search results for &quot;{searchQuery}&quot;

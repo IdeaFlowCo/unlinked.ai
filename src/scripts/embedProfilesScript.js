@@ -1,7 +1,8 @@
-import { createClient } from "@supabase/supabase-js";
-import { Pinecone } from "@pinecone-database/pinecone";
-import OpenAI from "openai";
-import dotenv from "dotenv";
+const { createClient } = require("@supabase/supabase-js");
+const { Pinecone } = require("@pinecone-database/pinecone");
+const OpenAI = require("openai");
+const dotenv = require("dotenv");
+const { v4: uuidv4 } = require("uuid");
 
 // Load env variables since we're in a script
 dotenv.config();
@@ -9,8 +10,8 @@ dotenv.config();
 async function main() {
   // Initialize Supabase client with service role key to bypass RLS
   const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
   );
 
   // Initialize OpenAI client
@@ -20,11 +21,11 @@ async function main() {
 
   // Initialize Pinecone client
   const pc = new Pinecone({
-    apiKey: process.env.PINECONE_API_KEY!,
+    apiKey: process.env.PINECONE_API_KEY,
   });
   const index = pc.index("unlinked");
 
-  async function embedTexts(texts: string[]): Promise<number[][]> {
+  async function embedTexts(texts) {
     const response = await openai.embeddings.create({
       model: "text-embedding-3-large",
       input: texts,
@@ -58,7 +59,7 @@ async function main() {
           hasMore = false;
         }
 
-        // Process profiles in batches of 50
+        // Process profiles in batches
         for (let i = 0; i < (profiles?.length || 0); i += batchSize) {
           const batch = profiles?.slice(i, i + batchSize) || [];
           const validProfiles = batch.filter((profile) => profile.headline);
@@ -72,10 +73,11 @@ async function main() {
 
             // Prepare batch upsert data
             const upsertData = validProfiles.map((profile, index) => ({
-              id: profile.id,
+              id: uuidv4(),
               values: embeddings[index],
               metadata: {
                 headline: profile.headline,
+                profileId: profile.id,
               },
             }));
 

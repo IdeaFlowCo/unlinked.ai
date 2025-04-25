@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "embed-profiles": "ts-node --esm src/scripts/embedProfilesScript.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -37,11 +38,14 @@
     "@types/papaparse": "^5.3.15",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/uuid": "^10.0.0",
     "eslint": "^9",
     "eslint-config-next": "15.1.2",
     "postcss": "^8",
     "supabase": "^2.1.1",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3",
+    "uuid": "^11.1.0"
   }
 }
