@@ -17,6 +17,21 @@ import { useEffect, useState, useMemo } from "react";
 import SearchInput from "@/components/SearchInput";
 import { StarFilledIcon } from "@radix-ui/react-icons";
 
+interface Profile {
+  id: string;
+  full_name?: string;
+  headline?: string;
+}
+
+interface Connection {
+  id: string;
+  profile_id_a: string;
+  profile_id_b: string;
+  profile_a: Profile;
+  profile_b: Profile;
+  created_at: string;
+}
+
 const PAGE_SIZE = 50;
 
 export default function NetworkConnections({
@@ -29,7 +44,7 @@ export default function NetworkConnections({
   const [searchQuery, setSearchQuery] = useState("");
   const [isAISearchActive, setIsAISearchActive] = useState(false);
   const [isAISearchLoading, setIsAISearchLoading] = useState(false);
-  const [AISearchResults, setAISearchResults] = useState<any[]>([]);
+  const [AISearchResults, setAISearchResults] = useState<Connection[]>([]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery({
@@ -141,7 +156,7 @@ export default function NetworkConnections({
       />
       {isAISearchActive && (
         <Text size="2" color="gray">
-          Showing AI search results for "{searchQuery}"
+          Showing AI search results for &quot;{searchQuery}&quot;
         </Text>
       )}
       {connections.map((conn) => {
