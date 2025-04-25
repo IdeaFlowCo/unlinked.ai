@@ -1,3 +1,4 @@
+// @ts-nocheck
 const { createClient } = require("@supabase/supabase-js");
 const { Pinecone } = require("@pinecone-database/pinecone");
 const OpenAI = require("openai");

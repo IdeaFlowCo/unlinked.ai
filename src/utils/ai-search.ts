@@ -57,27 +57,6 @@ export async function semanticSearch(
     filterIds ? { metadata: { profileId: { $in: filterIds } } } : "no filter"
   );
 
-  // First try without filter to see if there are any results at all
-  const unfilteredResult = await index.query({
-    vector: embedding,
-    topK,
-    includeMetadata: true,
-  });
-
-  // Debug log the full structure of the first unfiltered result
-  console.log(
-    "First unfiltered result structure:",
-    unfilteredResult.matches?.[0]
-      ? JSON.stringify(unfilteredResult.matches[0], null, 2)
-      : "No matches"
-  );
-
-  console.log(
-    "Unfiltered results count:",
-    unfilteredResult.matches?.length || 0
-  );
-
-  // Then try with filter
   const queryResult = await index.query({
     vector: embedding,
     topK,
@@ -98,8 +77,6 @@ export async function semanticSearch(
   //       2
   //     )
   //   );
-
-  console.log("Filtered results count:", queryResult.matches || 0);
 
   // Filter and map results
   return (
