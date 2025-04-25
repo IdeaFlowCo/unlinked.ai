@@ -98,9 +98,7 @@ export default function NetworkConnections({
 
   // Turn off AI search when user types new search query
   useEffect(() => {
-    if (isAISearchActive) {
-      setIsAISearchActive(false);
-    }
+    setIsAISearchActive(false);
   }, [searchQuery]);
 
   const connections = useMemo(() => {
@@ -189,6 +187,10 @@ export default function NetworkConnections({
           ) : hasNextPage ? (
             <Text size="2" color="gray">
               Load more
+            </Text>
+          ) : isAISearchLoading ? (
+            <Text size="2" color="gray">
+              Searching connections...
             </Text>
           ) : (
             <Text size="2" color="gray">

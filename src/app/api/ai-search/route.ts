@@ -3,6 +3,16 @@ import { createClient } from "@/utils/supabase/server";
 import { semanticSearch } from "@/utils/ai-search";
 import type { Profile } from "@/components/ProfileList";
 
+type SemanticSearchResult = {
+  id: string;
+  score: number;
+  values: any[];
+  metadata: {
+    headline: string;
+    profileId: string;
+  };
+};
+
 export async function POST(request: NextRequest) {
   try {
     // Parse the request body
@@ -16,14 +26,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Get semantically similar profiles
-    const searchResults = await semanticSearch(query);
+    const searchResults = (await semanticSearch(
+      query
+    )) as SemanticSearchResult[];
 
     if (searchResults.length === 0) {
       return NextResponse.json({ profiles: [] });
     }
 
     // Extract profile IDs from the results
-    const profileIds = searchResults.map((result) => result.id);
+    const profileIds = searchResults
+      .filter(
+        (result): result is SemanticSearchResult =>
+          result.metadata?.profileId != null
+      )
+      .map((result) => result.metadata.profileId);
 
     // Fetch the full profile data from Supabase using the IDs
     const supabase = await createClient();

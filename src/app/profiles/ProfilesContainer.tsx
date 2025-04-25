@@ -28,7 +28,7 @@ export default function ProfilesContainer({
 }: ProfilesContainerProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const { ref, inView } = useInView();
   const supabase = createClient();
 
@@ -77,6 +77,8 @@ export default function ProfilesContainer({
       }
 
       const data = await response.json();
+      console.log("response data:", data);
+
       setAISearchResults(data.profiles || []);
       setIsAISearchActive(true);
     } catch (error) {
@@ -141,7 +143,13 @@ export default function ProfilesContainer({
     if (inView && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     }
-  }, [inView, fetchNextPage, hasNextPage, isFetchingNextPage]);
+  }, [
+    inView,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isAISearchActive,
+  ]);
 
   // Turn off AI search when user types new search query
   useEffect(() => {
