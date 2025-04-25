@@ -6,7 +6,7 @@ import type { Profile } from "@/components/ProfileList";
 type SemanticSearchResult = {
   id: string;
   score: number;
-  values: any[];
+  values: number[];
   metadata: {
     headline: string;
     profileId: string;

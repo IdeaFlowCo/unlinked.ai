@@ -55,7 +55,7 @@ export default function ProfilesContainer({
     return () => {
       debouncedSearch.cancel();
     };
-  }, [debouncedSearch, isAISearchActive]);
+  }, [debouncedSearch]);
 
   // Function to search with AI using our backend API
   const searchWithAI = async (query: string) => {
@@ -143,20 +143,12 @@ export default function ProfilesContainer({
     if (inView && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     }
-  }, [
-    inView,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    isAISearchActive,
-  ]);
+  }, [inView, fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   // Turn off AI search when user types new search query
   useEffect(() => {
-    if (isAISearchActive) {
-      console.log("new search query, turning off AI search: ", searchQuery);
-      setIsAISearchActive(false);
-    }
+    console.log("new search query, turning off AI search: ", searchQuery);
+    setIsAISearchActive(false);
   }, [searchQuery]);
 
   const allProfiles =
