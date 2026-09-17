@@ -1,6 +1,7 @@
 import { Container, Flex, Box, Button, Heading, TextField, Text, Card } from '@radix-ui/themes'
 import Link from 'next/link'
 import { login, signInWithGoogle, resetPassword } from '@/app/auth/actions'
+import { LINKEDIN_EXPORT_URL } from '@/app/onboarding/types'
 
 type SearchParams = { [key: string]: string | string[] | undefined }
 
@@ -117,6 +118,23 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                             google
                         </Button>
                     </form>
+                </Card>
+
+                <Card size="2" style={{ width: '100%' }}>
+                    <Flex direction="column" gap="3" align="center" style={{ textAlign: 'center' }}>
+                        <Text size="2" color="gray">
+                            linkedin takes 1–3 days to prepare your data export. start it now so it&apos;s ready when you sign up.
+                        </Text>
+                        <a
+                            href={LINKEDIN_EXPORT_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            <Button size="2" variant="soft">
+                                request my linkedin export →
+                            </Button>
+                        </a>
+                    </Flex>
                 </Card>
 
                 <Box style={{ textAlign: 'center' }}>
