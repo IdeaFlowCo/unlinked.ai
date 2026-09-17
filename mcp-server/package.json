@@ -1,0 +1,35 @@
+{
+  "name": "@unlinked/mcp-server",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for unlinked.ai — lets Claude / Cursor / any MCP client search your network, look up profiles, draft intros, and list your LinkedIn imports via the unlinked.ai agent API.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "unlinked-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "unlinked",
+    "linkedin",
+    "claude",
+    "cursor"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "typescript": "5.8.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
