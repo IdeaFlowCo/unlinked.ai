@@ -23,6 +23,11 @@ export default async function ProfileDetail({
     return <div>Error or not found</div>
   }
 
+  // AI search runs against the signed-in user's own network, so only offer it
+  // when they're looking at their own profile.
+  const { data: { user } } = await supabase.auth.getUser()
+  const isOwnProfile = Boolean(user && profile.user_id === user.id)
+
   return (
     <Container size="4" pt="4">
       <Grid
@@ -33,7 +38,7 @@ export default async function ProfileDetail({
           <ProfileDetails profile={profile} />
         </Box>
         <Box>
-          <NetworkConnections profileId={id} />
+          <NetworkConnections profileId={id} canSearchNetwork={isOwnProfile} />
         </Box>
       </Grid>
     </Container>
