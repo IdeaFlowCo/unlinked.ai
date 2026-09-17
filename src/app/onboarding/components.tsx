@@ -152,6 +152,9 @@ export function ExportStep({ onNext, onLinkedInUrl, isProcessing, error }: Expor
             paste your profile link below and we&apos;ll get started 😊
           </Text>
         </Flex>
+        <Text size="1" color="gray" style={{ maxWidth: '320px', textAlign: 'center', lineHeight: '1.4' }}>
+          when linkedin asks, choose &quot;download larger data archive&quot; — it includes your profile, positions, education &amp; skills, not just connections
+        </Text>
         <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: '320px' }}>
           <Flex direction="column" gap="3">
             <input
