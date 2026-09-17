@@ -14,8 +14,8 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
 
     return (
         <Container size="1">
-            <Flex direction="column" align="center" gap="6" py="9">
-                <Box mb="4" style={{ textAlign: 'center' }}>
+            <Flex direction="column" align="center" gap="4" py="5">
+                <Box mb="2" style={{ textAlign: 'center' }}>
                     <Heading
                         size="8"
                         style={{
@@ -31,7 +31,7 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                     </Text>
                 </Box>
 
-                <Card size="4" style={{ width: '100%' }}>
+                <Card size="3" style={{ width: '100%' }}>
                     {error && (
                         <Box mb="4">
                             <Text size="2" color="red" weight="medium">
@@ -48,7 +48,7 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                     )}
 
                     <form>
-                        <Flex direction="column" gap="5">
+                        <Flex direction="column" gap="4">
                             <TextField.Root
                                 size="3"
                                 type="email"
@@ -100,7 +100,7 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                         </Flex>
                     </form>
 
-                    <Box my="5">
+                    <Box my="3">
                         <Flex align="center" gap="4">
                             <Box style={{ height: '1px', backgroundColor: 'var(--gray-a5)', flex: 1 }} />
                             <Text size="2">or continue with</Text>
@@ -123,7 +123,7 @@ export default async function SignInPage(props: { searchParams: Promise<SearchPa
                 <Card size="2" style={{ width: '100%' }}>
                     <Flex direction="column" gap="3" align="center" style={{ textAlign: 'center' }}>
                         <Text size="2" color="gray">
-                            linkedin takes 1–3 days to prepare your data export. start it now so it&apos;s ready when you sign up.
+                            linkedin takes 1–3 days to prepare your full data archive. start it now so it&apos;s ready when you sign up — choose &quot;download larger data archive&quot; (the quick connections-only export skips your own profile).
                         </Text>
                         <a
                             href={LINKEDIN_EXPORT_URL}
