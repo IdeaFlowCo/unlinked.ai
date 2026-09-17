@@ -16,9 +16,10 @@ import {
 } from "@radix-ui/themes";
 import type { Database } from "@/utils/supabase/types";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import EditProfileForm from "./EditProfileForm";
 import { createClient } from "@/utils/supabase/client";
-import { Pencil2Icon } from "@radix-ui/react-icons";
+import { Pencil2Icon, LockClosedIcon } from "@radix-ui/react-icons";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"] & {
   positions: (Database["public"]["Tables"]["positions"]["Row"] & {
@@ -111,26 +112,49 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
                 )}
               </Flex>
               {canEdit && (
-                <HoverCard.Root>
-                  <HoverCard.Trigger>
-                    <Button
-                      size={{ initial: "3", sm: "3" }}
-                      variant="soft"
-                      style={{ width: "60px" }}
-                      onClick={() => setIsEditing(true)}
-                    >
-                      <Pencil2Icon width="16" height="16" />
-                    </Button>
-                  </HoverCard.Trigger>
-                  <HoverCard.Content size="2">
-                    <Text as="div" weight="bold">
-                      edit profile
-                    </Text>
-                    <Text as="div" color="gray" size="2">
-                      customize your profile
-                    </Text>
-                  </HoverCard.Content>
-                </HoverCard.Root>
+                <Flex align="center" gap="2">
+                  <HoverCard.Root>
+                    <HoverCard.Trigger>
+                      <Button
+                        size={{ initial: "3", sm: "3" }}
+                        variant="soft"
+                        style={{ width: "60px" }}
+                        onClick={() => setIsEditing(true)}
+                      >
+                        <Pencil2Icon width="16" height="16" />
+                      </Button>
+                    </HoverCard.Trigger>
+                    <HoverCard.Content size="2">
+                      <Text as="div" weight="bold">
+                        edit profile
+                      </Text>
+                      <Text as="div" color="gray" size="2">
+                        customize your profile
+                      </Text>
+                    </HoverCard.Content>
+                  </HoverCard.Root>
+                  <HoverCard.Root>
+                    <HoverCard.Trigger>
+                      <Link href="/settings/agent-keys">
+                        <Button
+                          size={{ initial: "3", sm: "3" }}
+                          variant="soft"
+                          style={{ width: "60px" }}
+                        >
+                          <LockClosedIcon width="16" height="16" />
+                        </Button>
+                      </Link>
+                    </HoverCard.Trigger>
+                    <HoverCard.Content size="2">
+                      <Text as="div" weight="bold">
+                        agent keys
+                      </Text>
+                      <Text as="div" color="gray" size="2">
+                        let an ai agent act on your behalf
+                      </Text>
+                    </HoverCard.Content>
+                  </HoverCard.Root>
+                </Flex>
               )}
             </Flex>
             <Flex direction="column" gap="2">
