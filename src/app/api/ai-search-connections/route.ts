@@ -1,82 +1,51 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-import { semanticSearch, SemanticSearchResult } from "@/utils/ai-search";
+import { NextResponse } from "next/server";
+import { authenticate, jsonError } from "@/utils/agent-auth";
+import { normalizeLimit, searchContacts } from "@/utils/contact-search";
 
-export async function POST(request: NextRequest) {
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+/**
+ * DEPRECATED. Use POST /api/search-contacts.
+ *
+ * Kept as a thin alias for older clients. The previous implementation trusted a
+ * client-supplied `profileId` and would happily search any user's network; that
+ * parameter is now ignored and the caller's own profile is resolved from their
+ * session. Session auth only -- agents should call /api/search-contacts.
+ */
+export async function POST(request: Request) {
+  const auth = await authenticate(request, { allowAgentKey: false });
+  if (!auth.ok) return auth.response;
+
+  let body: unknown;
   try {
-    // Parse the request body
-    const { query, profileId } = await request.json();
-
-    if (!query || typeof query !== "string") {
-      return NextResponse.json(
-        { error: "Query must be a non-empty string" },
-        { status: 400 }
-      );
-    }
-
-    if (!profileId) {
-      return NextResponse.json(
-        { error: "Profile ID is required" },
-        { status: 400 }
-      );
-    }
-
-    // First, fetch all connections for the user
-    const supabase = await createClient();
-    const { data: connections, error: connectionsError } = await supabase
-      .from("connections")
-      .select(
-        `
-        *,
-        profile_b:profiles!connections_profile_id_b_fkey(*),
-        profile_a:profiles!connections_profile_id_a_fkey(*)
-      `
-      )
-      .or(`profile_id_a.eq.${profileId},profile_id_b.eq.${profileId}`);
-
-    if (connectionsError) {
-      console.error("Supabase error:", connectionsError);
-      return NextResponse.json(
-        { error: "Failed to fetch connections" },
-        { status: 500 }
-      );
-    }
-
-    // Get the IDs of all connected profiles
-    const connectedProfileIds = connections.map((conn) =>
-      conn.profile_id_a === profileId ? conn.profile_id_b : conn.profile_id_a
-    );
-
-    if (connectedProfileIds.length === 0) {
-      return NextResponse.json({ connections: [] });
-    }
-
-    // console.log("connectedProfileIds:", connectedProfileIds);
-
-    // Perform semantic search only on connected profiles
-    const searchResults = await semanticSearch(query, 10, connectedProfileIds);
-
-    if (searchResults.length === 0) {
-      return NextResponse.json({ connections: [] });
-    }
-
-    // Map search results back to connections
-    const sortedConnections = searchResults
-      .map((result: SemanticSearchResult) =>
-        connections.find(
-          (conn) =>
-            conn.profile_id_a === result.metadata?.profileId ||
-            conn.profile_id_b === result.metadata?.profileId
-        )
-      )
-      .filter(Boolean);
-
-    return NextResponse.json({ connections: sortedConnections });
-  } catch (error) {
-    console.error("AI search failed:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    body = await request.json();
+  } catch {
+    return jsonError(400, "body must be valid json");
   }
+
+  const rawQuery = (body as { query?: unknown } | null)?.query;
+  const query = typeof rawQuery === "string" ? rawQuery.trim() : "";
+  if (!query) return jsonError(400, "query must be a non-empty string");
+
+  const limit = normalizeLimit((body as { limit?: unknown } | null)?.limit);
+
+  const outcome = await searchContacts(auth.caller, query, limit);
+  if (!outcome.ok) return outcome.response;
+
+  // Legacy response shape: connection-ish rows with the caller on side A.
+  const connections = outcome.results.map((hit) => ({
+    id: `${outcome.selfProfileId}:${hit.profile.id}`,
+    profile_id_a: outcome.selfProfileId,
+    profile_id_b: hit.profile.id,
+    profile_a: { id: outcome.selfProfileId },
+    profile_b: hit.profile,
+    reason: hit.reason,
+    score: hit.score,
+  }));
+
+  return NextResponse.json(
+    { connections, deprecated: "use POST /api/search-contacts" },
+    { headers: { Deprecation: "true", Link: '</api/search-contacts>; rel="successor-version"' } }
+  );
 }

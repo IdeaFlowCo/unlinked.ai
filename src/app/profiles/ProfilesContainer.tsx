@@ -10,11 +10,10 @@ import {
   useMemo,
 } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { Text, Card, Flex, Badge, Button } from "@radix-ui/themes";
+import { Text, Card, Flex, Badge } from "@radix-ui/themes";
 import debounce from "lodash/debounce";
 import type { Profile } from "@/components/ProfileList";
 import ProfileList from "@/components/ProfileList";
-import { StarFilledIcon } from "@radix-ui/react-icons";
 
 const DEBOUNCE_MS = 300;
 const PAGE_SIZE = 10;
@@ -31,11 +30,6 @@ export default function ProfilesContainer({
   const [, startTransition] = useTransition();
   const { ref, inView } = useInView();
   const supabase = createClient();
-
-  // New state variables for AI search
-  const [AISearchResults, setAISearchResults] = useState<Profile[]>([]);
-  const [isAISearchActive, setIsAISearchActive] = useState(false);
-  const [isAISearchLoading, setIsAISearchLoading] = useState(false);
 
   const debouncedSetSearch = useCallback(
     (value: string) => {
@@ -56,38 +50,6 @@ export default function ProfilesContainer({
       debouncedSearch.cancel();
     };
   }, [debouncedSearch]);
-
-  // Function to search with AI using our backend API
-  const searchWithAI = async (query: string) => {
-    if (!query.trim()) return;
-
-    setIsAISearchLoading(true);
-    try {
-      // Call our backend API endpoint
-      const response = await fetch("/api/ai-search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ query }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("response data:", data);
-
-      setAISearchResults(data.profiles || []);
-      setIsAISearchActive(true);
-    } catch (error) {
-      console.error("AI Search failed:", error);
-      // You might want to show an error message to the user
-    } finally {
-      setIsAISearchLoading(false);
-    }
-  };
 
   const {
     data,
@@ -145,12 +107,6 @@ export default function ProfilesContainer({
     }
   }, [inView, fetchNextPage, hasNextPage, isFetchingNextPage]);
 
-  // Turn off AI search when user types new search query
-  useEffect(() => {
-    console.log("new search query, turning off AI search: ", searchQuery);
-    setIsAISearchActive(false);
-  }, [searchQuery]);
-
   const allProfiles =
     data?.pages
       .flat()
@@ -159,8 +115,7 @@ export default function ProfilesContainer({
           index === self.findIndex((p) => p.id === profile.id)
       ) || [];
 
-  // Determine which profiles to display based on AI search state
-  const displayedProfiles = isAISearchActive ? AISearchResults : allProfiles;
+  const displayedProfiles = allProfiles;
 
   if (error) {
     return (
@@ -197,9 +152,7 @@ export default function ProfilesContainer({
             onChange={(e) => {
               const query = e.target.value;
               setSearchQuery(query);
-              if (!isAISearchActive) {
-                debouncedSearch(query);
-              }
+              debouncedSearch(query);
             }}
             placeholder="Filter professionals..."
             style={{
@@ -210,43 +163,16 @@ export default function ProfilesContainer({
               fontSize: "14px",
             }}
           />
-          <Button
-            variant="soft"
-            color="iris"
-            onClick={() => {
-              searchWithAI(searchQuery);
-            }}
-            disabled={isAISearchLoading || !searchQuery.trim()}
-          >
-            <StarFilledIcon />
-            {isAISearchLoading ? "Searching..." : "Search with AI"}
-          </Button>
         </Flex>
-        {isAISearchActive && (
-          <Badge size="2" color="iris">
-            Showing AI search results for &quot;{searchQuery}&quot;
-          </Badge>
-        )}
       </Flex>
 
-      {displayedProfiles.length === 0 && !isLoading && !isAISearchLoading ? (
+      {displayedProfiles.length === 0 && !isLoading ? (
         <Card size="2">
           <Flex direction="column" gap="3" p="4" align="center">
             <Text size="3" color="gray">
-              {isAISearchActive
-                ? `No AI results found for "${searchQuery}"`
-                : debouncedQuery
+              {debouncedQuery
                 ? `No results found for "${debouncedQuery}"`
                 : "No profiles available"}
-            </Text>
-          </Flex>
-        </Card>
-      ) : isAISearchLoading ? (
-        <Card size="2">
-          <Flex direction="column" gap="3" p="4" align="center">
-            <div className="loading-spinner" />
-            <Text size="3" color="gray">
-              Loading AI search results...
             </Text>
           </Flex>
         </Card>
@@ -254,44 +180,40 @@ export default function ProfilesContainer({
         <ProfileList profiles={displayedProfiles} />
       )}
 
-      {!isAISearchActive && (
-        <Flex
-          ref={ref}
-          justify="center"
-          align="center"
-          py="4"
-          gap="2"
-          style={{
-            minHeight: "60px",
-            background:
-              "linear-gradient(to bottom, transparent, var(--gray-1))",
-          }}
-        >
-          {isFetchingNextPage ? (
-            <Flex gap="2" align="center">
-              <div className="loading-spinner" />
-              <Text size="2" color="gray">
-                Loading more profiles...
-              </Text>
-            </Flex>
-          ) : hasNextPage ? (
+      <Flex
+        ref={ref}
+        justify="center"
+        align="center"
+        py="4"
+        gap="2"
+        style={{
+          minHeight: "60px",
+          background: "linear-gradient(to bottom, transparent, var(--gray-1))",
+        }}
+      >
+        {isFetchingNextPage ? (
+          <Flex gap="2" align="center">
+            <div className="loading-spinner" />
             <Text size="2" color="gray">
-              Scroll to load more
+              Loading more profiles...
             </Text>
-          ) : allProfiles.length > 0 ? (
-            <Text size="2" color="gray">
-              No more profiles to load
-            </Text>
-          ) : null}
-        </Flex>
-      )}
+          </Flex>
+        ) : hasNextPage ? (
+          <Text size="2" color="gray">
+            Scroll to load more
+          </Text>
+        ) : allProfiles.length > 0 ? (
+          <Text size="2" color="gray">
+            No more profiles to load
+          </Text>
+        ) : null}
+      </Flex>
 
       {displayedProfiles.length > 0 && (
         <Flex justify="center" pb="4">
           <Badge size="1" variant="soft">
             {displayedProfiles.length} professional
             {displayedProfiles.length === 1 ? "" : "s"} found
-            {isAISearchActive ? " by AI" : ""}
           </Badge>
         </Flex>
       )}
