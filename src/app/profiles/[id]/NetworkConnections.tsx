@@ -29,15 +29,25 @@ interface Connection {
   profile_id_b: string;
   profile_a: Profile;
   profile_b: Profile;
-  created_at: string;
+  created_at?: string;
+  reason?: string;
+}
+
+interface ContactSearchHit {
+  profile: Profile;
+  score: number;
+  reason: string;
 }
 
 const PAGE_SIZE = 50;
 
 export default function NetworkConnections({
   profileId,
+  canSearchNetwork = false,
 }: {
   profileId: string;
+  /** AI search runs against the signed-in user's own network only. */
+  canSearchNetwork?: boolean;
 }) {
   const { ref, inView } = useInView();
   const supabase = createClient();
@@ -89,12 +99,12 @@ export default function NetworkConnections({
 
     setIsAISearchLoading(true);
     try {
-      const response = await fetch("/api/ai-search-connections", {
+      const response = await fetch("/api/search-contacts", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query, profileId }),
+        body: JSON.stringify({ query }),
       });
 
       if (!response.ok) {
@@ -102,7 +112,17 @@ export default function NetworkConnections({
       }
 
       const data = await response.json();
-      setAISearchResults(data.connections || []);
+      const hits: ContactSearchHit[] = data.results || [];
+      setAISearchResults(
+        hits.map((hit) => ({
+          id: `${profileId}:${hit.profile.id}`,
+          profile_id_a: profileId,
+          profile_id_b: hit.profile.id,
+          profile_a: { id: profileId },
+          profile_b: hit.profile,
+          reason: hit.reason,
+        }))
+      );
       setIsAISearchActive(true);
     } catch (error) {
       console.error("AI Search failed:", error);
@@ -143,15 +163,17 @@ export default function NetworkConnections({
         placeholder="Search connections..."
         isLoading={isAISearchLoading}
         searchWithAI={
-          <Button
-            variant="soft"
-            color="iris"
-            onClick={() => searchWithAI(searchQuery)}
-            disabled={isAISearchLoading || !searchQuery.trim()}
-          >
-            <StarFilledIcon />
-            {isAISearchLoading ? "Searching..." : "Search with AI"}
-          </Button>
+          canSearchNetwork ? (
+            <Button
+              variant="soft"
+              color="iris"
+              onClick={() => searchWithAI(searchQuery)}
+              disabled={isAISearchLoading || !searchQuery.trim()}
+            >
+              <StarFilledIcon />
+              {isAISearchLoading ? "Searching..." : "Search with AI"}
+            </Button>
+          ) : null
         }
       />
       {isAISearchActive && (
@@ -184,6 +206,11 @@ export default function NetworkConnections({
                   {connectedProfile.headline && (
                     <Text as="div" size="2" color="gray">
                       {connectedProfile.headline}
+                    </Text>
+                  )}
+                  {conn.reason && (
+                    <Text as="div" size="2" color="iris" mt="1">
+                      {conn.reason}
                     </Text>
                   )}
                 </Box>
