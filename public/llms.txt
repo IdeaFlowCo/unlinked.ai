@@ -23,7 +23,7 @@
 - `GET /api/imports`: List caller's uploaded LinkedIn archives and total ingested record counts across their network graph.
 
 ## MCP Tools
-The `@unlinked/mcp-server` package provides stdio tools for any MCP-aware client:
+The `@unlinked/mcp-server` package provides stdio tools for any MCP-aware client. It is not published to npm; build it from a clone (`git clone https://github.com/IdeaFlowCo/unlinked.ai && cd unlinked.ai/mcp-server && npm install && npm run build`) and launch it with `node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js`:
 - `unlinked_me`: Return the caller's own unlinked.ai profile plus connection and upload counts.
 - `unlinked_search_contacts(query, limit?)`: Semantic search over direct connections (max 25 results) with match scores and explanations.
 - `unlinked_get_profile(profileId)`: Read own profile or direct connection's profile (unrelated returns not-found).

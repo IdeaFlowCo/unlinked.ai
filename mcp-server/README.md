@@ -12,19 +12,15 @@ A [Model Context Protocol](https://modelcontextprotocol.io) adapter for [unlinke
 
 ## Claude Code
 
-```bash
-claude mcp add unlinked \
-  --env UNLINKED_API_KEY=ul_your_key_here \
-  -- npx -y github:IdeaFlowCo/unlinked.ai --prefix mcp-server
-```
-
-Or, after cloning locally (see below), point directly at the built server:
+After cloning and building locally (see below), point directly at the built server:
 
 ```bash
 claude mcp add unlinked \
   --env UNLINKED_API_KEY=ul_your_key_here \
   -- node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js
 ```
+
+> **Not currently working:** `npx -y github:IdeaFlowCo/unlinked.ai --prefix mcp-server` fails with `could not determine executable to run` (the server is not published to npm). Use the local build above.
 
 ## Claude Desktop
 

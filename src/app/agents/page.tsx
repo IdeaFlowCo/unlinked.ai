@@ -91,13 +91,13 @@ function CodeBlock({ code }: CodeBlockProps) {
 
 const CLAUDE_CODE_SNIPPET = `claude mcp add unlinked \\
   --env UNLINKED_API_KEY=ul_your_key_here \\
-  -- npx -y github:IdeaFlowCo/unlinked.ai --prefix mcp-server`
+  -- node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js`
 
 const CLAUDE_DESKTOP_SNIPPET = `{
   "mcpServers": {
     "unlinked": {
-      "command": "npx",
-      "args": ["-y", "github:IdeaFlowCo/unlinked.ai", "--prefix", "mcp-server"],
+      "command": "node",
+      "args": ["/absolute/path/to/unlinked.ai/mcp-server/dist/index.js"],
       "env": {
         "UNLINKED_API_KEY": "ul_your_key_here"
       }
@@ -108,13 +108,13 @@ const CLAUDE_DESKTOP_SNIPPET = `{
 const CURSOR_CONFIG = `# Cursor Settings -> Features -> MCP -> Add new MCP server
 Name: unlinked
 Type: command
-Command: npx -y github:IdeaFlowCo/unlinked.ai --prefix mcp-server
+Command: node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js
 Environment: UNLINKED_API_KEY=ul_your_key_here`
 
 const LOCAL_CLONE_SNIPPET = `git clone https://github.com/IdeaFlowCo/unlinked.ai
 cd unlinked.ai/mcp-server
 npm install && npm run build
-UNLINKED_API_KEY=ul_your_key_here npm start`
+# then point your client at: node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js`
 
 const CREDENTIALS_FILE_SNIPPET = `{
   "apiKey": "ul_your_key_here",
@@ -196,8 +196,10 @@ export default function ForAgentsPage() {
               <strong>2.</strong> Copy the key (starts with <Badge color="blue">ul_</Badge>)
             </Text>
             <Text size="2">
-              <strong>3.</strong> Paste one of the configuration snippets below into your
-              client
+              <strong>3.</strong> Build the MCP server from a local clone (see the{' '}
+              <strong>Local clone</strong> tab; it is not published to npm), then paste one of
+              the configuration snippets below into your client, replacing{' '}
+              <code>/absolute/path/to/unlinked.ai</code> with your clone&apos;s path
             </Text>
           </Flex>
         </Box>
@@ -253,8 +255,8 @@ export default function ForAgentsPage() {
               <Tabs.Content value="local">
                 <Flex direction="column" gap="2">
                   <Text size="2" color="gray">
-                    Clone and run the MCP server locally for offline inspection or
-                    development:
+                    Clone and build the MCP server. Every client snippet runs this
+                    local build:
                   </Text>
                   <CodeBlock code={LOCAL_CLONE_SNIPPET} />
                 </Flex>

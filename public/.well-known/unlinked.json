@@ -51,7 +51,8 @@
   "mcp": {
     "server_card": "/.well-known/mcp/server-card.json",
     "package": "@unlinked/mcp-server",
-    "command": "npx -y github:IdeaFlowCo/unlinked.ai --prefix mcp-server",
+    "command": "node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js",
+    "setup": "git clone https://github.com/IdeaFlowCo/unlinked.ai && cd unlinked.ai/mcp-server && npm install && npm run build",
     "tools": [
       "unlinked_me",
       "unlinked_search_contacts",
