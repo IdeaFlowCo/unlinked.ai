@@ -39,8 +39,15 @@ test('public/.well-known/mcp/server-card.json is valid and matches MCP server to
   assert.equal(card.package, '@unlinked/mcp-server');
   assert.equal(card.version, '0.1.0');
   assert.ok(card.transports?.stdio, 'stdio transport must be defined');
-  assert.equal(card.transports.stdio.command, 'npx');
-  assert.deepEqual(card.transports.stdio.args, ['-y', 'github:IdeaFlowCo/unlinked.ai', '--prefix', 'mcp-server']);
+  // The server is not published to npm, so the advertised launch must be the local build:
+  // `node <clone>/mcp-server/dist/index.js`, matching the package's own bin/start entrypoint.
+  const stdio = card.transports.stdio;
+  assert.equal(stdio.command, 'node');
+  assert.equal(stdio.args.length, 1);
+  const mcpPkg = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'mcp-server/package.json'), 'utf8'));
+  const entrypoint = path.posix.join('mcp-server', mcpPkg.bin['unlinked-mcp-server']);
+  assert.ok(stdio.args[0].endsWith(`/${entrypoint}`), `stdio arg must point at ${entrypoint}`);
+  assert.equal(stdio.setup.entrypoint, entrypoint);
 
   const toolNames = card.tools.map((t) => t.name);
   const expectedTools = [
@@ -74,6 +81,27 @@ test('public/.well-known/unlinked.json product descriptor is valid', () => {
   assert.equal(descriptor.docs.openapi, '/openapi.json');
   assert.equal(descriptor.docs.mcp_server_card, '/.well-known/mcp/server-card.json');
   assert.equal(descriptor.api.auth.key_prefix, 'ul_');
+
+  const [command, ...args] = descriptor.mcp.command.split(' ');
+  assert.equal(command, 'node');
+  assert.equal(args.length, 1);
+  assert.ok(args[0].endsWith('/mcp-server/dist/index.js'), 'mcp.command must launch the local build');
+});
+
+test('machine-readable MCP launch config never advertises the broken npx github: form', () => {
+  const card = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/mcp/server-card.json'), 'utf8'));
+  const descriptor = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/unlinked.json'), 'utf8'));
+  const launchValues = [
+    card.transports.stdio.command,
+    ...card.transports.stdio.args,
+    ...Object.values(card.transports.stdio.setup),
+    descriptor.mcp.command,
+    descriptor.mcp.setup,
+  ];
+  for (const value of launchValues) {
+    assert.ok(!/\bnpx\b/.test(value), `launch config must not use npx: ${value}`);
+    assert.ok(!value.includes('github:'), `launch config must not use github: specifiers: ${value}`);
+  }
 });
 
 test('public/openapi.json describes agent routes accurately', () => {

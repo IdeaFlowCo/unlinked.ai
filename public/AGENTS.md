@@ -30,22 +30,24 @@ Every request to unlinked.ai is authenticated server-side to the user owning the
 
 ## Quick Start: MCP Server
 
-unlinked.ai provides a Model Context Protocol server under `@unlinked/mcp-server` that connects any MCP-aware client to your network.
+unlinked.ai provides a Model Context Protocol server under `@unlinked/mcp-server` that connects any MCP-aware client to your network. It is not published to npm; run it from a local build.
+
+### Build the server
+
+```bash
+git clone https://github.com/IdeaFlowCo/unlinked.ai
+cd unlinked.ai/mcp-server
+npm install && npm run build
+```
+
+In the snippets below, replace `/absolute/path/to/unlinked.ai` with the absolute path of your clone.
 
 ### Claude Code
 
 ```bash
 claude mcp add unlinked \
   --env UNLINKED_API_KEY=ul_your_key_here \
-  -- npx -y github:IdeaFlowCo/unlinked.ai --prefix mcp-server
-```
-
-Or with a local build:
-
-```bash
-claude mcp add unlinked \
-  --env UNLINKED_API_KEY=ul_your_key_here \
-  -- node /path/to/unlinked.ai/mcp-server/dist/index.js
+  -- node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js
 ```
 
 ### Claude Desktop
@@ -56,8 +58,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 {
   "mcpServers": {
     "unlinked": {
-      "command": "npx",
-      "args": ["-y", "github:IdeaFlowCo/unlinked.ai", "--prefix", "mcp-server"],
+      "command": "node",
+      "args": ["/absolute/path/to/unlinked.ai/mcp-server/dist/index.js"],
       "env": {
         "UNLINKED_API_KEY": "ul_your_key_here"
       }
@@ -66,13 +68,10 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 }
 ```
 
-### Local Development / Manual Start
+### Manual Start
 
 ```bash
-git clone https://github.com/IdeaFlowCo/unlinked.ai
-cd unlinked.ai/mcp-server
-npm install && npm run build
-UNLINKED_API_KEY=ul_your_key_here npm start
+UNLINKED_API_KEY=ul_your_key_here node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js
 ```
 
 ### Credentials File Fallback

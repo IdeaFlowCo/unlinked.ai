@@ -7,14 +7,14 @@
   "homepage": "https://www.unlinked.ai",
   "transports": {
     "stdio": {
-      "command": "npx",
-      "args": ["-y", "github:IdeaFlowCo/unlinked.ai", "--prefix", "mcp-server"],
+      "command": "node",
+      "args": ["/absolute/path/to/unlinked.ai/mcp-server/dist/index.js"],
       "env": ["UNLINKED_API_KEY", "UNLINKED_BASE_URL"],
-      "local_build": {
-        "build_command": "npm run build",
+      "setup": {
+        "clone": "git clone https://github.com/IdeaFlowCo/unlinked.ai",
+        "build_command": "cd unlinked.ai/mcp-server && npm install && npm run build",
         "entrypoint": "mcp-server/dist/index.js",
-        "command": "node",
-        "args": ["mcp-server/dist/index.js"]
+        "note": "Replace /absolute/path/to/unlinked.ai with the absolute path of your clone. The server is not published to npm."
       }
     }
   },
