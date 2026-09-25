@@ -1,0 +1,60 @@
+# Machine discovery and agent entry points:
+#   /llms.txt
+#   /AGENTS.md
+#   /.well-known/unlinked.json
+#   /.well-known/mcp/server-card.json
+#   /openapi.json
+#   /agents
+#
+# Profile pages are disallowed for crawlers pending the decision on
+# unclaimed profile directory visibility.
+
+User-agent: *
+Disallow: /profiles
+Disallow: /profiles/
+Disallow: /api/
+Allow: /
+Allow: /llms.txt
+Allow: /AGENTS.md
+Allow: /.well-known/
+Allow: /openapi.json
+Allow: /agents
+Allow: /sitemap.xml
+
+User-agent: GPTBot
+Disallow: /profiles
+Disallow: /profiles/
+Disallow: /api/
+Allow: /
+Allow: /llms.txt
+Allow: /AGENTS.md
+Allow: /.well-known/
+Allow: /openapi.json
+Allow: /agents
+Allow: /sitemap.xml
+
+User-agent: ClaudeBot
+Disallow: /profiles
+Disallow: /profiles/
+Disallow: /api/
+Allow: /
+Allow: /llms.txt
+Allow: /AGENTS.md
+Allow: /.well-known/
+Allow: /openapi.json
+Allow: /agents
+Allow: /sitemap.xml
+
+User-agent: PerplexityBot
+Disallow: /profiles
+Disallow: /profiles/
+Disallow: /api/
+Allow: /
+Allow: /llms.txt
+Allow: /AGENTS.md
+Allow: /.well-known/
+Allow: /openapi.json
+Allow: /agents
+Allow: /sitemap.xml
+
+Sitemap: https://www.unlinked.ai/sitemap.xml

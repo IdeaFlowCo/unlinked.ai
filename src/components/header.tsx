@@ -2,7 +2,7 @@
 import { Flex, Heading, Link, Button, Text, Box, Avatar, HoverCard } from '@radix-ui/themes'
 import { createClient } from '@/utils/supabase/server'
 import { signOut } from '@/app/auth/actions'
-import { ExitIcon, PersonIcon, MagnifyingGlassIcon, EnterIcon, PlusIcon } from '@radix-ui/react-icons'
+import { ExitIcon, PersonIcon, MagnifyingGlassIcon, EnterIcon, PlusIcon, CodeIcon } from '@radix-ui/react-icons'
 
 interface HeaderProps {
     showSearch?: boolean
@@ -55,6 +55,22 @@ export default async function Header({ showSearch = false }: HeaderProps) {
                 <Flex align="center" gap={{ initial: '2', sm: '4' }}>
                     {user ? (
                         <Flex align="center" gap={{ initial: '2', sm: '4' }} wrap="wrap">
+                            <HoverCard.Root>
+                                <HoverCard.Trigger>
+                                    <Link href="/agents">
+                                        <Button size={{ initial: '3', sm: '3' }} variant="ghost" style={{ width: '48px' }} aria-label="for agents">
+                                            <CodeIcon width="16" height="16" />
+                                        </Button>
+                                    </Link>
+                                </HoverCard.Trigger>
+                                <HoverCard.Content size="2">
+                                    <Text as="div" weight="bold">for agents</Text>
+                                    <Text as="div" color="gray" size="2">
+                                        mcp server &amp; api setup
+                                    </Text>
+                                </HoverCard.Content>
+                            </HoverCard.Root>
+
                             <HoverCard.Root>
                                 <HoverCard.Trigger>
                                     <Link href="/profiles">
@@ -116,6 +132,22 @@ export default async function Header({ showSearch = false }: HeaderProps) {
                         </Flex>
                     ) : (
                         <Flex gap={{ initial: '2', sm: '4' }} wrap="wrap">
+                            <HoverCard.Root>
+                                <HoverCard.Trigger>
+                                    <Link href="/agents">
+                                        <Button size={{ initial: '3', sm: '3' }} variant="ghost" style={{ width: '48px' }} aria-label="for agents">
+                                            <CodeIcon width="16" height="16" />
+                                        </Button>
+                                    </Link>
+                                </HoverCard.Trigger>
+                                <HoverCard.Content size="2">
+                                    <Text as="div" weight="bold">for agents</Text>
+                                    <Text as="div" color="gray" size="2">
+                                        mcp server &amp; api setup
+                                    </Text>
+                                </HoverCard.Content>
+                            </HoverCard.Root>
+
                             <HoverCard.Root>
                                 <HoverCard.Trigger>
                                     <Link href="/profiles">
