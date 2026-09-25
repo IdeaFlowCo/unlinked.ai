@@ -8,7 +8,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io) adapter for [unlinke
 
 1. Sign in to unlinked.ai -> **Settings -> Agent keys -> create key**
 2. Copy the key (starts with `ul_`)
-3. Paste one of the snippets below into your MCP client's config
+3. Build the server from a local clone (see **Local clone** below; it is not published to npm)
+4. Paste one of the snippets below into your MCP client's config, replacing `/absolute/path/to/unlinked.ai` with your clone's path
 
 ## Claude Code
 
