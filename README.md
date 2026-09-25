@@ -8,6 +8,17 @@ This is an AI-powered LinkedIn tool built with modern web technologies. The proj
 - Radix UI components for accessible interface elements
 - Client-side and server-side authentication for robust security
 
+## Agent & MCP Surface
+
+unlinked.ai provides a Model Context Protocol (MCP) server and REST API for autonomous agents:
+
+- **Quick start & setup:** [`/agents`](https://www.unlinked.ai/agents) (or see [`mcp-server/README.md`](mcp-server/README.md))
+- **Machine discovery:** [`/llms.txt`](https://www.unlinked.ai/llms.txt), [`/.well-known/unlinked.json`](https://www.unlinked.ai/.well-known/unlinked.json), [`/.well-known/mcp/server-card.json`](https://www.unlinked.ai/.well-known/mcp/server-card.json), and [`/openapi.json`](https://www.unlinked.ai/openapi.json)
+- **Developer & contributor notes:** [`AGENTS.md`](AGENTS.md) (repo-internal) and [`public/AGENTS.md`](public/AGENTS.md) (HTTP agent brief)
+- **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — stdio server supporting Claude Desktop, Claude Code, Cursor, and any MCP client
+- **Agent Keys:** Mint keys starting with `ul_` at **Settings -> Agent keys** (`/settings/agent-keys`)
+- **Strict isolation:** Every tool call and HTTP request is resolved server-side to the authenticated user. An agent key can only access the owner's profile and direct connections.
+
 ## Getting Started
 
 First, run the development server:
