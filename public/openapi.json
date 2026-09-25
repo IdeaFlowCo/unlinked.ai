@@ -1,0 +1,454 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "unlinked.ai Agent API",
+    "description": "Programmatic API for unlinked.ai. Provides personal network search, profile exploration, intro drafting, and archive import inspection for autonomous agents and MCP clients.\n\nAll agent requests authenticate using a Bearer token starting with 'ul_' (created in the web interface at /settings/agent-keys). Every request is resolved to the authenticated user server-side, enforcing strict isolation to the caller's own profile and direct connections.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "unlinked.ai Support",
+      "url": "https://www.unlinked.ai/agents"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://www.unlinked.ai",
+      "description": "Production unlinked.ai server"
+    }
+  ],
+  "security": [
+    {
+      "agentKey": []
+    }
+  ],
+  "paths": {
+    "/api/me": {
+      "get": {
+        "summary": "Get authenticated caller profile",
+        "description": "Returns the caller's own profile plus connection and upload counts. The profile is resolved server-side from the authenticated agent key.",
+        "operationId": "getMe",
+        "responses": {
+          "200": {
+            "description": "Caller profile and counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "profile": {
+                      "$ref": "#/components/schemas/Profile"
+                    },
+                    "counts": {
+                      "type": "object",
+                      "properties": {
+                        "connections": { "type": "integer" },
+                        "uploads": { "type": "integer" }
+                      },
+                      "required": ["connections", "uploads"]
+                    },
+                    "auth": {
+                      "type": "object",
+                      "properties": {
+                        "via": { "type": "string", "enum": ["agent-key", "session"] }
+                      },
+                      "required": ["via"]
+                    }
+                  },
+                  "required": ["profile", "counts", "auth"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "No profile exists for this account",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search-contacts": {
+      "post": {
+        "summary": "Search direct contacts semantically",
+        "description": "Semantic search restricted strictly to the caller's own direct connections. Returns matching contacts with similarity scores and an LLM-generated reason explaining each match.",
+        "operationId": "searchContacts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "Search query describing the desired contact attributes"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25,
+                    "default": 10,
+                    "description": "Maximum number of contact matches to return"
+                  }
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Matching contacts with relevance scores and reasons",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ContactSearchHit"
+                      }
+                    }
+                  },
+                  "required": ["results"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid search parameters",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profiles/{id}": {
+      "get": {
+        "summary": "Get profile by ID",
+        "description": "Look up a profile by UUID. Only readable if it belongs to the caller or is a direct connection of the caller. Unrelated profiles return 404 to preserve privacy.",
+        "operationId": "getProfile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Profile UUID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile details and relationship indicator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "profile": {
+                      "$ref": "#/components/schemas/Profile"
+                    },
+                    "relationship": {
+                      "type": "string",
+                      "enum": ["self", "direct-connection"]
+                    }
+                  },
+                  "required": ["profile", "relationship"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Profile not found or not connected",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/draft-intro": {
+      "post": {
+        "summary": "Draft intro to a direct connection",
+        "description": "Drafts a short, forwardable introduction message between the caller and one of their direct connections. Read-only: no records are written to the database.",
+        "operationId": "draftIntro",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "contactProfileId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "UUID of a direct connection"
+                  },
+                  "context": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Optional background or intent for the introduction"
+                  }
+                },
+                "required": ["contactProfileId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draft intro text and recipient metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "draft": { "type": "string" },
+                    "contact": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string", "format": "uuid" },
+                        "full_name": { "type": ["string", "null"] },
+                        "headline": { "type": ["string", "null"] }
+                      },
+                      "required": ["id"]
+                    }
+                  },
+                  "required": ["draft", "contact"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contact ID or request body",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Contact not found or not a direct connection",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/imports": {
+      "get": {
+        "summary": "List LinkedIn archive uploads",
+        "description": "Lists the caller's uploaded LinkedIn archive files and returns account-wide counts of ingested connections, positions, education, and skills.",
+        "operationId": "listImports",
+        "responses": {
+          "200": {
+            "description": "Uploaded archives and ingested record counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "uploads": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "format": "uuid" },
+                          "file_name": { "type": "string" },
+                          "file_path": { "type": "string" },
+                          "created_at": { "type": "string", "format": "date-time" }
+                        },
+                        "required": ["id", "file_name", "file_path", "created_at"]
+                      }
+                    },
+                    "ingested": {
+                      "type": "object",
+                      "properties": {
+                        "connections": { "type": "integer" },
+                        "positions": { "type": "integer" },
+                        "education": { "type": "integer" },
+                        "skills": { "type": "integer" }
+                      },
+                      "required": ["connections", "positions", "education", "skills"]
+                    },
+                    "note": { "type": "string" }
+                  },
+                  "required": ["uploads", "ingested", "note"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "No profile exists for this account",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "agentKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "ul_<key>",
+        "description": "Agent key created at https://www.unlinked.ai/settings/agent-keys. Prefix 'ul_' followed by 32 random base64url bytes."
+      }
+    },
+    "schemas": {
+      "Profile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "full_name": { "type": ["string", "null"] },
+          "headline": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "industry": { "type": ["string", "null"] },
+          "linkedin_slug": { "type": ["string", "null"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": ["string", "null"], "format": "date-time" },
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "title": { "type": ["string", "null"] },
+                "description": { "type": ["string", "null"] },
+                "started_on": { "type": ["string", "null"] },
+                "finished_on": { "type": ["string", "null"] },
+                "companies": {
+                  "type": ["object", "null"],
+                  "properties": {
+                    "name": { "type": ["string", "null"] }
+                  }
+                }
+              }
+            }
+          },
+          "education": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "degree_name": { "type": ["string", "null"] },
+                "started_on": { "type": ["string", "null"] },
+                "finished_on": { "type": ["string", "null"] },
+                "institutions": {
+                  "type": ["object", "null"],
+                  "properties": {
+                    "name": { "type": ["string", "null"] }
+                  }
+                }
+              }
+            }
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": ["string", "null"] }
+              }
+            }
+          }
+        },
+        "required": ["id"]
+      },
+      "ContactSearchHit": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "format": "uuid" },
+              "full_name": { "type": ["string", "null"] },
+              "headline": { "type": ["string", "null"] },
+              "industry": { "type": ["string", "null"] }
+            },
+            "required": ["id"]
+          },
+          "score": {
+            "type": "number",
+            "description": "Cosine similarity score"
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-sentence explanation of why this contact matches the query"
+          }
+        },
+        "required": ["profile", "score", "reason"]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "hint": { "type": "string" }
+        },
+        "required": ["error"]
+      }
+    }
+  }
+}

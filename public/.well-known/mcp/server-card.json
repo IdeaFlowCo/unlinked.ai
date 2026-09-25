@@ -1,0 +1,110 @@
+{
+  "name": "unlinked",
+  "description": "Model Context Protocol server for unlinked.ai — search your network, look up profiles, draft intros, and list LinkedIn imports via the unlinked.ai agent API.",
+  "version": "0.1.0",
+  "package": "@unlinked/mcp-server",
+  "repository": "https://github.com/IdeaFlowCo/unlinked.ai",
+  "homepage": "https://www.unlinked.ai",
+  "transports": {
+    "stdio": {
+      "command": "npx",
+      "args": ["-y", "github:IdeaFlowCo/unlinked.ai", "--prefix", "mcp-server"],
+      "env": ["UNLINKED_API_KEY", "UNLINKED_BASE_URL"],
+      "local_build": {
+        "build_command": "npm run build",
+        "entrypoint": "mcp-server/dist/index.js",
+        "command": "node",
+        "args": ["mcp-server/dist/index.js"]
+      }
+    }
+  },
+  "authentication": {
+    "type": "bearer",
+    "prefix": "ul_",
+    "header": "Authorization",
+    "env_var": "UNLINKED_API_KEY",
+    "credentials_file": "~/.unlinked/credentials.json",
+    "create_key_url": "https://www.unlinked.ai/settings/agent-keys",
+    "scoping": "Resolved server-side to the authenticated user. Accessible data is strictly limited to the caller's own profile and direct connections."
+  },
+  "tools": [
+    {
+      "name": "unlinked_me",
+      "description": "Return the authenticated caller's own unlinked.ai profile, plus connection and upload counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "unlinked_search_contacts",
+      "description": "Semantic search restricted to the caller's own direct connections. Returns matching profiles with a similarity score and a one-sentence reason each was included.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What kind of contact you're looking for"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 10,
+            "description": "Max results to return (default 10, max 25)"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "unlinked_get_profile",
+      "description": "Look up a profile by id. Only readable if it's your own profile or a direct connection of yours; anything else returns not-found.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The profile id (uuid)"
+          }
+        },
+        "required": ["profileId"]
+      }
+    },
+    {
+      "name": "unlinked_list_imports",
+      "description": "Return the caller's LinkedIn archive uploads plus counts of what has been ingested into their graph.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "unlinked_draft_intro",
+      "description": "Draft a short, forwardable intro message between the caller and one of their direct connections. Read-only -- nothing is written to unlinked.ai.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contactProfileId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Profile id (uuid) of the direct connection to introduce yourself to"
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Optional context on what you want out of the intro"
+          }
+        },
+        "required": ["contactProfileId"]
+      }
+    }
+  ],
+  "fallback": {
+    "rest_api": "https://www.unlinked.ai/api",
+    "docs": "https://www.unlinked.ai/agents",
+    "openapi": "https://www.unlinked.ai/openapi.json"
+  }
+}

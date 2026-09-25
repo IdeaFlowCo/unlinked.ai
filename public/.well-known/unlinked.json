@@ -1,0 +1,63 @@
+{
+  "$schema": "https://www.unlinked.ai/.well-known/unlinked.json",
+  "name": "unlinked.ai",
+  "description": "AI-powered LinkedIn network search, profile exploration, and intro drafting for autonomous agents and MCP clients.",
+  "site": "https://www.unlinked.ai",
+  "repo": "https://github.com/IdeaFlowCo/unlinked.ai",
+  "docs": {
+    "llms_txt": "/llms.txt",
+    "agents_md": "/AGENTS.md",
+    "agents_page": "/agents",
+    "openapi": "/openapi.json",
+    "mcp_server_card": "/.well-known/mcp/server-card.json"
+  },
+  "api": {
+    "base_url": "https://www.unlinked.ai/api",
+    "auth": {
+      "header": "Authorization",
+      "format": "Bearer ul_<key>",
+      "key_prefix": "ul_",
+      "mint_url": "https://www.unlinked.ai/settings/agent-keys",
+      "scoping": "Resolved server-side to the authenticated user. Accessible data is strictly limited to the caller's own profile and direct connections."
+    },
+    "routes": {
+      "me": {
+        "method": "GET",
+        "path": "/api/me",
+        "description": "Authenticated caller's own profile and network counts"
+      },
+      "search_contacts": {
+        "method": "POST",
+        "path": "/api/search-contacts",
+        "description": "Semantic search restricted to caller's direct connections"
+      },
+      "get_profile": {
+        "method": "GET",
+        "path": "/api/profiles/{id}",
+        "description": "Read caller's own profile or direct connection's profile"
+      },
+      "draft_intro": {
+        "method": "POST",
+        "path": "/api/draft-intro",
+        "description": "Draft a short forwardable intro to a direct connection (read-only)"
+      },
+      "imports": {
+        "method": "GET",
+        "path": "/api/imports",
+        "description": "List LinkedIn archive uploads and ingested record counts"
+      }
+    }
+  },
+  "mcp": {
+    "server_card": "/.well-known/mcp/server-card.json",
+    "package": "@unlinked/mcp-server",
+    "command": "npx -y github:IdeaFlowCo/unlinked.ai --prefix mcp-server",
+    "tools": [
+      "unlinked_me",
+      "unlinked_search_contacts",
+      "unlinked_get_profile",
+      "unlinked_list_imports",
+      "unlinked_draft_intro"
+    ]
+  }
+}

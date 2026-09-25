@@ -1,0 +1,31 @@
+# unlinked.ai
+> AI-powered LinkedIn network search, profile exploration, and intro drafting for autonomous agents and MCP clients.
+
+## Documentation
+- [Agent quick start](/agents): setup guide — agent key creation, client configuration (Claude Code, Claude Desktop, Cursor), and tool roster
+- [Developer notes for agents](/AGENTS.md): agent-readable brief on authentication, server-side scoping guarantees, and REST API endpoints
+- [Well-known product descriptor](/.well-known/unlinked.json): machine-readable bootstrap manifest
+- [MCP server card](/.well-known/mcp/server-card.json): Model Context Protocol server card for `@unlinked/mcp-server`
+- [OpenAPI specification](/openapi.json): full OpenAPI 3.1.0 schema for agent-facing HTTP routes
+
+## Machine Access
+- Base URL: `https://www.unlinked.ai`
+- Authentication: `Authorization: Bearer ul_<key>` header on all agent requests.
+- Key Creation: Signed-in users create keys at `https://www.unlinked.ai/settings/agent-keys`. Keys start with prefix `ul_`.
+- Scoping Guarantee: Every request resolves to the caller server-side. An agent key can only access the caller's own profile and direct connections -- never anyone else's network.
+- Note on Backend: Interface documentation reflects supported schemas and tools; database availability follows backend plan state.
+
+## HTTP Endpoints
+- `GET /api/me`: Return authenticated caller's own profile, plus connection and upload counts.
+- `POST /api/search-contacts`: Semantic search restricted to direct connections; returns matches with similarity score and reasoning. Request body: `{"query": string, "limit"?: number}` (limit 1-25, default 10).
+- `GET /api/profiles/{id}`: Look up a profile by UUID. Readable only for caller's own profile or a direct connection; unrelated profiles return 404.
+- `POST /api/draft-intro`: Draft a short, forwardable intro message between the caller and a direct connection. Read-only (nothing is written). Request body: `{"contactProfileId": string, "context"?: string}`.
+- `GET /api/imports`: List caller's uploaded LinkedIn archives and total ingested record counts across their network graph.
+
+## MCP Tools
+The `@unlinked/mcp-server` package provides stdio tools for any MCP-aware client:
+- `unlinked_me`: Return the caller's own unlinked.ai profile plus connection and upload counts.
+- `unlinked_search_contacts(query, limit?)`: Semantic search over direct connections (max 25 results) with match scores and explanations.
+- `unlinked_get_profile(profileId)`: Read own profile or direct connection's profile (unrelated returns not-found).
+- `unlinked_list_imports`: Return LinkedIn archive uploads and ingested-record counts.
+- `unlinked_draft_intro(contactProfileId, context?)`: Draft a short, forwardable intro to a direct connection.
