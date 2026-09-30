@@ -1,4 +1,10 @@
-This is an AI-powered LinkedIn tool built with modern web technologies. The project aims to enhance LinkedIn interactions using artificial intelligence.
+Unlinked helps people carry an in-person introduction into a lasting connection. The public landing and `/meet` work independently of the paused legacy Supabase backend. The existing profile and agent features remain behind their legacy backend.
+
+## Meet someone
+
+`/meet` accepts only `https://chat.globalbr.ai/c/<24-letter-or-digit-token>` card URLs or the matching `openchat://card/<token>` QR payload. It offers live camera scanning, pasted URLs, and a phone camera photo fallback. A valid payload opens the public OpenChat card page, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. An Unlinked card URL does not itself send a request.
+
+The page displays the legacy network's unavailable state without querying Supabase. No live profiles or cards are imported into Unlinked.
 
 ## Core Features & Technologies
 
@@ -25,23 +31,18 @@ See the [private lab guide](docs/provider-lab.md) for tester usage, stage config
 
 ## Getting Started
 
-First, run the development server:
+For the public landing and Meet flow, install dependencies and run the development server on an available high port:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm ci
+npm run dev -- --port 7743
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:7743](http://localhost:7743) and `/meet`. Neither page needs Supabase environment variables or database access. Legacy routes require the existing Supabase settings and a reachable backend.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, set `NEXT_PUBLIC_SUPABASE_URL=https://db.unlinked.ai` while that host is unresolved and confirm `/` and `/meet` still return 200. A 24-character syntactically valid token can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The landing page lives at `src/app/page.tsx`; the Meet UI lives at `src/app/meet/`.
 
 ## Learn More
 
