@@ -63,11 +63,11 @@ export class BrowserCardScanner {
 
   acceptValue(value) {
     if (this.stopped || this.navigated) return
-    const token = parseOpenChatCard(value)
-    if (token) {
+    const card = parseOpenChatCard(value)
+    if (card) {
       this.navigated = true
       this.stop()
-      this.onCard(token)
+      this.onCard(card)
     } else if (this.lastUnsupported !== value) {
       this.lastUnsupported = value
       this.onUnsupportedCode()

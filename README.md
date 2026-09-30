@@ -2,7 +2,7 @@ Unlinked helps people carry an in-person introduction into a lasting connection.
 
 ## Meet someone
 
-`/meet` accepts OpenChat card URLs and matching card QR codes. It offers live camera scanning, pasted URLs, and a phone camera photo fallback. A valid payload opens the public OpenChat card page, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. Opening a card does not itself send a request.
+`/meet` accepts only `https://chat.globalbr.ai/c/<24-letter-or-digit-token>` and `https://chat.ideaflow.app/c/<24-letter-or-digit-token>` card URLs. It offers live camera scanning, pasted URLs, and a phone camera photo fallback. A valid payload opens the public OpenChat card page on the same host as the scanned or pasted URL, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. Opening a card does not itself send a request.
 
 The page displays the legacy network's unavailable state without querying Supabase. No live profiles or cards are imported into Unlinked.
 
