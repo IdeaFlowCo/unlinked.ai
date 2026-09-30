@@ -1,7 +1,12 @@
 import { type NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { updateSession } from '@/utils/supabase/middleware'
 
 export async function middleware(request: NextRequest) {
+    // These entry points must render while the legacy Supabase host is paused.
+    if (request.nextUrl.pathname === '/' || /^\/meet\/?$/.test(request.nextUrl.pathname)) {
+        return NextResponse.next()
+    }
     return await updateSession(request)
 }
 
