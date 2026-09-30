@@ -1,13 +1,13 @@
 // app/layout.tsx
 import '@radix-ui/themes/styles.css'
+import './globals.css'
 import { Box } from '@radix-ui/themes'
 import type { Metadata } from 'next'
 import Providers from './providers'
-import Header from '@/components/header'
 
 export const metadata: Metadata = {
   title: 'unlinked.ai',
-  description: 'AI-powered LinkedIn tool',
+  description: 'Meet in person. Stay in touch. Scan an OpenChat card to connect.',
 }
 
 export default function RootLayout({
@@ -19,13 +19,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <Providers>
-          <Box style={{
-            minHeight: '100vh',
-            background: 'linear-gradient(to bottom, var(--gray-1), white)'
-          }}>
-            <Header />
-            {children}
-          </Box>
+          <Box style={{ minHeight: '100vh' }}>{children}</Box>
         </Providers>
       </body>
     </html>
