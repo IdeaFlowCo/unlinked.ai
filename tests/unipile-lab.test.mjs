@@ -179,12 +179,12 @@ test('demo lookup and connection action use target ID and keep tester previews s
   await lab.previewTarget('alice', 'https://linkedin.com/in/target-one')
   await lab.previewTarget('bob', 'https://linkedin.com/in/target-two')
   assert.equal(lab.get('alice').preview.target.id, 'target-one')
-  const result = await lab.targetConnections('alice')
+  const result = await lab.targetConnections('alice', 'https://linkedin.com/in/target-one')
   assert.equal(result.outcome, 'empty')
   assert.equal(result.mode, 'demo')
   assert.deepEqual(calls.at(-1), ['target-relations', 'demo', 'target-one'])
   const callCount = calls.length
-  await lab.targetConnections('alice')
+  await lab.targetConnections('alice', 'https://linkedin.com/in/target-one')
   await lab.previewTarget('alice', 'https://linkedin.com/in/target-one')
   assert.equal(calls.length, callCount)
   assert.equal(lab.get('bob').preview.target.id, 'target-two')
@@ -220,7 +220,7 @@ test('one page is capped at ten and marked partial', async () => {
   provider.targetConnections = async () => ({ people: Array.from({ length: 11 }, (_, i) => ({ id: `${i}`, name: `${i}` })), partial: false })
   const lab = new UnipileLab(provider, 'demo')
   await lab.previewTarget('alice', 'https://linkedin.com/in/person')
-  const result = await lab.targetConnections('alice')
+  const result = await lab.targetConnections('alice', 'https://linkedin.com/in/person')
   assert.equal(result.people.length, 10)
   assert.equal(result.outcome, 'partial')
 })
@@ -272,7 +272,7 @@ test('clearing invalidates in-flight profile, page, and callback previews', asyn
   await lab.previewTarget('alice', 'https://linkedin.com/in/person')
   const pageHold = deferred()
   provider.targetConnections = async () => await pageHold.promise
-  const page = lab.targetConnections('alice')
+  const page = lab.targetConnections('alice', 'https://linkedin.com/in/person')
   lab.reset('alice')
   pageHold.resolve({ people: [{ id: 'visible', name: 'Visible' }], partial: false })
   await assert.rejects(page, /cleared/)
@@ -287,4 +287,71 @@ test('clearing invalidates in-flight profile, page, and callback previews', asyn
   await callback
   assert.equal(lab.get('alice').connected, true)
   assert.equal(lab.get('alice').preview, undefined)
+})
+
+
+test('callback failures retain only sanitized tester-scoped outcomes', async () => {
+  for (const failure of [new LabError('denied', 'Private provider detail'), new LabError('unsupported', 'Private unsupported detail'), new LabError('unavailable', 'Private unavailable detail'), new Error('Private transport detail')]) {
+    let now = 1000
+    const { provider, calls } = fixture()
+    const lab = new UnipileLab(provider, 'demo', () => now)
+    await lab.start('alice', 'https://test.example')
+    assert.equal(lab.get('alice').connectionOutcome.status, 'pending')
+    provider.ownProfile = async () => { throw failure }
+    const callback = callbackOf(calls)
+    await assert.rejects(lab.callback(callback), failure)
+    assert.deepEqual(lab.get('alice').connectionOutcome, {
+      status: failure instanceof LabError ? failure.code : 'unavailable',
+      expiresAt: new Date(now + 600_000).toISOString(),
+    })
+    assert.equal(lab.get('alice').connected, false)
+    assert.equal(lab.get('bob').connectionOutcome, undefined)
+    await assert.rejects(lab.callback(callback), /used/)
+    now += 600_000
+    assert.equal(lab.get('alice').connectionOutcome, undefined)
+    await lab.start('alice', 'https://test.example')
+    assert.equal(lab.get('alice').connectionOutcome.status, 'pending')
+  }
+})
+
+test('expired verification is reported on refresh without a callback', async () => {
+  let now = 1000
+  const { provider, calls } = fixture()
+  const lab = new UnipileLab(provider, 'demo', () => now)
+  await lab.start('alice', 'https://test.example')
+  now += 600_000
+  assert.equal(lab.get('alice').connectionOutcome.status, 'expired')
+  assert.equal(lab.get('alice').connected, false)
+  await assert.rejects(lab.callback(callbackOf(calls)), /used/)
+  assert.deepEqual(calls.map(call => call[0]), ['hosted'])
+  now += 600_000
+  assert.equal(lab.get('alice').connectionOutcome, undefined)
+})
+
+test('expired authenticated callback retains expiry after pending cleanup', async () => {
+  let now = 1000
+  const { provider, calls } = fixture()
+  const lab = new UnipileLab(provider, 'demo', () => now)
+  await lab.start('alice', 'https://test.example')
+  const callback = callbackOf(calls)
+  now += 600_000
+  await assert.rejects(lab.callback(callback), error => error.code === 'expired')
+  assert.equal(lab.get('alice').connectionOutcome.status, 'expired')
+  assert.equal(lab.get('bob').connectionOutcome, undefined)
+  assert.deepEqual(calls.map(call => call[0]), ['hosted'])
+})
+
+test('replacement lookup failures invalidate targets and connection requests bind the URL', async () => {
+  const { provider, calls } = fixture()
+  const lab = new UnipileLab(provider, 'demo')
+  const first = 'https://linkedin.com/in/target-one'
+  const second = 'https://linkedin.com/in/target-two'
+  await lab.previewTarget('alice', first)
+  await assert.rejects(lab.targetConnections('alice', second), error => error.code === 'conflict')
+  await assert.rejects(lab.targetConnections('alice', undefined), error => error.code === 'invalid')
+  provider.targetProfile = async () => { throw new LabError('unavailable', 'Lookup failed') }
+  await assert.rejects(lab.previewTarget('alice', second), /Lookup failed/)
+  assert.equal(lab.get('alice').preview, undefined)
+  await assert.rejects(lab.targetConnections('alice', first), /Preview a target/)
+  assert.equal(calls.some(call => call[0] === 'target-relations'), false)
 })

@@ -37,9 +37,11 @@ export interface LabProvider {
   targetConnections(accountId: string, targetId: string): Promise<{ people: Profile[]; partial: boolean }>
 }
 
+export type ConnectionOutcome = { status: 'pending' | 'verified' | 'denied' | 'unavailable' | 'unsupported' | 'expired'; expiresAt: string }
+
 type Pending = { userId: string; secret: string; expires: number; reconnectAccount?: string; used: boolean }
 type SourceStatus = 'verified' | 'quarantined'
-type UserState = { accountId?: string; ownerProfileId?: string; sourceStatus?: SourceStatus; preview?: Preview; previewExpires?: number; busy?: string; generation?: number }
+type UserState = { connectionOutcome?: ConnectionOutcome; accountId?: string; ownerProfileId?: string; sourceStatus?: SourceStatus; preview?: Preview; previewExpires?: number; busy?: string; generation?: number }
 
 /** Process-local, expiring test state. Live activation requires a single-instance stage. */
 export class UnipileLab {
@@ -65,12 +67,24 @@ export class UnipileLab {
       delete state.preview
       delete state.previewExpires
     }
+    if (state.connectionOutcome && Date.parse(state.connectionOutcome.expiresAt) <= this.now()) delete state.connectionOutcome
+    const name = this.pendingByUser.get(userId)
+    const pending = name ? this.pending.get(name) : undefined
+    if (pending && pending.expires <= this.now()) {
+      this.pending.delete(name!)
+      this.pendingByUser.delete(userId)
+      this.connectionResult(state, 'expired')
+    }
     return state
+  }
+
+  private connectionResult(state: UserState, status: ConnectionOutcome['status']) {
+    state.connectionOutcome = { status, expiresAt: new Date(this.now() + TTL_MS).toISOString() }
   }
 
   get(userId: string) {
     const state = this.state(userId)
-    return { connected: !!state.accountId && state.sourceStatus === 'verified', hasSource: !!state.accountId, sourceStatus: state.sourceStatus ?? 'none', preview: state.preview }
+    return { connected: !!state.accountId && state.sourceStatus === 'verified', hasSource: !!state.accountId, sourceStatus: state.sourceStatus ?? 'none', connectionOutcome: state.connectionOutcome, preview: state.preview }
   }
 
   private async once<T>(userId: string, action: string, fn: (state: UserState) => Promise<T>): Promise<T> {
@@ -94,6 +108,7 @@ export class UnipileLab {
       const pending: Pending = { userId, secret, expires: this.now() + TTL_MS, reconnectAccount, used: false }
       this.pending.set(name, pending)
       this.pendingByUser.set(userId, name)
+      this.connectionResult(state, 'pending')
       if (reconnect) this.quarantine(state)
       try {
         const url = await this.provider.hostedLink({
@@ -104,20 +119,20 @@ export class UnipileLab {
           reconnectAccount,
         })
         return { url }
-      } catch (error) { this.pending.delete(name); this.pendingByUser.delete(userId); throw error }
+      } catch (error) { this.pending.delete(name); this.pendingByUser.delete(userId); this.connectionResult(state, 'unavailable'); throw error }
     })
   }
 
   async callback(input: { state?: unknown; token?: unknown; name?: unknown; status?: unknown; accountId?: unknown }) {
     const pending = typeof input.state === 'string' ? this.pending.get(input.state) : undefined
     if (!pending || pending.used) throw new LabError('denied', 'Unknown or used connection callback.')
-    if (this.now() >= pending.expires) { pending.used = true; throw new LabError('expired', 'Connection link expired.') }
     if (typeof input.token !== 'string' || !safeEqual(input.token, pending.secret) || input.name !== input.state) throw new LabError('denied', 'Connection callback did not match its pending request.')
     // Claim before the first await; simultaneous/replayed notifications cannot race.
     pending.used = true
     const state = this.state(pending.userId)
     const generation = state.generation ?? 0
     try {
+      if (this.now() >= pending.expires) throw new LabError('expired', 'Connection link expired.')
       if (input.status !== (pending.reconnectAccount ? 'RECONNECTED' : 'CREATION_SUCCESS')) throw new LabError('denied', 'Connection was not confirmed by the provider.')
       if (typeof input.accountId !== 'string' || !/^[a-zA-Z0-9_-]{4,100}$/.test(input.accountId)) throw new LabError('invalid', 'Invalid provider account.')
       this.checkAssignment(pending, input.accountId, state)
@@ -136,6 +151,13 @@ export class UnipileLab {
       state.sourceStatus = 'verified'
       this.accountOwners.set(input.accountId, pending.userId)
       this.save(state, { outcome: 'ok', viewedAt: new Date(this.now()).toISOString(), mode: 'own', target: own }, generation)
+      this.connectionResult(state, 'verified')
+    } catch (error) {
+      if (this.pendingByUser.get(pending.userId) === input.state) {
+        const status = error instanceof LabError && ['denied', 'unsupported', 'expired'].includes(error.code) ? error.code as 'denied' | 'unsupported' | 'expired' : 'unavailable'
+        this.connectionResult(state, status)
+      }
+      throw error
     } finally {
       if (this.pendingByUser.get(pending.userId) === input.state) this.pendingByUser.delete(pending.userId)
       this.pending.delete(input.state as string)
@@ -180,10 +202,17 @@ export class UnipileLab {
 
   async previewTarget(userId: string, rawUrl: unknown): Promise<Preview> {
     return this.once(userId, 'target', async state => {
+      const prior = state.preview
+      delete state.preview
+      delete state.previewExpires
       const identifier = parseLinkedInUrl(rawUrl)
       if (!this.demoAccountId) throw new LabError('unavailable', 'Demo account is not configured.')
       if (this.allowedTargets && !this.allowedTargets.has(identifier)) throw new LabError('denied', 'This target is not approved for the live test.')
-      if (state.preview?.mode === 'demo' && state.preview.target?.publicUrl === `https://www.linkedin.com/in/${identifier}`) return state.preview
+      if (prior?.mode === 'demo' && prior.target?.publicUrl === `https://www.linkedin.com/in/${identifier}`) {
+        state.preview = prior
+        state.previewExpires = new Date(prior.viewedAt).getTime() + TTL_MS
+        return prior
+      }
       const generation = state.generation ?? 0
       const target = await this.provider.targetProfile(this.demoAccountId, identifier)
       if (!target.id) throw new LabError('unavailable', 'Target profile has no usable provider ID.')
@@ -193,11 +222,13 @@ export class UnipileLab {
     })
   }
 
-  async targetConnections(userId: string): Promise<Preview> {
+  async targetConnections(userId: string, rawUrl: unknown): Promise<Preview> {
     return this.once(userId, 'targetConnections', async state => {
       if (!this.demoAccountId) throw new LabError('unavailable', 'Demo account is not configured.')
       const prior = state.preview
       if (!prior || prior.mode !== 'demo' || !prior.target?.id) throw new LabError('invalid', 'Preview a target profile first.')
+      const identifier = parseLinkedInUrl(rawUrl)
+      if (prior.target.publicUrl !== `https://www.linkedin.com/in/${identifier}`) throw new LabError('conflict', 'Target changed. Preview this profile before checking connections.')
       if (prior.people) return prior
       const generation = state.generation ?? 0
       // Preserve the target; never substitute the viewer's own relations.

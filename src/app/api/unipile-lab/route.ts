@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       case 'reconnect': return json({ ...await instance.start(userId, callbackOrigin(request), true), mode: labMode() })
       case 'own-connections': return json({ preview: await instance.ownConnections(userId) })
       case 'preview-target': return json({ preview: await instance.previewTarget(userId, body.url) })
-      case 'target-connections': return json({ preview: await instance.targetConnections(userId) })
+      case 'target-connections': return json({ preview: await instance.targetConnections(userId, body.url) })
       case 'reset': instance.reset(userId); return json({ preview: null })
       default: return json({ error: 'Unknown action.' }, 400)
     }

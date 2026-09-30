@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import type { Preview } from '@/utils/unipile-lab'
+import type { ConnectionOutcome, Preview } from '@/utils/unipile-lab'
 import styles from './panel.module.css'
 
 type Action = 'connect' | 'reconnect' | 'own-connections' | 'preview-target' | 'target-connections' | 'reset'
@@ -14,20 +14,23 @@ export default function LabPanel() {
   const [busy, setBusy] = useState<Action | null>(null)
   const [message, setMessage] = useState('')
   const [returned, setReturned] = useState(false)
+  const [connectionOutcome, setConnectionOutcome] = useState<ConnectionOutcome | null>(null)
   const [mode, setMode] = useState<'fixture' | 'live'>('fixture')
 
   const load = useCallback(async () => {
     const response = await fetch('/api/unipile-lab', { cache: 'no-store' })
     if (!response.ok) { setMessage('Private lab is unavailable.'); return }
     const data = await response.json()
+    setConnectionOutcome(data.connectionOutcome ?? null)
     setConnected(!!data.connected)
     setHasSource(!!data.hasSource)
     setPreview(data.preview ?? null)
+    if (data.preview?.mode === 'demo' && data.preview.target?.publicUrl) setUrl(data.preview.target.publicUrl)
     setMode(data.mode === 'live' ? 'live' : 'fixture')
   }, [])
 
   useEffect(() => {
-    setReturned(new URLSearchParams(window.location.search).get('return') === 'success')
+    setReturned(new URLSearchParams(window.location.search).has('return'))
     void load()
   }, [load])
 
@@ -42,10 +45,11 @@ export default function LabPanel() {
     if (busy) return
     setBusy(action)
     setMessage('')
+    if (action === 'preview-target') setPreview(null)
     try {
       const response = await fetch('/api/unipile-lab', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ...(action === 'preview-target' ? { url } : {}) }),
+        body: JSON.stringify({ action, ...(action === 'preview-target' ? { url } : action === 'target-connections' ? { url: preview?.target?.publicUrl } : {}) }),
       })
       const data = await response.json()
       if (!response.ok) { setMessage(`${data.outcome ? `Outcome: ${data.outcome}. ` : ''}${data.error ?? 'Preview unavailable.'}`); return }
@@ -68,8 +72,13 @@ export default function LabPanel() {
     </header>
 
     {message && <div className={styles.notice} role="alert">{message}</div>}
-    {returned && !connected &&
-      <div className={styles.notice}>Hosted Auth returned. Linkage is pending server verification; refresh after the provider callback arrives.</div>}
+    {connectionOutcome && <div className={styles.notice} role="status">
+      Connection outcome: {connectionOutcome.status}.
+      {connectionOutcome.status === 'pending' ? ' Awaiting server verification; refresh after the provider callback arrives.' :
+        connectionOutcome.status === 'verified' ? ' LinkedIn source verified.' : ' Linkage was not verified. Start Hosted Auth again to retry.'}
+    </div>}
+    {returned && !connected && !connectionOutcome &&
+      <div className={styles.notice}>Hosted Auth returned. No active verification is available; start Hosted Auth again.</div>}
 
     <div className={styles.grid}>
       <section className={styles.card} aria-labelledby="own-heading">
@@ -89,7 +98,7 @@ export default function LabPanel() {
         <h2 id="demo-heading">Preview a profile</h2>
         <p>Paste a LinkedIn profile URL. The URL is lookup input and says nothing about who owns that profile.</p>
         <label htmlFor="profile-url">LinkedIn profile URL</label>
-        <input id="profile-url" type="url" inputMode="url" placeholder="https://www.linkedin.com/in/person-name" value={url} onChange={event => setUrl(event.target.value)} />
+        <input id="profile-url" disabled={!!busy} type="url" inputMode="url" placeholder="https://www.linkedin.com/in/person-name" value={url} onChange={event => { setUrl(event.target.value); if (preview?.mode === 'demo') setPreview(null) }} />
         <div className={styles.actions}>
           <button disabled={!!busy || !url.trim()} onClick={() => void act('preview-target')}>Preview through demo account →</button>
           {preview?.mode === 'demo' && <button className={styles.secondary} disabled={!!busy} onClick={() => void act('target-connections')}>Check visible connections</button>}
