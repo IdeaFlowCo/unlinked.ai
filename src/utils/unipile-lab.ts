@@ -127,6 +127,9 @@ export class UnipileLab {
       if (pending.reconnectAccount && state.ownerProfileId !== own.id) throw new LabError('denied', 'Reconnected LinkedIn owner did not match this source.')
       // No await between the final checks and writes: distinct callback tokens
       // cannot assign the same account or replace a tester's source concurrently.
+      if (this.pendingByUser.get(pending.userId) !== input.state || this.pending.get(input.state as string) !== pending) {
+        throw new LabError('conflict', 'Connection callback was superseded.')
+      }
       this.checkAssignment(pending, input.accountId, state)
       state.accountId = input.accountId
       state.ownerProfileId = own.id

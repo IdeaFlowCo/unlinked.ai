@@ -142,6 +142,37 @@ test('reconnect waits for an in-flight own page, then quarantines its result', a
   await assert.rejects(lab.ownConnections('alice'), /not verified/)
 })
 
+test('expired superseded callback cannot restore source after a newer failed reconnect', async () => {
+  let now = 0
+  const { provider, calls } = fixture()
+  const lab = new UnipileLab(provider, 'demo', () => now)
+  await lab.start('alice', 'https://test.example')
+  await lab.callback(callbackOf(calls, 'account-one'))
+  await lab.start('alice', 'https://test.example', true)
+  const older = callbackOf(calls, 'account-one')
+  const oldOwner = deferred()
+  const enteredRead = deferred()
+  now = 599_999
+  provider.ownProfile = async () => { enteredRead.resolve(); return oldOwner.promise }
+  const oldCallback = lab.callback(older)
+  await enteredRead.promise
+  now = 600_001
+  await lab.start('alice', 'https://test.example', true)
+  provider.ownProfile = async () => ({ id: 'changed-owner', name: 'Changed owner' })
+  await assert.rejects(lab.callback(callbackOf(calls, 'account-one')), /owner did not match/)
+  assert.equal(lab.get('alice').connected, false)
+  oldOwner.resolve({ id: 'owner-account-one', name: 'Stale owner' })
+  await assert.rejects(oldCallback, /superseded/)
+  assert.equal(lab.get('alice').connected, false)
+  assert.equal(lab.get('alice').preview, undefined)
+  await assert.rejects(lab.ownConnections('alice'), /not verified/)
+
+  await lab.start('alice', 'https://test.example', true)
+  provider.ownProfile = async () => ({ id: 'owner-account-one', name: 'Original owner' })
+  await lab.callback(callbackOf(calls, 'account-one'))
+  assert.equal(lab.get('alice').connected, true)
+})
+
 test('demo lookup and connection action use target ID and keep tester previews separate', async () => {
   const { provider, calls } = fixture()
   const lab = new UnipileLab(provider, 'demo')
