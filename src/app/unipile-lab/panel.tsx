@@ -8,6 +8,7 @@ type Action = 'connect' | 'reconnect' | 'own-connections' | 'preview-target' | '
 
 export default function LabPanel() {
   const [connected, setConnected] = useState(false)
+  const [hasSource, setHasSource] = useState(false)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState<Action | null>(null)
@@ -20,6 +21,7 @@ export default function LabPanel() {
     if (!response.ok) { setMessage('Private lab is unavailable.'); return }
     const data = await response.json()
     setConnected(!!data.connected)
+    setHasSource(!!data.hasSource)
     setPreview(data.preview ?? null)
     setMode(data.mode === 'live' ? 'live' : 'fixture')
   }, [])
@@ -74,11 +76,11 @@ export default function LabPanel() {
         <div className={styles.cardTop}><span>01 / YOUR SOURCE</span><span>Authenticated Unlinked tester</span></div>
         <h2 id="own-heading">Connect my LinkedIn</h2>
         <p>Attach your own account as a private test source. Provider login and any challenge happen in Hosted Auth.</p>
-        <div className={styles.identity}>Source owner <strong>{connected ? 'Linked · verified by provider' : 'Not linked'}</strong></div>
+        <div className={styles.identity}>Source owner <strong>{connected ? 'Linked · verified by provider' : hasSource ? 'Unverified · reconnect required' : 'Not linked'}</strong></div>
         <div className={styles.actions}>
-          <button disabled={!!busy || connected} onClick={() => void act('connect')}>Start Hosted Auth ↗</button>
+          <button disabled={!!busy || hasSource} onClick={() => void act('connect')}>Start Hosted Auth ↗</button>
           {connected && <button className={styles.secondary} disabled={!!busy} onClick={() => void act('own-connections')}>Show up to 10 of my connections</button>}
-          {connected && <button className={styles.tertiary} disabled={!!busy} onClick={() => void act('reconnect')}>Reconnect my source</button>}
+          {hasSource && <button className={styles.tertiary} disabled={!!busy} onClick={() => void act('reconnect')}>Reconnect my source</button>}
         </div>
       </section>
 

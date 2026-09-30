@@ -38,7 +38,8 @@ export interface LabProvider {
 }
 
 type Pending = { userId: string; secret: string; expires: number; reconnectAccount?: string; used: boolean }
-type UserState = { accountId?: string; ownerProfileId?: string; preview?: Preview; previewExpires?: number; busy?: string; generation?: number }
+type SourceStatus = 'verified' | 'quarantined'
+type UserState = { accountId?: string; ownerProfileId?: string; sourceStatus?: SourceStatus; preview?: Preview; previewExpires?: number; busy?: string; generation?: number }
 
 /** Process-local, expiring test state. Live activation requires a single-instance stage. */
 export class UnipileLab {
@@ -69,7 +70,7 @@ export class UnipileLab {
 
   get(userId: string) {
     const state = this.state(userId)
-    return { connected: !!state.accountId, preview: state.preview }
+    return { connected: !!state.accountId && state.sourceStatus === 'verified', hasSource: !!state.accountId, sourceStatus: state.sourceStatus ?? 'none', preview: state.preview }
   }
 
   private async once<T>(userId: string, action: string, fn: (state: UserState) => Promise<T>): Promise<T> {
@@ -93,6 +94,7 @@ export class UnipileLab {
       const pending: Pending = { userId, secret, expires: this.now() + TTL_MS, reconnectAccount, used: false }
       this.pending.set(name, pending)
       this.pendingByUser.set(userId, name)
+      if (reconnect) this.quarantine(state)
       try {
         const url = await this.provider.hostedLink({
           name,
@@ -128,6 +130,7 @@ export class UnipileLab {
       this.checkAssignment(pending, input.accountId, state)
       state.accountId = input.accountId
       state.ownerProfileId = own.id
+      state.sourceStatus = 'verified'
       this.accountOwners.set(input.accountId, pending.userId)
       this.save(state, { outcome: 'ok', viewedAt: new Date(this.now()).toISOString(), mode: 'own', target: own }, generation)
     } finally {
@@ -144,6 +147,13 @@ export class UnipileLab {
     }
   }
 
+  private quarantine(state: UserState) {
+    state.sourceStatus = 'quarantined'
+    state.generation = (state.generation ?? 0) + 1
+    delete state.preview
+    delete state.previewExpires
+  }
+
   private save(state: UserState, preview: Preview, generation: number): Preview | undefined {
     if ((state.generation ?? 0) !== generation) return undefined
     state.preview = preview
@@ -153,10 +163,11 @@ export class UnipileLab {
 
   async ownConnections(userId: string): Promise<Preview> {
     return this.once(userId, 'ownConnections', async state => {
-      if (!state.accountId) throw new LabError('denied', 'Connect your own LinkedIn first.')
+      if (!state.accountId || state.sourceStatus !== 'verified') throw new LabError('denied', 'LinkedIn source is not verified for reads.')
       if (state.preview?.mode === 'own' && state.preview.people) return state.preview
       const generation = state.generation ?? 0
       const result = await this.provider.ownConnections(state.accountId)
+      if (state.sourceStatus !== 'verified') throw new LabError('denied', 'LinkedIn source is not verified for reads.')
       const people = result.people.slice(0, LIMIT)
       const preview = this.save(state, { outcome: result.partial || result.people.length > LIMIT ? 'partial' : people.length ? 'ok' : 'empty', viewedAt: new Date(this.now()).toISOString(), mode: 'own', people }, generation)
       if (!preview) throw new LabError('conflict', 'Preview was cleared during the request.')

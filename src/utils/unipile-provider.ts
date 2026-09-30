@@ -16,12 +16,17 @@ function profile(value: unknown): Profile {
   }
 }
 
-function page(value: unknown, expectedObject: 'UserRelationsList' | 'LinkedinSearch') {
+function relationProfile(value: unknown): Profile {
+  const row = object(value)
+  return { ...profile(value), id: str(row.member_id) ?? '' }
+}
+
+function page(value: unknown, expectedObject: 'UserRelationsList' | 'LinkedinSearch', decode: (value: unknown) => Profile) {
   const body = object(value)
   if (body.object !== expectedObject || !Array.isArray(body.items) || (body.cursor != null && typeof body.cursor !== 'string')) {
     throw new LabError('unavailable', 'Provider returned an unexpected connections page.')
   }
-  const people = body.items.slice(0, 10).map(profile)
+  const people = body.items.slice(0, 10).map(decode)
   if (people.some(person => !person.id)) throw new LabError('unavailable', 'Provider returned an incomplete connections page.')
   return { people, partial: !!body.cursor || body.items.length > 10 }
 }
@@ -99,12 +104,12 @@ export class V1UnipileProvider implements LabProvider {
   }
   async ownProfile(accountId: string): Promise<Profile> { return profile(await this.request(`/api/v1/users/me?account_id=${encodeURIComponent(accountId)}`)) }
   async targetProfile(accountId: string, identifier: string): Promise<Profile> { return profile(await this.request(`/api/v1/users/${encodeURIComponent(identifier)}?account_id=${encodeURIComponent(accountId)}`)) }
-  async ownConnections(accountId: string) { return page(await this.request(`/api/v1/users/relations?account_id=${encodeURIComponent(accountId)}&limit=10`), 'UserRelationsList') }
+  async ownConnections(accountId: string) { return page(await this.request(`/api/v1/users/relations?account_id=${encodeURIComponent(accountId)}&limit=10`), 'UserRelationsList', relationProfile) }
   async targetConnections(accountId: string, targetId: string) {
     // v1 own relations are self-only. Classic connections_of is viewer-relative.
     return page(await this.request(`/api/v1/linkedin/search?account_id=${encodeURIComponent(accountId)}&limit=10`, {
       method: 'POST', body: JSON.stringify({ api: 'classic', category: 'people', connections_of: [targetId] }),
-    }), 'LinkedinSearch')
+    }), 'LinkedinSearch', profile)
   }
 }
 

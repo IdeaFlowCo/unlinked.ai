@@ -111,11 +111,27 @@ test('v1 page decoder distinguishes valid empty, content, and malformed response
   try {
     global.fetch = async () => Response.json({ object: 'UserRelationsList', items: [], cursor: null })
     assert.deepEqual(await provider.ownConnections('account-one'), { people: [], partial: false })
-    global.fetch = async () => Response.json({ object: 'LinkedinSearch', items: [{ provider_id: 'person-one', first_name: 'Ada', last_name: 'Lovelace' }] })
+    const ownRequests = []
+    global.fetch = async url => {
+      ownRequests.push(String(url))
+      return Response.json({ object: 'UserRelationsList', items: [{ object: 'UserRelation', member_id: 'v1-member', first_name: 'Ada', last_name: 'Lovelace', headline: 'Engineer' }], cursor: null })
+    }
+    assert.deepEqual((await provider.ownConnections('account-one')).people[0], { id: 'v1-member', name: 'Ada Lovelace', headline: 'Engineer', publicUrl: undefined })
+    assert.equal(ownRequests.length, 1)
+    assert.match(ownRequests[0], /\/users\/relations\?account_id=account-one&limit=10$/)
+    global.fetch = async () => Response.json({ object: 'UserRelationsList', items: Array.from({ length: 11 }, (_, i) => ({ member_id: `member-${i}`, first_name: 'Member' })), cursor: 'next' })
+    const boundedOwn = await provider.ownConnections('account-one')
+    assert.equal(boundedOwn.people.length, 10)
+    assert.equal(boundedOwn.partial, true)
+    global.fetch = async () => Response.json({ object: 'LinkedinSearch', items: [], cursor: null })
+    assert.deepEqual(await provider.targetConnections('demo', 'target'), { people: [], partial: false })
+    global.fetch = async () => Response.json({ object: 'LinkedinSearch', items: [{ id: 'person-one', first_name: 'Ada', last_name: 'Lovelace' }] })
     assert.equal((await provider.targetConnections('demo', 'target')).people[0].name, 'Ada Lovelace')
     for (const bad of [null, { object: 'UnexpectedResult', items: [] }, { object: 'LinkedinSearch' }, { object: 'LinkedinSearch', items: null }, { object: 'LinkedinSearch', items: [{}] }, { object: 'LinkedinSearch', items: [], cursor: 5 }]) {
       global.fetch = async () => Response.json(bad)
       await assert.rejects(provider.targetConnections('demo', 'target'), error => error.code === 'unavailable')
     }
+    global.fetch = async () => Response.json({ object: 'UserRelationsList', items: [{ id: 'v2-id-without-member-id' }] })
+    await assert.rejects(provider.ownConnections('account-one'), error => error.code === 'unavailable')
   } finally { global.fetch = prior }
 })
