@@ -12,7 +12,7 @@
 - Base URL: `https://www.unlinked.ai`
 - Authentication: `Authorization: Bearer ul_<key>` header on all agent requests.
 - Key Creation: Signed-in users create keys at `https://www.unlinked.ai/settings/agent-keys`. Keys start with prefix `ul_`.
-- Scoping Guarantee: Every request resolves to the caller server-side. An agent key can only access the caller's own profile and direct connections -- never anyone else's network.
+- Scoping Guarantee: Agent API requests are scoped to the caller; see /AGENTS.md for details.
 - Note on Backend: Interface documentation reflects supported schemas and tools; database availability follows backend plan state.
 
 ## HTTP Endpoints

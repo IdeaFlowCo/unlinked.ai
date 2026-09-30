@@ -2,7 +2,7 @@ Unlinked helps people carry an in-person introduction into a lasting connection.
 
 ## Meet someone
 
-`/meet` accepts only `https://chat.globalbr.ai/c/<24-letter-or-digit-token>` card URLs or the matching `openchat://card/<token>` QR payload. It offers live camera scanning, pasted URLs, and a phone camera photo fallback. A valid payload opens the public OpenChat card page, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. An Unlinked card URL does not itself send a request.
+`/meet` accepts OpenChat card URLs and matching card QR codes. It offers live camera scanning, pasted URLs, and a phone camera photo fallback. A valid payload opens the public OpenChat card page, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. Opening a card does not itself send a request.
 
 The page displays the legacy network's unavailable state without querying Supabase. No live profiles or cards are imported into Unlinked.
 
@@ -40,7 +40,7 @@ npm run dev -- --port 7743
 
 Open [http://localhost:7743](http://localhost:7743) and `/meet`. Neither page needs Supabase environment variables or database access. Legacy routes require the existing Supabase settings and a reachable backend.
 
-Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, set `NEXT_PUBLIC_SUPABASE_URL=https://db.unlinked.ai` while that host is unresolved and confirm `/` and `/meet` still return 200. A 24-character syntactically valid token can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
+Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, set `NEXT_PUBLIC_SUPABASE_URL=https://db.unlinked.ai` while that host is unresolved and confirm `/` and `/meet` still return 200. A card token with valid syntax can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
 
 The landing page lives at `src/app/page.tsx`; the Meet UI lives at `src/app/meet/`.
 
