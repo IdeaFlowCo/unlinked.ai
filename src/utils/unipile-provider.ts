@@ -6,18 +6,24 @@ const str = (value: unknown): string | undefined => typeof value === 'string' &&
 
 function profile(value: unknown): Profile {
   const row = object(value)
+  const first = str(row.first_name)
+  const last = str(row.last_name)
   return {
     id: str(row.provider_id) ?? str(row.id) ?? '',
-    name: str(row.name) ?? str(row.full_name) ?? 'Name unavailable',
+    name: str(row.name) ?? str(row.full_name) ?? ([first, last].filter(Boolean).join(' ') || 'Name unavailable'),
     headline: str(row.headline),
     publicUrl: str(row.public_profile_url),
   }
 }
 
-function page(value: unknown) {
+function page(value: unknown, expectedObject: 'UserRelationsList' | 'LinkedinSearch') {
   const body = object(value)
-  const items = Array.isArray(body.items) ? body.items : []
-  return { people: items.slice(0, 10).map(profile), partial: !!body.cursor || items.length > 10 }
+  if (body.object !== expectedObject || !Array.isArray(body.items) || (body.cursor != null && typeof body.cursor !== 'string')) {
+    throw new LabError('unavailable', 'Provider returned an unexpected connections page.')
+  }
+  const people = body.items.slice(0, 10).map(profile)
+  if (people.some(person => !person.id)) throw new LabError('unavailable', 'Provider returned an incomplete connections page.')
+  return { people, partial: !!body.cursor || body.items.length > 10 }
 }
 
 export class FixtureUnipileProvider implements LabProvider {
@@ -86,15 +92,19 @@ export class V1UnipileProvider implements LabProvider {
   async verifyAccount(accountId: string): Promise<void> {
     const result = object(await this.request(`/api/v1/accounts/${encodeURIComponent(accountId)}`))
     if (result.id !== accountId || result.type !== 'LINKEDIN') throw new LabError('denied', 'Provider account identity did not match LinkedIn.')
+    const sources = result.sources
+    if (!Array.isArray(sources) || sources.length === 0 || sources.some(source => object(source).status !== 'OK')) {
+      throw new LabError('unavailable', 'LinkedIn source is not ready.')
+    }
   }
   async ownProfile(accountId: string): Promise<Profile> { return profile(await this.request(`/api/v1/users/me?account_id=${encodeURIComponent(accountId)}`)) }
   async targetProfile(accountId: string, identifier: string): Promise<Profile> { return profile(await this.request(`/api/v1/users/${encodeURIComponent(identifier)}?account_id=${encodeURIComponent(accountId)}`)) }
-  async ownConnections(accountId: string) { return page(await this.request(`/api/v1/users/relations?account_id=${encodeURIComponent(accountId)}&limit=10`)) }
+  async ownConnections(accountId: string) { return page(await this.request(`/api/v1/users/relations?account_id=${encodeURIComponent(accountId)}&limit=10`), 'UserRelationsList') }
   async targetConnections(accountId: string, targetId: string) {
     // v1 own relations are self-only. Classic connections_of is viewer-relative.
     return page(await this.request(`/api/v1/linkedin/search?account_id=${encodeURIComponent(accountId)}&limit=10`, {
       method: 'POST', body: JSON.stringify({ api: 'classic', category: 'people', connections_of: [targetId] }),
-    }))
+    }), 'LinkedinSearch')
   }
 }
 

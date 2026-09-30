@@ -28,6 +28,12 @@ function callbackOf(calls, accountId = 'account-one') {
   return { state: callback.searchParams.get('state'), token: callback.searchParams.get('token'), name: input.name, status: input.reconnectAccount ? 'RECONNECTED' : 'CREATION_SUCCESS', accountId }
 }
 
+function deferred() {
+  let resolve
+  const promise = new Promise(done => { resolve = done })
+  return { promise, resolve }
+}
+
 test('accepts only plain LinkedIn profile URLs', () => {
   assert.equal(parseLinkedInUrl('https://www.linkedin.com/in/jacob-test'), 'jacob-test')
   for (const value of ['http://linkedin.com/in/person', 'https://evil.com/in/person', 'https://linkedin.com.evil.com/in/person', 'https://linkedin.com/company/foo', 'https://linkedin.com/in/a?x=1', 'https://user@linkedin.com/in/person', 'https://linkedin.com/in/a']) {
@@ -77,6 +83,18 @@ test('reconnect and account assignment cannot cross tester or demo boundaries', 
   await lab.start('bob', 'https://test.example')
   await assert.rejects(lab.callback(callbackOf(calls, 'demo')), /already assigned/)
   assert.equal(lab.get('bob').connected, false)
+})
+
+test('reconnect preserves the verified LinkedIn owner identity', async () => {
+  const { provider, calls } = fixture()
+  const lab = new UnipileLab(provider, 'demo')
+  await lab.start('alice', 'https://test.example')
+  await lab.callback(callbackOf(calls, 'account-one'))
+  await lab.start('alice', 'https://test.example', true)
+  provider.ownProfile = async () => ({ id: 'different-owner', name: 'Different owner' })
+  await assert.rejects(lab.callback(callbackOf(calls, 'account-one')), /owner did not match/)
+  assert.equal(lab.get('alice').connected, true)
+  assert.equal(lab.get('alice').preview.target.id, 'owner-account-one')
 })
 
 test('demo lookup and connection action use target ID and keep tester previews separate', async () => {
@@ -129,4 +147,68 @@ test('one page is capped at ten and marked partial', async () => {
   const result = await lab.targetConnections('alice')
   assert.equal(result.people.length, 10)
   assert.equal(result.outcome, 'partial')
+})
+
+test('distinct callbacks cannot assign the same account to two testers', async () => {
+  const { provider, calls } = fixture()
+  const hold = deferred()
+  provider.verifyAccount = async () => { await hold.promise }
+  const lab = new UnipileLab(provider, 'demo')
+  await lab.start('alice', 'https://test.example')
+  const alice = callbackOf(calls, 'shared-account')
+  await lab.start('bob', 'https://test.example')
+  const bob = callbackOf(calls, 'shared-account')
+  const results = [lab.callback(alice), lab.callback(bob)]
+  hold.resolve()
+  const settled = await Promise.allSettled(results)
+  assert.deepEqual(settled.map(result => result.status).sort(), ['fulfilled', 'rejected'])
+  assert.equal(Number(lab.get('alice').connected) + Number(lab.get('bob').connected), 1)
+})
+
+test('one tester cannot start two create flows or replace an in-flight callback', async () => {
+  const { provider, calls } = fixture()
+  const hold = deferred()
+  provider.verifyAccount = async () => { await hold.promise }
+  const lab = new UnipileLab(provider, 'demo')
+  await lab.start('alice', 'https://test.example')
+  await assert.rejects(lab.start('alice', 'https://test.example'), /already pending/)
+  const callback = lab.callback(callbackOf(calls, 'account-one'))
+  await assert.rejects(lab.start('alice', 'https://test.example'), /already pending/)
+  hold.resolve()
+  await callback
+  await assert.rejects(lab.start('alice', 'https://test.example'), /already linked/)
+  await lab.start('alice', 'https://test.example', true)
+  await assert.rejects(lab.start('alice', 'https://test.example'), /already pending/)
+})
+
+test('clearing invalidates in-flight profile, page, and callback previews', async () => {
+  const { provider, calls } = fixture()
+  const profileHold = deferred()
+  provider.targetProfile = async () => await profileHold.promise
+  const lab = new UnipileLab(provider, 'demo')
+  const lookup = lab.previewTarget('alice', 'https://linkedin.com/in/person')
+  lab.reset('alice')
+  profileHold.resolve({ id: 'person', name: 'Person' })
+  await assert.rejects(lookup, /cleared/)
+  assert.equal(lab.get('alice').preview, undefined)
+
+  provider.targetProfile = async () => ({ id: 'person', name: 'Person' })
+  await lab.previewTarget('alice', 'https://linkedin.com/in/person')
+  const pageHold = deferred()
+  provider.targetConnections = async () => await pageHold.promise
+  const page = lab.targetConnections('alice')
+  lab.reset('alice')
+  pageHold.resolve({ people: [{ id: 'visible', name: 'Visible' }], partial: false })
+  await assert.rejects(page, /cleared/)
+  assert.equal(lab.get('alice').preview, undefined)
+
+  await lab.start('alice', 'https://test.example')
+  const verifyHold = deferred()
+  provider.verifyAccount = async () => await verifyHold.promise
+  const callback = lab.callback(callbackOf(calls))
+  lab.reset('alice')
+  verifyHold.resolve()
+  await callback
+  assert.equal(lab.get('alice').connected, true)
+  assert.equal(lab.get('alice').preview, undefined)
 })

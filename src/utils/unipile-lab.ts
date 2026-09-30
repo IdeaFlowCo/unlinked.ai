@@ -38,11 +38,12 @@ export interface LabProvider {
 }
 
 type Pending = { userId: string; secret: string; expires: number; reconnectAccount?: string; used: boolean }
-type UserState = { accountId?: string; preview?: Preview; previewExpires?: number; busy?: string }
+type UserState = { accountId?: string; ownerProfileId?: string; preview?: Preview; previewExpires?: number; busy?: string; generation?: number }
 
 /** Process-local, expiring test state. Live activation requires a single-instance stage. */
 export class UnipileLab {
   private pending = new Map<string, Pending>()
+  private pendingByUser = new Map<string, string>()
   private users = new Map<string, UserState>()
   private accountOwners = new Map<string, string>()
   private provider: LabProvider
@@ -80,6 +81,10 @@ export class UnipileLab {
 
   async start(userId: string, origin: string, reconnect = false) {
     return this.once(userId, 'start', async state => {
+      const activeName = this.pendingByUser.get(userId)
+      const active = activeName ? this.pending.get(activeName) : undefined
+      if (active && active.expires > this.now()) throw new LabError('conflict', 'A connection is already pending for this tester.')
+      if (activeName) { this.pending.delete(activeName); this.pendingByUser.delete(userId) }
       if (reconnect && !state.accountId) throw new LabError('invalid', 'No linked account to reconnect.')
       if (!reconnect && state.accountId) throw new LabError('conflict', 'An account is already linked.')
       const name = randomBytes(24).toString('base64url')
@@ -87,6 +92,7 @@ export class UnipileLab {
       const reconnectAccount = reconnect ? state.accountId : undefined
       const pending: Pending = { userId, secret, expires: this.now() + TTL_MS, reconnectAccount, used: false }
       this.pending.set(name, pending)
+      this.pendingByUser.set(userId, name)
       try {
         const url = await this.provider.hostedLink({
           name,
@@ -96,7 +102,7 @@ export class UnipileLab {
           reconnectAccount,
         })
         return { url }
-      } catch (error) { this.pending.delete(name); throw error }
+      } catch (error) { this.pending.delete(name); this.pendingByUser.delete(userId); throw error }
     })
   }
 
@@ -107,20 +113,39 @@ export class UnipileLab {
     if (typeof input.token !== 'string' || !safeEqual(input.token, pending.secret) || input.name !== input.state) throw new LabError('denied', 'Connection callback did not match its pending request.')
     // Claim before the first await; simultaneous/replayed notifications cannot race.
     pending.used = true
-    if (input.status !== (pending.reconnectAccount ? 'RECONNECTED' : 'CREATION_SUCCESS')) throw new LabError('denied', 'Connection was not confirmed by the provider.')
-    if (typeof input.accountId !== 'string' || !/^[a-zA-Z0-9_-]{4,100}$/.test(input.accountId)) throw new LabError('invalid', 'Invalid provider account.')
     const state = this.state(pending.userId)
-    if (pending.reconnectAccount && (input.accountId !== pending.reconnectAccount || state.accountId !== pending.reconnectAccount)) throw new LabError('denied', 'Reconnect account does not belong to this tester.')
-    if (!pending.reconnectAccount && (state.accountId || this.accountOwners.has(input.accountId) || input.accountId === this.demoAccountId)) throw new LabError('denied', 'Provider account is already assigned.')
-    await this.provider.verifyAccount(input.accountId)
-    const own = await this.provider.ownProfile(input.accountId)
-    if (!own.id) throw new LabError('unavailable', 'Provider did not verify the account owner.')
-    state.accountId = input.accountId
-    this.accountOwners.set(input.accountId, pending.userId)
-    this.save(state, { outcome: 'ok', viewedAt: new Date(this.now()).toISOString(), mode: 'own', target: own })
+    const generation = state.generation ?? 0
+    try {
+      if (input.status !== (pending.reconnectAccount ? 'RECONNECTED' : 'CREATION_SUCCESS')) throw new LabError('denied', 'Connection was not confirmed by the provider.')
+      if (typeof input.accountId !== 'string' || !/^[a-zA-Z0-9_-]{4,100}$/.test(input.accountId)) throw new LabError('invalid', 'Invalid provider account.')
+      this.checkAssignment(pending, input.accountId, state)
+      await this.provider.verifyAccount(input.accountId)
+      const own = await this.provider.ownProfile(input.accountId)
+      if (!own.id) throw new LabError('unavailable', 'Provider did not verify the account owner.')
+      if (pending.reconnectAccount && state.ownerProfileId !== own.id) throw new LabError('denied', 'Reconnected LinkedIn owner did not match this source.')
+      // No await between the final checks and writes: distinct callback tokens
+      // cannot assign the same account or replace a tester's source concurrently.
+      this.checkAssignment(pending, input.accountId, state)
+      state.accountId = input.accountId
+      state.ownerProfileId = own.id
+      this.accountOwners.set(input.accountId, pending.userId)
+      this.save(state, { outcome: 'ok', viewedAt: new Date(this.now()).toISOString(), mode: 'own', target: own }, generation)
+    } finally {
+      if (this.pendingByUser.get(pending.userId) === input.state) this.pendingByUser.delete(pending.userId)
+      this.pending.delete(input.state as string)
+    }
   }
 
-  private save(state: UserState, preview: Preview): Preview {
+  private checkAssignment(pending: Pending, accountId: string, state: UserState) {
+    if (pending.reconnectAccount) {
+      if (accountId !== pending.reconnectAccount || state.accountId !== accountId || this.accountOwners.get(accountId) !== pending.userId) throw new LabError('denied', 'Reconnect account does not belong to this tester.')
+    } else if (state.accountId || this.accountOwners.has(accountId) || accountId === this.demoAccountId) {
+      throw new LabError('denied', 'Provider account is already assigned.')
+    }
+  }
+
+  private save(state: UserState, preview: Preview, generation: number): Preview | undefined {
+    if ((state.generation ?? 0) !== generation) return undefined
     state.preview = preview
     state.previewExpires = this.now() + TTL_MS
     return preview
@@ -130,9 +155,12 @@ export class UnipileLab {
     return this.once(userId, 'ownConnections', async state => {
       if (!state.accountId) throw new LabError('denied', 'Connect your own LinkedIn first.')
       if (state.preview?.mode === 'own' && state.preview.people) return state.preview
+      const generation = state.generation ?? 0
       const result = await this.provider.ownConnections(state.accountId)
       const people = result.people.slice(0, LIMIT)
-      return this.save(state, { outcome: result.partial || result.people.length > LIMIT ? 'partial' : people.length ? 'ok' : 'empty', viewedAt: new Date(this.now()).toISOString(), mode: 'own', people })
+      const preview = this.save(state, { outcome: result.partial || result.people.length > LIMIT ? 'partial' : people.length ? 'ok' : 'empty', viewedAt: new Date(this.now()).toISOString(), mode: 'own', people }, generation)
+      if (!preview) throw new LabError('conflict', 'Preview was cleared during the request.')
+      return preview
     })
   }
 
@@ -142,9 +170,12 @@ export class UnipileLab {
       if (!this.demoAccountId) throw new LabError('unavailable', 'Demo account is not configured.')
       if (this.allowedTargets && !this.allowedTargets.has(identifier)) throw new LabError('denied', 'This target is not approved for the live test.')
       if (state.preview?.mode === 'demo' && state.preview.target?.publicUrl === `https://www.linkedin.com/in/${identifier}`) return state.preview
+      const generation = state.generation ?? 0
       const target = await this.provider.targetProfile(this.demoAccountId, identifier)
       if (!target.id) throw new LabError('unavailable', 'Target profile has no usable provider ID.')
-      return this.save(state, { outcome: 'ok', viewedAt: new Date(this.now()).toISOString(), mode: 'demo', target: { ...target, publicUrl: `https://www.linkedin.com/in/${identifier}` } })
+      const preview = this.save(state, { outcome: 'ok', viewedAt: new Date(this.now()).toISOString(), mode: 'demo', target: { ...target, publicUrl: `https://www.linkedin.com/in/${identifier}` } }, generation)
+      if (!preview) throw new LabError('conflict', 'Preview was cleared during the request.')
+      return preview
     })
   }
 
@@ -154,15 +185,19 @@ export class UnipileLab {
       const prior = state.preview
       if (!prior || prior.mode !== 'demo' || !prior.target?.id) throw new LabError('invalid', 'Preview a target profile first.')
       if (prior.people) return prior
+      const generation = state.generation ?? 0
       // Preserve the target; never substitute the viewer's own relations.
       const result = await this.provider.targetConnections(this.demoAccountId, prior.target.id)
       const people = result.people.slice(0, LIMIT)
-      return this.save(state, { ...prior, outcome: result.partial || result.people.length > LIMIT ? 'partial' : people.length ? 'ok' : 'empty', viewedAt: new Date(this.now()).toISOString(), people, note: 'One viewer-visible page; this may be incomplete.' })
+      const preview = this.save(state, { ...prior, outcome: result.partial || result.people.length > LIMIT ? 'partial' : people.length ? 'ok' : 'empty', viewedAt: new Date(this.now()).toISOString(), people, note: 'One viewer-visible page; this may be incomplete.' }, generation)
+      if (!preview) throw new LabError('conflict', 'Preview was cleared during the request.')
+      return preview
     })
   }
 
   reset(userId: string) {
     const state = this.state(userId)
+    state.generation = (state.generation ?? 0) + 1
     delete state.preview
     delete state.previewExpires
   }

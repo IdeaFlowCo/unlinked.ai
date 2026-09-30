@@ -29,6 +29,13 @@ export default function LabPanel() {
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (!preview) return
+    const remaining = Math.max(0, new Date(preview.viewedAt).getTime() + 10 * 60_000 - Date.now())
+    const timer = window.setTimeout(() => setPreview(null), remaining)
+    return () => window.clearTimeout(timer)
+  }, [preview])
+
   async function act(action: Action) {
     if (busy) return
     setBusy(action)
