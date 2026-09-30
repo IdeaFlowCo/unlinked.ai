@@ -17,9 +17,9 @@ export default function LabPanel() {
   const [connectionOutcome, setConnectionOutcome] = useState<ConnectionOutcome | null>(null)
   const [mode, setMode] = useState<'fixture' | 'live'>('fixture')
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (reportError = true) => {
     const response = await fetch('/api/unipile-lab', { cache: 'no-store' })
-    if (!response.ok) { setMessage('Private lab is unavailable.'); return }
+    if (!response.ok) { if (reportError) setMessage('Private lab is unavailable.'); return }
     const data = await response.json()
     setConnectionOutcome(data.connectionOutcome ?? null)
     setConnected(!!data.connected)
@@ -46,21 +46,30 @@ export default function LabPanel() {
     setBusy(action)
     setMessage('')
     if (action === 'preview-target') setPreview(null)
+    let failed = false
     try {
       const response = await fetch('/api/unipile-lab', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ...(action === 'preview-target' ? { url } : action === 'target-connections' ? { url: preview?.target?.publicUrl } : {}) }),
       })
       const data = await response.json()
-      if (!response.ok) { setMessage(`${data.outcome ? `Outcome: ${data.outcome}. ` : ''}${data.error ?? 'Preview unavailable.'}`); return }
+      if (!response.ok) { failed = true; setMessage(`${data.outcome ? `Outcome: ${data.outcome}. ` : ''}${data.error ?? 'Preview unavailable.'}`); return }
       if (data.url) {
         if (data.mode === 'fixture') { setMessage('Fixture mode: Hosted Auth is synthetic and cannot complete a real connection.'); return }
         window.location.assign(data.url); return
       }
       setPreview(data.preview ?? null)
       await load()
-    } catch { setMessage('Preview unavailable. Check the connection and try later.') }
-    finally { setBusy(null) }
+    } catch { failed = true; setMessage('Preview unavailable. Check the connection and try later.') }
+    finally {
+      if (failed && (action === 'connect' || action === 'reconnect')) {
+        setConnected(false)
+        setPreview(null)
+        setConnectionOutcome(null)
+        try { await load(false) } catch {}
+      }
+      setBusy(null)
+    }
   }
 
   return <main className={styles.lab}>
