@@ -1,5 +1,6 @@
 // app/layout.tsx
 import '@radix-ui/themes/styles.css'
+import './globals.css'
 import { Box } from '@radix-ui/themes'
 import type { Metadata } from 'next'
 import Providers from './providers'

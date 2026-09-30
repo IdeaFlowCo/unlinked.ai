@@ -10,7 +10,7 @@ Any MCP-aware client (Claude Desktop, Claude Code, Cursor, Cline, Codex CLI) or 
 
 ## Scoping Guarantee
 
-Every request to unlinked.ai is authenticated server-side to the user owning the agent key.
+Every agent API request is authenticated server-side to the user owning the agent key.
 
 - **Strict isolation:** An agent key can only access the caller's own profile and their direct connections. It can never view, search, or infer the network of any other user.
 - **Server-side resolution:** No request parameter ever specifies whose network is searched. The target network is resolved server-side from the authenticated key.
