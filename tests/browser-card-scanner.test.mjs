@@ -16,7 +16,7 @@ function fixture(t, getUserMedia) {
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => video } })
   Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: callback => { frame = callback; return 1 } })
   Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value: () => {} })
-  return { host, get frame() { return frame }, get stops() { return stops }, get removals() { return removals } }
+  return { host, video, get frame() { return frame }, get stops() { return stops }, get removals() { return removals } }
 }
 
 test('camera starts on demand, rejects unrelated QR values, and opens one card', async t => {
@@ -48,4 +48,49 @@ test('leaving before camera permission resolves stops the late stream', async t 
   await starting
   assert.equal(lateStopped, true)
   assert.equal(setup.frame, undefined)
+})
+
+test('camera decode attempts are spaced out and reuse the drawing surface', async t => {
+  const setup = fixture(t)
+  setup.video.readyState = 2
+  setup.video.videoWidth = 64
+  setup.video.videoHeight = 64
+  let canvases = 0
+  let reads = 0
+  let draws = 0
+  const canvas = {
+    width: 0,
+    height: 0,
+    getContext() {
+      return {
+        drawImage() { draws++ },
+        getImageData(x, y, width, height) {
+          reads++
+          return { data: new Uint8ClampedArray(width * height * 4), width, height }
+        },
+      }
+    },
+  }
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+    createElement(tag) {
+      if (tag === 'video') return setup.video
+      assert.equal(tag, 'canvas')
+      canvases++
+      return canvas
+    },
+  } })
+  const scanner = new BrowserCardScanner(setup.host, { onCard() {}, onUnsupportedCode() {} })
+  await scanner.start()
+  for (const timestamp of [0, 16, 100, 199, 200, 250, 400]) setup.frame(timestamp)
+  assert.equal(canvases, 1)
+  assert.equal(draws, 3)
+  assert.equal(reads, 3)
+  setup.video.videoWidth = 128
+  setup.frame(600)
+  assert.equal(canvas.width, 128)
+  assert.equal(canvases, 1)
+  assert.equal(reads, 4)
+  scanner.stop()
+  setup.frame(800)
+  assert.equal(reads, 4)
 })

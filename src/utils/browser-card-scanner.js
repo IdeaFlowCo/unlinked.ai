@@ -10,6 +10,9 @@ export class BrowserCardScanner {
     this.stream = null
     this.video = null
     this.frame = null
+    this.canvas = null
+    this.context = null
+    this.lastScanAt = -Infinity
     this.stopped = false
     this.navigated = false
     this.lastUnsupported = null
@@ -34,18 +37,23 @@ export class BrowserCardScanner {
     } catch (error) { this.stop(); throw error }
   }
 
-  scanFrame = () => {
+  scanFrame = (timestamp) => {
     if (this.stopped || !this.video) return
     const video = this.video
-    if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-      const canvas = document.createElement('canvas')
+    if (timestamp - this.lastScanAt >= 200 && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+      if (!this.canvas) {
+        this.canvas = document.createElement('canvas')
+        this.context = this.canvas.getContext('2d', { willReadFrequently: true })
+      }
       const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight))
-      canvas.width = Math.round(video.videoWidth * scale)
-      canvas.height = Math.round(video.videoHeight * scale)
-      const context = canvas.getContext('2d', { willReadFrequently: true })
-      if (context) {
-        context.drawImage(video, 0, 0, canvas.width, canvas.height)
-        const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+      const width = Math.round(video.videoWidth * scale)
+      const height = Math.round(video.videoHeight * scale)
+      if (this.canvas.width !== width) this.canvas.width = width
+      if (this.canvas.height !== height) this.canvas.height = height
+      if (this.context) {
+        this.lastScanAt = timestamp
+        this.context.drawImage(video, 0, 0, width, height)
+        const pixels = this.context.getImageData(0, 0, width, height)
         const code = jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: 'attemptBoth' })
         if (code) this.acceptValue(code.data)
       }
@@ -79,5 +87,7 @@ export class BrowserCardScanner {
     this.stream = null
     this.video = null
     this.frame = null
+    this.canvas = null
+    this.context = null
   }
 }
