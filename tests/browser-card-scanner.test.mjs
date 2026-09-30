@@ -23,7 +23,7 @@ test('camera starts on demand, rejects unrelated QR values, and opens one card',
   const setup = fixture(t)
   const opened = []
   let unsupported = 0
-  const scanner = new BrowserCardScanner(setup.host, { onCard: token => opened.push(token), onUnsupportedCode: () => unsupported++ })
+  const scanner = new BrowserCardScanner(setup.host, { onCard: card => opened.push(card), onUnsupportedCode: () => unsupported++ })
   assert.equal(setup.stops, 0)
   await scanner.start()
   scanner.acceptValue('https://evil.test/c/AbC123def456GHI789jkl012')
@@ -32,9 +32,20 @@ test('camera starts on demand, rejects unrelated QR values, and opens one card',
   scanner.acceptValue(card)
   scanner.acceptValue(card)
   setup.frame?.()
-  assert.deepEqual(opened, ['AbC123def456GHI789jkl012'])
+  assert.deepEqual(opened, [{ origin: 'https://chat.globalbr.ai', token: 'AbC123def456GHI789jkl012' }])
   assert.equal(setup.stops, 1)
   assert.equal(setup.removals, 1)
+})
+
+test('scanner keeps a new-host QR on its original host', async t => {
+  const setup = fixture(t)
+  const opened = []
+  const scanner = new BrowserCardScanner(setup.host, { onCard: card => opened.push(card), onUnsupportedCode() {} })
+  await scanner.start()
+  scanner.acceptValue('https://chat.ideaflow.app/c/AbC123def456GHI789jkl012')
+  scanner.acceptValue('https://chat.globalbr.ai/c/AbC123def456GHI789jkl012')
+  assert.deepEqual(opened, [{ origin: 'https://chat.ideaflow.app', token: 'AbC123def456GHI789jkl012' }])
+  assert.equal(setup.stops, 1)
 })
 
 test('leaving before camera permission resolves stops the late stream', async t => {

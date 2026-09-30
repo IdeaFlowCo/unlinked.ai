@@ -6,6 +6,7 @@ import { parseOpenChatCard, openChatCardUrl } from '@/utils/openchat-card'
 import { BrowserCardScanner } from '@/utils/browser-card-scanner'
 
 type CameraState = 'idle' | 'starting' | 'scanning' | 'unavailable'
+type OpenChatCard = NonNullable<ReturnType<typeof parseOpenChatCard>>
 
 export default function MeetFlow() {
   const previewRef = useRef<HTMLDivElement>(null)
@@ -26,16 +27,16 @@ export default function MeetFlow() {
     return () => { mountedRef.current = false; stopCamera() }
   }, [stopCamera])
 
-  const openCard = useCallback((token: string) => {
+  const openCard = useCallback((card: OpenChatCard) => {
     if (openedRef.current || !mountedRef.current) return
     openedRef.current = true
     stopCamera()
-    window.location.assign(openChatCardUrl(token))
+    window.location.assign(openChatCardUrl(card))
   }, [stopCamera])
 
   const acceptCode = useCallback((value: string) => {
-    const token = parseOpenChatCard(value)
-    if (token) openCard(token)
+    const card = parseOpenChatCard(value)
+    if (card) openCard(card)
     else setMessage('This is not an OpenChat card. Ask for a current card QR code or paste its link.')
   }, [openCard])
 
@@ -100,7 +101,7 @@ export default function MeetFlow() {
       <div ref={previewRef} className={`camera-preview ${cameraState === 'scanning' ? 'is-scanning' : ''}`}><div className="camera-target" aria-hidden="true"><span /><span /><span /><span /></div>{cameraState !== 'scanning' && <span className="camera-placeholder">{cameraState === 'starting' ? 'Starting camera…' : 'Camera is off'}</span>}</div>
       {cameraState === 'scanning' ? <button type="button" className="public-button public-button-quiet" onClick={() => { stopCamera(); setCameraState('idle') }}>Stop camera</button> : <button type="button" className="public-button public-button-primary" onClick={() => { void startCamera() }}>{cameraState === 'starting' ? 'Starting…' : 'Start camera'}</button>}
     </section>
-    <section className="meet-card alternate-card" aria-labelledby="paste-title"><div className="option-number">02 / PASTE</div><h2 id="paste-title">Paste a card URL</h2><p>Have a link instead? Use the full OpenChat card URL.</p>
+    <section className="meet-card alternate-card" aria-labelledby="paste-title"><div className="option-number">02 / PASTE</div><h2 id="paste-title">Paste a card URL</h2><p>Have a link instead? Use the full OpenChat card URL from chat.globalbr.ai or chat.ideaflow.app.</p>
       <form onSubmit={submitLink}><label htmlFor="card-url">OpenChat card URL</label><input id="card-url" type="url" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="https://chat.globalbr.ai/c/…" value={link} onChange={event => setLink(event.target.value)} required /><button className="public-button public-button-primary" type="submit">Open card <span aria-hidden="true">↗</span></button></form>
       <div className="alternate-divider"><span>or use your phone</span></div>
       <label className="public-button public-button-outline native-camera" htmlFor="camera-photo">Use phone camera <span aria-hidden="true">↗</span></label><input id="camera-photo" className="visually-hidden" type="file" accept="image/*" capture="environment" onChange={event => { void captureCard(event) }} /><p className="camera-help">Your phone’s camera can take a photo of the QR code. You can also scan it in the Camera app to open OpenChat directly.</p>
