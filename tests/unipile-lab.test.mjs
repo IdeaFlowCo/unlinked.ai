@@ -355,3 +355,30 @@ test('replacement lookup failures invalidate targets and connection requests bin
   await assert.rejects(lab.targetConnections('alice', first), /Preview a target/)
   assert.equal(calls.some(call => call[0] === 'target-relations'), false)
 })
+
+test('demo previews expire independently of a verified own source and cannot supply own connections', async () => {
+  let now = 1000
+  const { provider, calls } = fixture()
+  provider.ownConnections = async id => {
+    calls.push(['own-relations', id])
+    return { people: [{ id: 'own-person', name: 'Own visible person' }], partial: false }
+  }
+  const lab = new UnipileLab(provider, 'demo', () => now)
+  await lab.start('alice', 'https://test.example')
+  await lab.callback(callbackOf(calls, 'account-one'))
+  await lab.previewTarget('alice', 'https://linkedin.com/in/target-one')
+  assert.equal(lab.get('alice').connected, true)
+  assert.equal(lab.get('alice').preview.mode, 'demo')
+  assert.equal(lab.get('bob').preview, undefined)
+  now += 600_000
+  assert.equal(lab.get('alice').preview, undefined)
+  await assert.rejects(lab.targetConnections('alice', 'https://linkedin.com/in/target-one'), /Preview a target/)
+  const own = await lab.ownConnections('alice')
+  assert.equal(own.mode, 'own')
+  assert.equal(own.people[0].id, 'own-person')
+  assert.deepEqual(calls.at(-1), ['own-relations', 'account-one'])
+  assert.equal(own.target, undefined)
+  now += 600_000
+  assert.equal(lab.get('alice').preview, undefined)
+  assert.equal(lab.get('alice').connected, true)
+})

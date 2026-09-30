@@ -14,9 +14,9 @@ This file is the repo-internal guide for autonomous agents and contributors work
   - Handled in `src/utils/agent-auth.ts`: Bearer tokens mint a short-lived user JWT (15 min) rather than using a service-role client, ensuring Postgres RLS enforces isolation.
   - Agent key management (`/api/agent-keys`, `/api/agent-keys/[id]`) requires browser session cookies (`allowAgentKey: false`). Agent keys cannot mint or revoke other agent keys.
 - **Server-Side Scoping Guarantee:**
-  - The target user/profile is *always* resolved server-side from the authenticated token via `resolveCallerProfile(caller)`.
+  - For agent-facing endpoints, the caller's profile is resolved server-side from the authenticated token via `resolveCallerProfile(caller)`.
   - Endpoints (`/api/search-contacts`, `/api/profiles/[id]`, `/api/draft-intro`) strictly verify direct connections (`isDirectConnection`).
-  - Accessing an unrelated profile ID returns 404 (never 403), preventing enumeration of whether an unrelated profile exists.
+  - `/api/profiles/[id]` returns 404 (never 403) for an unrelated profile ID, preventing enumeration of whether an unrelated profile exists.
   - Drafting intros (`/api/draft-intro`) is read-only and never writes to the database.
 - **MCP Server:**
   - Package `@unlinked/mcp-server` lives in `mcp-server/`. Runs as a stdio server (`@modelcontextprotocol/sdk`).

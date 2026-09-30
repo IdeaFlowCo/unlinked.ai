@@ -17,7 +17,11 @@ unlinked.ai provides a Model Context Protocol (MCP) server and REST API for auto
 - **Developer & contributor notes:** [`AGENTS.md`](AGENTS.md) (repo-internal) and [`public/AGENTS.md`](public/AGENTS.md) (HTTP agent brief)
 - **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — stdio server supporting Claude Desktop, Claude Code, Cursor, and any MCP client
 - **Agent Keys:** Mint keys starting with `ul_` at **Settings -> Agent keys** (`/settings/agent-keys`)
-- **Strict isolation:** Every tool call and HTTP request is resolved server-side to the authenticated user. An agent key can only access the owner's profile and direct connections.
+- **Strict isolation:** Every tool call and agent API request is resolved server-side to the authenticated user. An agent key can only access the owner's profile and direct connections.
+
+## Private Unipile Preview Lab
+
+See the [private lab guide](docs/unipile-lab.md) for tester usage, stage configuration, and preview limitations.
 
 ## Getting Started
 
