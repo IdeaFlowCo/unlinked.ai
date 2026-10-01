@@ -22,7 +22,7 @@ const backendIndependentReadPaths = new Set([
 
 export function bypassesLegacySession(method, pathname) {
   if (backendIndependentPaths.has(pathname)) return true
-  return ['GET', 'HEAD'].includes(method) && backendIndependentReadPaths.has(pathname)
+  return ['GET', 'HEAD'].includes(method) && (backendIndependentReadPaths.has(pathname) || /^\/people(?:\/[^/]+)?\/?$/.test(pathname))
 }
 
 export async function runMiddlewareGate(request, { nextResponse, updateSession }) {
