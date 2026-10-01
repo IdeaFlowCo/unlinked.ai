@@ -4,6 +4,9 @@ services:
     image: ${PILOT_NEO4J_IMAGE:?approved digest-pinned image required}
     container_name: unlinked-private-guest-pilot-20261001-graph
     user: ${PILOT_UID:?explicit host operator uid required}:${PILOT_GID:?explicit host operator gid required}
+    # Preserve tini signal forwarding and the pinned image entrypoint; only tighten creation modes.
+    entrypoint: [tini, -g, --, /bin/bash, -c, "umask 077; exec /startup/docker-entrypoint.sh neo4j"]
+    command: []
     env_file: /srv/unlinked-private-guest-pilot-20261001/runtime/graph.env
     environment:
       NEO4J_server_memory_heap_initial__size: 512m
