@@ -32,3 +32,23 @@ test('malformed and excessive public output fails unavailable rather than manufa
     assert.equal((await directory.profile('x')).state, 'unavailable')
   }
 })
+test('reader rejects reserved dot IDs in lists, profiles and connections', async () => {
+  for (const id of ['.', '..']) {
+    const person = { id, name: 'Synthetic Person' }
+    const profile = { id: 'ordinary-id', name: 'Synthetic Person', positions: [], education: [], skills: [], connections: [] }
+    const directory = createDirectory({ list: async () => ({ profiles: [person] }), profile: async () => ({ profile: { ...profile, ...person } }) })
+    assert.deepEqual(await directory.list(''), { state: 'unavailable' })
+    assert.deepEqual(await directory.profile(id), { state: 'unavailable' })
+    const connected = createDirectory({ list: async () => ({ profiles: [] }), profile: async () => ({ profile: { ...profile, connections: [person] } }) })
+    assert.deepEqual(await connected.profile(profile.id), { state: 'unavailable' })
+  }
+})
+test('reader preserves stable IDs other than reserved dot segments', async () => {
+  for (const id of ['ordinary-id', 'other/id', 'a.b', '...', '.hidden', 'trailing.', 'person space', '人物', '%2E']) {
+    const person = { id, name: 'Synthetic Person' }
+    const profile = { ...person, positions: [], education: [], skills: [], connections: [person] }
+    const directory = createDirectory({ list: async () => ({ profiles: [person] }), profile: async () => ({ profile }) })
+    assert.deepEqual(await directory.list(''), { state: 'ready', data: { profiles: [person] } })
+    assert.deepEqual(await directory.profile(id), { state: 'ready', data: profile })
+  }
+})
