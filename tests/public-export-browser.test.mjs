@@ -33,48 +33,37 @@ const surface = () => evaluate(`({url:location.href,text:document.querySelector(
   primary:[...document.querySelectorAll('main a.public-button-primary')].map(a=>({text:a.innerText,href:a.href,target:a.target})),
   overflow:document.documentElement.scrollWidth>innerWidth})`);
 
-test('public export journey is honest, navigable and responsive', { skip: !base }, async () => {
+test('public beta bridge is honest, navigable and responsive', { skip: !base }, async () => {
   axi('newpage', base);
   const originalTab = Math.max(...tabIds());
   axi('resize', '1440', '1000');
   let page = surface();
   assert.equal(page.files, 0);
   assert.equal(page.primary.length, 1);
-  assert.match(page.primary[0].text, /^Start my LinkedIn export/);
-  assert.equal(page.primary[0].href, 'https://www.linkedin.com/mypreferences/d/download-my-data');
-  assert.equal(page.primary[0].target, '_blank');
+  assert.match(page.primary[0].text, /^Start/);
+  assert.equal(page.primary[0].href, 'https://private.unlinked.ai/login');
   assert.match(page.text, /EXAMPLE · FICTIONAL PEOPLE/);
   assert.match(page.text, /Director of Partnerships\s+Northwind Solar/);
-  assert.match(page.text, /Uploads and sign-in are not active yet/);
+  assert.match(page.text, /Open beta. No invitation needed/);
+  assert.match(page.text, /Full ZIP preferred; Connections-only also supported/);
   assert.doesNotMatch(page.text, /Unipile/);
   assert.equal(page.overflow, false);
-  const previousTabs = tabIds();
-  clickLink('Start my LinkedIn export ↗');
-  const popup = await eventually(() => tabIds().find(id => !previousTabs.includes(id)), Boolean);
-  axi('selectpage', String(popup));
-  await eventually(() => evaluate('location.href'), url => new URL(url).hostname.endsWith('linkedin.com'));
-  axi('closepage', String(popup));
-  axi('selectpage', String(originalTab));
-  page = await eventually(surface, p => new URL(p.url).pathname === '/import-linkedin');
-  assert.equal(new URL(page.url).pathname, '/import-linkedin');
-  assert.match(page.text, /select Connections only/);
-  assert.match(page.text, /within 48 hours/);
-  assert.match(page.text, /not available on mobile/);
-  assert.match(page.text, /within 72 hours/);
-  assert.match(page.text, /invited Ideaflow ID account is required before upload/);
-  assert.match(page.text, /browser file-picker journey still needs verification/);
-  assert.equal(page.files, 0);
+  axi('open', new URL('/auth/login', base).href);
+  page = surface();
+  assert.equal(page.primary[0].href, 'https://private.unlinked.ai/login');
+  assert.match(page.text, /No invitation or separate Unlinked password is required/);
+  assert.doesNotMatch(page.text, /not available yet|coming soon|invitation is ready/);
   // Exercise the alternate path for people who already downloaded their file.
   axi('open', base);
-  clickLink('Already have your file? See the next step →');
+  clickLink('Need your export? Get it from LinkedIn →');
   page = await eventually(surface, p => new URL(p.url).hash === '#next');
   assert.equal(new URL(page.url).hash, '#next');
-  assert.match(page.text, /Sign-in and uploads are not active yet/);
+  assert.match(page.text, /Open beta at private.unlinked.ai/);
   assert.equal(evaluate(`(()=>{const r=document.querySelector('#next').getBoundingClientRect();return r.top<innerHeight&&r.bottom>0})()`), true);
   axi('resize', '390', '844');
   axi('open', base);
   assert.equal(surface().overflow, false);
-  clickLink('Already have your file? See the next step →');
+  clickLink('Need your export? Get it from LinkedIn →');
   await eventually(surface, p => new URL(p.url).hash === '#next');
   assert.equal(surface().overflow, false);
   axi('closepage', String(originalTab));
