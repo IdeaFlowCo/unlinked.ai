@@ -2,7 +2,8 @@
 
 This is a deterministic, read-only planning interface, not an import completion receipt.
 `createLegacyPlan(uncompressedDumpBytes, limits?)` produces a normalized migration plan without executing SQL, accessing a database, or writing to Noos.
-`sourceSha256` identifies the exact uncompressed dump bytes; keep the compressed backup hash separately in the recovery receipt.
+`sourceSha256` identifies the exact uncompressed dump bytes; pass the separately computed compressed backup hash through the optional `sourceContainerSha256` metadata option.
+The planner validates that metadata format but cannot verify container identity without container bytes; the read-only recovery caller must compute it.
 
 Only eight `public` tables are decoded: profiles, connections, positions, education, skills, companies, institutions and uploads.
 All other COPY sections, including authentication and storage/security tables, are discarded without decoding their fields.
