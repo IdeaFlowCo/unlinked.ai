@@ -8,7 +8,7 @@ import { join } from 'node:path'
 let browser
 try { browser = await import('../mcp-server/private-browser.mjs') } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error }
 
-test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE and preserves account choice', { skip: !browser }, async () => {
+test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE and requests reauthentication', { skip: !browser }, async () => {
   const issuer = 'https://synthetic-ideaflow.invalid', callbackUrl = 'https://private.invalid/auth/callback/ideaflow'
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), wrongKeys = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const jwk = { ...keys.publicKey.export({ format: 'jwk' }), kid: 'synthetic-rsa', alg: 'RS256', use: 'sig' }
@@ -27,9 +27,10 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
     const now = Math.floor(Date.now() / 1000)
     return Response.json({ access_token: 'synthetic-identity-only', token_type: 'Bearer', expires_in: 300, id_token: sign({ iss: issuer, aud: 'private-client', sub: 'immutable-synthetic-subject', iat: now, exp: now + 300, nonce, email: 'unverified@example.invalid', email_verified: false, ...override }) })
   } })
+  assert.equal(login.authorizationOrigin, issuer)
   for (const bad of [{}, { nonce: 'wrong' }, { iss: 'https://other.invalid' }, { aud: 'other-client' }]) {
     const start = await login.begin(), location = new URL(start.location)
-    assert.equal(location.searchParams.get('prompt'), 'select_account'); assert.equal(location.searchParams.get('code_challenge_method'), 'S256')
+    assert.equal(location.searchParams.get('prompt'), 'login'); assert.equal(location.searchParams.get('code_challenge_method'), 'S256')
     nonce = start.transaction.nonce; override = bad
     const callback = new URL(`${callbackUrl}?code=synthetic-code&state=${start.transaction.state}`)
     if (!Object.keys(bad).length) {
@@ -45,6 +46,32 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
   const before = exchanges
   await assert.rejects(login.finish(new URL(`${callbackUrl}?code=code&state=wrong`), start.transaction))
   assert.equal(exchanges, before)
+})
+
+test('signup mode does not expose invitation confirmation or account switching routes', { skip: !browser }, async t => {
+  let claims = 0, signups = 0
+  const owner = { ownerId: 'signup-owner', userId: 'signup-user' }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  handler = browser.createPrivateBrowserHandler({ baseUrl,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/account-choice', transaction: { state: 'synthetic-state' } }), finish: async () => ({ issuer: 'https://synthetic.invalid', subject: 'signup-sub' }) },
+    resolveOwner: async identity => identity.subject === 'signup-sub' && signups ? owner : null,
+    signup: async () => { signups++; return owner },
+    claimInvitation: async () => { claims++; return owner },
+    getBackend: async () => ({ adapter: {}, readResource: async () => null, listImportIds: async () => [] }),
+    issueAccountGrant: async () => 'grant',
+    revokeAccountGrant: async () => {},
+  })
+  const invite = await fetch(`${endpoint}/invite/${'a'.repeat(43)}`)
+  assert.equal(invite.status, 401)
+  assert.equal((await invite.text()).includes('Use another account'), false)
+  assert.equal(claims, 0)
+  const start = await fetch(`${endpoint}/login`, { redirect: 'manual' })
+  const callback = await fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic&state=synthetic-state`, { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  assert.equal(callback.status, 303)
+  assert.equal(signups, 1)
 })
 
 test('private browser sign-in, consent upload, durable replay receipt, search and scoped setup execute over HTTP', { skip: !browser }, async t => {
@@ -128,4 +155,19 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
   assert.equal(issued.length, 1)
   assert.equal((await fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic&state=synthetic-state`, { headers: { Cookie: loginCookie } })).status, 400)
   assert.equal(finishes, 1)
+})
+
+
+test('private browser denies noncanonical or unsafe authorization origins before serving a form', { skip: !browser }, () => {
+  assert.throws(() => browser.createPrivateBrowserHandler({ baseUrl: 'https://private.invalid',
+    login: { begin: async () => {}, finish: async () => {} },
+    claimInvitation: async () => null,
+    resolveOwner: async () => null, getBackend: async () => null,
+  }))
+  for (const authorizationOrigin of ['http://issuer.invalid', 'https://issuer.invalid/path', 'https://issuer.invalid/?query=1', "https://issuer.invalid; form-action *", 'https://issuer.invalid\n']) {
+    assert.throws(() => browser.createPrivateBrowserHandler({ baseUrl: 'https://private.invalid',
+      login: { authorizationOrigin, begin: async () => {}, finish: async () => {} },
+      resolveOwner: async () => null, getBackend: async () => null,
+    }))
+  }
 })

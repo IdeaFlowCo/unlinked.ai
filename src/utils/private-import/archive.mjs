@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
 import Papa from 'papaparse'
 
-export const PARSER_VERSION = 'linkedin-archive-v4'
-export const LIMITS = Object.freeze({ archiveBytes: 20 * 1024 * 1024, fileBytes: 8 * 1024 * 1024, expandedBytes: 40 * 1024 * 1024, files: 200, rows: 100000, headerRows: 20, recordChars: 65536, fieldChars: 32768, fields: 256, quoteTokens: 1024 })
+export const PARSER_VERSION = 'linkedin-archive-v5'
+export const LIMITS = Object.freeze({ archiveBytes: 64 * 1024 * 1024, fileBytes: 8 * 1024 * 1024, expandedBytes: 40 * 1024 * 1024, files: 2000, rows: 100000, headerRows: 20, recordChars: 65536, fieldChars: 32768, fields: 256, quoteTokens: 1024 })
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const crcTable = Array.from({ length: 256 }, (_, n) => {
   for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1
@@ -16,13 +16,13 @@ function crc32(bytes) {
 }
 function fail(code) { throw new Error(code) }
 function safePath(path) {
-  if (!path || path.includes('\\') || path.startsWith('/') || path.includes('\0') || path.split('/').some(p => p === '..' || p === '.')) fail('unsafe_archive_path')
+  if (!path || path.length > 1024 || path.includes('\\') || path.startsWith('/') || path.includes('\0') || path.split('/').some(p => p === '..' || p === '.')) fail('unsafe_archive_path')
   return path
 }
 
 // Inspect central-directory bounds before inflating. ZIP64, encryption, symlinks,
 // duplicate paths and alternate compression methods are deliberately unsupported.
-export function unpackArchive(input, filename) {
+export function unpackArchive(input, filename, { selectedOnly = false } = {}) {
   const bytes = Buffer.from(input)
   if (!bytes.length || bytes.length > LIMITS.archiveBytes) fail('archive_size_limit')
   if (/\.csv$/i.test(filename)) {
@@ -53,18 +53,22 @@ export function unpackArchive(input, filename) {
     const path = safePath(new TextDecoder('utf-8', { fatal: true }).decode(nameBytes))
     if (paths.has(path)) fail('duplicate_archive_path')
     paths.add(path)
-    expanded += uncompressed
-    if (uncompressed > LIMITS.fileBytes || expanded > LIMITS.expandedBytes) fail('zip_expansion_limit')
+    const selected = !selectedOnly || Object.hasOwn(categories, path.split('/').pop().toLowerCase())
+    if (selected) {
+      expanded += uncompressed
+      if (uncompressed > LIMITS.fileBytes || expanded > LIMITS.expandedBytes) fail('zip_expansion_limit')
+    }
     if (localOffset + 30 > offset || bytes.readUInt32LE(localOffset) !== 0x04034b50) fail('invalid_zip_local_header')
     const localNameSize = bytes.readUInt16LE(localOffset + 26), localExtraSize = bytes.readUInt16LE(localOffset + 28)
     const start = localOffset + 30 + localNameSize + localExtraSize
     if (bytes.readUInt16LE(localOffset + 6) !== flags || bytes.readUInt16LE(localOffset + 8) !== method || !bytes.subarray(localOffset + 30, localOffset + 30 + localNameSize).equals(nameBytes) || start + compressed > offset) fail('zip_header_mismatch')
-    entries.push({ path, method, crc, uncompressed, compressed, start })
+    entries.push({ path, method, crc, uncompressed, compressed, start, selected })
     cursor = next
   }
   if (cursor !== end) fail('invalid_zip_directory_size')
   return entries.filter(e => !e.path.endsWith('/')).map(e => {
     const compressed = bytes.subarray(e.start, e.start + e.compressed)
+    if (!e.selected) return { path: e.path, skippedEntry: { path: e.path, compressionMethod: e.method, crc32: e.crc, expandedBytes: e.uncompressed, compressedBytes: e.compressed, compressedSha256: digest(compressed) } }
     const content = e.method === 0 ? Buffer.from(compressed) : inflateRawSync(compressed, { maxOutputLength: LIMITS.fileBytes })
     if (content.length !== e.uncompressed || crc32(content) !== e.crc) fail('zip_content_mismatch')
     return { path: e.path, bytes: content }
@@ -175,12 +179,17 @@ export function parseSource(source, budget = { remaining: LIMITS.rows }, limitEr
 }
 
 export function parseArchive(input, filename) {
-  const sources = unpackArchive(input, filename)
+  const sources = unpackArchive(input, filename, { selectedOnly: true })
   const budget = { remaining: LIMITS.rows }
-  const receipts = sources.map(source => {
+  const ignored = sources.filter(source => source.skippedEntry).map(source => source.skippedEntry)
+  const receipts = sources.filter(source => !source.skippedEntry).map(source => {
     const receipt = parseSource(source, budget, 'archive_row_limit')
     if (receipt.error === 'archive_row_limit') fail('archive_row_limit')
     return { ...receipt, rawBytes: source.bytes }
   })
+  if (ignored.length) {
+    const source = { path: '__archive_manifest__/ignored-entries.json', bytes: Buffer.from(JSON.stringify({ version: 1, entries: ignored })) }
+    receipts.push({ ...parseSource(source, budget), rawBytes: source.bytes, skippedFileCount: ignored.length })
+  }
   return { parserVersion: PARSER_VERSION, archiveSha256: digest(input), sources: receipts }
 }

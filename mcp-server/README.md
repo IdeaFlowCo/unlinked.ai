@@ -8,6 +8,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io) adapter for the hist
 
 Live private sign-in, archive uploads, agent-key creation, and hosted MCP setup are unavailable in the deployed product today. `/agents` shows setup status rather than an active onboarding flow. The setup examples below are preserved as historical implementation notes for recovery and local development.
 
+The default-off private runtime also contains a hosted account MCP handler for the private pilot. That handler uses a separate bearer audience, exposes only `unlinked_search_network`, searches all current owner imports plus future imports until revoked, and is documented in `../deploy/private-pilot/ACCOUNT-LAUNCH.md`; it is not the public stdio server below.
+
 ## Historical setup reference
 
 1. Sign in to a private unlinked.ai account after private access is enabled -> **Settings -> Agent keys -> create key**

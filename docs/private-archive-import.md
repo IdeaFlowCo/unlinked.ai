@@ -8,7 +8,7 @@ The legacy onboarding/agent endpoints are not connected to this module.
 
 `src/utils/private-import/archive.mjs` consumes real ZIP or individual CSV bytes.
 The authoritative numeric bounds are the exported `LIMITS` in `src/utils/private-import/archive.mjs`: archive/file bytes, total expanded bytes, ZIP entries and parsed CSV records across the archive, including blank, preamble and header records.
-Incremental parsing aborts when that shared budget is exceeded; unsupported files are retained without CSV parsing.
+Incremental parsing aborts when that shared budget is exceeded. For ZIP input, only supported LinkedIn CSV members are inflated; unsupported entries are recorded in an immutable manifest so the original archive bytes remain recoverable without expanding media or other nonselected files.
 Before passing a record to PapaParse, a constant-memory logical-record iterator enforces `LIMITS.recordChars` and `LIMITS.fieldChars` in UTF-16 code units, `LIMITS.fields` and `LIMITS.quoteTokens` (including escaped quotes).
 Quoted commas, escaped quotes and multiline fields remain supported within those limits. The first line ending outside quoted fields selects the CSV record separator. Each PapaParse input contains at most one bounded logical record plus its separator, avoiding searches over the remaining file.
 Exceeding a boundary fails the entire source with `csv_record_size_limit`, `csv_field_size_limit`, `csv_field_count_limit` or `csv_quote_limit`; no assertions from that file are published and its original bytes remain retained.
@@ -42,7 +42,7 @@ Its batch publication, private asset, immutable revision and read-fence contract
 No production route mounts this adapter and no generic Noos graph is written.
 Noos labels are not isolation by themselves; the destination must be inaccessible to legacy generic query, graph, search, counts, export, attachments and agent credentials.
 
-The browser identity seam remains verified `(issuer, subject)` to an immutable Unlinked owner ID and Noos user ID, preserving account choice and established bindings. The optional new-owner claim is owned by [Private invited-owner browser](private-invited-browser.md).
+The browser identity seam remains verified `(issuer, subject)` to an immutable Unlinked owner ID and Noos user ID, preserving explicit account confirmation and established bindings. Invited new-owner claims are owned by [Private invited-owner browser](private-invited-browser.md); open-account signup is owned by the default-off private runtime and summarized in [Open account launch](../deploy/private-pilot/ACCOUNT-LAUNCH.md).
 A LinkedIn slug, imported email or a call to the legacy `claim_linkedin_profile` is not that mapping.
 The identity owner owns token verification and subject resolution; the import module accepts only the resolved owner, not an owner from browser upload input.
 Browser and scoped agent search use the same committed owner-specific dataset in staging; see [Private Noos staging](private-noos-staging.md#scoped-search-and-browser).
