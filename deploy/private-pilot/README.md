@@ -10,6 +10,7 @@ No dependencies are installed by this packet.
 ```sh
 python3 deploy/private-pilot/pilot.py plan
 python3 deploy/private-pilot/checks.py
+python3 deploy/private-pilot/topology-check.py
 node --check deploy/private-pilot/runtime.mjs
 # Later, on the exact approved GCP host, with a mode-600 reviewed manifest:
 python3 /release/pilot.py preflight --manifest /private/release.json
@@ -26,7 +27,7 @@ Every command defaults to no mutation except verification, which only reads its 
 `preflight` requires final source receipts, exact clean checkout heads, reviewed wiring digest, verified image artifacts, existing mode-700 roots/directories and mode-600 inputs.
 There is no implicit directory creation during deployment and no command to obtain a certificate, alter DNS, register a client, create an invitation or copy credentials.
 The start command fails on occupied owned ports; services must be explicitly checked after start before any claim of availability.
-Privileged HTTPS availability is checked without requiring the operator to bind port 443 directly; loopback runtime and graph ports still use direct bind probes.
+HTTPS availability is checked without requiring the operator to bind port 443 directly; app, operations and graph ports are not published by the private container recipe.
 Production client and identity operations remain with the identity owner.
 Readiness booleans record verified source, image, isolation and input facts; they do not introduce routine human approval gates for reversible preparation.
 The production identity operation and new persistent OpenAI secret destination retain their explicit authority requirements.
@@ -41,7 +42,7 @@ It validates the dedicated root and exact live origin/ports, initializes callbac
 Before provisioning or exposing HTTP readiness, it waits for the dedicated Bolt driver to report graph connectivity with the same bounded driver timeouts.
 The server-side operations key never leaves the runtime; hosted MCP uses its separate search-only grants and live publication fences.
 The private env, production client, TLS/DNS, dependency-complete source artifacts and built deployment images remain activation inputs.
-It must start the isolated operational service only at `127.0.0.1:9022` and return `login`, `resolveOwner`, `claimInvitation`, `getBackend`, `complete` and `close` capabilities.
+It must start the isolated operational service only at container `127.0.0.1:9022` and return `login`, `resolveOwner`, `claimInvitation`, `getBackend`, `complete` and `close` capabilities.
 The login object must implement `begin` and `finish` using `createIdeaflowLogin` with the exact verified production issuer/client and callback.
 The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `claimInvitation` is its guarded claim method and `resolveOwner` resolves the same verified issuer/subject mapping.
 `getBackend` must revalidate active immutable owner/principal and publication access on every operation.
@@ -62,11 +63,16 @@ It verifies daemon access before launching or stopping owned services; secret va
 Container user IDs are set explicitly from the local operator and no bind source can be automatically created by Compose.
 Neo4j graph files must satisfy the private recovery permission checks; verify the approved image's file ownership/modes before enabling guest data.
 `runtime.env`, `graph.env` and `operator.json` are proposed destinations, not files to populate automatically.
+The recipe uses explicit `isolated-container` mode.
+A dedicated frontend bridge contains only nginx and runtime; a separate internal backend bridge contains only runtime and graph.
+Only nginx publishes host 443 to its unprivileged container port 8443, as the file-owning operator with all capabilities dropped.
+The browser listens on 0.0.0.0:9367 inside its container with no published app port; operations stays on container loopback 9022 and Bolt uses exactly graph:7687 on the internal backend.
+The default process mode remains host loopback; an arbitrary public browser/graph address is rejected.
 The proposed persistent OpenAI destination is `runtime/runtime.env` and requires explicit destination confirmation before any key copy.
 Synthetic testing can continue reading the existing M5 key in place; no model key belongs on a CI VM.
 The runtime reads `IDEAFLOW_ISSUER`, `IDEAFLOW_CLIENT_ID`, `IDEAFLOW_CLIENT_SECRET`, `NOOS_PRIVATE_PASSWORD` and `OPENAI_API_KEY` from its explicit `runtime.env` only.
 The proposed production issuer is `https://id.ideaflow.app/api/auth`; client registration and confidential secret delivery belong to the identity owner.
-The callback is exactly `https://private.unlinked.ai/auth/callback/ideaflow`; the process binds browser 9367 and operations 9022 to loopback, and uses the dedicated graph at loopback 9289.
+The callback is exactly `https://private.unlinked.ai/auth/callback/ideaflow`; the isolated container recipe uses browser 9367, operations on its own loopback 9022, and the dedicated internal graph at graph:7687.
 Run it as the explicitly provisioned private host operator UID/GID recorded in the release manifest; no root database or operator invitation capability is passed through HTTP.
 The Noos operator CLI owns invitation creation/replay/revocation and accepts a private config plus `NOOS_PROVISIONING_PASSWORD` without printing its secret.
 Its `create --config PRIVATE.json --out NEW-PRIVATE.json` writes the mode-600, fsynced recovery bundle before the graph operation.
@@ -75,7 +81,10 @@ The offline operator capability never enters the browser runtime.
 
 ## Recovery and ingress
 
-Compose owns only three distinctly named and labeled containers; graph publishes loopback Bolt 9289, runtime binds browser 9367 and operations 9022 to loopback, and ingress alone listens publicly on HTTPS 443.
+Compose owns only three distinctly named and labeled containers and two dedicated bridges; only ingress publishes HTTPS 443.
+Graph and runtime have no published ports; nginx cannot join the internal graph bridge or access runtime loopback operations.
+All services run as the private operator with all capabilities dropped; nginx temp paths and tmpfs ownership permit non-root startup with read-only TLS mounts.
+If a separately owned maintenance-only ingress occupies 443, verify its exact saved ID/root/maintenance labels and stop it before starting the full recipe; retain its config/certificates for rollback.
 Existing port-80 nginx, legacy Noos containers, shared graph, existing assets and synthetic fixture roots are not mounted or stopped.
 Proxy request/error logging is disabled, so `/invite/<token>` and query strings cannot leak there.
 Wrong Host headers and raw operations/asset/query paths are rejected; application session/CSRF/owner authorization remains the trusted product's responsibility.

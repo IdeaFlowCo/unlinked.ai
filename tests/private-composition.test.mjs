@@ -147,3 +147,20 @@ test('composition fails closed when graph readiness deadline expires', async t =
   assert.equal(state.initialized, undefined)
   assert.equal(state.closes, 1)
 })
+
+
+test('explicit container mode keeps operations loopback and allows only private graph DNS', async t => {
+  const { options, state, port } = await fixture(t)
+  const isolated = { ...options, networkMode: 'isolated-container', boltUrl: 'bolt://graph:7687' }
+  for (const change of [{ boltUrl: 'bolt://graph:9289' }, { boltUrl: 'bolt://other:7687' }, { boltUrl: 'bolt://127.0.0.1:7687' }, { host: '0.0.0.0' }, { networkMode: 'unknown' }]) {
+    await assert.rejects(createPrivatePilotDependencies({ ...isolated, ...change }), /private_composition_configuration_required/)
+  }
+  const dependencies = await createPrivatePilotDependencies(isolated)
+  t.after(dependencies.close)
+  assert.equal(state.driver.url, 'bolt://graph:7687')
+  assert.equal((await fetch(`http://127.0.0.1:${port}/v1/unlinked/import/${'a'.repeat(64)}`)).status, 401)
+  const owner = await dependencies.resolveOwner({ issuer: configuration.issuer, subject: 'chosen-subject' })
+  const backend = await dependencies.getBackend(owner)
+  assert.deepEqual(await backend.readResource('import', 'a'.repeat(64)), state.resource)
+  await assert.rejects(dependencies.getBackend({ ...owner, ownerId: 'wrong-owner' }), /owner_denied/)
+})

@@ -22,20 +22,21 @@ function loadNoos(root) {
 // Explicit private-process composition; never imported by Next.js. No operator
 // capability, provider token, graph credential or operations bearer reaches a
 // browser/agent. The caller supplies an isolated root and reviewed private env.
-export async function createPrivatePilotDependencies({ root, baseUrl, host, operationalPort, boltUrl, dataMode,
+export async function createPrivatePilotDependencies({ root, baseUrl, host, operationalPort, boltUrl, dataMode, networkMode = 'loopback',
   config = { issuer: process.env.IDEAFLOW_ISSUER, clientId: process.env.IDEAFLOW_CLIENT_ID,
     clientSecret: process.env.IDEAFLOW_CLIENT_SECRET, graphPassword: process.env.NOOS_PRIVATE_PASSWORD,
     apiKey: process.env.OPENAI_API_KEY }, modules, loginFactory = createIdeaflowLogin,
   completionFactory = createResponsesCompletion, graphReadyDeadlineMs = 90000, graphReadyRetryMs = 1000 }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
+  const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : networkMode === 'isolated-container' && bolt.hostname === 'graph' && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
-      bolt.protocol !== 'bolt:' || bolt.hostname !== '127.0.0.1' || !bolt.port || bolt.pathname || bolt.search || bolt.hash || bolt.username || bolt.password ||
+      bolt.protocol !== 'bolt:' || !privateBolt || !bolt.port || bolt.pathname || bolt.search || bolt.hash || bolt.username || bolt.password ||
       !Number.isSafeInteger(operationalPort) || operationalPort < 7000 || operationalPort > 9999 || !['synthetic', 'private_live'].includes(dataMode) ||
       !Number.isSafeInteger(graphReadyDeadlineMs) || graphReadyDeadlineMs < 1 || graphReadyDeadlineMs > 90000 ||
       !Number.isSafeInteger(graphReadyRetryMs) || graphReadyRetryMs < 1 || graphReadyRetryMs > graphReadyDeadlineMs ||
       ['issuer', 'clientId', 'clientSecret', 'graphPassword', 'apiKey'].some(key => typeof config[key] !== 'string' || !config[key])) throw new Error('private_composition_configuration_required')
   if (dataMode === 'private_live' && (root !== '/srv/unlinked-private-guest-pilot-20261001' || base.origin !== 'https://private.unlinked.ai' ||
-      config.issuer !== 'https://id.ideaflow.app/api/auth' || bolt.port !== '9289' || operationalPort !== 9022)) throw new Error('private_composition_target_required')
+      config.issuer !== 'https://id.ideaflow.app/api/auth' || bolt.port !== (networkMode === 'isolated-container' ? '7687' : '9289') || operationalPort !== 9022)) throw new Error('private_composition_target_required')
   const stat = await lstat(root)
   if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_composition_root_required')
   const dependencies = modules ?? loadNoos(root)

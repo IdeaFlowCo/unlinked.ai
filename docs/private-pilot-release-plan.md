@@ -63,3 +63,7 @@ The real guest packet rollback stops only its three labeled containers and prese
 Publication rollback is an irreversible tombstone for that publication; it retains private originals and denies tools.
 A quiesced paired restore must restore journal rows before final publication fences and preserve owner mappings, source IDs, immutable receipt history and grant/publication tombstones.
 The synthetic harness rehearses this pair; power-loss/directory-fsync durability, operational backup ownership/retention and historical live-writer fencing remain separate release evidence.
+
+The private container recipe uses a frontend bridge for nginx/runtime and a separate internal runtime/graph bridge.
+Only non-root nginx publishes 443 to container 8443; neither app nor graph has a published port, and operations remains container loopback.
+The process default remains host loopback; exact isolated-container mode and private service addresses must be explicitly selected.
