@@ -213,9 +213,13 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         return resources.filter(resource => resource && !resource.deleted && resource.sourceOwnerId === session.owner.ownerId && resource.payload?.id === resource.sourceId && !resource.payload.kind && !resource.payload.receiptOf)
       }
       const profileJobs = jobs => [...jobs].sort((a, b) => {
-        const createdA = a.payload.createdAt, createdB = b.payload.createdAt
-        if (!Number.isSafeInteger(createdA) || !Number.isSafeInteger(createdB)) throw new Error('private_import_created_at_invalid')
-        return createdA - createdB || a.sourceId.localeCompare(b.sourceId)
+        const key = resource => {
+          if (resource.payload.backgroundVersion !== 'profile-first-v1') return [0, 0, resource.sourceId]
+          if (!Number.isSafeInteger(resource.payload.createdAt)) throw new Error('private_import_created_at_invalid')
+          return [1, resource.payload.createdAt, resource.sourceId]
+        }
+        const left = key(a), right = key(b)
+        return left[0] - right[0] || left[1] - right[1] || left[2].localeCompare(right[2])
       })
       const jobProps = jobs => {
         const ordered = [...jobs].sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0))
