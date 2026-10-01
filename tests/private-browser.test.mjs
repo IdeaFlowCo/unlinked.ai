@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { generateKeyPairSync, createSign } from 'node:crypto'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 let browser
 try { browser = await import('../mcp-server/private-browser.mjs') } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error }
@@ -84,14 +86,29 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
   const receiptPath = uploaded.headers.get('location'), importId = receiptPath.split('/').pop()
   assert.equal(assets.has(digest(Buffer.from(csv))), true)
   assert.equal((await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(true), redirect: 'manual' })).headers.get('location'), receiptPath)
-  assert.equal((await fetch(`${endpoint}${receiptPath}`, { headers: { Cookie: sessionCookie } })).status, 200)
+  const receiptResponse = await fetch(`${endpoint}${receiptPath}`, { headers: { Cookie: sessionCookie } })
+  assert.equal(receiptResponse.status, 200)
+  const receiptHtml = await receiptResponse.text()
   const search = await fetch(`${endpoint}/search`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId, query: 'engineer' }) })
-  assert.match(await search.text(), /Observed engineer/)
+  const searchHtml = await search.text()
+  assert.match(searchHtml, /Observed engineer/)
   assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers: { ...headers, Origin: 'https://wrong.invalid' }, body: new URLSearchParams({ csrf, importId }) })).status, 403)
   const setup = await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })
   assert.equal(setup.status, 200)
   assert.deepEqual(issued[0].scope, { importIds: [importId], tools: ['unlinked_search_import'] })
-  assert.equal((await setup.json()).mcpServers['unlinked-private'].url, `${baseUrl}/mcp`)
+  const configuration = await setup.json()
+  assert.equal(configuration.mcpServers['unlinked-private'].url, `${baseUrl}/mcp`)
+  if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) {
+    for (const [name, html] of [['upload', uploadPage], ['receipt', receiptHtml], ['search', searchHtml]]) {
+      await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `browser-${name}.html`), html)
+    }
+    await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, 'browser-journey.json'), JSON.stringify({
+      boundary: 'Actual staging HTTP handler output; synthetic login, in-memory storage and deterministic completion. No live provider login, Noos storage or model proof.',
+      refusedUploadStatus: refused.status, uploadStatus: uploaded.status, replayLocation: receiptPath,
+      receiptStatus: receiptResponse.status, searchStatus: search.status, grantScope: issued[0].scope,
+      configuration,
+    }, null, 2))
+  }
   const storedConsent = resources.get(importId).payload.consent
   assert.equal(storedConsent.version, 'private-archive-openai-v1')
   delete resources.get(importId).payload.consent

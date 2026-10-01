@@ -1,6 +1,7 @@
 import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { writeFile } from 'node:fs/promises'
 import { createPrivateSearch, responsesRequest, parseResponsesResult } from '../src/utils/private-import/ai-search.mjs'
 
 const id = 'a'.repeat(64), rowId = 'b'.repeat(64)
@@ -45,6 +46,10 @@ test('all 1001 connection IDs participate in bounded ranking; cancellation stops
   let calls = 0
   await assert.rejects(createPrivateSearch({ readImport: async () => indexed, complete: async () => { calls++; controller.abort(); return { matches: [] } } })({ importId: id, query: 'last contact', signal: controller.signal }))
   assert.equal(calls, 1)
+  if (process.env.PRIVATE_SEARCH_EVIDENCE) await writeFile(process.env.PRIVATE_SEARCH_EVIDENCE, JSON.stringify({
+    boundary: 'Executable query-time search over 1001 synthetic observations; deterministic provider completion, no network/model or Noos persistence proof.',
+    consideredConnections: considered.size, result, cancelledProviderCalls: calls,
+  }, null, 2))
 })
 
 

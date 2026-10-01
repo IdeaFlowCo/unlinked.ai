@@ -26,7 +26,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const { createOperationalRouter } = await load('router')
   const { createAccessTokenAuthenticator } = await load('access-token')
   const { StagingFileAssets, createPrivateAssetRouter } = await load('assets')
-  const root = await mkdtemp('/Volumes/External_SSD/code-overflow/unlinked-auth-receipt-')
+  const root = await mkdtemp(join(process.cwd(), '.unlinked-auth-receipt-'))
   const driver = neo4j.driver(uri, neo4j.auth.basic('neo4j', 'synthetic-contract-only'))
   let api, toolServer, client, searchClient, setupHandler
   t.after(async () => {
