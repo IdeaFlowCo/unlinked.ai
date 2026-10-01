@@ -22,7 +22,7 @@ async function fixture(t) {
     const listening = await new Promise(resolve => { probe.once('error', () => resolve(false)); probe.listen(candidate, '127.0.0.1', () => resolve(true)) })
     if (listening) { port = candidate; await new Promise(resolve => probe.close(resolve)); break }
   }
-  const state = { closes: 0, mounts: [], active: true, resource: { sourceOwnerId: 'owner-one', payload: { private: true } } }
+  const state = { closes: 0, mounts: [], active: true, readyFailures: 0, resource: { sourceOwnerId: 'owner-one', payload: { private: true } } }
   // Explicit process-side contract doubles. Real Noos graph/provisioning evidence
   // is separate; this test executes composition, signed bearer and HTTP routing.
   class OperationalStore {
@@ -46,7 +46,13 @@ async function fixture(t) {
   }
   const modules = {
     neo4j: { auth: { basic: (user, password) => ({ user, password }) }, driver: (url, auth, limits) => {
-      state.driver = { url, auth, limits }; return { close: async () => { state.closes++ } }
+      state.driver = { url, auth, limits }; return {
+        async verifyConnectivity() {
+          state.readinessChecks = (state.readinessChecks ?? 0) + 1
+          if (state.readyFailures-- > 0) throw new Error('graph_starting')
+        },
+        close: async () => { state.closes++ },
+      }
     } }, OperationalStore, InvitedOwnerProvisioner,
     StagingFileAssets: class { async get() { throw new Error('unused') } async put() { throw new Error('unused') } },
     createAccessTokenAuthenticator(options) {
@@ -122,5 +128,22 @@ test('composition fails closed on public graph, unapproved live target and initi
   await assert.rejects(createPrivatePilotDependencies({ ...options, boltUrl: 'bolt://graph.invalid:9289' }), /private_composition_configuration_required/)
   await assert.rejects(createPrivatePilotDependencies({ ...options, dataMode: 'private_live' }), /private_composition_target_required/)
   await assert.rejects(createPrivatePilotDependencies({ ...options, loginFactory: async () => { throw new Error('issuer_discovery_failed') } }), /issuer_discovery_failed/)
+  assert.equal(state.closes, 1)
+})
+
+test('composition waits for graph readiness before provisioning', async t => {
+  const { options, state } = await fixture(t)
+  state.readyFailures = 2
+  const dependencies = await createPrivatePilotDependencies({ ...options, graphReadyDeadlineMs: 1000, graphReadyRetryMs: 1 })
+  t.after(dependencies.close)
+  assert.equal(state.readinessChecks, 3)
+  assert.equal(state.initialized, true)
+})
+
+test('composition fails closed when graph readiness deadline expires', async t => {
+  const { options, state } = await fixture(t)
+  state.readyFailures = 100
+  await assert.rejects(createPrivatePilotDependencies({ ...options, graphReadyDeadlineMs: 3, graphReadyRetryMs: 1 }), /private_graph_not_ready/)
+  assert.equal(state.initialized, undefined)
   assert.equal(state.closes, 1)
 })

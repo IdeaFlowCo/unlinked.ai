@@ -26,6 +26,7 @@ Every command defaults to no mutation except verification, which only reads its 
 `preflight` requires final source receipts, exact clean checkout heads, reviewed wiring digest, verified image artifacts, existing mode-700 roots/directories and mode-600 inputs.
 There is no implicit directory creation during deployment and no command to obtain a certificate, alter DNS, register a client, create an invitation or copy credentials.
 The start command fails on occupied owned ports; services must be explicitly checked after start before any claim of availability.
+Privileged HTTPS availability is checked without requiring the operator to bind port 443 directly; loopback runtime and graph ports still use direct bind probes.
 Production client and identity operations remain with the identity owner.
 Readiness booleans record verified source, image, isolation and input facts; they do not introduce routine human approval gates for reversible preparation.
 The production identity operation and new persistent OpenAI secret destination retain their explicit authority requirements.
@@ -37,6 +38,7 @@ The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, 
 Install this packet's `wiring.mjs` as mode 600 at `/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs`; its relative export resolves the exact private Unlinked checkout.
 The factory loads only compiled Noos operational modules from the private Noos checkout, never its legacy auth or generic query application.
 It validates the dedicated root and exact live origin/ports, initializes callback-only invitation provisioning, and mints internal ephemeral operations credentials only after active owner/principal authorization.
+Before provisioning or exposing HTTP readiness, it waits for the dedicated Bolt driver to report graph connectivity with the same bounded driver timeouts.
 The server-side operations key never leaves the runtime; hosted MCP uses its separate search-only grants and live publication fences.
 The private env, production client, TLS/DNS, dependency-complete source artifacts and built deployment images remain activation inputs.
 It must start the isolated operational service only at `127.0.0.1:9022` and return `login`, `resolveOwner`, `claimInvitation`, `getBackend`, `complete` and `close` capabilities.

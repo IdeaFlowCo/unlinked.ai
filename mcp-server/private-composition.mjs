@@ -7,6 +7,8 @@ import { createIdeaflowLogin } from './private-browser.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
 
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+
 function loadNoos(root) {
   const directory = join(root, 'runtime', 'noos'), require = createRequire(join(directory, 'package.json'))
   return { neo4j: require('neo4j-driver'), express: require('express'),
@@ -24,11 +26,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   config = { issuer: process.env.IDEAFLOW_ISSUER, clientId: process.env.IDEAFLOW_CLIENT_ID,
     clientSecret: process.env.IDEAFLOW_CLIENT_SECRET, graphPassword: process.env.NOOS_PRIVATE_PASSWORD,
     apiKey: process.env.OPENAI_API_KEY }, modules, loginFactory = createIdeaflowLogin,
-  completionFactory = createResponsesCompletion }) {
+  completionFactory = createResponsesCompletion, graphReadyDeadlineMs = 90000, graphReadyRetryMs = 1000 }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
       bolt.protocol !== 'bolt:' || bolt.hostname !== '127.0.0.1' || !bolt.port || bolt.pathname || bolt.search || bolt.hash || bolt.username || bolt.password ||
       !Number.isSafeInteger(operationalPort) || operationalPort < 7000 || operationalPort > 9999 || !['synthetic', 'private_live'].includes(dataMode) ||
+      !Number.isSafeInteger(graphReadyDeadlineMs) || graphReadyDeadlineMs < 1 || graphReadyDeadlineMs > 90000 ||
+      !Number.isSafeInteger(graphReadyRetryMs) || graphReadyRetryMs < 1 || graphReadyRetryMs > graphReadyDeadlineMs ||
       ['issuer', 'clientId', 'clientSecret', 'graphPassword', 'apiKey'].some(key => typeof config[key] !== 'string' || !config[key])) throw new Error('private_composition_configuration_required')
   if (dataMode === 'private_live' && (root !== '/srv/unlinked-private-guest-pilot-20261001' || base.origin !== 'https://private.unlinked.ai' ||
       config.issuer !== 'https://id.ideaflow.app/api/auth' || bolt.port !== '9289' || operationalPort !== 9022)) throw new Error('private_composition_target_required')
@@ -48,6 +52,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await driver.close()
   }
   try {
+    const deadline = Date.now() + graphReadyDeadlineMs
+    for (;;) {
+      try { await driver.verifyConnectivity(); break }
+      catch (error) {
+        if (Date.now() + graphReadyRetryMs > deadline) throw new Error('private_graph_not_ready')
+        await wait(graphReadyRetryMs)
+      }
+    }
     const store = new dependencies.OperationalStore(driver, 'neo4j')
     const provisioner = new dependencies.InvitedOwnerProvisioner(driver, 'neo4j', {
       role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId,

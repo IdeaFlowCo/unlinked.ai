@@ -60,5 +60,29 @@ with tempfile.TemporaryDirectory(prefix='private-pilot-release-check-') as tempo
     manifest['images_verified'] = True
     invalid.write_text(json.dumps(manifest))
     refused(lambda: pilot.validate_manifest(invalid))
+    ports = {'bolt': 9289, 'operations': 9022, 'browser': 9367, 'https': 443}
+    original_listeners = pilot.listening_tcp_ports
+    original_socket = pilot.socket.socket
+    pilot.listening_tcp_ports = lambda: {443}
+    refused(lambda: pilot.check_ports_available(ports))
+    class ProbeSocket:
+        def bind(self, address):
+            if address[1] == 443:
+                raise PermissionError('would require root')
+        def connect_ex(self, address):
+            return 1
+        def close(self):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            self.close()
+    try:
+        pilot.listening_tcp_ports = lambda: set()
+        pilot.socket.socket = ProbeSocket
+        pilot.check_ports_available(ports)
+    finally:
+        pilot.listening_tcp_ports = original_listeners
+        pilot.socket.socket = original_socket
 
-print('PASS: blocked plan, paired recovery roundtrip, production/overwrite refusal, corruption, symlink and unsafe target/image rejection; no external operations')
+print('PASS: blocked plan, paired recovery roundtrip, production/overwrite refusal, corruption, symlink, unsafe target/image rejection and privileged port checks; no external operations')
