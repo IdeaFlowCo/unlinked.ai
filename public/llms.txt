@@ -1,40 +1,26 @@
-# unlinked.ai
+# Unlinked
 
-> AI-powered LinkedIn network search over your own uploaded archive, available through the open-beta app.
+> Import a LinkedIn export, search your own network and connect your agent.
 
-Public Start and Sign in links lead to the working open-beta app at https://private.unlinked.ai/login.
-Sign in or create an account through Ideaflow ID; no invitation is needed.
-Prefer a full LinkedIn ZIP; Connections-only is also supported.
-Upload and ask AI about your own network, then open Agent setup in the beta app for its MCP configuration.
-The app currently runs separately from the www.unlinked.ai homepage; this is an interim bridge.
-Legacy API schemas below are historical reference documentation, not the beta onboarding or MCP setup path.
+Canonical app: https://www.unlinked.ai. Sign in with Ideaflow ID at /login; no invitation required.
+A full ZIP is preferred; Connections-only ZIP or CSV is supported up to 64 MiB.
+Import processing continues server-side after navigation. Profile and People show real progress.
+Own-network AI search reads the signed-in owner's published imports. Global shared search is not yet available.
+Settings creates a revocable account-scoped MCP grant; keep its bearer credential private.
+Contact emails, phone numbers and original archive bytes are excluded from agent search.
 
-## Documentation
-- [Agent setup status](/agents): sign-in bridge and instructions for Agent setup in the beta app
-- [Developer notes for agents](/AGENTS.md): agent-readable brief on authentication, server-side scoping guarantees, and REST API endpoints
-- [Well-known product descriptor](/.well-known/unlinked.json): machine-readable bootstrap manifest
-- [MCP server card](/.well-known/mcp/server-card.json): Model Context Protocol server card for `@unlinked/mcp-server`
-- [OpenAPI specification](/openapi.json): full OpenAPI 3.1.0 schema for agent-facing HTTP routes
+## Entry and discovery
+- [Sign in](/login)
+- [Import instructions](/import-linkedin)
+- [Agent setup](/agents)
+- [Agent brief](/AGENTS.md)
+- [MCP card](/.well-known/mcp/server-card.json)
+- [Product descriptor](/.well-known/unlinked.json)
+- [API description](/openapi.json)
+- [Meet: scan or paste an OpenChat card](/meet)
 
-## Machine Access Reference
-- Base URL: `https://www.unlinked.ai`
-- Availability: Open-beta sign-in, upload, own-network AI search and Agent setup are at https://private.unlinked.ai/login. Legacy API availability remains separate.
-- Historical Authentication: `Authorization: Bearer ul_<key>` header on legacy agent requests.
-- Historical Key Format: Keys start with prefix `ul_`; no live key creation URL is advertised.
-- Scoping Guarantee: Agent API requests are scoped to the caller; see /AGENTS.md for details.
-- Note on Backend: Interface documentation reflects supported schemas and tools; database availability follows backend plan state.
-
-## HTTP Endpoints
-- `GET /api/me`: Return authenticated caller's own profile, plus connection and upload counts.
-- `POST /api/search-contacts`: Semantic search restricted to direct connections; returns matches with similarity score and reasoning. Request body: `{"query": string, "limit"?: number}` (limit 1-25, default 10).
-- `GET /api/profiles/{id}`: Look up a profile by UUID. Readable only for caller's own profile or a direct connection; unrelated profiles return 404.
-- `POST /api/draft-intro`: Draft a short, forwardable intro message between the caller and a direct connection. Read-only (nothing is written). Request body: `{"contactProfileId": string, "context"?: string}`.
-- `GET /api/imports`: List caller's uploaded LinkedIn archives and total ingested record counts across their network graph.
-
-## MCP Tools
-The `@unlinked/mcp-server` package preserves the historical stdio tools for MCP-aware clients. Live setup is unavailable until private access reopens; the tool roster is reference documentation:
-- `unlinked_me`: Return the caller's own unlinked.ai profile plus connection and upload counts.
-- `unlinked_search_contacts(query, limit?)`: Semantic search over direct connections (max 25 results) with match scores and explanations.
-- `unlinked_get_profile(profileId)`: Read own profile or direct connection's profile (unrelated returns not-found).
-- `unlinked_list_imports`: Return LinkedIn archive uploads and ingested-record counts.
-- `unlinked_draft_intro(contactProfileId, context?)`: Draft a short, forwardable intro to a direct connection.
+## Current authenticated MCP
+Streamable HTTP endpoint: https://www.unlinked.ai/mcp.
+Tool: unlinked_search_network(query). Its durable account grant covers current and future owner imports until revoked in Settings.
+Grant tokens are distinct from Ideaflow tokens and Noos operational credentials.
+Legacy Supabase routes and stdio tools are historical source references, not live bootstrap instructions.

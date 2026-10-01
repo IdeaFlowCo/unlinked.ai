@@ -1,7 +1,7 @@
 # unlinked.ai — Repository Agent Memory
 
 Next.js 15 (App Router) + React 19 + Radix UI Themes + Supabase + Pinecone + OpenAI.
-Hosted on Vercel at **https://www.unlinked.ai**.
+The canonical beta at **https://www.unlinked.ai** runs the standalone Noos-backed runtime; Next.js retains historical/public source routes.
 
 This file is the repo-internal guide for autonomous agents and contributors working *in* this codebase. For agents arriving at unlinked.ai over HTTP, see the public brief at `public/AGENTS.md` (served at `/AGENTS.md`).
 
@@ -90,3 +90,7 @@ Keep this file for knowledge useful to almost every future agent session in this
 Do not repeat what the codebase already shows; point to the authoritative file or command instead.
 Prefer rewriting or pruning existing entries over appending new ones.
 When updating this file, preserve this bar for all agents and keep entries concise.
+
+## Canonical anonymous discovery
+
+`mcp-server/public-discovery.mjs` mounts exact GET/HEAD discovery/import/Meet routes before session resolution; its fixed asset map never exposes owner data or request-selected files.
