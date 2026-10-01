@@ -4,7 +4,9 @@
 This source module changes no route, Noos adapter, authentication, publication or graph data.
 
 The factory injects `readPublishedSnapshot({maxProfiles,maxConnections,maxTextBytes,signal,viewer})`.
+The injected adapter is trusted code that produces data-only DTOs. Snapshot and identity values use standard plain objects and arrays without custom prototypes, getters or executable traversal overrides; client input cannot supply the adapter or these values.
 The provider returns `{state:'published',complete:true,revision,profiles,connections}` only after one immutable final migration publication fence.
+`revision` must be a nonempty ASCII string of at most 128 characters, identifying that immutable publication. Invalid, oversized or non-ASCII backend revisions return the fixed data-free unavailable503 error. This bound keeps every emitted list/connection cursor within the existing 2048-character DTO limit without hashing the revision.
 It must enforce current visibility on every profile and both endpoints of every connection before returning any row used in search, ranking or pagination.
 `viewer` is null or an immutable server-resolved identity passed through factory configuration; query input cannot supply identity authority. Identity objects and arrays must be recursively frozen plain data, with no accessors, cycles, sparse arrays or mutable nested values.
 Unknown, unpublished, unavailable, incomplete, malformed or over-limit snapshots fail closed.

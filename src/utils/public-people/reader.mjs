@@ -8,6 +8,7 @@ const invalid = () => { throw new PublicPeopleReaderError(400, 'public_people_in
 const normalized = value => value.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim()
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
 const idValid = value => typeof value === 'string' && value.length > 0 && value.length <= 160 && value !== '.' && value !== '..'
+const revisionValid = value => typeof value === 'string' && value.length > 0 && value.length <= 128 && [...value].every(character => character.charCodeAt(0) <= 127)
 const bounded = (value, max) => Number.isSafeInteger(value) && value > 0 && value <= max
 const plain = value => value !== null && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -56,7 +57,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (combined.aborted) abortHandler()
       })
       const value = await Promise.race([Promise.resolve().then(() => readPublishedSnapshot({ maxProfiles, maxConnections, maxTextBytes, signal: combined, viewer })), interruption])
-      if (!plain(value) || value.state !== 'published' || value.complete !== true || typeof value.revision !== 'string' || !value.revision.length || value.revision.length > 512 || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !dense(value.profiles) || !Array.isArray(value.connections) || value.connections.length > maxConnections || !dense(value.connections)) unavailable()
+      if (!plain(value) || value.state !== 'published' || value.complete !== true || !revisionValid(value.revision) || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !dense(value.profiles) || !Array.isArray(value.connections) || value.connections.length > maxConnections || !dense(value.connections)) unavailable()
       let textBytes = 0
       const text = (input, required = false, nonempty = false) => {
         if (input === undefined && !required) return undefined
@@ -113,7 +114,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     if (typeof cursor !== 'string' || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)) invalid()
     let decoded
     try { decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) } catch { invalid() }
-    if (!plain(decoded) || decoded.v !== 1 || decoded.scope !== hash(scope) || typeof decoded.revision !== 'string' || !decoded.revision.length || decoded.revision.length > 512 || !Number.isSafeInteger(decoded.offset) || decoded.offset < 0) invalid()
+    if (!plain(decoded) || decoded.v !== 1 || decoded.scope !== hash(scope) || !revisionValid(decoded.revision) || !Number.isSafeInteger(decoded.offset) || decoded.offset < 0) invalid()
     return decoded
   }
   function page(rows, cursor, scope, revision) {
