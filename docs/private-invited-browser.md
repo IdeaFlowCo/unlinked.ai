@@ -6,7 +6,7 @@ The runtime is separate from the deployed legacy Unlinked app.
 An operator creates one expiring invitation using the Noos `unlinked-invite.mjs` CLI and keeps its mode-600 recovery bundle.
 The guest opens the bundle's `/invite/<token>` URL and chooses **Continue with Ideaflow**.
 That action records an expiring, one-use browser intent and starts fresh Ideaflow authentication with code, PKCE, state, nonce and `prompt=login`.
-After signed ID-token verification against the configured issuer/client/JWKS, Unlinked renders the verified issuer/subject or verified email for explicit confirmation before the trusted backend claims the invitation and reads back the same owner and private Noos principal.
+After signed ID-token verification against the configured issuer/client/JWKS, Unlinked renders the verified issuer/subject or authenticated IdP email for explicit confirmation before the trusted backend claims the invitation and reads back the same owner and private Noos principal.
 The guest can restart authentication to use another account or cancel before any owner is created.
 An email address never selects, links or creates an owner.
 The separate Unlinked profile does not link an existing OpenChat account.
