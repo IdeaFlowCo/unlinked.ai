@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-export const LEGACY_COLUMNS = Object.freeze({
+export const LEGACY_COLUMNS = Object.freeze(Object.fromEntries(Object.entries({
   companies: ['id', 'name', 'created_at'],
   institutions: ['id', 'name', 'created_at'],
   connections: ['id', 'profile_id_a', 'profile_id_b', 'created_at'],
@@ -9,7 +9,7 @@ export const LEGACY_COLUMNS = Object.freeze({
   profiles: ['id', 'user_id', 'full_name', 'headline', 'linkedin_slug', 'summary', 'industry', 'created_at', 'updated_at'],
   skills: ['id', 'profile_id', 'name', 'created_at'],
   uploads: ['id', 'profile_id', 'file_name', 'file_path', 'created_at'],
-})
+}).map(([table, columns]) => [table, Object.freeze(columns)])))
 const fail = code => { throw new Error(code) }
 const identifier = value => {
   if (/^"(?:[^"]|"")+"$/.test(value)) return value.slice(1, -1).replaceAll('""', '"')
@@ -42,7 +42,7 @@ export function decodeCopyField(field) {
   }
   chunks.push(Buffer.from(field.slice(start)))
   let result
-  try { result = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)) } catch { fail('legacy_copy_field_utf8_invalid') }
+  try { result = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)) } catch { fail('legacy_copy_field_utf8_invalid') }
   if (result.includes('\0')) fail('legacy_copy_nul_invalid')
   return result
 }
@@ -51,8 +51,9 @@ export function decodeCopyField(field) {
 export function parseLegacyCopy(source, { maxBytes = 64 * 1024 * 1024, maxLineBytes = 2 * 1024 * 1024, maxRowsPerTable = 1000000, maxCopySections = 256 } = {}) {
   for (const bound of [maxBytes, maxLineBytes, maxRowsPerTable, maxCopySections]) if (!Number.isSafeInteger(bound) || bound < 1) fail('legacy_copy_bound_invalid')
   if (!(typeof source === 'string' || Buffer.isBuffer(source) || source instanceof Uint8Array)) fail('legacy_copy_source_invalid')
-  const bytes = typeof source === 'string' ? Buffer.from(source) : Buffer.from(source)
-  if (bytes.length > maxBytes) fail('legacy_copy_bytes_limit')
+  const sourceByteLength = typeof source === 'string' ? Buffer.byteLength(source) : source.byteLength
+  if (sourceByteLength > maxBytes) fail('legacy_copy_bytes_limit')
+  const bytes = Buffer.from(source)
   let text
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { fail('legacy_copy_utf8_invalid') }
   const tables = Object.fromEntries(Object.keys(LEGACY_COLUMNS).map(table => [table, []]))

@@ -66,3 +66,62 @@ test('bounds and malformed/truncated COPY are rejected without data-bearing erro
   assert.throws(() => parseLegacyCopy(source.replace('id, name, created_at', 'id, encrypted_password, created_at')), /columns_invalid/)
   assert.throws(() => parseLegacyCopy(Buffer.from([0xff])), /utf8_invalid/)
 })
+
+
+test('leading field BOM survives literal, octal and hexadecimal COPY encodings', () => {
+  const value = '\uFEFFLeading summary'
+  for (const field of [value, '\\357\\273\\277Leading summary', '\\xEF\\xBB\\xBFLeading summary']) {
+    assert.equal(decodeCopyField(field), value)
+    const source = dump({ profiles: [{ id: 'a', user_id: null, summary: value }, { id: 'b', user_id: null }] }).replace(value, field)
+    assert.equal(createLegacyPlan(source).profiles[0].about, value)
+  }
+})
+
+test('nullable organizations preserve rows and provenance while non-null references must resolve', () => {
+  const changes = {
+    positions: [{ id: 'p-null', profile_id: 'a', company_id: null }, { id: 'p-company', profile_id: 'a', company_id: 'co' }],
+    education: [{ id: 'e-null', profile_id: 'a', institution_id: null }, { id: 'e-school', profile_id: 'a', institution_id: 'school' }],
+  }
+  const plan = createLegacyPlan(dump(changes))
+  assert.equal(plan.counts.positions, 2)
+  assert.equal(plan.counts.education, 2)
+  const { positions, education } = plan.profiles[0]
+  assert.equal(positions.length, 2)
+  assert.equal(education.length, 2)
+  assert.deepEqual([positions[0].legacyId, positions[0].legacyProfileId, positions[0].legacyCompanyId, positions[0].company, positions[0].companyProvenance, positions[0].provenance], ['p-null', 'a', null, null, null, { table: 'public.positions', rowOrdinal: 1 }])
+  assert.deepEqual([education[0].legacyId, education[0].legacyProfileId, education[0].legacyInstitutionId, education[0].institution, education[0].institutionProvenance, education[0].provenance], ['e-null', 'a', null, null, null, { table: 'public.education', rowOrdinal: 1 }])
+  assert.deepEqual(positions[1].companyProvenance, { table: 'public.companies', rowOrdinal: 1 })
+  assert.deepEqual(education[1].institutionProvenance, { table: 'public.institutions', rowOrdinal: 1 })
+  for (const [table, column, organization] of [['positions', 'company_id', 'companies'], ['education', 'institution_id', 'institutions']]) {
+    assert.throws(() => createLegacyPlan(dump({ ...changes, [table]: [{ ...changes[table][0], [column]: 'missing' }] })), { message: `legacy_plan_dangling_${organization}` })
+    assert.throws(() => createLegacyPlan(dump({ ...changes, [table]: [{ ...changes[table][0], profile_id: 'missing' }] })), { message: 'legacy_plan_dangling_profiles' })
+    assert.throws(() => createLegacyPlan(dump({ ...changes, [table]: [{ ...changes[table][0], [column]: '' }] })), { message: 'legacy_plan_id_invalid' })
+  }
+})
+
+test('exported column policy rejects mutation without changing parsing', () => {
+  const source = dump()
+  for (const columns of Object.values(LEGACY_COLUMNS)) {
+    assert.throws(() => columns.push('encrypted_password'), TypeError)
+    assert.throws(() => { columns[0] = 'encrypted_password' }, TypeError)
+  }
+  assert.throws(() => { LEGACY_COLUMNS.profiles = [] }, TypeError)
+  assert.equal(createLegacyPlan(source).profiles.length, 2)
+})
+
+test('oversized strings and byte sources fail before allocation or copying', t => {
+  const source = dump()
+  const sources = [source, Buffer.from(source), new Uint8Array(Buffer.from(source))]
+  const originalFrom = Buffer.from
+  for (const input of sources) {
+    const mock = t.mock.method(Buffer, 'from', function (value, ...args) {
+      if (value === input) throw new Error('source_copy_attempted')
+      return originalFrom.call(this, value, ...args)
+    })
+    try {
+      assert.throws(() => parseLegacyCopy(input, { maxBytes: Buffer.byteLength(source) - 1 }), { message: 'legacy_copy_bytes_limit' })
+      assert.equal(mock.mock.callCount(), 0)
+    } finally { mock.mock.restore() }
+  }
+  for (const input of sources) assert.equal(createLegacyPlan(input, { maxBytes: Buffer.byteLength(source) }).profiles.length, 2)
+})
