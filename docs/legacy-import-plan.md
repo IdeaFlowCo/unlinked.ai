@@ -11,11 +11,14 @@ Every expected public table must be present, including empty tables.
 Headers may reorder columns, but must contain precisely the approved schema columns.
 Duplicate sections, IDs, directed endpoint pairs, unknown schema columns, dangling references and malformed input fail closed with data-free error codes.
 Default bounds are64MiB dump bytes,2MiB per line,1,000,000 rows per COPY section and256 COPY sections.
-Callers must bound decompression before passing input.
-COPY null, escaped controls/backslashes, octal and hexadecimal UTF-8 bytes are decoded without interpreting SQL.
+Source byte length is checked before copying input; callers must bound decompression before passing input.
+The exported table policy and each column array are immutable.
+COPY null, escaped controls/backslashes, octal and hexadecimal UTF-8 bytes are decoded without interpreting SQL, preserving leading U+FEFF field content.
 
 The plan retains every source row ID and its public table/one-based row ordinal.
 Positions, education and skills are nested under their source profile, with related organization IDs and provenance.
+Schema-valid null company/institution references retain their position/education rows with null organization ID, name and provenance.
+Every non-null organization reference must resolve; profile references remain required.
 Companies and institutions are also preserved as top-level arrays, including unreferenced source rows.
 Directed connections preserve both endpoints exactly; reciprocal edges are not invented.
 Uploads preserve metadata paths and filenames but never read blobs or storage credentials.

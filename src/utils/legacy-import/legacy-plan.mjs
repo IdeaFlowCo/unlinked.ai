@@ -21,6 +21,7 @@ export function createLegacyPlan(source, { sourceContainerSha256 = null, ...limi
     if (!indexes[table].has(id)) fail(`legacy_plan_dangling_${table}`)
     return indexes[table].get(id)
   }
+  const nullableLookup = (table, id) => id === null ? null : lookup(table, id)
   const profiles = tables.profiles.map(row => ({
     legacyId: row.id, legacyUserId: nullableId(row.user_id), name: row.full_name,
     headline: row.headline, linkedinSlug: row.linkedin_slug, about: row.summary, industry: row.industry,
@@ -30,12 +31,12 @@ export function createLegacyPlan(source, { sourceContainerSha256 = null, ...limi
   const profileById = new Map(profiles.map(profile => [profile.legacyId, profile]))
   const profile = id => { lookup('profiles', id); return profileById.get(id) }
   for (const row of tables.positions) {
-    const company = lookup('companies', row.company_id)
-    profile(row.profile_id).positions.push({ legacyId: row.id, legacyProfileId: row.profile_id, legacyCompanyId: company.id, company: company.name, companyProvenance: provenance(company), title: row.title, description: row.description, startedOn: row.started_on, finishedOn: row.finished_on, createdAt: row.created_at, provenance: provenance(row) })
+    const company = nullableLookup('companies', row.company_id)
+    profile(row.profile_id).positions.push({ legacyId: row.id, legacyProfileId: row.profile_id, legacyCompanyId: company?.id ?? null, company: company?.name ?? null, companyProvenance: company === null ? null : provenance(company), title: row.title, description: row.description, startedOn: row.started_on, finishedOn: row.finished_on, createdAt: row.created_at, provenance: provenance(row) })
   }
   for (const row of tables.education) {
-    const institution = lookup('institutions', row.institution_id)
-    profile(row.profile_id).education.push({ legacyId: row.id, legacyProfileId: row.profile_id, legacyInstitutionId: institution.id, institution: institution.name, institutionProvenance: provenance(institution), degree: row.degree_name, startedOn: row.started_on, finishedOn: row.finished_on, createdAt: row.created_at, provenance: provenance(row) })
+    const institution = nullableLookup('institutions', row.institution_id)
+    profile(row.profile_id).education.push({ legacyId: row.id, legacyProfileId: row.profile_id, legacyInstitutionId: institution?.id ?? null, institution: institution?.name ?? null, institutionProvenance: institution === null ? null : provenance(institution), degree: row.degree_name, startedOn: row.started_on, finishedOn: row.finished_on, createdAt: row.created_at, provenance: provenance(row) })
   }
   for (const row of tables.skills) profile(row.profile_id).skills.push({ legacyId: row.id, legacyProfileId: row.profile_id, name: row.name, createdAt: row.created_at, provenance: provenance(row) })
   const directedEdges = new Set()
