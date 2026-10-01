@@ -23,6 +23,7 @@ A dedicated Neo4j container would use `neo4j-data/` under this root, loopback-on
 The isolated operational HTTP service would bind only `127.0.0.1:9021`; the browser/MCP service binds `127.0.0.1:9367` and receives tailnet-only HTTPS through Tailscale Serve.
 These ports were available at preparation; recheck immediately before launch.
 The separate real guest packet fixes its root at `/srv/unlinked-private-guest-pilot-20261001`; in explicit isolated-container mode it keeps graph Bolt on internal service `graph:7687`, operations on runtime loopback 9022, browser on the unpublished runtime listener 9367 and HTTPS ingress on 443.
+Inside the runtime container, that root parent is an ephemeral mode-700 tmpfs owned by the explicit operator UID/GID; only the `runtime/`, `assets/` and `audit/` child mounts are bound into the app, preserving their read-only/write boundaries and preventing a Docker-created root-owned 755 parent from bypassing the privacy guard.
 Its helper runs as the private file-owning release operator and uses only the existing noninteractive `sudo -n docker` route for Docker operations, preserving only the UID/GID and three image variables needed by Compose.
 The graph service keeps the pinned Neo4j image startup path and `tini`, but sets `umask 077` before launch so newly created graph directories/files satisfy the private 700/600 recovery policy.
 The operational service must use the dedicated driver/database and must never mount the legacy generic query API.
@@ -67,4 +68,5 @@ The synthetic harness rehearses this pair; power-loss/directory-fsync durability
 
 The private container recipe uses a frontend bridge for nginx/runtime and a separate internal runtime/graph bridge.
 Only non-root nginx publishes 443 to container 8443; neither app nor graph has a published port, and operations remains container loopback.
+The runtime's private parent tmpfs is part of that recipe; graph, backups and invitation trees are not broadly mounted into the app.
 The process default remains host loopback; exact isolated-container mode and private service addresses must be explicitly selected.

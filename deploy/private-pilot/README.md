@@ -13,6 +13,7 @@ No dependencies are installed by this packet.
 python3 deploy/private-pilot/pilot.py plan
 python3 deploy/private-pilot/checks.py
 python3 deploy/private-pilot/topology-check.py
+python3 deploy/private-pilot/root-mount-check.py
 node --check deploy/private-pilot/runtime.mjs
 # Later, on the exact approved GCP host, with a mode-600 reviewed manifest:
 python3 /release/pilot.py preflight --manifest /private/release.json
@@ -88,6 +89,10 @@ The offline operator capability never enters the browser runtime.
 
 Compose owns only three distinctly named and labeled containers and two dedicated bridges; only ingress publishes HTTPS 443.
 Graph and runtime have no published ports; nginx cannot join the internal graph bridge or access runtime loopback operations.
+The runtime parent path is a mode-700 tmpfs owned by that same UID/GID; Docker would otherwise create the unmounted parent as root-owned mode 755 and the factory correctly refuses it.
+Only this directory shell is ephemeral; the explicit runtime, assets and audit child bind mounts preserve their existing read-only/write boundaries and durable host files.
+The graph, backups and invitation trees are not broadly mounted into the app.
+`python3 deploy/private-pilot/root-mount-check.py` proves the before/after ownership using a bounded, network-none Node container and persistent generated child files; no credentials, graph or provider are used.
 All services run as the private operator with all capabilities dropped; nginx temp paths and tmpfs ownership permit non-root startup with read-only TLS mounts.
 If a separately owned maintenance-only ingress occupies 443, verify its exact saved ID/root/maintenance labels and stop it before starting the full recipe; retain its config/certificates for rollback.
 Existing port-80 nginx, legacy Noos containers, shared graph, existing assets and synthetic fixture roots are not mounted or stopped.
