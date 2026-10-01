@@ -36,13 +36,14 @@ Publication checks after delayed model work deny deleted/changed imports.
 This is query-time AI ranking over a private observation index, with no shared people database or embedding completeness claim.
 At the parser maximum many model calls/resource reads are required; the 1,001-contact receipt is the acceptance target, not a 100,000-record latency/cost claim.
 
-The isolated OIDC browser factory uses confidential code flow, client_secret_basic, PKCE S256, nonce/state, signed ID tokens and account choice.
+The isolated OIDC browser factory uses confidential code flow, client_secret_basic, PKCE S256, nonce/state, signed ID tokens, fresh-provider authentication with `prompt=login` and explicit in-browser account confirmation for invited owner creation.
 Only verified issuer plus opaque subject enters the trusted immutable existing/new owner mapping.
 Archive email/profile fields never select or rebind ownership.
 Unknown/conflicting ownership fails closed before upload.
 Bounded random sessions use Secure/HttpOnly/SameSite cookies and disappear on restart.
 Same-origin requests and CSRF protect mutations; one combined upload disclosure/action authorizes private retention and bounded OpenAI processing for browser and search-only scoped agent searches. Versioned consent persists in immutable import/source receipts; search and grant issuance/verification fail closed for older imports lacking it. Replays reuse the original consent without changing prior receipts.
 Receipt/replay and one-action scoped setup forms are implemented.
+Browser responses use `Referrer-Policy: strict-origin`; invited landing pages additionally allow the exact HTTPS provider origin in CSP `form-action`, while all other forms stay self-only.
 Setup downloads a fifteen-minute search-only grant for exactly one import; raw archive access is excluded.
 The separate signed tool audience uses a durable owner-private Noos grant record, live expiry/publication/revocation checks, and ephemeral signing keys that invalidate grants on restart.
 Operational bearers and provider ID tokens never become agent credentials.

@@ -41,7 +41,7 @@ Any persistent deployment copy requires its own exact destination confirmation; 
 
 The production Id provider's supported existing Google sign-in is the candidate identity route.
 If the invited guest has no Ideaflow ID account, Google-based creation/cohort invitation requires the explicit production account decision; native signup/reset must not be advertised while deployment/mail gates remain unresolved.
-The app uses confidential code+PKCE/state/nonce/signed ID tokens and account choice.
+The app uses confidential code+PKCE/state/nonce/signed ID tokens, `prompt=login` reauthentication and an Unlinked confirmation screen for the returned verified account.
 Its read-only resolver returns only an established exact issuer/subject mapping.
 An unknown subject cannot upload and receives the setup/recovery gate; it never auto-claims an email, archive, LinkedIn slug, legacy UUID or existing Noos account.
 For a NEW private account, the reviewed offline operation generates a fresh Unlinked UUID, obtains/provisions its independently verified Noos principal through the approved identity adapter, and binds the verified production tuple in one transaction with a provenance receipt.
@@ -54,6 +54,7 @@ An actual existing legacy account still needs independent supported legacy-owner
 ## Access, consent and delegation
 
 Public ingress exposes only sign-in/account setup; all receipts/uploads/search are session/CSRF/same-origin and exact invited-owner gated.
+Ingress uses `Referrer-Policy: strict-origin` so provider navigation keeps the Origin header without sending invitation tokens in referrers. The invitation landing page permits only the exact HTTPS identity provider in CSP `form-action`; subsequent private forms remain self-only.
 Secure HttpOnly SameSite cookies contain random fifteen-minute session IDs, not identity/access tokens.
 One combined upload disclosure/action authorizes private archive retention and bounded OpenAI processing of queries and observed name/company/position/date fields for browser and search-only scoped agent searches. Immutable import/source receipts retain versioned consent. Older imports without this disclosure fail closed for search and grants; replay never upgrades prior consent.
 Agent setup is a separate explicit owner action, exactly one import and only search, with distinct tool audience, fifteen-minute expiry, durable grant record and live revocation/publication checks.

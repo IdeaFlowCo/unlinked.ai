@@ -42,7 +42,7 @@ Its batch publication, private asset, immutable revision and read-fence contract
 No production route mounts this adapter and no generic Noos graph is written.
 Noos labels are not isolation by themselves; the destination must be inaccessible to legacy generic query, graph, search, counts, export, attachments and agent credentials.
 
-The browser identity seam remains verified `(issuer, subject)` to an immutable Unlinked owner ID and Noos user ID, preserving account choice and established bindings. The optional new-owner claim is owned by [Private invited-owner browser](private-invited-browser.md).
+The browser identity seam remains verified `(issuer, subject)` to an immutable Unlinked owner ID and Noos user ID, preserving explicit account confirmation and established bindings. The optional new-owner claim is owned by [Private invited-owner browser](private-invited-browser.md).
 A LinkedIn slug, imported email or a call to the legacy `claim_linkedin_profile` is not that mapping.
 The identity owner owns token verification and subject resolution; the import module accepts only the resolved owner, not an owner from browser upload input.
 Browser and scoped agent search use the same committed owner-specific dataset in staging; see [Private Noos staging](private-noos-staging.md#scoped-search-and-browser).
