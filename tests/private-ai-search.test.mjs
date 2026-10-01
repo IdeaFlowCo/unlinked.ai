@@ -46,3 +46,38 @@ test('all 1001 connection IDs participate in bounded ranking; cancellation stops
   await assert.rejects(createPrivateSearch({ readImport: async () => indexed, complete: async () => { calls++; controller.abort(); return { matches: [] } } })({ importId: id, query: 'last contact', signal: controller.signal }))
   assert.equal(calls, 1)
 })
+
+
+for (const count of [181, 4001]) test(`${count} long-field connections with an escaped query fit exact JSON bounds in every ranking round`, async () => {
+  const query = '\\'.repeat(1024)
+  const fields = Object.fromEntries(['first name', 'last name', 'company', 'position', 'connected on'].map(key => [key, 'x'.repeat(256)]))
+  const assertions = Array.from({ length: count }, (_, i) => ({ ...publication.assertions[0], id: i.toString(16).padStart(64, '0'), fields }))
+  const indexed = { ...publication, indexed: count, assertions }, calls = []
+  const result = await createPrivateSearch({ readImport: async () => indexed, complete: async ({ input, candidateIds }) => {
+    assert.ok(Buffer.byteLength(input) <= 256 * 1024)
+    assert.ok(candidateIds.length > 0 && candidateIds.length <= 200)
+    const parsed = JSON.parse(input)
+    assert.equal(parsed.query, query)
+    assert.deepEqual(parsed.observations.map(row => row.id), candidateIds)
+    const matches = candidateIds.slice(-10).map(id => ({ id, reason: '\\'.repeat(512) }))
+    calls.push({ observations: parsed.observations, matches })
+    return { matches }
+  } })({ importId: id, query })
+  let expected = assertions.map(row => row.id), offset = 0, rounds = 0
+  while (offset < calls.length) {
+    const considered = [], winners = []
+    while (considered.length < expected.length) {
+      const call = calls[offset++]
+      assert.ok(call)
+      assert.ok(call.observations.every(row => rounds === 0 ? !Object.hasOwn(row, 'priorReason') : row.priorReason === '\\'.repeat(512)))
+      considered.push(...call.observations.map(row => row.id))
+      winners.push(...call.matches.map(match => match.id))
+    }
+    assert.deepEqual(considered, expected)
+    expected = winners; rounds++
+  }
+  assert.ok(rounds >= 2)
+  assert.deepEqual(result.matches.map(match => match.assertionId), expected)
+  assert.ok(result.matches.some(match => match.assertionId === assertions.at(-1).id))
+  assert.equal(result.indexed, count)
+})
