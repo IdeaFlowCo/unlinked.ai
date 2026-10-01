@@ -53,7 +53,7 @@ def digest(path):
     return result.hexdigest()
 
 
-COMPOSE_VARIABLES = ('PILOT_UID', 'PILOT_GID', 'PILOT_NEO4J_IMAGE', 'PILOT_RUNTIME_IMAGE', 'PILOT_NGINX_IMAGE')
+COMPOSE_VARIABLES = ('PILOT_ORIGIN', 'PILOT_UID', 'PILOT_GID', 'PILOT_NEO4J_IMAGE', 'PILOT_RUNTIME_IMAGE', 'PILOT_NGINX_IMAGE')
 
 
 def docker_command(args):
@@ -210,8 +210,8 @@ def restore_snapshot(backup, checksum, target):
 def validate_manifest(path, execution=False, recovery=False):
     no_links(path)
     manifest = json.loads(path.read_text())
-    require(manifest['root'] == str(ROOT) and manifest['project'] == PROJECT and manifest['origin'] == ORIGIN, 'exact_target_required')
-    require(manifest['callback'] == ORIGIN + '/auth/callback/ideaflow', 'exact_callback_required')
+    require(manifest['root'] == str(ROOT) and manifest['project'] == PROJECT and manifest['origin'] in (ORIGIN, 'https://www.unlinked.ai'), 'exact_target_required')
+    require(manifest['callback'] == manifest['origin'] + '/auth/callback/ideaflow', 'exact_callback_required')
     require(manifest['gcp'] == {'project': 'lightsail-migration', 'instance': 'noos', 'zone': 'us-central1-a'}, 'existing_host_required')
     require(manifest.get('network_mode') == 'isolated-container', 'isolated_container_network_required')
     require(manifest['ports'] == {'bolt': 7687, 'operations': 9022, 'browser': 9367, 'https': 443}, 'owned_ports_required')
@@ -279,8 +279,8 @@ def validate_manifest(path, execution=False, recovery=False):
         for part in (*PARTS, 'runtime', 'backups', 'runtime/tls'):
             private(ROOT / part, True)
         require(not blockers, 'activation_blocked:' + ','.join(blockers))
-        require({item[4][0] for item in socket.getaddrinfo('private.unlinked.ai', 443, family=socket.AF_INET)} == {'34.10.134.247'}, 'exact_private_dns_target_required')
-        run(['openssl', 'x509', '-in', manifest['destinations']['certificate'], '-noout', '-checkhost', 'private.unlinked.ai'])
+        require({item[4][0] for item in socket.getaddrinfo(manifest['origin'].split('://', 1)[1], 443, family=socket.AF_INET)} == {'34.10.134.247'}, 'exact_private_dns_target_required')
+        run(['openssl', 'x509', '-in', manifest['destinations']['certificate'], '-noout', '-checkhost', manifest['origin'].split('://', 1)[1]])
         run(['openssl', 'x509', '-in', manifest['destinations']['certificate'], '-noout', '-checkend', '86400'])
     return manifest, blockers
 
@@ -300,6 +300,7 @@ def owned_services(stopped=False, running=False):
 def compose_env(manifest):
     # Only approved image digests are added to child environment; no secret reads.
     environment = dict(os.environ)
+    environment['PILOT_ORIGIN'] = manifest['origin']
     environment['PILOT_UID'] = str(os.getuid())
     environment['PILOT_GID'] = str(os.getgid())
     for name, variable in (('neo4j', 'PILOT_NEO4J_IMAGE'), ('runtime', 'PILOT_RUNTIME_IMAGE'), ('nginx', 'PILOT_NGINX_IMAGE')):

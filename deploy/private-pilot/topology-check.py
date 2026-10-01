@@ -17,6 +17,7 @@ with tempfile.TemporaryDirectory(prefix='unlinked-compose-consumer-') as directo
     override.write_text('services:\n  graph:\n    env_file: !override []\n  runtime:\n    env_file: !override []\n')
     result = subprocess.run(['docker', 'compose', '--env-file', '/dev/null', '-f', str(root / 'compose.yaml'), '-f', str(override), 'config', '--no-env-resolution', '--format', 'json'], env=env, capture_output=True, text=True, check=True, timeout=30)
 config = json.loads(result.stdout)
+assert config['services']['runtime']['environment']['PILOT_ORIGIN'] == 'https://private.unlinked.ai'
 services = config['services']
 assert set(services) == {'graph', 'runtime', 'ingress'}
 assert set(services['graph']['networks']) == {'backend'}
@@ -47,3 +48,14 @@ assert runtime['PILOT_HOST'] == '0.0.0.0' and runtime['PILOT_NETWORK_MODE'] == '
 assert runtime['PILOT_BOLT_URL'] == 'bolt://graph:7687'
 assert runtime['PILOT_OPERATIONS_URL'] == 'http://127.0.0.1:9022'
 print('PASS: real Compose consumer confirms isolated service networks, no app/graph publication, private operations, non-root TLS port and zero added capabilities')
+
+# A canonical packet uses the same confinement, with only its exact origin changed.
+with tempfile.TemporaryDirectory(prefix='unlinked-canonical-compose-consumer-') as directory:
+    override = Path(directory) / 'no-private-env.yaml'
+    override.write_text('services:\n  graph:\n    env_file: !override []\n  runtime:\n    env_file: !override []\n')
+    result = subprocess.run(['docker', 'compose', '--env-file', '/dev/null', '-f', str(root / 'compose.yaml'), '-f', str(override), 'config', '--no-env-resolution', '--format', 'json'], env=dict(env, PILOT_ORIGIN='https://www.unlinked.ai'), capture_output=True, text=True, check=True, timeout=30)
+canonical = json.loads(result.stdout)
+assert canonical['services']['runtime']['environment'].pop('PILOT_ORIGIN') == 'https://www.unlinked.ai'
+config['services']['runtime']['environment'].pop('PILOT_ORIGIN')
+assert canonical == config
+print('PASS: canonical Compose changes only the approved origin; all confinement unchanged')

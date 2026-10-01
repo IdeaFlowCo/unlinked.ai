@@ -11,7 +11,7 @@ import { createAccountHostedHandler } from './account-hosted.mjs'
 // invocation; no operational credential or provider token is sent to clients.
 export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInvitation, signup, accountGrantKey, getBackend, complete, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic' }) {
   const base = new URL(baseUrl)
-  const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : networkMode === 'isolated-container' && host === '0.0.0.0' && base.origin === 'https://private.unlinked.ai' && port === 9367
+  const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : networkMode === 'isolated-container' && host === '0.0.0.0' && ['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) && port === 9367
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !Number.isSafeInteger(port) || port < 7000 || port > 9999 || !privateHost || typeof complete !== 'function') throw new Error('explicit_isolated_pilot_configuration_required')
   const keys = await generateKeyPair('RS256', { modulusLength: 2048 })
   if (signup !== undefined && (typeof signup !== 'function' || !(accountGrantKey instanceof Uint8Array) || accountGrantKey.length < 32)) throw new Error('account_signup_configuration_required')

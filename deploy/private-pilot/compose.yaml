@@ -34,7 +34,7 @@ services:
     env_file: /srv/unlinked-private-guest-pilot-20261001/runtime/runtime.env
     environment:
       PILOT_ROOT: /srv/unlinked-private-guest-pilot-20261001
-      PILOT_ORIGIN: https://private.unlinked.ai
+      PILOT_ORIGIN: ${PILOT_ORIGIN:-https://private.unlinked.ai}
       PILOT_DATA_MODE: private_live
       PILOT_HOST: 0.0.0.0
       PILOT_NETWORK_MODE: isolated-container
