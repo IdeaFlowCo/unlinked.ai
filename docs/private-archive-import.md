@@ -1,23 +1,22 @@
 # Private LinkedIn archive foundation
 
-This slice restores a visible **Import LinkedIn archive** entry alongside Meet and implements the parser/job foundation.
-The public entry displays an unavailable state and accepts no uploads.
+This slice implements the parser/job foundation. See [README.md](../README.md#import-linkedin-archive) for the public archive entry and upload availability.
 There is no live ingestion, AI search, identity binding, agent linking, migration or backend activation in this change.
 The legacy onboarding/agent endpoints are not connected to this module.
 
 ## Parser and receipts
 
 `src/utils/private-import/archive.mjs` consumes real ZIP or individual CSV bytes.
-The fixed limits are 20 MiB compressed archive, 8 MiB per file, 40 MiB total expanded data, 200 ZIP entries and 100,000 parsed CSV records across the archive, including blank, preamble and header records.
+The authoritative numeric bounds are the exported `LIMITS` in `src/utils/private-import/archive.mjs`: archive/file bytes, total expanded bytes, ZIP entries and parsed CSV records across the archive, including blank, preamble and header records.
 Incremental parsing aborts when that shared budget is exceeded; unsupported files are retained without CSV parsing.
-Before passing a record to PapaParse, a constant-memory logical-record iterator limits it to 65,536 UTF-16 code units, each encoded field to 32,768 code units, 256 fields and 1,024 quote tokens (including escaped quotes).
+Before passing a record to PapaParse, a constant-memory logical-record iterator enforces `LIMITS.recordChars` and `LIMITS.fieldChars` in UTF-16 code units, `LIMITS.fields` and `LIMITS.quoteTokens` (including escaped quotes).
 Quoted commas, escaped quotes and multiline fields remain supported within those limits. The first line ending outside quoted fields selects the CSV record separator. Each PapaParse input contains at most one bounded logical record plus its separator, avoiding searches over the remaining file.
 Exceeding a boundary fails the entire source with `csv_record_size_limit`, `csv_field_size_limit`, `csv_field_count_limit` or `csv_quote_limit`; no assertions from that file are published and its original bytes remain retained.
 Central-directory bounds are checked before expansion; actual inflation is bounded and size/CRC checked.
 Encryption, ZIP64, multi-disk archives, symlinks, duplicate paths, path traversal and unsupported compression fail closed.
 No archive member is extracted to a filesystem path.
 Supported categories are Connections, Profile, Positions, Education and Skills.
-CSV headers are discovered within the first 20 nonempty or malformed records, rather than dropping two lines.
+CSV headers are discovered within `LIMITS.headerRows` nonempty or malformed records, rather than dropping two lines.
 Unknown files, invalid UTF-8, absent headers, invalid URLs and malformed records have explicit receipts; their original bytes remain recoverable.
 Logical record identifiers count parsed nonempty or malformed CSV records, including preamble/header records, not physical line numbers (quoted fields may span lines).
 Imported URLs and emails are observations, never proof of an app login identity.
@@ -33,7 +32,7 @@ A job advances from `uploaded` to `parsing`, then `partial` with `phase: awaitin
 Every source receipt records accepted/rejected counts and unsupported/error outcomes.
 `counts.indexed` remains zero and `indexGate` names the missing Noos private index; this foundation never reports `indexed` merely because parsing succeeded.
 The future index adapter must prove accepted source-backed assertions are indexed before publishing an `indexed` receipt.
-Persistence errors reject the operation and leave a retryable `parsing` receipt; they are never translated into archive success.
+Persistence errors reject the operation; they are never translated into archive success. Once the `parsing` receipt is saved, later persistence errors leave that retryable receipt. Failures during initial asset/job writes can leave no job or an `uploaded` receipt, depending on the last successful write.
 The adapter must serialize one owner's job, preserve immutable assets/assertions and atomically publish assertions plus the final job receipt.
 Retry starts its counters from zero, so an interrupted publication cannot duplicate counts.
 

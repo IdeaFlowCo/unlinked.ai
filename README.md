@@ -6,6 +6,12 @@ Unlinked helps people carry an in-person introduction into a lasting connection.
 
 The page displays the legacy network's unavailable state without querying Supabase. No live profiles or cards are imported into Unlinked.
 
+## Import LinkedIn archive
+
+**Import LinkedIn archive** remains visible beside Meet and opens `/import-linkedin`. The page displays an unavailable state and accepts no uploads. Keep your original LinkedIn archive while the private service is being restored.
+
+The parser/job foundation does not provide live ingestion, indexing/search, historical data recovery or agent linking. See the [private archive foundation contract](docs/private-archive-import.md) for adapter requirements and activation gates.
+
 ## Core Features & Technologies
 
 - Next.js web application with React for a modern, fast user interface
@@ -41,6 +47,8 @@ npm run dev -- --port 7743
 Open [http://localhost:7743](http://localhost:7743) and `/meet`. Neither page needs Supabase environment variables or database access. Legacy routes require the existing Supabase settings and a reachable backend.
 
 Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, set `NEXT_PUBLIC_SUPABASE_URL=https://db.unlinked.ai` while that host is unresolved and confirm `/` and `/meet` still return 200. A card token with valid syntax can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
+
+For lint validation, run `npx eslint` with the changed JavaScript or TypeScript file paths. The existing `npm run lint` invokes unsupported `next lint`; ESLint is configured in `eslint.config.mjs`. No separate formatter is configured.
 
 The landing page lives at `src/app/page.tsx`; the Meet UI lives at `src/app/meet/`.
 

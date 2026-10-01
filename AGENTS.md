@@ -29,9 +29,7 @@ This file is the repo-internal guide for autonomous agents and contributors work
 
 ## Private archive foundation
 
-`docs/private-archive-import.md` owns the bounded parser/job adapter contract and live activation gates.
-The `/import-linkedin` entry is unavailable until private Noos persistence/indexing and verified identity mapping are proven; parser receipts are never search readiness.
-The durable filesystem adapter in `tests/private-import-store.mjs` is test-only and must not become a production people store.
+See `docs/private-archive-import.md` for the bounded parser/job adapter contract, the test-only persistence boundary and live activation gates; see `README.md` for the public archive entry.
 
 ## Directory Structure
 
@@ -50,7 +48,6 @@ The durable filesystem adapter in `tests/private-import-store.mjs` is test-only 
 # Web application
 npm run dev           # Next.js dev server with Turbopack
 npm run build         # Next.js production build
-npm run lint          # Run ESLint
 
 # Tests
 npm test              # Run verification tests with node --test
@@ -61,6 +58,8 @@ npm install
 npm run build         # TypeScript build into dist/
 npm start             # Start MCP server on stdio
 ```
+
+See `README.md` for focused lint validation.
 
 ## Discovery Surface & Parity Rule
 
