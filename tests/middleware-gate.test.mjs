@@ -36,3 +36,16 @@ test('canonical callback bypass is exact by method and path', async () => {
     'GET /profiles',
   ])
 })
+
+test('public directory GET/HEAD renders even when legacy Supabase is unavailable', async () => {
+  let legacyCalls = 0
+  const options = { nextResponse: { next: () => ({ kind: 'next' }) }, updateSession: async () => { legacyCalls++; throw Error('legacy Supabase unavailable') } }
+  for (const method of ['GET', 'HEAD']) for (const path of ['/people', '/people/', '/people/public-id', '/people/public-id/']) {
+    assert.deepEqual(await runMiddlewareGate(request(method, path), options), { kind: 'next' })
+  }
+  assert.equal(legacyCalls, 0)
+  for (const [method, path] of [['POST', '/people'], ['POST', '/people/public-id'], ['GET', '/people/id/private'], ['GET', '/api/people'], ['GET', '/profiles']]) {
+    await assert.rejects(runMiddlewareGate(request(method, path), options), /legacy Supabase unavailable/)
+  }
+  assert.equal(legacyCalls, 5)
+})
