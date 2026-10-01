@@ -1,5 +1,7 @@
 # unlinked.ai — for agents
 
+Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The private Noos adapter and hosted read tool are unmounted staging-only source; their synthetic receipt does not verify this legacy backend.
+
 This is the agent-facing brief served at `/AGENTS.md` for autonomous agents arriving at unlinked.ai over HTTP. For agents and developers working inside this repository, see `AGENTS.md` at the repo root.
 
 ## What this is

@@ -1,6 +1,8 @@
 # unlinked.ai
 > AI-powered LinkedIn network search, profile exploration, and intro drafting for autonomous agents and MCP clients.
 
+Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The private Noos adapter and hosted read tool are unmounted staging-only source; their synthetic receipt does not verify this legacy backend.
+
 ## Documentation
 - [Agent quick start](/agents): setup guide — agent key creation, client configuration (Claude Code, Claude Desktop, Cursor), and tool roster
 - [Developer notes for agents](/AGENTS.md): agent-readable brief on authentication, server-side scoping guarantees, and REST API endpoints

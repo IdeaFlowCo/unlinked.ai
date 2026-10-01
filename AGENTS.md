@@ -29,6 +29,8 @@ This file is the repo-internal guide for autonomous agents and contributors work
 
 ## Private archive foundation
 
+The unmounted private Noos/hosted setup slice and its production gates are documented in `docs/private-noos-staging.md`.
+
 See `docs/private-archive-import.md` for the bounded parser/job adapter contract, the test-only persistence boundary and live activation gates; see `README.md` for the public archive entry.
 
 ## Directory Structure
