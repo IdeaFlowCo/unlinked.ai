@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
 import Papa from 'papaparse'
 
-export const PARSER_VERSION = 'linkedin-archive-v2'
-export const LIMITS = Object.freeze({ archiveBytes: 20 * 1024 * 1024, fileBytes: 8 * 1024 * 1024, expandedBytes: 40 * 1024 * 1024, files: 200, rows: 100000, headerRows: 20 })
+export const PARSER_VERSION = 'linkedin-archive-v3'
+export const LIMITS = Object.freeze({ archiveBytes: 20 * 1024 * 1024, fileBytes: 8 * 1024 * 1024, expandedBytes: 40 * 1024 * 1024, files: 200, rows: 100000, headerRows: 20, recordChars: 65536, fieldChars: 32768, fields: 256, quoteTokens: 1024 })
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const crcTable = Array.from({ length: 256 }, (_, n) => {
   for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1
@@ -86,6 +86,47 @@ function linkedinUrl(value) {
   } catch { return null }
 }
 
+function csvBoundary(text) {
+  let newline = '\n'
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\r' || text[i] === '\n') {
+      newline = text[i] === '\r' && text[i + 1] === '\n' ? '\r\n' : text[i]
+      break
+    }
+  }
+  let recordStart = 0, fieldStart = 0, fields = 1, quotes = 0, quoted = false
+  for (let i = 0; i < text.length; i++) {
+    const recordEnd = !quoted && text.startsWith(newline, i)
+    const fieldEnd = !quoted && (text[i] === ',' || recordEnd)
+    if (i - recordStart + Number(!recordEnd) > LIMITS.recordChars) return { error: 'csv_record_size_limit' }
+    if (i - fieldStart + Number(!fieldEnd) > LIMITS.fieldChars) return { error: 'csv_field_size_limit' }
+    if (text[i] === '"') {
+      if (++quotes > LIMITS.quoteTokens) return { error: 'csv_quote_limit' }
+      if (!quoted && i === fieldStart) quoted = true
+      else if (quoted) {
+        if (text[i + 1] === '"') {
+          if (++quotes > LIMITS.quoteTokens) return { error: 'csv_quote_limit' }
+          i++
+        } else {
+          let next = i + 1
+          while (next < text.length && text[next] !== ',' && !text.startsWith(newline, next) && !text[next].trim()) next++
+          if (i === text.length - 1 || text[next] === ',' || text.startsWith(newline, next)) quoted = false
+        }
+      }
+    } else if (!quoted && text[i] === ',') {
+      if (++fields > LIMITS.fields) return { error: 'csv_field_count_limit' }
+      fieldStart = i + 1
+    } else if (!quoted && text.startsWith(newline, i)) {
+      i += newline.length - 1
+      recordStart = fieldStart = i + 1
+      fields = 1; quotes = 0
+    }
+  }
+  if (text.length - recordStart > LIMITS.recordChars) return { error: 'csv_record_size_limit' }
+  if (text.length - fieldStart > LIMITS.fieldChars) return { error: 'csv_field_size_limit' }
+  return { newline }
+}
+
 export function parseSource(source, budget = { remaining: LIMITS.rows }, limitError = 'csv_row_limit') {
   const spec = categories[source.path.split('/').pop().toLowerCase()]
   const base = { path: source.path, sha256: digest(source.bytes), bytes: source.bytes.length, category: spec?.category ?? 'unsupported', accepted: [], rejected: [], skipped: !spec }
@@ -93,9 +134,11 @@ export function parseSource(source, budget = { remaining: LIMITS.rows }, limitEr
   let text
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(source.bytes).replace(/^\uFEFF/, '') }
   catch { return { ...base, error: 'invalid_utf8' } }
+  const boundary = csvBoundary(text)
+  if (boundary.error) return { ...base, error: boundary.error }
   let headers, record = 0
   Papa.parse(text, {
-    delimiter: ',', fastMode: false,
+    delimiter: ',', newline: boundary.newline, fastMode: false,
     step(result, parser) {
       if (budget.remaining <= 0) {
         base.error = limitError

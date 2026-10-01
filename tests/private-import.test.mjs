@@ -219,3 +219,62 @@ test('failed-file totals agree with statuses for invalid, header-only and mixed 
   assert.equal(job.counts.accepted, 1)
   assert.equal(job.counts.indexed, 0)
 })
+
+
+test('single-record allocation limits fail before PapaParse and retain failed private receipts', async t => {
+  const { adapter } = await fixture(t)
+  const ownerId = 'synthetic-owner-a'
+  const adversarial = Buffer.from('Name\n"' + 'x"'.repeat(4000000) + '\n')
+  assert.ok(adversarial.length < LIMITS.fileBytes)
+  const cases = [
+    [adversarial, 'csv_quote_limit'],
+    [Buffer.from('Name\n' + 'a'.repeat(LIMITS.fieldChars + 1)), 'csv_field_size_limit'],
+    [Buffer.from('Name\n' + Array(7).fill('a'.repeat(10000)).join(',')), 'csv_record_size_limit'],
+    [Buffer.from('Name\n' + Array(LIMITS.fields + 1).fill('a').join(',')), 'csv_field_count_limit'],
+    [Buffer.from('Name\n"' + '""'.repeat(LIMITS.quoteTokens) + '"'), 'csv_quote_limit'],
+  ]
+  const originalParse = Papa.parse
+  Papa.parse = () => { throw new Error('unsafe_input_reached_papaparse') }
+  try {
+    for (const [bytes, error] of cases) {
+      const source = parseArchive(bytes, 'Skills.csv').sources[0]
+      assert.equal(source.error, error)
+      assert.deepEqual(source.accepted, [])
+      assert.deepEqual(source.rejected, [])
+      assert.deepEqual(source.rawBytes, bytes)
+    }
+    const job = await ingestArchive({ ownerId, filename: 'Skills.csv', bytes: adversarial, adapter })
+    assert.equal(job.status, 'failed')
+    assert.equal(job.sources[0].status, 'failed')
+    assert.equal(job.sources[0].error, 'csv_quote_limit')
+    assert.equal(job.counts.failedFiles, 1)
+    assert.equal(job.counts.accepted, 0)
+    assert.equal(job.counts.indexed, 0)
+    assert.deepEqual(await adapter.assertions(ownerId), [])
+    assert.deepEqual(await adapter.asset(ownerId, job.archiveSha256), adversarial)
+    assert.deepEqual(await adapter.asset(ownerId, job.sources[0].sha256), adversarial)
+    assert.deepEqual(await ingestArchive({ ownerId, filename: 'Skills.csv', bytes: adversarial, adapter }), job)
+  } finally { Papa.parse = originalParse }
+})
+
+test('bounded records preserve quoted commas, escaped quotes and multiline fields across line endings', () => {
+  for (const newline of ['\n', '\r\n', '\r']) {
+    const value = `Synthetic, "quoted"${newline}multiline skill`
+    const encoded = '"' + value.replaceAll('"', '""') + '"'
+    const bytes = Buffer.from(`Name${newline}${encoded}${newline}Next skill${newline}`)
+    const source = parseArchive(bytes, 'Skills.csv').sources[0]
+    assert.equal(source.error, undefined)
+    assert.deepEqual(source.rejected, [])
+    assert.deepEqual(source.accepted.map(row => row.fields.name), [value, 'Next skill'])
+    assert.deepEqual(source.accepted.map(row => row.rowId), ['Skills.csv#record=2', 'Skills.csv#record=3'])
+    assert.deepEqual(source.rawBytes, bytes)
+  }
+  const field = 'a'.repeat(LIMITS.fieldChars)
+  const source = parseArchive(Buffer.from(`Name\n${field}\n`), 'Skills.csv').sources[0]
+  assert.equal(source.error, undefined)
+  assert.equal(source.accepted[0].fields.name, field)
+  const quoted = '"' + '""'.repeat((LIMITS.quoteTokens - 2) / 2) + '"'
+  const escaped = parseArchive(Buffer.from(`Name\n${quoted}`), 'Skills.csv').sources[0]
+  assert.equal(escaped.error, undefined)
+  assert.equal(escaped.accepted[0].fields.name, '"'.repeat((LIMITS.quoteTokens - 2) / 2))
+})
