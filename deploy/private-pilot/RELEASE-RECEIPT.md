@@ -10,9 +10,9 @@ The default plan returns `status: blocked`, `mutations: false` and lists missing
 No deployment, provider registration, credential read/copy, DNS/TLS mutation, container/graph start, live guest claim, paid resource, push or merge occurred.
 The consumer checks operate exclusively on temporary synthetic files and mock Docker subprocesses while exercising paired snapshot/restore, manifest/file integrity, production-target and overwrite refusal, symlink rejection, unsafe target/image refusal, sudo-only Docker invocation, nonsecret Compose interpolation and foreign-container refusal.
 `node --check deploy/private-pilot/runtime.mjs` passed.
-Ruby's installed YAML parser accepted `compose.yaml` with exactly the three owned services.
+`topology-check.py` consumed `compose.yaml` through Docker Compose config normalization with synthetic images and no private env reads; it confirmed the three owned services, internal/frontend bridges, no app/graph publication, graph `umask 077` entrypoint, private operations, non-root TLS port and zero added capabilities.
 Invoking `runtime.mjs` without approved env/composition returned exit 2 and only `private_pilot_runtime_dependencies_unavailable`.
-No real Docker/Compose execution or nginx binary configuration test was performed, so actual daemon authorization, image compatibility, nginx startup and runtime composition are not claimed.
+No real container launch or nginx binary configuration test was performed, so actual daemon authorization, image compatibility, nginx startup and runtime composition are not claimed.
 Final graph/model/invitation receipts and the production composition adapter remain with the sole application writer and are not inferred from this packet.
 Production provider/client registration remains with the identity owner; private DNS/TLS, exact persistent secret destinations and invitation activation still require their actual operation authority.
 Real Javier acceptance and operational graph/blob restore readback remain `unlinked-9a9`.
