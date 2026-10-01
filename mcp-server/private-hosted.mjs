@@ -26,12 +26,14 @@ export function createPrivateHostedHandler({ authenticateGrant, readResource, re
     const search = typeof complete === 'function' ? createPrivateSearch({ readImport, complete }) : null
     const invoke = (tool, work) => async input => {
       const { importId } = input
+      const controller = new AbortController()
+      res.once('close', () => { if (!res.writableFinished) controller.abort() })
       try {
         // Revalidate even during a delayed tool call; revocation never depends on an MCP session cache.
         const current = await authenticateGrant(req)
         if (!current || current.expiresAt <= Date.now() || current.ownerId !== snapshot.ownerId ||
             !current.importIds.includes(importId) || !current.tools.includes(tool)) throw new Error('private_import_not_found')
-        const result = await work(input)
+        const result = await work({ ...input, signal: controller.signal })
         const finalGrant = await authenticateGrant(req)
         if (!finalGrant || finalGrant.expiresAt <= Date.now() || finalGrant.ownerId !== snapshot.ownerId ||
             !finalGrant.importIds.includes(importId) || !finalGrant.tools.includes(tool)) throw new Error('private_import_not_found')
@@ -43,7 +45,7 @@ export function createPrivateHostedHandler({ authenticateGrant, readResource, re
     if (grant.tools.includes('unlinked_read_import')) server.registerTool('unlinked_read_import', {
       description: 'Read observed assertions from one explicitly granted private LinkedIn archive.',
       inputSchema: { importId: z.string().regex(/^[a-f0-9]{64}$/) },
-    }, invoke('unlinked_read_import', ({ importId }) => readImport(importId)))
+    }, invoke('unlinked_read_import', ({ importId, signal }) => readImport(importId, { signal })))
     if (grant.tools.includes('unlinked_search_import') && search) server.registerTool('unlinked_search_import', {
       description: 'Search connection observations in one explicitly granted private LinkedIn archive using query-time AI. Results include source provenance; no shared index.',
       inputSchema: { importId: z.string().regex(/^[a-f0-9]{64}$/), query: z.string().min(1).max(1024) },
