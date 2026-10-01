@@ -11,7 +11,7 @@ const emptyCounts = () => ({ accepted: 0, rejected: 0, skippedFiles: 0, failedFi
 export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
   if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > LIMITS.archiveBytes) throw new Error('archive_size_limit')
   const archiveSha256 = digest(bytes)
-  const id = privateId(ownerId, 'import', archiveSha256, PARSER_VERSION)
+  const id = privateId(ownerId, 'import', archiveSha256, filename, PARSER_VERSION)
   return adapter.withImport(ownerId, id, async store => {
     const existing = await store.getJob(id)
     if (existing && ['partial', 'failed', 'indexed'].includes(existing.status)) return existing
@@ -43,8 +43,9 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
       const sourceId = privateId(ownerId, 'source', id, source.path, source.sha256)
       const { accepted } = source
       const receipt = { ...source }; delete receipt.rawBytes; delete receipt.accepted
+      const status = source.error ? 'failed' : source.skipped ? 'skipped' : accepted.length ? 'partial' : 'failed'
       job.sources.push({ ...receipt, id: sourceId, acceptedCount: accepted.length, indexedCount: 0,
-        status: source.error ? 'failed' : source.skipped ? 'skipped' : accepted.length ? 'partial' : 'failed',
+        status,
       })
       for (const row of accepted) assertions.push({
         id: privateId(ownerId, 'assertion', sourceId, row.rowId), ownerId, sourceId, importId: id,
@@ -53,7 +54,7 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
       job.counts.accepted += accepted.length
       job.counts.rejected += source.rejected.length
       job.counts.skippedFiles += Number(source.skipped)
-      job.counts.failedFiles += Number(Boolean(source.error))
+      job.counts.failedFiles += Number(status === 'failed')
     }
     // Publication is one atomic operation. Retrying an interrupted parsing job
     // cannot accumulate row counts or reveal only half an owner's assertions.

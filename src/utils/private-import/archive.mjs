@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
 import Papa from 'papaparse'
 
-export const PARSER_VERSION = 'linkedin-archive-v1'
+export const PARSER_VERSION = 'linkedin-archive-v2'
 export const LIMITS = Object.freeze({ archiveBytes: 20 * 1024 * 1024, fileBytes: 8 * 1024 * 1024, expandedBytes: 40 * 1024 * 1024, files: 200, rows: 100000, headerRows: 20 })
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const crcTable = Array.from({ length: 256 }, (_, n) => {
@@ -86,42 +86,60 @@ function linkedinUrl(value) {
   } catch { return null }
 }
 
-export function parseSource(source) {
+export function parseSource(source, budget = { remaining: LIMITS.rows }, limitError = 'csv_row_limit') {
   const spec = categories[source.path.split('/').pop().toLowerCase()]
   const base = { path: source.path, sha256: digest(source.bytes), bytes: source.bytes.length, category: spec?.category ?? 'unsupported', accepted: [], rejected: [], skipped: !spec }
   if (!spec) return base
   let text
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(source.bytes).replace(/^\uFEFF/, '') }
   catch { return { ...base, error: 'invalid_utf8' } }
-  const parsed = Papa.parse(text, { skipEmptyLines: 'greedy' })
-  if (parsed.data.length > LIMITS.rows) return { ...base, error: 'csv_row_limit' }
-  const headerIndex = parsed.data.slice(0, LIMITS.headerRows).findIndex(row => {
-    const headers = row.map(value => value.trim().toLowerCase())
-    return spec.required.every(key => headers.includes(key))
+  let headers, record = 0
+  Papa.parse(text, {
+    delimiter: ',', fastMode: false,
+    step(result, parser) {
+      if (budget.remaining <= 0) {
+        base.error = limitError
+        parser.abort()
+        return
+      }
+      budget.remaining--
+      const row = result.data
+      if (row.every(value => !value.trim())) return
+      record++
+      const error = result.errors[0]?.code
+      if (!headers) {
+        const candidate = row.map(value => value.trim().toLowerCase())
+        if (!error && spec.required.every(key => candidate.includes(key))) {
+          if (new Set(candidate).size !== candidate.length || candidate.some(h => !h)) {
+            base.error = 'invalid_csv_header'
+            parser.abort()
+          } else headers = candidate
+        } else if (record >= LIMITS.headerRows) {
+          base.error = 'csv_header_not_found'
+          parser.abort()
+        }
+        return
+      }
+      const rowId = `${source.path}#record=${record}`
+      if (error || row.length !== headers.length) { base.rejected.push({ rowId, reason: error ?? 'csv_column_count' }); return }
+      const fields = Object.fromEntries(headers.map((key, i) => [key, row[i].trim()]))
+      if (spec.required.some(key => !fields[key])) { base.rejected.push({ rowId, reason: 'missing_required_field' }); return }
+      const subject = spec.category === 'connections' ? linkedinUrl(fields.url) : 'archive_owner_observation'
+      if (!subject) { base.rejected.push({ rowId, reason: 'invalid_or_missing_linkedin_url' }); return }
+      base.accepted.push({ rowId, category: spec.category, subject, fields })
+    },
   })
-  if (headerIndex < 0) return { ...base, error: 'csv_header_not_found' }
-  const headers = parsed.data[headerIndex].map(value => value.trim().toLowerCase())
-  if (new Set(headers).size !== headers.length || headers.some(h => !h)) return { ...base, error: 'invalid_csv_header' }
-  const errors = new Map(parsed.errors.map(error => [error.row, error.code]))
-  for (let rowIndex = headerIndex + 1; rowIndex < parsed.data.length; rowIndex++) {
-    const row = parsed.data[rowIndex], rowId = `${source.path}#record=${rowIndex + 1}`
-    if (errors.has(rowIndex) || row.length !== headers.length) { base.rejected.push({ rowId, reason: errors.get(rowIndex) ?? 'csv_column_count' }); continue }
-    const fields = Object.fromEntries(headers.map((key, i) => [key, row[i].trim()]))
-    if (spec.required.some(key => !fields[key])) { base.rejected.push({ rowId, reason: 'missing_required_field' }); continue }
-    const subject = spec.category === 'connections' ? linkedinUrl(fields.url) : 'archive_owner_observation'
-    if (!subject) { base.rejected.push({ rowId, reason: 'invalid_or_missing_linkedin_url' }); continue }
-    base.accepted.push({ rowId, category: spec.category, subject, fields })
-  }
+  if (!headers && !base.error) base.error = 'csv_header_not_found'
+  if (base.error) { base.accepted = []; base.rejected = [] }
   return base
 }
 
 export function parseArchive(input, filename) {
   const sources = unpackArchive(input, filename)
-  let rows = 0
+  const budget = { remaining: LIMITS.rows }
   const receipts = sources.map(source => {
-    const receipt = parseSource(source)
-    rows += receipt.accepted.length + receipt.rejected.length
-    if (rows > LIMITS.rows) fail('archive_row_limit')
+    const receipt = parseSource(source, budget, 'archive_row_limit')
+    if (receipt.error === 'archive_row_limit') fail('archive_row_limit')
     return { ...receipt, rawBytes: source.bytes }
   })
   return { parserVersion: PARSER_VERSION, archiveSha256: digest(input), sources: receipts }

@@ -8,7 +8,8 @@ The legacy onboarding/agent endpoints are not connected to this module.
 ## Parser and receipts
 
 `src/utils/private-import/archive.mjs` consumes real ZIP or individual CSV bytes.
-The fixed v1 limits are 20 MiB compressed archive, 8 MiB per file, 40 MiB total expanded data, 200 ZIP entries and 100,000 archive records.
+The fixed limits are 20 MiB compressed archive, 8 MiB per file, 40 MiB total expanded data, 200 ZIP entries and 100,000 parsed CSV records across the archive, including blank, preamble and header records.
+Incremental parsing aborts when that shared budget is exceeded; unsupported files are retained without CSV parsing.
 Central-directory bounds are checked before expansion; actual inflation is bounded and size/CRC checked.
 Encryption, ZIP64, multi-disk archives, symlinks, duplicate paths, path traversal and unsupported compression fail closed.
 No archive member is extracted to a filesystem path.
@@ -19,8 +20,8 @@ Logical record identifiers count parsed nonempty CSV records, including preamble
 Imported URLs and emails are observations, never proof of an app login identity.
 
 `src/utils/private-import/job.mjs` binds deterministic job, source and assertion IDs to a caller-supplied verified historical owner ID.
-The ID includes the archive hash/parser version, and assertions include the source hash/path/record identifier.
-An exact replay returns the original terminal receipt; revised bytes create a new job and preserve the old source/assertions.
+The ID includes the archive hash/upload filename/parser version, and assertions include the source hash/path/record identifier.
+An exact replay returns the original terminal receipt; revised bytes or filenames create a new job and preserve the old source/assertions.
 There is no person directory, cross-owner merge, automatic publication or account claim.
 No active-person materialization or supersession resolver exists yet: a future owner-scoped resolver must select/supersede only this owner's prior assertions and invalidate its embeddings.
 
