@@ -89,7 +89,7 @@ export default async function Header({ showSearch = false }: HeaderProps) {
 
                             <HoverCard.Root>
                                 <HoverCard.Trigger>
-                                    <Link href={`/profiles/${profile!.id}`} className="no-underline">
+                                    <Link href={profile?.id ? `/profiles/${profile.id}` : "/network"} className="no-underline">
                                         <Button size={{ initial: '3', sm: '3' }} variant="soft" style={{ width: '60px' }}>
                                             <PersonIcon width="16" height="16" />
                                         </Button>

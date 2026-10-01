@@ -92,3 +92,22 @@
 .meet-message { grid-column:1/-1; background:#fff0df; border:1px solid #d2a067; padding:14px 18px; color:#693d16; font:14px/1.5 Arial,sans-serif; }
 @media(max-width:850px) { .hero { grid-template-columns:1fr; }.hero-copy { padding-bottom:20px; }.hero-art { height:330px; border-radius:200px 200px 0 0; }.orbit { top:-80px; }.orbit-two { top:10px; }.meet-node-a { top:28%; }.meet-node-b { top:23%; }.art-caption { bottom:18px; }.steps { grid-template-columns:1fr; gap:28px; }.meet-options { grid-template-columns:1fr; } }
 @media(max-width:600px) { .public-header { padding:20px; }.public-main,.meet-main { padding:0 20px 45px; }.hero { min-height:auto; }.hero-copy { padding:58px 0 28px; }.hero h1,.meet-intro h1 { font-size:clamp(49px,13vw,72px); }.hero-subtitle,.meet-intro>p:last-child { font-size:16px; }.hero-art { height:270px; }.orbit { width:330px;height:330px;left:calc(50% - 165px);top:-35px; }.orbit-two { width:210px;height:210px;left:calc(50% - 105px);top:25px; }.meet-node-a { width:100px;height:100px;font-size:18px;left:16%; }.meet-node-b { width:115px;height:115px;font-size:19px;right:13%; }.steps { padding:58px 0; }.meet-intro { padding:55px 0 28px; }.meet-card { padding:22px; }.public-footer { padding:25px 20px; flex-direction:column; }.camera-preview { height:240px; } }
+
+/* Public network entry: warm paper, green ink, a visible path through each feature. */
+.network-art { min-height:460px; position:relative; background:#e6ebdf; padding:36px; overflow:hidden; border:1px solid var(--line); border-radius:180px 180px 4px 4px; }
+.network-art>.eyebrow { text-align:center; margin:26px 0 32px; }
+.network-question { font:italic 38px/1.15 Georgia,serif; letter-spacing:-.04em; text-align:center; position:relative; z-index:1; }
+.network-thread { margin:30px auto; max-width:270px; display:grid; gap:10px; position:relative; z-index:1; }
+.network-thread span { padding:10px 15px; background:#f9f8f0; border:1px solid #b6c8b8; font:13px/1.5 'Trebuchet MS',sans-serif; }
+.network-thread span:nth-child(2) { margin-left:24px; }
+.network-thread span:nth-child(3) { margin-left:48px; }
+.network-center { position:absolute; right:-10px; top:190px; width:100px; height:100px; display:grid; place-items:center; background:var(--forest); border-radius:50%; color:white; font:italic 25px Georgia,serif; }
+.feature-caption,.section-copy { font:14px/1.6 'Trebuchet MS',sans-serif; color:#435c55; max-width:490px; }
+.public-site a:focus-visible { outline:3px solid #ad7926; outline-offset:4px; }
+.public-site .steps h3 a { color:inherit; text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:5px; }
+.public-site button:disabled { opacity:.65; cursor:not-allowed; transform:none; }
+.meet-handoff { border-top:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:30px; padding:38px 0 12px; }
+.meet-handoff h2 { font-size:40px; font-weight:400; letter-spacing:-.04em; margin:10px 0; }
+.meet-handoff p:last-child { font:15px/1.6 'Trebuchet MS',sans-serif; color:#435c55; max-width:600px; }
+@media(max-width:850px) { .public-header { align-items:flex-start; gap:20px; }.public-header nav { max-width:500px; }.network-art { min-height:420px; margin-bottom:35px; } }
+@media(max-width:600px) { .public-header { flex-direction:column; }.public-header nav { justify-content:flex-start; gap:14px 20px; }.network-art { padding:24px; }.network-question { font-size:34px; }.meet-handoff { align-items:flex-start; flex-direction:column; }.public-site .hero-actions { gap:10px; } }

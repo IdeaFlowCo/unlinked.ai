@@ -1,5 +1,7 @@
 # unlinked.ai — for agents
 
+Public browser entry uses Ideaflow ID only; private sign-in and uploads are not live yet. /auth/login shows current availability, /auth/signup returns there, and /agents shows setup availability without instructing users to mint a legacy key. Legacy API schemas below are reference documentation, not a working onboarding path.
+
 Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend.
 
 This is the agent-facing brief served at `/AGENTS.md` for autonomous agents arriving at unlinked.ai over HTTP. For agents and developers working inside this repository, see `AGENTS.md` at the repo root.
@@ -8,33 +10,35 @@ This is the agent-facing brief served at `/AGENTS.md` for autonomous agents arri
 
 See the repository [README](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/README.md) for current product behavior and availability. The API and MCP instructions below describe the legacy backend surface; they do not expose the new [private archive parser/job foundation](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-archive-import.md).
 
-Any MCP-aware client (Claude Desktop, Claude Code, Cursor, Cline, Codex CLI) or HTTP agent can interact with unlinked.ai programmatically using an agent key.
+The sections below preserve the historical agent API and MCP contract for recovery work. They are not live setup instructions while private sign-in, uploads and hosted MCP access remain unavailable.
 
-## Scoping Guarantee
+## Historical Scoping Guarantee
 
-Every agent API request is authenticated server-side to the user owning the agent key.
+The legacy agent API authenticates every request server-side to the user owning the agent key.
 
 - **Strict isolation:** An agent key can only access the caller's own profile and their direct connections. It can never view, search, or infer the network of any other user.
 - **Server-side resolution:** No request parameter ever specifies whose network is searched. The target network is resolved server-side from the authenticated key.
 - **Privacy by 404:** Requesting an unrelated profile ID via `/api/profiles/[id]` returns `404 Not Found` (identical to a nonexistent profile), never confirming whether an unrelated profile exists.
 - **Read-only intro drafting:** Drafting an intro via `/api/draft-intro` generates a candidate message in memory and writes nothing to the database.
 
-## Authentication
+## Historical Authentication Reference
 
-1. **Minting a Key:** Sign in to unlinked.ai and navigate to **Settings -> Agent keys** (`https://www.unlinked.ai/settings/agent-keys`).
+There is no live agent-key creation path in the deployed product today. The legacy implementation used the following contract:
+
+1. **Minting a Key:** A signed-in private account created keys from **Settings -> Agent keys** after private access was enabled.
 2. **Format:** Agent keys start with the prefix `ul_` followed by base64url-encoded random bytes (e.g. `ul_...`).
 3. **Storage:** The plaintext key is shown exactly once upon creation. Server-side, only a SHA-256 hash is stored.
 4. **Usage:** Provide the key in the HTTP `Authorization` header:
    ```http
    Authorization: Bearer ul_your_key_here
    ```
-5. **Revocation:** Keys can be revoked at any time from **Settings -> Agent keys**. Key management endpoints require an interactive browser session; agent keys cannot mint or revoke other agent keys.
+5. **Revocation:** Keys were revoked from **Settings -> Agent keys**. Key management endpoints require an interactive browser session; agent keys cannot mint or revoke other agent keys.
 
-## Quick Start: MCP Server
+## Historical MCP Server Reference
 
-unlinked.ai provides a Model Context Protocol server under `@unlinked/mcp-server` that connects any MCP-aware client to your network. It is not published to npm; run it from a local build.
+unlinked.ai includes a Model Context Protocol server under `@unlinked/mcp-server` for the legacy agent API. Because live agent-key creation and hosted setup are unavailable, the snippets below are reference examples only.
 
-### Build the server
+### Build the server from source
 
 ```bash
 git clone https://github.com/IdeaFlowCo/unlinked.ai
@@ -97,9 +101,11 @@ If `UNLINKED_API_KEY` is not set in the environment, the MCP server checks `~/.u
 | `unlinked_list_imports` | None | List LinkedIn archive uploads and count of ingested graph records. |
 | `unlinked_draft_intro` | `contactProfileId` (string UUID, required), `context` (string, max 2000 chars, optional) | Draft a short, forwardable intro to a direct connection (read-only). |
 
-## HTTP REST API Reference
+## Historical HTTP REST API Reference
 
 Base URL: `https://www.unlinked.ai`
+
+These examples document the preserved legacy schema. They are not live onboarding commands while private access and key creation remain unavailable.
 
 ### 1. Get My Profile
 `GET /api/me`

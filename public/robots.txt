@@ -5,6 +5,10 @@
 #   /.well-known/mcp/server-card.json
 #   /openapi.json
 #   /agents
+#   /network
+#   /search
+#   /import-linkedin
+#   /auth/login
 #
 # Profile pages are disallowed for crawlers pending the decision on
 # unclaimed profile directory visibility.
@@ -19,6 +23,10 @@ Allow: /AGENTS.md
 Allow: /.well-known/
 Allow: /openapi.json
 Allow: /agents
+Allow: /network
+Allow: /search
+Allow: /import-linkedin
+Allow: /auth/login
 Allow: /sitemap.xml
 
 User-agent: GPTBot
@@ -31,6 +39,10 @@ Allow: /AGENTS.md
 Allow: /.well-known/
 Allow: /openapi.json
 Allow: /agents
+Allow: /network
+Allow: /search
+Allow: /import-linkedin
+Allow: /auth/login
 Allow: /sitemap.xml
 
 User-agent: ClaudeBot
@@ -43,6 +55,10 @@ Allow: /AGENTS.md
 Allow: /.well-known/
 Allow: /openapi.json
 Allow: /agents
+Allow: /network
+Allow: /search
+Allow: /import-linkedin
+Allow: /auth/login
 Allow: /sitemap.xml
 
 User-agent: PerplexityBot
@@ -55,6 +71,10 @@ Allow: /AGENTS.md
 Allow: /.well-known/
 Allow: /openapi.json
 Allow: /agents
+Allow: /network
+Allow: /search
+Allow: /import-linkedin
+Allow: /auth/login
 Allow: /sitemap.xml
 
 Sitemap: https://www.unlinked.ai/sitemap.xml
