@@ -165,33 +165,24 @@ test('incremental parsing aborts dense input and shares a budget across archive 
     'nested/Skills.csv': 'Name\n' + 'b\n'.repeat(60000),
   })
   const originalParse = Papa.parse
-  let steps = 0, aborted = 0
-  Papa.parse = (input, config) => originalParse(input, {
-    ...config,
-    step: config.step && ((result, parser) => {
-      steps++
-      config.step(result, parser)
-    }),
-    complete(result) {
-      aborted += Number(Boolean(result.meta.aborted))
-      config.complete?.(result)
-    },
-  })
+  let windows = 0
+  Papa.parse = (input, config) => {
+    windows++
+    assert.ok(input.length <= LIMITS.recordChars + 2)
+    return originalParse(input, config)
+  }
   try {
     const source = parseSource({ path: 'Skills.csv', bytes: Buffer.from('Name\n' + 'a\n'.repeat(4000000)) })
     assert.equal(source.error, 'csv_row_limit')
     assert.equal(source.accepted.length, 0)
-    assert.equal(steps, LIMITS.rows + 1)
-    assert.equal(aborted, 1)
-    steps = 0; aborted = 0
+    assert.equal(windows, LIMITS.rows)
+    windows = 0
     assert.throws(() => parseArchive(bytes, 'archive.zip'), /archive_row_limit/)
-    assert.equal(steps, LIMITS.rows + 1)
-    assert.equal(aborted, 1)
-    steps = 0; aborted = 0
+    assert.equal(windows, LIMITS.rows)
+    windows = 0
     const blanks = parseSource({ path: 'Skills.csv', bytes: Buffer.from('Name\n' + '\n'.repeat(LIMITS.rows + 10)) })
     assert.equal(blanks.error, 'csv_row_limit')
-    assert.equal(steps, LIMITS.rows + 1)
-    assert.equal(aborted, 1)
+    assert.equal(windows, LIMITS.rows)
   } finally { Papa.parse = originalParse }
 })
 
@@ -234,7 +225,10 @@ test('single-record allocation limits fail before PapaParse and retain failed pr
     [Buffer.from('Name\n"' + '""'.repeat(LIMITS.quoteTokens) + '"'), 'csv_quote_limit'],
   ]
   const originalParse = Papa.parse
-  Papa.parse = () => { throw new Error('unsafe_input_reached_papaparse') }
+  Papa.parse = (input, config) => {
+    if (input !== 'Name\n') throw new Error('unsafe_input_reached_papaparse')
+    return originalParse(input, config)
+  }
   try {
     for (const [bytes, error] of cases) {
       const source = parseArchive(bytes, 'Skills.csv').sources[0]
@@ -277,4 +271,70 @@ test('bounded records preserve quoted commas, escaped quotes and multiline field
   const escaped = parseArchive(Buffer.from(`Name\n${quoted}`), 'Skills.csv').sources[0]
   assert.equal(escaped.error, undefined)
   assert.equal(escaped.accepted[0].fields.name, '"'.repeat((LIMITS.quoteTokens - 2) / 2))
+})
+
+
+test('malformed whitespace records retain rejected receipts beside accepted skills', async t => {
+  const { adapter } = await fixture(t)
+  const bytes = Buffer.from('Name\nValid skill\n" ')
+  const job = await ingestArchive({ ownerId: 'synthetic-owner-a', filename: 'Skills.csv', bytes, adapter })
+  assert.equal(job.status, 'partial')
+  assert.equal(job.counts.accepted, 1)
+  assert.equal(job.counts.rejected, 1)
+  assert.deepEqual(job.sources[0].rejected, [{ rowId: 'Skills.csv#record=3', reason: 'MissingQuotes' }])
+  assert.equal((await adapter.assertions(job.ownerId))[0].fields.name, 'Valid skill')
+  assert.deepEqual(await adapter.asset(job.ownerId, job.archiveSha256), bytes)
+})
+
+test('inherited category names remain unsupported retained ZIP members', async t => {
+  const { adapter } = await fixture(t)
+  const raw = Buffer.from('retained unsupported bytes')
+  const bytes = await archive({ 'Skills.csv': 'Name\nValid skill\n', constructor: raw })
+  const job = await ingestArchive({ ownerId: 'synthetic-owner-a', filename: 'archive.zip', bytes, adapter })
+  assert.equal(job.status, 'partial')
+  assert.equal(job.counts.accepted, 1)
+  assert.equal(job.counts.skippedFiles, 1)
+  assert.equal(job.counts.failedFiles, 0)
+  const unsupported = job.sources.find(source => source.path === 'constructor')
+  assert.equal(unsupported.category, 'unsupported')
+  assert.equal(unsupported.status, 'skipped')
+  assert.deepEqual(await adapter.asset(job.ownerId, unsupported.sha256), raw)
+  const prototype = parseSource({ path: '__proto__', bytes: raw })
+  assert.equal(prototype.skipped, true)
+  assert.equal(prototype.category, 'unsupported')
+})
+
+test('record separators ignore line endings within quoted preambles', () => {
+  for (const [embedded, separator] of [['\r', '\n'], ['\n', '\r\n'], ['\r\n', '\r']]) {
+    const bytes = Buffer.from(`"Notes:${embedded}download"${separator}Name${separator}Valid skill${separator}`)
+    const source = parseArchive(bytes, 'Skills.csv').sources[0]
+    assert.equal(source.error, undefined)
+    assert.equal(source.accepted.length, 1)
+    assert.equal(source.accepted[0].fields.name, 'Valid skill')
+    assert.equal(source.accepted[0].rowId, 'Skills.csv#record=3')
+    assert.deepEqual(source.rejected, [])
+    assert.deepEqual(source.rawBytes, bytes)
+  }
+})
+
+test('quoted single-column archives use bounded PapaParse windows', () => {
+  const bytes = Buffer.from('Name\n' + ('"' + 'a'.repeat(80) + '"\n').repeat(LIMITS.rows - 2))
+  assert.ok(bytes.length < LIMITS.fileBytes)
+  const originalParse = Papa.parse
+  let windows = 0, inputChars = 0
+  Papa.parse = (input, config) => {
+    assert.ok(input.length <= LIMITS.recordChars + 2)
+    windows++
+    inputChars += input.length
+    return originalParse(input, config)
+  }
+  try {
+    const source = parseArchive(bytes, 'Skills.csv').sources[0]
+    assert.equal(source.error, undefined)
+    assert.equal(source.accepted.length, LIMITS.rows - 2)
+    assert.equal(source.rejected.length, 0)
+    assert.equal(source.accepted.at(-1).fields.name, 'a'.repeat(80))
+    assert.equal(windows, LIMITS.rows)
+    assert.equal(inputChars, bytes.length)
+  } finally { Papa.parse = originalParse }
 })

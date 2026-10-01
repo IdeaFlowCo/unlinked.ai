@@ -10,16 +10,16 @@ The legacy onboarding/agent endpoints are not connected to this module.
 `src/utils/private-import/archive.mjs` consumes real ZIP or individual CSV bytes.
 The fixed limits are 20 MiB compressed archive, 8 MiB per file, 40 MiB total expanded data, 200 ZIP entries and 100,000 parsed CSV records across the archive, including blank, preamble and header records.
 Incremental parsing aborts when that shared budget is exceeded; unsupported files are retained without CSV parsing.
-Before PapaParse runs, a constant-memory scan bounds each logical CSV record to 65,536 UTF-16 code units, each encoded field to 32,768 code units, 256 fields and 1,024 quote tokens (including escaped quotes).
-Quoted commas, escaped quotes and multiline fields remain supported within those limits. The first line ending selects the CSV record separator.
+Before passing a record to PapaParse, a constant-memory logical-record iterator limits it to 65,536 UTF-16 code units, each encoded field to 32,768 code units, 256 fields and 1,024 quote tokens (including escaped quotes).
+Quoted commas, escaped quotes and multiline fields remain supported within those limits. The first line ending outside quoted fields selects the CSV record separator. Each PapaParse input contains at most one bounded logical record plus its separator, avoiding searches over the remaining file.
 Exceeding a boundary fails the entire source with `csv_record_size_limit`, `csv_field_size_limit`, `csv_field_count_limit` or `csv_quote_limit`; no assertions from that file are published and its original bytes remain retained.
 Central-directory bounds are checked before expansion; actual inflation is bounded and size/CRC checked.
 Encryption, ZIP64, multi-disk archives, symlinks, duplicate paths, path traversal and unsupported compression fail closed.
 No archive member is extracted to a filesystem path.
 Supported categories are Connections, Profile, Positions, Education and Skills.
-CSV headers are discovered within the first 20 nonempty records, rather than dropping two lines.
+CSV headers are discovered within the first 20 nonempty or malformed records, rather than dropping two lines.
 Unknown files, invalid UTF-8, absent headers, invalid URLs and malformed records have explicit receipts; their original bytes remain recoverable.
-Logical record identifiers count parsed nonempty CSV records, including preamble/header records, not physical line numbers (quoted fields may span lines).
+Logical record identifiers count parsed nonempty or malformed CSV records, including preamble/header records, not physical line numbers (quoted fields may span lines).
 Imported URLs and emails are observations, never proof of an app login identity.
 
 `src/utils/private-import/job.mjs` binds deterministic job, source and assertion IDs to a caller-supplied verified historical owner ID.

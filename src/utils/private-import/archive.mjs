@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
 import Papa from 'papaparse'
 
-export const PARSER_VERSION = 'linkedin-archive-v3'
+export const PARSER_VERSION = 'linkedin-archive-v4'
 export const LIMITS = Object.freeze({ archiveBytes: 20 * 1024 * 1024, fileBytes: 8 * 1024 * 1024, expandedBytes: 40 * 1024 * 1024, files: 200, rows: 100000, headerRows: 20, recordChars: 65536, fieldChars: 32768, fields: 256, quoteTokens: 1024 })
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const crcTable = Array.from({ length: 256 }, (_, n) => {
@@ -86,92 +86,89 @@ function linkedinUrl(value) {
   } catch { return null }
 }
 
-function csvBoundary(text) {
-  let newline = '\n'
+function* csvRecords(text) {
+  let newline, recordStart = 0, fieldStart = 0, fields = 1, quotes = 0, quoted = false
+  const separatorAt = i => newline ? text.startsWith(newline, i) : text[i] === '\r' || text[i] === '\n'
   for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\r' || text[i] === '\n') {
-      newline = text[i] === '\r' && text[i + 1] === '\n' ? '\r\n' : text[i]
-      break
-    }
-  }
-  let recordStart = 0, fieldStart = 0, fields = 1, quotes = 0, quoted = false
-  for (let i = 0; i < text.length; i++) {
-    const recordEnd = !quoted && text.startsWith(newline, i)
+    const recordEnd = !quoted && separatorAt(i)
     const fieldEnd = !quoted && (text[i] === ',' || recordEnd)
-    if (i - recordStart + Number(!recordEnd) > LIMITS.recordChars) return { error: 'csv_record_size_limit' }
-    if (i - fieldStart + Number(!fieldEnd) > LIMITS.fieldChars) return { error: 'csv_field_size_limit' }
+    if (i - recordStart + Number(!recordEnd) > LIMITS.recordChars) { yield { error: 'csv_record_size_limit' }; return }
+    if (i - fieldStart + Number(!fieldEnd) > LIMITS.fieldChars) { yield { error: 'csv_field_size_limit' }; return }
     if (text[i] === '"') {
-      if (++quotes > LIMITS.quoteTokens) return { error: 'csv_quote_limit' }
+      if (++quotes > LIMITS.quoteTokens) { yield { error: 'csv_quote_limit' }; return }
       if (!quoted && i === fieldStart) quoted = true
       else if (quoted) {
         if (text[i + 1] === '"') {
-          if (++quotes > LIMITS.quoteTokens) return { error: 'csv_quote_limit' }
+          if (++quotes > LIMITS.quoteTokens) { yield { error: 'csv_quote_limit' }; return }
           i++
         } else {
           let next = i + 1
-          while (next < text.length && text[next] !== ',' && !text.startsWith(newline, next) && !text[next].trim()) next++
-          if (i === text.length - 1 || text[next] === ',' || text.startsWith(newline, next)) quoted = false
+          while (next < text.length && text[next] !== ',' && !separatorAt(next) && !text[next].trim()) {
+            if (next - recordStart >= LIMITS.recordChars) { yield { error: 'csv_record_size_limit' }; return }
+            if (next - fieldStart >= LIMITS.fieldChars) { yield { error: 'csv_field_size_limit' }; return }
+            next++
+          }
+          if (i === text.length - 1 || text[next] === ',' || separatorAt(next)) quoted = false
         }
       }
     } else if (!quoted && text[i] === ',') {
-      if (++fields > LIMITS.fields) return { error: 'csv_field_count_limit' }
+      if (++fields > LIMITS.fields) { yield { error: 'csv_field_count_limit' }; return }
       fieldStart = i + 1
-    } else if (!quoted && text.startsWith(newline, i)) {
+    } else if (recordEnd) {
+      newline ??= text[i] === '\r' && text[i + 1] === '\n' ? '\r\n' : text[i]
       i += newline.length - 1
+      yield { text: text.slice(recordStart, i + 1), newline }
       recordStart = fieldStart = i + 1
       fields = 1; quotes = 0
     }
   }
-  if (text.length - recordStart > LIMITS.recordChars) return { error: 'csv_record_size_limit' }
-  if (text.length - fieldStart > LIMITS.fieldChars) return { error: 'csv_field_size_limit' }
-  return { newline }
+  if (text.length - recordStart > LIMITS.recordChars) { yield { error: 'csv_record_size_limit' }; return }
+  if (text.length - fieldStart > LIMITS.fieldChars) { yield { error: 'csv_field_size_limit' }; return }
+  yield { text: text.slice(recordStart), newline: newline ?? '\n' }
 }
 
 export function parseSource(source, budget = { remaining: LIMITS.rows }, limitError = 'csv_row_limit') {
-  const spec = categories[source.path.split('/').pop().toLowerCase()]
+  const filename = source.path.split('/').pop().toLowerCase()
+  const spec = Object.hasOwn(categories, filename) ? categories[filename] : undefined
   const base = { path: source.path, sha256: digest(source.bytes), bytes: source.bytes.length, category: spec?.category ?? 'unsupported', accepted: [], rejected: [], skipped: !spec }
   if (!spec) return base
   let text
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(source.bytes).replace(/^\uFEFF/, '') }
   catch { return { ...base, error: 'invalid_utf8' } }
-  const boundary = csvBoundary(text)
-  if (boundary.error) return { ...base, error: boundary.error }
   let headers, record = 0
-  Papa.parse(text, {
-    delimiter: ',', newline: boundary.newline, fastMode: false,
-    step(result, parser) {
-      if (budget.remaining <= 0) {
-        base.error = limitError
-        parser.abort()
-        return
-      }
-      budget.remaining--
-      const row = result.data
-      if (row.every(value => !value.trim())) return
-      record++
-      const error = result.errors[0]?.code
-      if (!headers) {
-        const candidate = row.map(value => value.trim().toLowerCase())
-        if (!error && spec.required.every(key => candidate.includes(key))) {
-          if (new Set(candidate).size !== candidate.length || candidate.some(h => !h)) {
-            base.error = 'invalid_csv_header'
-            parser.abort()
-          } else headers = candidate
-        } else if (record >= LIMITS.headerRows) {
-          base.error = 'csv_header_not_found'
-          parser.abort()
+  for (const window of csvRecords(text)) {
+    if (budget.remaining <= 0) { base.error = limitError; break }
+    if (window.error) { base.error = window.error; break }
+    budget.remaining--
+    const result = Papa.parse(window.text, { delimiter: ',', newline: window.newline, fastMode: false, preview: 1 })
+    const row = result.data[0] ?? ['']
+    const error = result.errors[0]?.code
+    if (!error && row.every(value => !value.trim())) continue
+    record++
+    const rowId = `${source.path}#record=${record}`
+    if (error) base.rejected.push({ rowId, reason: error })
+    if (!headers) {
+      const candidate = row.map(value => value.trim().toLowerCase())
+      if (!error && spec.required.every(key => candidate.includes(key))) {
+        if (new Set(candidate).size !== candidate.length || candidate.some(h => !h)) {
+          base.error = 'invalid_csv_header'
+          break
         }
-        return
+        headers = candidate
+      } else if (record >= LIMITS.headerRows) {
+        base.error = 'csv_header_not_found'
+        break
       }
-      const rowId = `${source.path}#record=${record}`
-      if (error || row.length !== headers.length) { base.rejected.push({ rowId, reason: error ?? 'csv_column_count' }); return }
-      const fields = Object.fromEntries(headers.map((key, i) => [key, row[i].trim()]))
-      if (spec.required.some(key => !fields[key])) { base.rejected.push({ rowId, reason: 'missing_required_field' }); return }
-      const subject = spec.category === 'connections' ? linkedinUrl(fields.url) : 'archive_owner_observation'
-      if (!subject) { base.rejected.push({ rowId, reason: 'invalid_or_missing_linkedin_url' }); return }
-      base.accepted.push({ rowId, category: spec.category, subject, fields })
-    },
-  })
+      continue
+    }
+    if (error) continue
+    if (row.length !== headers.length) { base.rejected.push({ rowId, reason: 'csv_column_count' }); continue }
+    const fields = Object.fromEntries(headers.map((key, i) => [key, row[i].trim()]))
+    if (spec.required.some(key => !fields[key])) { base.rejected.push({ rowId, reason: 'missing_required_field' }); continue }
+    const subject = spec.category === 'connections' ? linkedinUrl(fields.url) : 'archive_owner_observation'
+    if (!subject) { base.rejected.push({ rowId, reason: 'invalid_or_missing_linkedin_url' }); continue }
+    base.accepted.push({ rowId, category: spec.category, subject, fields })
+  }
   if (!headers && !base.error) base.error = 'csv_header_not_found'
   if (base.error) { base.accepted = []; base.rejected = [] }
   return base
