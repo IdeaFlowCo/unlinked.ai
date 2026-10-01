@@ -39,29 +39,29 @@ The production identity operation and new persistent OpenAI secret destination r
 
 ## Trusted runtime capability
 
-The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, signup, accountGrantKey, getBackend, complete, port, host, networkMode, dataMode})`; its real-data mode is exactly `private_live`.
+The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, signup, accountGrantKey, getBackend, complete, backgroundImports, audit, port, host, networkMode, dataMode})`; its real-data mode is exactly `private_live`.
 `mcp-server/private-composition.mjs` provides the process-only `createPrivatePilotDependencies(options)` implementation.
 Install this packet's `wiring.mjs` as mode 600 at `/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs`; its relative export resolves the exact private Unlinked checkout.
 The factory loads only compiled Noos operational modules from the private Noos checkout, never its legacy auth or generic query application.
-It validates the dedicated root, exact approved live origin and ports, initializes callback-only invitation provisioning plus open-account signup, and mints internal ephemeral operations credentials only after active owner/principal authorization. The approved live origin is either the rollback private host or the canonical `https://www.unlinked.ai` cutover host.
+It validates the dedicated root, exact approved live origin and ports, initializes callback-only invitation provisioning plus open-account signup, starts the singleton background import worker, and mints internal ephemeral operations credentials only after active owner/principal authorization. The approved live origin is either the rollback private host or the canonical `https://www.unlinked.ai` cutover host.
 Before provisioning or exposing HTTP readiness, it waits for the dedicated Bolt driver to report graph connectivity with the same bounded driver timeouts.
 The server-side operations key never leaves the runtime; hosted MCP uses its separate search-only grants and live publication fences.
 The private env, production client, TLS/DNS, dependency-complete source artifacts and built deployment images remain activation inputs.
-It must start the isolated operational service only at container `127.0.0.1:9022` and return `login`, `resolveOwner`, `signup`, `accountGrantKey`, `getBackend`, `complete` and `close` capabilities; invitation-capable deployments may also return `claimInvitation`.
+It must start the isolated operational service only at container `127.0.0.1:9022` and return `login`, `resolveOwner`, `signup`, `accountGrantKey`, `getBackend`, `complete`, `backgroundImports`, `audit` and `close` capabilities; invitation-capable deployments may also return `claimInvitation`.
 The login object must implement `begin`, `finish` and the exact HTTPS `authorizationOrigin` using `createIdeaflowLogin` with the verified production issuer/client and callback.
 The authorization request uses `prompt=login`; Unlinked confirms the returned verified account before an invited owner claim, rather than silently binding by email.
-The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `signup` is its guarded open-account method, `claimInvitation` remains its guarded invitation method, and `resolveOwner` resolves the same verified issuer/subject mapping.
+The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `signup` is its guarded open-account method, `claimInvitation` remains its guarded invitation method, and `resolveOwner` resolves the same verified issuer/subject mapping. The operational store must expose `listPendingImportJobs` and owner-scoped `listImportJobIds`; older Noos artifacts fail startup instead of falling back to synchronous import.
 `getBackend` must revalidate active immutable owner/principal and publication access on every operation.
 The operational API exposes only its scoped router, never the legacy generic graph query routes.
-The returned `close` capability must stop its operational listener and graph driver on shutdown.
+The returned `close` capability must stop the background worker, operational listener and graph driver on shutdown.
 Scoped readers fetch at most eight observations concurrently, preserve every manifest ordinal and recheck the final live publication after all rows; they do not extend the existing 30-second per-request bound.
-Archive asset publication waits for file and directory fsync; a paired cold restore rehearsal remains required before real data.
+Archive asset staging waits for the original blob and `uploaded` receipt before browser redirect; publication then proceeds through the server worker, profile-first chunks and one final fence. Asset publication waits for file and directory fsync; a paired cold restore rehearsal remains required before real data.
 Read-only source mounts must contain locked dependencies supplied in the approved runtime image or exact checkouts; the packet does not download or install them.
 
 ## Private destinations and invitation recovery
 
 Create the proposed root and each private state, runtime and backup directory with mode 700 only after target approval.
-All private env, operator config, invitation bundle, audit receipts and snapshot files must use mode 600 under the operator UID/GID.
+All private env, operator config, invitation bundle, audit receipts and snapshot files must use mode 600 under the operator UID/GID. Browser callback success/denial and worker retry events append to `audit/browser-events.jsonl` with bounded sanitized fields only; no tokens, identity subjects, email addresses, cookies, authorization URLs, queries or archive content belong there.
 Run the helper as the private file-owning release operator, not as root.
 The existing Noos operator's read-only `sudo -n docker info` route was verified; direct socket access is denied.
 The helper uses noninteractive sudo only for Docker commands and preserves exactly `PILOT_ORIGIN`, `PILOT_UID`, `PILOT_GID`, `PILOT_NEO4J_IMAGE`, `PILOT_RUNTIME_IMAGE` and `PILOT_NGINX_IMAGE` for Compose, with `PILOT_ORIGIN` derived from the validated manifest rather than the ambient shell.

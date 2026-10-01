@@ -117,7 +117,7 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   assert.match(uploadHtml, /LinkedIn export ZIP or CSV/)
   const csrfUpload = uploadHtml.match(/name="csrf" value="([^"]+)"/)[1]
   const uploadForm = new FormData()
-  uploadForm.set('csrf', csrfUpload); uploadForm.set('consent', 'yes'); uploadForm.set('syntheticConsent', 'yes')
+  uploadForm.set('csrf', csrfUpload); uploadForm.set('syntheticConsent', 'yes')
   const csv = 'First Name,Last Name,URL,Company,Position\nInvited,Example,https://www.linkedin.com/in/synthetic-invited,Synthetic,Engineer\n'
   uploadForm.set('archive', new Blob([csv]), 'Connections.csv')
   const headers = { Cookie: sessionCookie, Origin: baseUrl }
