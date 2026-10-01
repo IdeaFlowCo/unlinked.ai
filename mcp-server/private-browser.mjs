@@ -57,21 +57,40 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
-  // Permit only the configured issuer origin for the invitation form redirect.
-  // Browser navigation POSTs use Origin:null under no-referrer; strict-origin
-  // retains the verified origin while never sending invitation paths or queries.
   const authorizationOrigin = login.authorizationOrigin ?? null
+  if (typeof claimInvitation === 'function' && authorizationOrigin === null) throw new Error('explicit_private_authorization_origin_required')
   if (authorizationOrigin !== null) {
     const authorization = new URL(authorizationOrigin)
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
-  const pending = new Map(), invitations = new Map(), sessions = new Map()
+  const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map()
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
   const sessionFor = request => { purge(sessions); return sessions.get(cookies(request)['__Host-ul-session']) }
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
+  const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
+  async function establishSession(response, identity, invitationToken = null) {
+    let claimed
+    if (invitationToken) {
+      if (typeof claimInvitation !== 'function') throw new Error('private_invitation_intent_invalid')
+      claimed = await claimInvitation(invitationToken, {
+        issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
+        verifiedAt: identity.verifiedAt, provenanceReceiptId: identity.provenanceReceiptId, newProfileIntent: true,
+      })
+      if (!claimed || typeof claimed.ownerId !== 'string' || !claimed.ownerId || typeof claimed.userId !== 'string' || !claimed.userId) throw new Error('private_owner_recovery_required')
+    }
+    const owner = await resolveOwner(identity)
+    if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new Error('private_owner_recovery_required')
+    if (claimed && (claimed.ownerId !== owner.ownerId || claimed.userId !== owner.userId)) throw new Error('private_owner_recovery_required')
+    purge(sessions)
+    if (sessions.size >= 100) throw new Error('private_login_capacity')
+    const sessionId = token()
+    sessions.set(sessionId, { owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), csrf: token(), expiresAt: Date.now() + 15 * 60000 })
+    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, 900)])
+    redirect(response, '/')
+  }
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
     response.setHeader('Referrer-Policy', 'strict-origin')
@@ -91,11 +110,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         invitations.set(id, { token: inviteMatch[1], csrf, expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-invite', id, 300))
         if (authorizationOrigin) response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${authorizationOrigin}; base-uri 'none'; frame-ancestors 'none'`)
-        render(response, 'Start your private Unlinked profile', `<p>Choose the Ideaflow account you want to use for this separate, private Unlinked profile. We verify that account before creating your owner. Your existing OpenChat account stays separate.</p><form method="post" action="/invite"><input type="hidden" name="csrf" value="${html(csrf)}"><p>You can review the archive retention and AI search disclosure when you upload.</p><button>Create my private profile with Ideaflow</button></form>`)
+        render(response, 'Start your private Unlinked profile', `<p>Sign in with Ideaflow for this separate, private Unlinked profile. After Ideaflow returns, Unlinked shows the verified account and asks you to confirm it before creating your owner. Your existing OpenChat account stays separate.</p><form method="post" action="/invite"><input type="hidden" name="csrf" value="${html(csrf)}"><p>You can review the archive retention and AI search disclosure when you upload.</p><button>Continue with Ideaflow</button></form>`)
         return
       }
       if (request.method === 'POST' && url.pathname === '/invite' && typeof claimInvitation === 'function') {
-        purge(invitations); purge(pending)
+        purge(invitations); purge(pending); purge(confirmations)
         const id = cookies(request)['__Host-ul-invite'], invitation = invitations.get(id)
         invitations.delete(id)
         response.setHeader('Set-Cookie', cookie('__Host-ul-invite', '', 0))
@@ -107,6 +126,25 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         response.setHeader('Set-Cookie', [cookie('__Host-ul-invite', '', 0), cookie('__Host-ul-login', transactionId, 300)])
         redirect(response, result.location); return
       }
+      if (request.method === 'POST' && url.pathname === '/invite/confirm' && typeof claimInvitation === 'function') {
+        purge(confirmations); purge(pending)
+        const id = cookies(request)['__Host-ul-confirm'], confirmation = confirmations.get(id)
+        confirmations.delete(id)
+        response.setHeader('Set-Cookie', cookie('__Host-ul-confirm', '', 0))
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (!confirmation || input.getAll('csrf').length !== 1 || input.get('csrf') !== confirmation.csrf || input.getAll('action').length !== 1 || [...input.keys()].some(key => !['csrf', 'action'].includes(key))) throw new Error('private_invitation_intent_invalid')
+        const action = input.get('action')
+        if (action === 'cancel') { redirect(response, '/'); return }
+        if (action === 'restart') {
+          if (pending.size >= 100) throw new Error('private_login_capacity')
+          const result = await login.begin(), transactionId = token()
+          pending.set(transactionId, { ...result.transaction, invitationToken: confirmation.invitationToken, newProfileIntent: true, expiresAt: Date.now() + 5 * 60000 })
+          response.setHeader('Set-Cookie', [cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-login', transactionId, 300)])
+          redirect(response, result.location); return
+        }
+        if (action !== 'confirm') throw new Error('private_invitation_intent_invalid')
+        await establishSession(response, confirmation.identity, confirmation.invitationToken); return
+      }
       if (request.method === 'GET' && url.pathname === '/login') {
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
@@ -116,30 +154,22 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         redirect(response, result.location); return
       }
       if (request.method === 'GET' && url.pathname === '/auth/callback/ideaflow') {
-        purge(pending)
+        purge(pending); purge(confirmations)
         const id = cookies(request)['__Host-ul-login'], transaction = pending.get(id)
         pending.delete(id) // All callback outcomes consume the one-use transaction.
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', '', 0))
         if (!transaction || url.searchParams.getAll('state').length !== 1 || url.searchParams.get('state') !== transaction.state || url.searchParams.getAll('code').length !== 1) throw new Error('private_login_transaction_invalid')
         const identity = await login.finish(url, transaction)
-        let claimed
         if (transaction.invitationToken) {
           if (typeof claimInvitation !== 'function' || transaction.newProfileIntent !== true) throw new Error('private_invitation_intent_invalid')
-          claimed = await claimInvitation(transaction.invitationToken, {
-            issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
-            verifiedAt: identity.verifiedAt, provenanceReceiptId: identity.provenanceReceiptId, newProfileIntent: true,
-          })
-          if (!claimed || typeof claimed.ownerId !== 'string' || !claimed.ownerId || typeof claimed.userId !== 'string' || !claimed.userId) throw new Error('private_owner_recovery_required')
+          if (confirmations.size >= 100) throw new Error('private_login_capacity')
+          const confirmationId = token(), csrf = token()
+          confirmations.set(confirmationId, { identity, invitationToken: transaction.invitationToken, csrf, expiresAt: Date.now() + 5 * 60000 })
+          response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', confirmationId, 300)])
+          render(response, 'Confirm your Ideaflow account', `<p>Ideaflow returned this verified account for your invitation. Confirm it here before Unlinked creates a private owner for the invitation.</p><article><strong>${displayIdentity(identity)}</strong></article><form method="post" action="/invite/confirm"><input type="hidden" name="csrf" value="${html(csrf)}"><button name="action" value="confirm">Use this account</button><button name="action" value="restart">Use another account</button><button name="action" value="cancel">Cancel</button></form>`)
+          return
         }
-        const owner = await resolveOwner(identity)
-        if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new Error('private_owner_recovery_required')
-        if (claimed && (claimed.ownerId !== owner.ownerId || claimed.userId !== owner.userId)) throw new Error('private_owner_recovery_required')
-        purge(sessions)
-        if (sessions.size >= 100) throw new Error('private_login_capacity')
-        const sessionId = token()
-        sessions.set(sessionId, { owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), csrf: token(), expiresAt: Date.now() + 15 * 60000 })
-        response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-session', sessionId, 900)])
-        redirect(response, '/'); return
+        await establishSession(response, identity); return
       }
       const session = sessionFor(request)
       if (!session) {

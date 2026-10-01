@@ -8,7 +8,7 @@ import { join } from 'node:path'
 let browser
 try { browser = await import('../mcp-server/private-browser.mjs') } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error }
 
-test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE and preserves account choice', { skip: !browser }, async () => {
+test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE and requests reauthentication', { skip: !browser }, async () => {
   const issuer = 'https://synthetic-ideaflow.invalid', callbackUrl = 'https://private.invalid/auth/callback/ideaflow'
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), wrongKeys = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const jwk = { ...keys.publicKey.export({ format: 'jwk' }), kid: 'synthetic-rsa', alg: 'RS256', use: 'sig' }
@@ -133,6 +133,11 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
 
 
 test('private browser denies noncanonical or unsafe authorization origins before serving a form', { skip: !browser }, () => {
+  assert.throws(() => browser.createPrivateBrowserHandler({ baseUrl: 'https://private.invalid',
+    login: { begin: async () => {}, finish: async () => {} },
+    claimInvitation: async () => null,
+    resolveOwner: async () => null, getBackend: async () => null,
+  }))
   for (const authorizationOrigin of ['http://issuer.invalid', 'https://issuer.invalid/path', 'https://issuer.invalid/?query=1', "https://issuer.invalid; form-action *", 'https://issuer.invalid\n']) {
     assert.throws(() => browser.createPrivateBrowserHandler({ baseUrl: 'https://private.invalid',
       login: { authorizationOrigin, begin: async () => {}, finish: async () => {} },
