@@ -2,6 +2,8 @@
 
 This packet prepares `unlinked-b3q`; it does not activate the proposed target or establish `unlinked-9a9` real acceptance.
 `manifest.example.json` records proposed destinations and unapproved source heads, image digests, provider and DNS operations.
+Its Unlinked source pin is the committed isolated-container implementation used for compatibility review, while `ready: false` and the missing final receipt keep the example inactive.
+A real private release manifest must pin the final reviewed merge plus compatible exact artifacts and receipt digests, never a stale base checkout.
 All-zero image digests are deliberately unusable proposals; replace them with individually reviewed dependency-complete images, never floating tags.
 No dependencies are installed by this packet.
 
