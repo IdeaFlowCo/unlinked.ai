@@ -25,7 +25,7 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
     assert.deepEqual(Buffer.from(new Headers(options.headers).get('authorization').slice(6), 'base64').toString().split(':').map(decodeURIComponent), ['private-client', 'synthetic-client-secret'])
     assert.ok(new URLSearchParams(options.body).get('code_verifier'))
     const now = Math.floor(Date.now() / 1000)
-    return Response.json({ access_token: 'synthetic-identity-only', token_type: 'Bearer', expires_in: 300, id_token: sign({ iss: issuer, aud: 'private-client', sub: 'immutable-synthetic-subject', iat: now, exp: now + 300, nonce, email: 'unverified@example.invalid', email_verified: false, ...override }) })
+    return Response.json({ access_token: 'synthetic-identity-only', token_type: 'Bearer', expires_in: 300, id_token: sign({ iss: issuer, aud: 'private-client', sub: 'immutable-synthetic-subject', iat: now, exp: now + 300, nonce, email: 'authenticated@example.invalid', email_verified: false, ...override }) })
   } })
   assert.equal(login.authorizationOrigin, issuer)
   for (const bad of [{}, { nonce: 'wrong' }, { iss: 'https://other.invalid' }, { aud: 'other-client' }]) {
@@ -35,12 +35,16 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
     const callback = new URL(`${callbackUrl}?code=synthetic-code&state=${start.transaction.state}`)
     if (!Object.keys(bad).length) {
       const identity = await login.finish(callback, start.transaction)
-      assert.equal(identity.issuer, issuer); assert.equal(identity.subject, 'immutable-synthetic-subject'); assert.equal(identity.verifiedEmail, null)
+      assert.equal(identity.issuer, issuer); assert.equal(identity.subject, 'immutable-synthetic-subject'); assert.equal(identity.verifiedEmail, 'authenticated@example.invalid')
       assert.equal(identity.clientId, 'private-client'); assert.ok(Number.isSafeInteger(identity.verifiedAt))
       assert.match(identity.provenanceReceiptId, /^[A-Za-z0-9_-]{43}$/)
     }
     else await assert.rejects(login.finish(callback, start.transaction))
   }
+  const missingFlag = await login.begin(); nonce = missingFlag.transaction.nonce; override = { email_verified: undefined }
+  const authenticated = await login.finish(new URL(`${callbackUrl}?code=code&state=${missingFlag.transaction.state}`), missingFlag.transaction)
+  assert.equal(authenticated.verifiedEmail, 'authenticated@example.invalid')
+  assert.equal(authenticated.subject, 'immutable-synthetic-subject')
   const start = await login.begin(); nonce = start.transaction.nonce; override = {}; signingKey = wrongKeys.privateKey
   await assert.rejects(login.finish(new URL(`${callbackUrl}?code=code&state=${start.transaction.state}`), start.transaction))
   const before = exchanges
