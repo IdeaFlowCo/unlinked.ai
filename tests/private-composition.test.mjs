@@ -26,6 +26,8 @@ async function fixture(t) {
   // Explicit process-side contract doubles. Real Noos graph/provisioning evidence
   // is separate; this test executes composition, signed bearer and HTTP routing.
   class OperationalStore {
+    async listPendingImportJobs() { return [] }
+    async listImportJobIds() { return [] }
     ready = false
     async initialize() { this.ready = true; state.storeInitialized = true }
     checkReady() { if (!this.ready) throw new Error('operational_unavailable') }
