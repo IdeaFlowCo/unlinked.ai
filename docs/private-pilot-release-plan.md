@@ -52,7 +52,7 @@ Revocation/deletion is checked live, and ephemeral stage signing keys revoke all
 3. Start the distinct reviewed synthetic operational/runtime/assets target; take a paired backup, restore to the isolated target and revalidate all published rows, original bytes and tombstones.
 4. Through the actual browser, verify sign-in/account choice, consent-gated 1,001-contact archive upload, durable replay receipt, accepted=indexed parity, all-contact AI search and one-action search-only MCP setup.
 5. Verify HTTPS from the M5 before sharing a URL. Report it explicitly as synthetic rehearsal unless a distinct isolated real-data target/live-bind decision has passed.
-6. Only a separately reviewed real-data pilot may accept the guest's archive, with the guest's own storage and AI-search consent. Do not switch the synthetic fixture into a real-data cohort implicitly.
+6. Only a separately reviewed real-data pilot may accept the guest's archive, with the guest's combined upload consent to private retention and bounded OpenAI processing. Do not switch the synthetic fixture into a real-data cohort implicitly.
 
 Rollback stops the owned browser/operational services, removes only their Tailscale Serve port, preserves private data/receipts/backups, and invalidates ephemeral grants.
 Publication rollback is an irreversible tombstone for that publication; it retains private originals and denies tools.

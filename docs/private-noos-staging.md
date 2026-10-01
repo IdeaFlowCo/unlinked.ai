@@ -41,7 +41,7 @@ Only verified issuer plus opaque subject enters the trusted immutable existing/n
 Archive email/profile fields never select or rebind ownership.
 Unknown/conflicting ownership fails closed before upload.
 Bounded random sessions use Secure/HttpOnly/SameSite cookies and disappear on restart.
-Same-origin requests and CSRF protect mutations; guest storage consent is required at upload and separate OpenAI data consent at search.
+Same-origin requests and CSRF protect mutations; one combined upload disclosure/action authorizes private retention and bounded OpenAI processing for browser and search-only scoped agent searches. Versioned consent persists in immutable import/source receipts; search and grant issuance/verification fail closed for older imports lacking it. Replays reuse the original consent without changing prior receipts.
 Receipt/replay and one-action scoped setup forms are implemented.
 Setup downloads a fifteen-minute search-only grant for exactly one import; raw archive access is excluded.
 The separate signed tool audience uses a durable owner-private Noos grant record, live expiry/publication/revocation checks, and ephemeral signing keys that invalidate grants on restart.

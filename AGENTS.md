@@ -29,7 +29,7 @@ This file is the repo-internal guide for autonomous agents and contributors work
 
 ## Private archive foundation
 
-The default-off private Noos/OIDC browser/scoped AI and hosted setup slice and its production gates are documented in `docs/private-noos-staging.md`.
+The default-off private Noos/OIDC browser/scoped AI and hosted setup slice and its immutable combined upload consent (private retention and bounded OpenAI browser/search-only agent processing), fail-closed legacy import behavior, and production gates are documented in `docs/private-noos-staging.md`.
 
 See `docs/private-archive-import.md` for the bounded parser/job adapter contract, the test-only persistence boundary and live activation gates; see `README.md` for the public archive entry.
 

@@ -49,7 +49,7 @@ An actual existing legacy account still needs independent supported legacy-owner
 
 Public ingress exposes only sign-in/account setup; all receipts/uploads/search are session/CSRF/same-origin and exact invited-owner gated.
 Secure HttpOnly SameSite cookies contain random fifteen-minute session IDs, not identity/access tokens.
-Upload requires guest consent to private archive retention; AI search separately requires consent to send bounded observed name/company/position/date fields to OpenAI.
+One combined upload disclosure/action authorizes private archive retention and bounded OpenAI processing of queries and observed name/company/position/date fields for browser and search-only scoped agent searches. Immutable import/source receipts retain versioned consent. Older imports without this disclosure fail closed for search and grants; replay never upgrades prior consent.
 Agent setup is a separate explicit owner action, exactly one import and only search, with distinct tool audience, fifteen-minute expiry, durable grant record and live revocation/publication checks.
 Operational/provider tokens and raw recovery APIs are never delegated to the agent.
 Actual real-user delegation must receive its own reviewed approval; synthetic stage issuer behavior is not production provider delegated consent.
