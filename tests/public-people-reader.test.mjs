@@ -21,6 +21,18 @@ test('default missing/unpublished/incomplete/failed provider is 503, never an em
 })
 
 test('stable normalized name/id ordering and query-bound pagination survives provider reorder', async () => {
+  for (const revision of ['r', 'r'.repeat(128), '\u0000'.repeat(128)]) {
+    const reader = createPublicPeopleReader({ pageSize: 1, readPublishedSnapshot: async () => ({ ...published(), revision }) })
+    const first = await reader.list()
+    assert.ok(first.nextCursor.length <= 2048)
+    const second = await reader.list({ cursor: first.nextCursor })
+    const third = await reader.list({ cursor: second.nextCursor })
+    assert.deepEqual([...first.profiles, ...second.profiles, ...third.profiles].map(profile => profile.id), ['a', 'b', 'z'])
+    const connectionPage = await reader.profile({ id: 'z' })
+    assert.ok(connectionPage.profile.nextConnectionsCursor.length <= 2048)
+    const next = await reader.profile({ id: 'z', cursor: connectionPage.profile.nextConnectionsCursor })
+    assert.deepEqual(next.profile.connections.map(profile => profile.id), ['b'])
+  }
   const source = published(), reader = createPublicPeopleReader({ readPublishedSnapshot: async () => source, pageSize: 1 })
   const first = await reader.list();assert.deepEqual(first.profiles.map(p => p.id), ['a'])
   source.profiles.reverse()
@@ -58,6 +70,10 @@ test('unknown public profile is null for HTTP404, empty published snapshot is re
 
 test('snapshot limits, malformed DTOs, duplicate/dangling edges fail closed without truncation', async () => {
   for (const source of [{ ...published(), profiles: [person('a', 'A'), person('a', 'Duplicate')] }, { ...published(), connections: [{ fromId: 'a', toId: 'unknown' }] }, { ...published(), connections: [{ fromId: 'a', toId: 'b' }, { fromId: 'a', toId: 'b' }] }, { ...published(), profiles: [{ ...person('a', 'A'), skills: Array(501).fill('x') }] }]) await assert.rejects(createPublicPeopleReader({ readPublishedSnapshot: async () => source }).list(), unavailable)
+  for (const revision of [undefined, null, 123, '', 'r'.repeat(129), '界', '界'.repeat(512)]) {
+    const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => ({ ...published(), revision }) })
+    for (const read of [() => reader.list(), () => reader.profile({ id: 'z' })]) await assert.rejects(read(), error => unavailable(error) && error.message === 'public_people_unavailable')
+  }
   for (const field of ['positions', 'education', 'skills']) {
     for (const inherited of [false, true]) {
       const entries = Array(1)
@@ -109,7 +125,7 @@ test('malformed input cannot become authority or oversized backend query', async
     await assert.rejects(reader.list(request), invalid)
     await assert.rejects(reader.profile(request), invalid)
   }
-  for (const cursor of ['broken!', encode({ ...decoded, revision: 4 }), encode({ ...decoded, revision: '' }), encode({ ...decoded, revision: null }), encode({ ...decoded, scope: 'wrong' })]) {
+  for (const cursor of ['broken!', encode({ ...decoded, revision: 4 }), encode({ ...decoded, revision: '' }), encode({ ...decoded, revision: null }), encode({ ...decoded, revision: 'r'.repeat(129) }), encode({ ...decoded, revision: '界' }), encode({ ...decoded, scope: 'wrong' })]) {
     await assert.rejects(reader.list({ cursor }), invalid)
     await assert.rejects(reader.profile({ id: 'unknown', cursor }), invalid)
     await assert.rejects(createPublicPeopleReader().list({ cursor }), invalid)
