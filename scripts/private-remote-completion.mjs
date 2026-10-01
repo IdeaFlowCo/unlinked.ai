@@ -24,8 +24,11 @@ except Exception as e: print(json.dumps({'error':str(e) if str(e) in ['credentia
 `
   const command = `python3 -c '${script.replaceAll("'", "'\\''")}'`
   return async input => {
+    input.signal?.throwIfAborted()
     const output = await new Promise((resolve, reject) => {
       const child = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', sshHost, command], { stdio: ['pipe', 'pipe', 'pipe'] })
+      const abort = () => { child.kill('SIGTERM'); reject(new Error('private_search_cancelled')) }
+      input.signal?.addEventListener('abort', abort, { once: true })
       const timer = setTimeout(() => { child.kill('SIGTERM'); reject(new Error('private_remote_timeout')) }, 45000)
       let data = '', size = 0
       child.stdout.on('data', bytes => {
@@ -35,7 +38,7 @@ except Exception as e: print(json.dumps({'error':str(e) if str(e) in ['credentia
       // SSH/provider stderr can include private configuration. Never surface it.
       child.stderr.resume()
       child.once('error', () => { clearTimeout(timer); reject(new Error('private_remote_unavailable')) })
-      child.once('close', code => { clearTimeout(timer); code === 0 ? resolve(data) : reject(new Error('private_remote_unavailable')) })
+      child.once('close', code => { clearTimeout(timer); input.signal?.removeEventListener('abort', abort); if (code === 0) resolve(data); else reject(new Error('private_remote_unavailable')) })
       child.stdin.on('error', () => {})
       child.stdin.end(JSON.stringify(responsesRequest(input)))
     })

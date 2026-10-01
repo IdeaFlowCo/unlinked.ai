@@ -130,7 +130,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
         const reader = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: session.owner.ownerId, importIds: [id] } })
         if (url.pathname === '/search') {
           if (input.getAll('aiConsent').length !== 1 || input.get('aiConsent') !== 'yes' || input.getAll('query').length !== 1 || typeof complete !== 'function') throw new Error('private_search_consent_required')
-          const result = await createPrivateSearch({ readImport: reader, complete })({ importId: id, query: input.get('query') })
+          const controller = new AbortController()
+          response.once('close', () => { if (!response.writableFinished) controller.abort() })
+          const result = await createPrivateSearch({ readImport: reader, complete })({ importId: id, query: input.get('query'), signal: controller.signal })
           page(response, 'Search results', `<p>${result.matches.length} matching observations.</p>${result.matches.map(match => `<article><h2>${html([match.fields['first name'], match.fields['last name']].filter(Boolean).join(' '))}</h2><p>${html(match.fields.position ?? '')} · ${html(match.fields.company ?? '')}</p><p>${html(match.reason)}</p><small>Source ${html(match.sourceId)}<br>${html(match.rowId)}</small></article>`).join('')}<a href="/imports/${id}">Back to import receipt</a>`)
           return
         }

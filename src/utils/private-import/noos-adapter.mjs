@@ -122,7 +122,7 @@ export function createNoosOwnerBackend({ baseUrl, accessToken, ownerId, fetchImp
     },
     async writeResource(input) {
       if (input.namespace !== 'unlinked' || input.sourceOwnerId !== ownerId || !/^[a-f0-9]{64}$/.test(input.sourceId) || input.type !== 'import') throw new Error('private_resource_key_invalid')
-      const { namespace: _namespace, type: _type, sourceId: _sourceId, ...payload } = input
+      const payload = { ...input }; delete payload.namespace; delete payload.type; delete payload.sourceId
       const response = await request(`${input.type}/${input.sourceId}`, { method: 'PUT', body: JSON.stringify(payload) })
       if (!response) throw new Error('private_noos_binding_not_found')
       return response.json()
@@ -143,7 +143,8 @@ export function createNoosOwnerBackend({ baseUrl, accessToken, ownerId, fetchImp
 export function createScopedImportReader({ readResource, readAsset, grant }) {
   if (!grant || !grant.ownerId || !Array.isArray(grant.importIds) || grant.importIds.length > 32) throw new Error('explicit_import_grant_required')
   const ownerId = grant.ownerId, allowed = new Set(grant.importIds)
-  return async function readImport(id) {
+  return async function readImport(id, { signal } = {}) {
+    signal?.throwIfAborted()
     if (!allowed.has(id)) throw new Error('private_import_not_found')
     const resource = await readResource('import', id)
     if (!resource || resource.deleted || resource.sourceOwnerId !== ownerId || !resource.payload ||
@@ -154,6 +155,7 @@ export function createScopedImportReader({ readResource, readAsset, grant }) {
       if (resource.payload.assertionChunks.length > Math.ceil(PRIVATE_PUBLICATION_ASSERTION_LIMIT / CHUNK_ROWS)) throw new Error('private_publication_support_limit')
       ids = []
       for (const [ordinal, chunkId] of resource.payload.assertionChunks.entries()) {
+        signal?.throwIfAborted()
         const chunk = await readResource('import', chunkId)
         if (!chunk || chunk.deleted || chunk.sourceOwnerId !== ownerId || chunk.payload?.kind !== 'private_observation_chunk' || chunk.payload.importId !== id || chunk.payload.ordinal !== ordinal || !Array.isArray(chunk.payload.assertionIds) || chunk.payload.assertionIds.length > CHUNK_ROWS || chunk.payload.indexedCount !== chunk.payload.assertionIds.length) throw new Error('private_publication_incomplete')
         ids.push(...chunk.payload.assertionIds)
@@ -161,6 +163,7 @@ export function createScopedImportReader({ readResource, readAsset, grant }) {
     }
     if (!Array.isArray(ids) || ids.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || new Set(ids).size !== ids.length || (resource.payload.indexVersion && ids.length !== resource.payload.counts?.indexed)) throw new Error('private_publication_incomplete')
     for (const assertionId of ids) {
+      signal?.throwIfAborted()
       const assertion = await readResource('assertion', assertionId)
       if (!assertion || assertion.deleted || assertion.sourceOwnerId !== ownerId || assertion.payload?.importId !== id) throw new Error('private_publication_incomplete')
       let row = assertion.payload

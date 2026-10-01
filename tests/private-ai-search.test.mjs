@@ -31,3 +31,17 @@ test('Responses request is bounded, strict and not stored; incomplete/refused ou
   assert.throws(() => parseResponsesResult({ status: 'incomplete' }), /incomplete/)
   assert.throws(() => parseResponsesResult({ status: 'completed', output: [{ type: 'message', content: [{ type: 'refusal' }] }] }), /refused/)
 })
+
+test('all 1001 connection IDs participate in bounded ranking; cancellation stops the next chunk', async () => {
+  const assertions = Array.from({ length: 1001 }, (_, i) => ({ ...publication.assertions[0], id: i.toString(16).padStart(64, '0') }))
+  const indexed = { ...publication, indexed: 1001, assertions }, considered = new Set(), controller = new AbortController()
+  const complete = async ({ candidateIds }) => {
+    assert.ok(candidateIds.length <= 200); candidateIds.forEach(id => considered.add(id))
+    return { matches: candidateIds.includes(assertions.at(-1).id) ? [{ id: assertions.at(-1).id, reason: 'Last contact' }] : [] }
+  }
+  const result = await createPrivateSearch({ readImport: async () => indexed, complete })({ importId: id, query: 'last contact' })
+  assert.equal(considered.size, 1001); assert.equal(result.indexed, 1001); assert.equal(result.matches[0].assertionId, assertions.at(-1).id)
+  let calls = 0
+  await assert.rejects(createPrivateSearch({ readImport: async () => indexed, complete: async () => { calls++; controller.abort(); return { matches: [] } } })({ importId: id, query: 'last contact', signal: controller.signal }))
+  assert.equal(calls, 1)
+})
