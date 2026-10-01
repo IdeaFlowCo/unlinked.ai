@@ -215,7 +215,7 @@ with patch.object(pilot, 'owned_services', lambda running=False: None), patch.ob
 bad_sequence = [
     (200, headers([('Cache-Control', 'no-store')])),
     (400, headers([('Cache-Control', 'no-store')])),
-    (303, headers([('Location', 'https://id.ideaflow.app/authorize'), ('Set-Cookie', '__Host-ul-login=abc; Path=/; Secure; SameSite=Lax; Max-Age=300')]))
+    (303, headers([('Location', 'https://id.ideaflow.app/authorize'), ('Set-Cookie', '__Host-ul-login=abc; Path=/; SameSite=Lax; Max-Age=300')]))
 ]
 with patch.object(pilot, 'owned_services', lambda running=False: None), patch.object(pilot, 'curl_headers', lambda path: bad_sequence.pop(0)):
     refused(lambda: pilot.verify_canonical_readiness(canonical_manifest))
