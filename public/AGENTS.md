@@ -4,7 +4,7 @@ This is the agent-facing brief served at `/AGENTS.md` for autonomous agents arri
 
 ## What this is
 
-unlinked.ai is a personal professional graph platform that ingests LinkedIn data archives, indexes connections semantically, and enables scoped search, profile lookups, and intro drafting.
+See the repository [README](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/README.md) for current product behavior and availability. The API and MCP instructions below describe the legacy backend surface; they do not expose the new [private archive parser/job foundation](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-archive-import.md).
 
 Any MCP-aware client (Claude Desktop, Claude Code, Cursor, Cline, Codex CLI) or HTTP agent can interact with unlinked.ai programmatically using an agent key.
 

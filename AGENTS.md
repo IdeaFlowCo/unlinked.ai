@@ -27,6 +27,10 @@ This file is the repo-internal guide for autonomous agents and contributors work
 - **Backend Deployment Note:**
   - The Supabase backend is hosted on a free plan and may be paused. Local builds and tests should not depend on live database uptime.
 
+## Private archive foundation
+
+See `docs/private-archive-import.md` for the bounded parser/job adapter contract, the test-only persistence boundary and live activation gates; see `README.md` for the public archive entry.
+
 ## Directory Structure
 
 - `src/app/`: Next.js App Router pages and API routes (`src/app/api/`).
@@ -44,7 +48,6 @@ This file is the repo-internal guide for autonomous agents and contributors work
 # Web application
 npm run dev           # Next.js dev server with Turbopack
 npm run build         # Next.js production build
-npm run lint          # Run ESLint
 
 # Tests
 npm test              # Run verification tests with node --test
@@ -55,6 +58,8 @@ npm install
 npm run build         # TypeScript build into dist/
 npm start             # Start MCP server on stdio
 ```
+
+See `README.md` for focused lint validation.
 
 ## Discovery Surface & Parity Rule
 

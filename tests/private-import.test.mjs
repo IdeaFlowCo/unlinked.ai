@@ -1,0 +1,398 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import JSZip from 'jszip'
+import Papa from 'papaparse'
+import { parseArchive, parseSource, unpackArchive, LIMITS } from '../src/utils/private-import/archive.mjs'
+import { ingestArchive } from '../src/utils/private-import/job.mjs'
+import { isolatedStore } from './private-import-store.mjs'
+
+const header = 'First Name,Last Name,URL,Company,Position\r\n'
+const contact = (company = 'Synthetic Alpha') => `Ada,Example,https://www.linkedin.com/in/synthetic-ada,${company},Engineer\r\n`
+async function archive(files) {
+  const zip = new JSZip()
+  for (const [path, bytes] of Object.entries(files)) zip.file(path, bytes)
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+}
+async function fixture(t, options) {
+  const root = await mkdtemp(join(tmpdir(), 'unlinked-private-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  return { root, adapter: isolatedStore(root, options) }
+}
+
+test('persisted job journey records uploaded and parsing before atomic partial publication', async t => {
+  const { root, adapter } = await fixture(t)
+  const ownerId = 'synthetic-journey-owner'
+  const bytes = await archive({
+    'Connections.csv': header + contact() + 'Missing,URL,,Synthetic,Designer\r\n',
+    'Profile.csv': 'First Name,Last Name\nAda,Example\n',
+    'Positions.csv': 'Company Name,Title\nSynthetic,Engineer\n',
+    'Education.csv': 'School Name\nSynthetic University\n',
+    'Skills.csv': 'Name\nSynthetic skill\n',
+    'Other.txt': 'original unsupported bytes',
+  })
+  const states = []
+  const observingAdapter = {
+    withImport: (owner, id, work) => adapter.withImport(owner, id, store => work({
+      ...store,
+      async saveJob(job) {
+        await store.saveJob(job)
+        const persisted = await isolatedStore(root).job(owner, id)
+        assert.equal(persisted.status, job.status)
+        assert.deepEqual(await adapter.asset(owner, job.archiveSha256), bytes)
+        assert.equal((await adapter.assertions(owner)).length, 0)
+        states.push(persisted)
+      },
+    })),
+  }
+  const request = { ownerId, filename: 'archive.zip', bytes, adapter: observingAdapter }
+  const result = await ingestArchive(request)
+  const reopened = isolatedStore(root)
+  assert.deepEqual(states.map(job => job.status), ['uploaded', 'parsing'])
+  assert.deepEqual(await reopened.job(ownerId, result.id), result)
+  assert.equal(result.status, 'partial')
+  assert.equal(result.phase, 'awaiting_private_index')
+  assert.equal(result.indexGate, 'noos_private_index_not_connected')
+  assert.deepEqual(result.counts, { accepted: 5, rejected: 1, skippedFiles: 1, failedFiles: 0, indexed: 0 })
+  const assertions = await reopened.assertions(ownerId)
+  assert.equal(assertions.length, 5)
+  for (const source of result.sources) {
+    assert.ok(await reopened.asset(ownerId, source.sha256))
+    assert.equal(source.indexedCount, 0)
+  }
+  assert.deepEqual(await ingestArchive({ ...request, adapter: reopened }), result)
+  assert.equal(await reopened.job('another-synthetic-owner', result.id), null)
+  assert.equal(await reopened.asset('another-synthetic-owner', result.archiveSha256), null)
+  const failedBytes = Buffer.from('synthetic corrupt ZIP')
+  const failed = await ingestArchive({ ...request, bytes: failedBytes, adapter: reopened })
+  assert.equal(failed.status, 'failed')
+  assert.deepEqual(await reopened.asset(ownerId, failed.archiveSha256), failedBytes)
+  if (process.env.PRIVATE_IMPORT_EVIDENCE) {
+    await writeFile(process.env.PRIVATE_IMPORT_EVIDENCE, JSON.stringify({
+      proofBoundary: 'Synthetic executable parser/job journey using durable isolated filesystem adapter. No real Noos authentication, authorization, indexing, historical recovery or live private data is demonstrated.',
+      transitions: [...states, result], persistedAssertions: assertions,
+      replay: 'Exact terminal receipt replayed without additional assertions',
+      otherOwnerLookup: { job: null, asset: null },
+      corruptArchive: failed, originalBytesRetained: true,
+    }, null, 2))
+  }
+})
+
+test('real ZIP and CSV bytes discover variable preambles and preserve rejected/unknown sources', async () => {
+  const bytes = await archive({
+    'archive/Connections.csv': 'Notes:\r\nYour exported connections, including fields\r\n\r\n' + header + contact() + 'Missing,Url,,Example,Designer\r\n',
+    'Skills.csv': 'Name\n"Synthetic, skill"\n',
+    'Unknown.csv': 'raw,unknown\nkeep,me\n',
+  })
+  const parsed = parseArchive(bytes, 'archive.zip')
+  assert.equal(parsed.sources[0].accepted.length, 1)
+  assert.equal(parsed.sources[0].rejected.length, 1)
+  assert.equal(parsed.sources[0].rejected[0].reason, 'missing_required_field')
+  assert.equal(parsed.sources[1].accepted[0].fields.name, 'Synthetic, skill')
+  assert.equal(parsed.sources[2].skipped, true)
+  assert.equal(parsed.sources[2].rawBytes.toString(), 'raw,unknown\nkeep,me\n')
+  assert.equal(parseArchive(Buffer.from(header + contact()), 'Connections.csv').sources[0].accepted.length, 1)
+})
+
+test('missing header, malformed rows, invalid UTF8 and foreign URLs are explicit failures', () => {
+  const source = text => parseArchive(Buffer.from(text), 'Connections.csv').sources[0]
+  assert.equal(source('not a header').error, 'csv_header_not_found')
+  assert.equal(source(header + 'Ada,Example,https://evil.test/in/synthetic-ada,Example,Engineer\n').rejected[0].reason, 'invalid_or_missing_linkedin_url')
+  assert.equal(source(header + 'Ada,Example,https://www.linkedin.com/in/synthetic-ada,Example\n').rejected[0].reason, 'csv_column_count')
+  assert.equal(source(header + '"unterminated').accepted.length, 0)
+  assert.equal(parseArchive(Buffer.from([0xff]), 'Skills.csv').sources[0].error, 'invalid_utf8')
+  assert.equal(source(Array(21).fill('preamble').join('\n') + '\n' + header + contact()).error, 'csv_header_not_found')
+})
+
+test('bounded ZIP expansion rejects lying sizes, corrupt bytes, duplicate and unsafe paths', async () => {
+  const bomb = await archive({ 'Unknown.csv': '0'.repeat(LIMITS.fileBytes + 1) })
+  assert.throws(() => unpackArchive(bomb, 'archive.zip'), /zip_expansion_limit/)
+  const lying = Buffer.from(bomb)
+  const directory = lying.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]))
+  lying.writeUInt32LE(1, directory + 24)
+  assert.throws(() => unpackArchive(lying, 'archive.zip')) // actual inflate bound
+  const unsafe = await archive({ '../escape.csv': 'no' })
+  assert.throws(() => unpackArchive(unsafe, 'archive.zip'), /unsafe_archive_path/)
+  const normal = await archive({ 'Connections.csv': header + contact() })
+  const corrupt = Buffer.from(normal)
+  corrupt[corrupt.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])) + 16] ^= 1
+  assert.throws(() => unpackArchive(corrupt, 'archive.zip'), /zip_content_mismatch/)
+  assert.throws(() => unpackArchive(Buffer.from('garbage'), 'archive.zip'), /invalid_zip_directory/)
+  assert.throws(() => unpackArchive(Buffer.alloc(LIMITS.archiveBytes + 1), 'archive.zip'), /archive_size_limit/)
+})
+
+test('durable replay and simultaneous duplicate uploads preserve immutable private sources', async t => {
+  const { root, adapter } = await fixture(t)
+  const bytes = await archive({ 'Connections.csv': header + contact(), 'Other.txt': 'retained privately' })
+  const request = { ownerId: 'synthetic-owner-a', filename: 'archive.zip', bytes, adapter }
+  const [first, duplicate] = await Promise.all([ingestArchive(request), ingestArchive(request)])
+  assert.deepEqual(duplicate, first)
+  assert.equal(first.status, 'partial')
+  assert.equal(first.phase, 'awaiting_private_index')
+  assert.equal(first.counts.indexed, 0)
+  assert.equal(first.counts.accepted, 1)
+  assert.equal(first.counts.skippedFiles, 1)
+  assert.equal((await adapter.assertions(request.ownerId)).length, 1)
+  const reopened = isolatedStore(root)
+  assert.deepEqual(await ingestArchive({ ...request, adapter: reopened }), first)
+  assert.deepEqual(await reopened.asset(request.ownerId, first.archiveSha256), bytes)
+  assert.equal((await stat(root)).mode & 0o077, 0)
+})
+
+test('two owners with the same subject retain conflicting assertions and cannot read each other by ID/hash', async t => {
+  const { root, adapter } = await fixture(t)
+  const a = await ingestArchive({ ownerId: 'synthetic-owner-a', filename: 'Connections.csv', bytes: Buffer.from(header + contact('Alpha')), adapter })
+  const b = await ingestArchive({ ownerId: 'synthetic-owner-b', filename: 'Connections.csv', bytes: Buffer.from(header + contact('Beta')), adapter })
+  assert.notEqual(a.id, b.id)
+  assert.equal(await adapter.job('synthetic-owner-b', a.id), null)
+  assert.equal(await adapter.asset('synthetic-owner-b', a.archiveSha256), null)
+  assert.equal((await adapter.assertions('synthetic-owner-a'))[0].fields.company, 'Alpha')
+  assert.equal((await adapter.assertions('synthetic-owner-b'))[0].fields.company, 'Beta')
+  assert.equal((await isolatedStore(root).assertions('anonymous')).length, 0)
+  // Source files are immutable history; a revised archive never overwrites an
+  // old assertion or the other owner's conflicting observation.
+  await ingestArchive({ ownerId: 'synthetic-owner-a', filename: 'Connections.csv', bytes: Buffer.from(header + contact('Revised')), adapter })
+  assert.equal((await adapter.assertions('synthetic-owner-a')).length, 2)
+  assert.equal((await adapter.assertions('synthetic-owner-b')).length, 1)
+  assert.equal((await adapter.job('synthetic-owner-a', a.id)).counts.accepted, 1)
+})
+
+test('parser failure leaves a durable failed job and recoverable original bytes', async t => {
+  const { adapter } = await fixture(t)
+  const bytes = Buffer.from('not a zip')
+  const job = await ingestArchive({ ownerId: 'synthetic-owner-a', filename: 'archive.zip', bytes, adapter })
+  assert.equal(job.status, 'failed')
+  assert.equal(job.counts.indexed, 0)
+  assert.equal(job.error, 'archive_parse_failed')
+  assert.deepEqual(await adapter.asset('synthetic-owner-a', job.archiveSha256), bytes)
+})
+
+test('interrupted publication exposes no partial assertions and retries from durable parsing', async t => {
+  let interrupt = true
+  const { root, adapter } = await fixture(t, { beforePublish: async () => { if (interrupt) throw new Error('synthetic_io_failure') } })
+  const request = { ownerId: 'synthetic-owner-a', filename: 'Connections.csv', bytes: Buffer.from(header + contact()), adapter }
+  await assert.rejects(ingestArchive(request), /synthetic_io_failure/)
+  assert.equal((await adapter.assertions(request.ownerId)).length, 0)
+  const reopened = isolatedStore(root)
+  interrupt = false
+  const job = await ingestArchive({ ...request, adapter: reopened })
+  assert.equal(job.counts.accepted, 1)
+  assert.equal((await reopened.assertions(request.ownerId)).length, 1)
+  assert.equal(job.status, 'partial')
+})
+
+
+test('CSV filenames select independent replay identities and immutable category assertions', async t => {
+  const { adapter } = await fixture(t)
+  const ownerId = 'synthetic-owner-a'
+  const bytes = Buffer.from(header + contact())
+  const upload = filename => ingestArchive({ ownerId, filename, bytes, adapter })
+  const unknown = await upload('Unknown.csv')
+  const connections = await upload('Connections.csv')
+  const profile = await upload('Profile.csv')
+  assert.equal(unknown.status, 'failed')
+  assert.equal(unknown.counts.skippedFiles, 1)
+  assert.equal(connections.counts.accepted, 1)
+  assert.equal(profile.counts.accepted, 1)
+  assert.equal(new Set([unknown.id, connections.id, profile.id]).size, 3)
+  assert.deepEqual(await upload('Connections.csv'), connections)
+  assert.deepEqual(await upload('Profile.csv'), profile)
+  assert.deepEqual(await adapter.job(ownerId, unknown.id), unknown)
+  const assertions = await adapter.assertions(ownerId)
+  assert.deepEqual(assertions.map(row => row.category).sort(), ['connections', 'profile'])
+  assert.equal(new Set(assertions.map(row => row.id)).size, 2)
+  assert.ok(assertions.every(row => row.ownerId === ownerId && row.visibility === 'owner'))
+  assert.deepEqual(await adapter.asset(ownerId, connections.archiveSha256), bytes)
+})
+
+test('blank records preserve quote errors on the malformed record before a valid skill', () => {
+  const bytes = Buffer.from('Name\n\n"Malformed"x"\nValid skill\n')
+  const source = parseArchive(bytes, 'Skills.csv').sources[0]
+  assert.deepEqual(source.rejected, [{ rowId: 'Skills.csv#record=2', reason: 'InvalidQuotes' }])
+  assert.equal(source.accepted.length, 1)
+  assert.equal(source.accepted[0].fields.name, 'Valid skill')
+  assert.equal(source.accepted[0].rowId, 'Skills.csv#record=3')
+  assert.deepEqual(source.rawBytes, bytes)
+})
+
+test('incremental parsing aborts dense input and shares a budget across archive members', async () => {
+  const bytes = await archive({
+    'Skills.csv': 'Name\n' + 'a\n'.repeat(60000),
+    'nested/Skills.csv': 'Name\n' + 'b\n'.repeat(60000),
+  })
+  const originalParse = Papa.parse
+  let windows = 0
+  Papa.parse = (input, config) => {
+    windows++
+    assert.ok(input.length <= LIMITS.recordChars + 2)
+    return originalParse(input, config)
+  }
+  try {
+    const source = parseSource({ path: 'Skills.csv', bytes: Buffer.from('Name\n' + 'a\n'.repeat(4000000)) })
+    assert.equal(source.error, 'csv_row_limit')
+    assert.equal(source.accepted.length, 0)
+    assert.equal(windows, LIMITS.rows)
+    windows = 0
+    assert.throws(() => parseArchive(bytes, 'archive.zip'), /archive_row_limit/)
+    assert.equal(windows, LIMITS.rows)
+    windows = 0
+    const blanks = parseSource({ path: 'Skills.csv', bytes: Buffer.from('Name\n' + '\n'.repeat(LIMITS.rows + 10)) })
+    assert.equal(blanks.error, 'csv_row_limit')
+    assert.equal(windows, LIMITS.rows)
+  } finally { Papa.parse = originalParse }
+})
+
+test('failed-file totals agree with statuses for invalid, header-only and mixed sources', async t => {
+  const { adapter } = await fixture(t)
+  const ownerId = 'synthetic-owner-a'
+  for (const bytes of [Buffer.from(header), Buffer.from(header + 'Ada,Example,https://evil.test/in/ada,Example,Engineer\n')]) {
+    const job = await ingestArchive({ ownerId, filename: 'Connections.csv', bytes, adapter })
+    assert.equal(job.status, 'failed')
+    assert.equal(job.sources[0].status, 'failed')
+    assert.equal(job.counts.failedFiles, 1)
+    assert.equal(job.counts.indexed, 0)
+  }
+  const bytes = await archive({
+    'Connections.csv': header,
+    'Skills.csv': 'Name\nValid skill\n',
+    'Profile.csv': 'not a header',
+    'Unknown.csv': 'unknown bytes',
+  })
+  const job = await ingestArchive({ ownerId, filename: 'archive.zip', bytes, adapter })
+  assert.equal(job.status, 'partial')
+  assert.equal(job.counts.failedFiles, 2)
+  assert.equal(job.counts.failedFiles, job.sources.filter(source => source.status === 'failed').length)
+  assert.equal(job.counts.skippedFiles, 1)
+  assert.equal(job.counts.accepted, 1)
+  assert.equal(job.counts.indexed, 0)
+})
+
+
+test('single-record allocation limits fail before PapaParse and retain failed private receipts', async t => {
+  const { adapter } = await fixture(t)
+  const ownerId = 'synthetic-owner-a'
+  const adversarial = Buffer.from('Name\n"' + 'x"'.repeat(4000000) + '\n')
+  assert.ok(adversarial.length < LIMITS.fileBytes)
+  const cases = [
+    [adversarial, 'csv_quote_limit'],
+    [Buffer.from('Name\n' + 'a'.repeat(LIMITS.fieldChars + 1)), 'csv_field_size_limit'],
+    [Buffer.from('Name\n' + Array(7).fill('a'.repeat(10000)).join(',')), 'csv_record_size_limit'],
+    [Buffer.from('Name\n' + Array(LIMITS.fields + 1).fill('a').join(',')), 'csv_field_count_limit'],
+    [Buffer.from('Name\n"' + '""'.repeat(LIMITS.quoteTokens) + '"'), 'csv_quote_limit'],
+  ]
+  const originalParse = Papa.parse
+  Papa.parse = (input, config) => {
+    if (input !== 'Name\n') throw new Error('unsafe_input_reached_papaparse')
+    return originalParse(input, config)
+  }
+  try {
+    for (const [bytes, error] of cases) {
+      const source = parseArchive(bytes, 'Skills.csv').sources[0]
+      assert.equal(source.error, error)
+      assert.deepEqual(source.accepted, [])
+      assert.deepEqual(source.rejected, [])
+      assert.deepEqual(source.rawBytes, bytes)
+    }
+    const job = await ingestArchive({ ownerId, filename: 'Skills.csv', bytes: adversarial, adapter })
+    assert.equal(job.status, 'failed')
+    assert.equal(job.sources[0].status, 'failed')
+    assert.equal(job.sources[0].error, 'csv_quote_limit')
+    assert.equal(job.counts.failedFiles, 1)
+    assert.equal(job.counts.accepted, 0)
+    assert.equal(job.counts.indexed, 0)
+    assert.deepEqual(await adapter.assertions(ownerId), [])
+    assert.deepEqual(await adapter.asset(ownerId, job.archiveSha256), adversarial)
+    assert.deepEqual(await adapter.asset(ownerId, job.sources[0].sha256), adversarial)
+    assert.deepEqual(await ingestArchive({ ownerId, filename: 'Skills.csv', bytes: adversarial, adapter }), job)
+  } finally { Papa.parse = originalParse }
+})
+
+test('bounded records preserve quoted commas, escaped quotes and multiline fields across line endings', () => {
+  for (const newline of ['\n', '\r\n', '\r']) {
+    const value = `Synthetic, "quoted"${newline}multiline skill`
+    const encoded = '"' + value.replaceAll('"', '""') + '"'
+    const bytes = Buffer.from(`Name${newline}${encoded}${newline}Next skill${newline}`)
+    const source = parseArchive(bytes, 'Skills.csv').sources[0]
+    assert.equal(source.error, undefined)
+    assert.deepEqual(source.rejected, [])
+    assert.deepEqual(source.accepted.map(row => row.fields.name), [value, 'Next skill'])
+    assert.deepEqual(source.accepted.map(row => row.rowId), ['Skills.csv#record=2', 'Skills.csv#record=3'])
+    assert.deepEqual(source.rawBytes, bytes)
+  }
+  const field = 'a'.repeat(LIMITS.fieldChars)
+  const source = parseArchive(Buffer.from(`Name\n${field}\n`), 'Skills.csv').sources[0]
+  assert.equal(source.error, undefined)
+  assert.equal(source.accepted[0].fields.name, field)
+  const quoted = '"' + '""'.repeat((LIMITS.quoteTokens - 2) / 2) + '"'
+  const escaped = parseArchive(Buffer.from(`Name\n${quoted}`), 'Skills.csv').sources[0]
+  assert.equal(escaped.error, undefined)
+  assert.equal(escaped.accepted[0].fields.name, '"'.repeat((LIMITS.quoteTokens - 2) / 2))
+})
+
+
+test('malformed whitespace records retain rejected receipts beside accepted skills', async t => {
+  const { adapter } = await fixture(t)
+  const bytes = Buffer.from('Name\nValid skill\n" ')
+  const job = await ingestArchive({ ownerId: 'synthetic-owner-a', filename: 'Skills.csv', bytes, adapter })
+  assert.equal(job.status, 'partial')
+  assert.equal(job.counts.accepted, 1)
+  assert.equal(job.counts.rejected, 1)
+  assert.deepEqual(job.sources[0].rejected, [{ rowId: 'Skills.csv#record=3', reason: 'MissingQuotes' }])
+  assert.equal((await adapter.assertions(job.ownerId))[0].fields.name, 'Valid skill')
+  assert.deepEqual(await adapter.asset(job.ownerId, job.archiveSha256), bytes)
+})
+
+test('inherited category names remain unsupported retained ZIP members', async t => {
+  const { adapter } = await fixture(t)
+  const raw = Buffer.from('retained unsupported bytes')
+  const bytes = await archive({ 'Skills.csv': 'Name\nValid skill\n', constructor: raw })
+  const job = await ingestArchive({ ownerId: 'synthetic-owner-a', filename: 'archive.zip', bytes, adapter })
+  assert.equal(job.status, 'partial')
+  assert.equal(job.counts.accepted, 1)
+  assert.equal(job.counts.skippedFiles, 1)
+  assert.equal(job.counts.failedFiles, 0)
+  const unsupported = job.sources.find(source => source.path === 'constructor')
+  assert.equal(unsupported.category, 'unsupported')
+  assert.equal(unsupported.status, 'skipped')
+  assert.deepEqual(await adapter.asset(job.ownerId, unsupported.sha256), raw)
+  const prototype = parseSource({ path: '__proto__', bytes: raw })
+  assert.equal(prototype.skipped, true)
+  assert.equal(prototype.category, 'unsupported')
+})
+
+test('record separators ignore line endings within quoted preambles', () => {
+  for (const [embedded, separator] of [['\r', '\n'], ['\n', '\r\n'], ['\r\n', '\r']]) {
+    const bytes = Buffer.from(`"Notes:${embedded}download"${separator}Name${separator}Valid skill${separator}`)
+    const source = parseArchive(bytes, 'Skills.csv').sources[0]
+    assert.equal(source.error, undefined)
+    assert.equal(source.accepted.length, 1)
+    assert.equal(source.accepted[0].fields.name, 'Valid skill')
+    assert.equal(source.accepted[0].rowId, 'Skills.csv#record=3')
+    assert.deepEqual(source.rejected, [])
+    assert.deepEqual(source.rawBytes, bytes)
+  }
+})
+
+test('quoted single-column archives use bounded PapaParse windows', () => {
+  const bytes = Buffer.from('Name\n' + ('"' + 'a'.repeat(80) + '"\n').repeat(LIMITS.rows - 2))
+  assert.ok(bytes.length < LIMITS.fileBytes)
+  const originalParse = Papa.parse
+  let windows = 0, inputChars = 0
+  Papa.parse = (input, config) => {
+    assert.ok(input.length <= LIMITS.recordChars + 2)
+    windows++
+    inputChars += input.length
+    return originalParse(input, config)
+  }
+  try {
+    const source = parseArchive(bytes, 'Skills.csv').sources[0]
+    assert.equal(source.error, undefined)
+    assert.equal(source.accepted.length, LIMITS.rows - 2)
+    assert.equal(source.rejected.length, 0)
+    assert.equal(source.accepted.at(-1).fields.name, 'a'.repeat(80))
+    assert.equal(windows, LIMITS.rows)
+    assert.equal(inputChars, bytes.length)
+  } finally { Papa.parse = originalParse }
+})
