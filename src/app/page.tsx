@@ -11,7 +11,7 @@ export default function Home() {
           <p className="hero-subtitle">Find people in your LinkedIn connections by name, company, title and when you connected. A private network to ask, then share with your agent.</p>
           <div className="hero-actions"><a className="public-button public-button-primary" href="https://private.unlinked.ai/login">Start →</a></div>
           <p className="feature-caption">Sign in or create your account, then upload your LinkedIn export. Full ZIP preferred; Connections-only also supported.</p>
-          <Link className="landing-text-link" href="/import-linkedin#next">Need your export? Get it from LinkedIn →</Link>
+          <Link className="landing-text-link" href="/import-linkedin">Need your export? Get it from LinkedIn →</Link>
         </div>
         <aside className="landing-example" aria-label="Illustrative search answer">
           <p className="eyebrow">Example · fictional people</p>
