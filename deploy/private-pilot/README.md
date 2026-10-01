@@ -13,6 +13,7 @@ No dependencies are installed by this packet.
 python3 deploy/private-pilot/pilot.py plan
 python3 deploy/private-pilot/checks.py
 python3 deploy/private-pilot/topology-check.py
+python3 deploy/private-pilot/root-mount-check.py
 node --check deploy/private-pilot/runtime.mjs
 # Later, on the exact approved GCP host, with a mode-600 reviewed manifest:
 python3 /release/pilot.py preflight --manifest /private/release.json
