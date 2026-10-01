@@ -27,9 +27,10 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
     const now = Math.floor(Date.now() / 1000)
     return Response.json({ access_token: 'synthetic-identity-only', token_type: 'Bearer', expires_in: 300, id_token: sign({ iss: issuer, aud: 'private-client', sub: 'immutable-synthetic-subject', iat: now, exp: now + 300, nonce, email: 'unverified@example.invalid', email_verified: false, ...override }) })
   } })
+  assert.equal(login.authorizationOrigin, issuer)
   for (const bad of [{}, { nonce: 'wrong' }, { iss: 'https://other.invalid' }, { aud: 'other-client' }]) {
     const start = await login.begin(), location = new URL(start.location)
-    assert.equal(location.searchParams.get('prompt'), 'select_account'); assert.equal(location.searchParams.get('code_challenge_method'), 'S256')
+    assert.equal(location.searchParams.get('prompt'), 'login'); assert.equal(location.searchParams.get('code_challenge_method'), 'S256')
     nonce = start.transaction.nonce; override = bad
     const callback = new URL(`${callbackUrl}?code=synthetic-code&state=${start.transaction.state}`)
     if (!Object.keys(bad).length) {
@@ -128,4 +129,14 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
   assert.equal(issued.length, 1)
   assert.equal((await fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic&state=synthetic-state`, { headers: { Cookie: loginCookie } })).status, 400)
   assert.equal(finishes, 1)
+})
+
+
+test('private browser denies noncanonical or unsafe authorization origins before serving a form', { skip: !browser }, () => {
+  for (const authorizationOrigin of ['http://issuer.invalid', 'https://issuer.invalid/path', 'https://issuer.invalid/?query=1', "https://issuer.invalid; form-action *", 'https://issuer.invalid\n']) {
+    assert.throws(() => browser.createPrivateBrowserHandler({ baseUrl: 'https://private.invalid',
+      login: { authorizationOrigin, begin: async () => {}, finish: async () => {} },
+      resolveOwner: async () => null, getBackend: async () => null,
+    }))
+  }
 })

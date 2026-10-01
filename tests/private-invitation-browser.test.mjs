@@ -47,7 +47,7 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
       id_token: sign({ iss: issuer, sub: 'chosen-opaque-subject', aud: clientId, iat: now, exp: now + 300, nonce, email: 'same-email@example.invalid', email_verified: true, ...override }) })
   } })
   handler = createPrivateBrowserHandler({ baseUrl,
-    login: { begin: async () => { const result = await realLogin.begin(); nonce = result.transaction.nonce; return result }, finish: realLogin.finish },
+    login: { authorizationOrigin: realLogin.authorizationOrigin, begin: async () => { const result = await realLogin.begin(); nonce = result.transaction.nonce; return result }, finish: realLogin.finish },
     claimInvitation: async (token, identity) => {
       claims.push({ token, identity })
       if (claimFailure) throw new Error(claimFailure)
@@ -73,7 +73,10 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const begin = async (extra = {}) => {
     const landing = await fetch(`${endpoint}/invite/${invitationToken}`)
     assert.equal(landing.status, 200)
-    assert.equal(landing.headers.get('referrer-policy'), 'no-referrer')
+    assert.equal(landing.headers.get('referrer-policy'), 'strict-origin')
+    const directives = new Map(landing.headers.get('content-security-policy').split(';').map(value => value.trim().split(/\s+/)).map(([key, ...values]) => [key, values]))
+    assert.deepEqual(directives.get('form-action'), ["'self'", issuer])
+    assert.deepEqual(directives.get('default-src'), ["'none'"])
     const text = await landing.text()
     invitationHtml = text
     assert.match(text, /Create my private profile with Ideaflow/)
@@ -86,12 +89,14 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const started = await begin()
   assert.equal(started.status, 303)
   const authorization = new URL(started.headers.get('location'))
-  assert.equal(authorization.searchParams.get('prompt'), 'select_account')
+  assert.equal(authorization.searchParams.get('prompt'), 'login')
   assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256')
   const completed = await callback(started)
   assert.equal(completed.status, 303); assert.equal(claims.length, 1)
   const sessionCookie = completed.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
   const upload = await fetch(endpoint, { headers: { Cookie: sessionCookie } })
+  const uploadDirectives = new Map(upload.headers.get('content-security-policy').split(';').map(value => value.trim().split(/\s+/)).map(([key, ...values]) => [key, values]))
+  assert.deepEqual(uploadDirectives.get('form-action'), ["'self'"])
   const uploadHtml = await upload.text()
   assert.match(uploadHtml, /LinkedIn export ZIP or CSV/)
   const csrfUpload = uploadHtml.match(/name="csrf" value="([^"]+)"/)[1]
@@ -147,6 +152,8 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const inviteCookie = landing.headers.get('set-cookie').split(';')[0]
   const csrf = (await landing.text()).match(/name="csrf" value="([^"]+)"/)[1]
   assert.equal((await fetch(`${endpoint}/invite`, { method: 'POST', headers: { Origin: 'https://other.invalid', Cookie: inviteCookie }, body: new URLSearchParams({ csrf }) })).status, 403)
+  assert.equal((await fetch(`${endpoint}/invite`, { method: 'POST', headers: { Origin: 'null', Cookie: inviteCookie }, body: new URLSearchParams({ csrf }) })).status, 403)
+  assert.equal((await fetch(`${endpoint}/invite`, { method: 'POST', headers: { Cookie: inviteCookie }, body: new URLSearchParams({ csrf }) })).status, 403)
   assert.equal((await fetch(`${endpoint}/invite`, { method: 'POST', headers: { Origin: baseUrl, Cookie: inviteCookie }, body: new URLSearchParams({ csrf: 'wrong' }) })).status, 400)
   assert.equal((await fetch(`${endpoint}/invite`, { method: 'POST', headers: { Origin: baseUrl, Cookie: inviteCookie }, body: new URLSearchParams({ csrf }) })).status, 400)
   assert.equal(claims.length, 2)

@@ -16,10 +16,11 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
   if (server.protocol !== 'https:' || server.search || server.hash || server.username || server.password || callback.protocol !== 'https:' || callback.pathname !== '/auth/callback/ideaflow' || callback.search || callback.hash || callback.username || callback.password || !clientId || !clientSecret) throw new Error('explicit_ideaflow_client_required')
   const config = await oidc.discovery(server, clientId, { client_secret: clientSecret, id_token_signed_response_alg: 'RS256' }, oidc.ClientSecretBasic(clientSecret), { timeout: 10, execute: [oidc.enableNonRepudiationChecks], ...(fetchImpl ? { [oidc.customFetch]: fetchImpl } : {}) })
   return {
+    authorizationOrigin: server.origin,
     async begin() {
       const verifier = oidc.randomPKCECodeVerifier(), state = oidc.randomState(), nonce = oidc.randomNonce()
       const location = oidc.buildAuthorizationUrl(config, { redirect_uri: callback.href, response_type: 'code', scope: 'openid profile email',
-        code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: 'S256', state, nonce, prompt: 'select_account' })
+        code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: 'S256', state, nonce, prompt: 'login' })
       return { location: location.href, transaction: { verifier, state, nonce } }
     },
     async finish(url, transaction) {
@@ -56,6 +57,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
+  // Permit only the configured issuer origin for the invitation form redirect.
+  // Browser navigation POSTs use Origin:null under no-referrer; strict-origin
+  // retains the verified origin while never sending invitation paths or queries.
+  const authorizationOrigin = login.authorizationOrigin ?? null
+  if (authorizationOrigin !== null) {
+    const authorization = new URL(authorizationOrigin)
+    if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
+  }
   const pending = new Map(), invitations = new Map(), sessions = new Map()
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
@@ -65,7 +74,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
-    response.setHeader('Referrer-Policy', 'no-referrer')
+    response.setHeader('Referrer-Policy', 'strict-origin')
     response.setHeader('X-Content-Type-Options', 'nosniff')
     response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
     if (request.headers.host !== base.host) { response.writeHead(403).end(); return }
@@ -81,6 +90,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const id = token(), csrf = token()
         invitations.set(id, { token: inviteMatch[1], csrf, expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-invite', id, 300))
+        if (authorizationOrigin) response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${authorizationOrigin}; base-uri 'none'; frame-ancestors 'none'`)
         render(response, 'Start your private Unlinked profile', `<p>Choose the Ideaflow account you want to use for this separate, private Unlinked profile. We verify that account before creating your owner. Your existing OpenChat account stays separate.</p><form method="post" action="/invite"><input type="hidden" name="csrf" value="${html(csrf)}"><p>You can review the archive retention and AI search disclosure when you upload.</p><button>Create my private profile with Ideaflow</button></form>`)
         return
       }
