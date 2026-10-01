@@ -185,19 +185,19 @@ def validate_manifest(path, execution=False, recovery=False):
             require(not run(['git', '-C', str(checkout), 'status', '--porcelain']), 'clean_source_required:' + name)
         else:
             blockers.append('missing_exact_source_checkout:' + name)
-        if not source['approved'] or not source['final_receipt_sha256']:
-            blockers.append('missing_source_approval_or_final_receipt:' + name)
+        if not source['ready'] or not source['final_receipt_sha256']:
+            blockers.append('missing_source_proof_or_final_receipt:' + name)
         else:
             require(re.fullmatch(r'[a-f0-9]{64}', source['final_receipt_sha256']), 'receipt_digest_required')
             receipt = Path(source['final_receipt'])
             require(receipt.is_file() and not receipt.is_symlink() and digest(receipt) == source['final_receipt_sha256'], 'source_receipt_mismatch:' + name)
     for name in ('neo4j', 'runtime', 'nginx'):
         require(re.fullmatch(r'[A-Za-z0-9._:/-]+@sha256:[a-f0-9]{64}', manifest['images'][name]), 'approved_digest_image_required')
-        if manifest['images_approved']:
+        if manifest['images_verified']:
             require(not manifest['images'][name].endswith('0' * 64), 'placeholder_image_rejected')
-        if not manifest['images_approved']:
-            blockers.append('image_approval_pending:' + name)
-    for flag in ('target_security_approved', 'provider_client_registered', 'dns_tls_ready', 'persistent_secret_destinations_approved', 'invitation_activation_approved'):
+        if not manifest['images_verified']:
+            blockers.append('image_verification_pending:' + name)
+    for flag in ('target_isolation_verified', 'provider_client_registered', 'dns_tls_ready', 'persistent_private_inputs_ready', 'invitation_ready'):
         if not manifest[flag]:
             blockers.append(flag)
     if not manifest['openai_persistent_destination_confirmed']:

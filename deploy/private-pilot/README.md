@@ -23,24 +23,30 @@ python3 /release/pilot.py rollback --manifest /private/release.json --execute
 ```
 
 Every command defaults to no mutation except verification, which only reads its explicit private snapshot.
-`preflight` requires all approved final source receipts, exact clean checkout heads, reviewed wiring digest, image approvals, existing mode-700 roots/directories and mode-600 inputs.
+`preflight` requires final source receipts, exact clean checkout heads, reviewed wiring digest, verified image artifacts, existing mode-700 roots/directories and mode-600 inputs.
 There is no implicit directory creation during deployment and no command to obtain a certificate, alter DNS, register a client, create an invitation or copy credentials.
 The start command fails on occupied owned ports; services must be explicitly checked after start before any claim of availability.
-Production client and identity operations remain with the identity owner; actual security/data operation authority must be recorded before setting approval fields.
-Reversible non-provider preparation does not introduce a per-PR human gate.
+Production client and identity operations remain with the identity owner.
+Readiness booleans record verified source, image, isolation and input facts; they do not introduce routine human approval gates for reversible preparation.
+The production identity operation and new persistent OpenAI secret destination retain their explicit authority requirements.
 
-## Missing runtime capability
+## Trusted runtime capability
 
 The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, getBackend, complete, port, host, dataMode})`; its real-data mode is exactly `private_live`.
-The repository does not provide a production composition module, private env, client registration or built deployment image.
-The sole application writer must provide reviewed `/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs`, exporting `createPrivatePilotDependencies(options)`.
+`mcp-server/private-composition.mjs` provides the process-only `createPrivatePilotDependencies(options)` implementation.
+Install this packet's `wiring.mjs` as mode 600 at `/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs`; its relative export resolves the exact private Unlinked checkout.
+The factory loads only compiled Noos operational modules from the private Noos checkout, never its legacy auth or generic query application.
+It validates the dedicated root and exact live origin/ports, initializes callback-only invitation provisioning, and mints internal ephemeral operations credentials only after active owner/principal authorization.
+The server-side operations key never leaves the runtime; hosted MCP uses its separate search-only grants and live publication fences.
+The private env, production client, TLS/DNS, dependency-complete source artifacts and built deployment images remain activation inputs.
 It must start the isolated operational service only at `127.0.0.1:9022` and return `login`, `resolveOwner`, `claimInvitation`, `getBackend`, `complete` and `close` capabilities.
 The login object must implement `begin` and `finish` using `createIdeaflowLogin` with the exact verified production issuer/client and callback.
 The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `claimInvitation` is its guarded claim method and `resolveOwner` resolves the same verified issuer/subject mapping.
 `getBackend` must revalidate active immutable owner/principal and publication access on every operation.
 The operational API exposes only its scoped router, never the legacy generic graph query routes.
 The returned `close` capability must stop its operational listener and graph driver on shutdown.
-This adapter is a real remaining app-writer dependency, not a claimed runnable implementation in the release packet.
+Scoped readers fetch at most eight observations concurrently, preserve every manifest ordinal and recheck the final live publication after all rows; they do not extend the existing 30-second per-request bound.
+Archive asset publication waits for file and directory fsync; a paired cold restore rehearsal remains required before real data.
 Read-only source mounts must contain locked dependencies supplied in the approved runtime image or exact checkouts; the packet does not download or install them.
 
 ## Private destinations and invitation recovery
@@ -52,6 +58,10 @@ Neo4j graph files must satisfy the private recovery permission checks; verify th
 `runtime.env`, `graph.env` and `operator.json` are proposed destinations, not files to populate automatically.
 The proposed persistent OpenAI destination is `runtime/runtime.env` and requires explicit destination confirmation before any key copy.
 Synthetic testing can continue reading the existing M5 key in place; no model key belongs on a CI VM.
+The runtime reads `IDEAFLOW_ISSUER`, `IDEAFLOW_CLIENT_ID`, `IDEAFLOW_CLIENT_SECRET`, `NOOS_PRIVATE_PASSWORD` and `OPENAI_API_KEY` from its explicit `runtime.env` only.
+The proposed production issuer is `https://id.ideaflow.app/api/auth`; client registration and confidential secret delivery belong to the identity owner.
+The callback is exactly `https://private.unlinked.ai/auth/callback/ideaflow`; the process binds browser 9367 and operations 9022 to loopback, and uses the dedicated graph at loopback 9289.
+Run it as the explicitly provisioned private host operator UID/GID recorded in the release manifest; no root database or operator invitation capability is passed through HTTP.
 The Noos operator CLI owns invitation creation/replay/revocation and accepts a private config plus `NOOS_PROVISIONING_PASSWORD` without printing its secret.
 Its `create --config PRIVATE.json --out NEW-PRIVATE.json` writes the mode-600, fsynced recovery bundle before the graph operation.
 Retain that exact bundle under `invitations/operator-recovery.json`; never place its token or URL in a release receipt, shell history, CI output or proxy logs.
