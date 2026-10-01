@@ -10,7 +10,7 @@
     "zone": "us-central1-a"
   },
   "ports": {
-    "bolt": 9289,
+    "bolt": 7687,
     "operations": 9022,
     "browser": 9367,
     "https": 443
@@ -18,7 +18,7 @@
   "sources": {
     "unlinked": {
       "checkout": "/srv/unlinked-private-guest-pilot-20261001/runtime/unlinked",
-      "sha": "55114ae338bb2c0c7527de8b14b45699a74760b6",
+      "sha": "5306165a707901b6ee6022f5f78f2f0afe2515da",
       "ready": false,
       "final_receipt": "/srv/unlinked-private-guest-pilot-20261001/audit/unlinked-source-ready.json",
       "final_receipt_sha256": ""
@@ -72,5 +72,6 @@
     "destination": "/srv/unlinked-private-guest-pilot-20261001/runtime/runtime.env",
     "status": "EXPLICIT_PERSISTENT_DESTINATION_CONFIRMATION_REQUIRED",
     "synthetic_alternative": "Existing M5 key read in place; never copy to CI VM"
-  }
+  },
+  "network_mode": "isolated-container"
 }

@@ -203,7 +203,8 @@ def validate_manifest(path, execution=False, recovery=False):
     require(manifest['root'] == str(ROOT) and manifest['project'] == PROJECT and manifest['origin'] == ORIGIN, 'exact_target_required')
     require(manifest['callback'] == ORIGIN + '/auth/callback/ideaflow', 'exact_callback_required')
     require(manifest['gcp'] == {'project': 'lightsail-migration', 'instance': 'noos', 'zone': 'us-central1-a'}, 'existing_host_required')
-    require(manifest['ports'] == {'bolt': 9289, 'operations': 9022, 'browser': 9367, 'https': 443}, 'owned_ports_required')
+    require(manifest.get('network_mode') == 'isolated-container', 'isolated_container_network_required')
+    require(manifest['ports'] == {'bolt': 7687, 'operations': 9022, 'browser': 9367, 'https': 443}, 'owned_ports_required')
     if recovery:
         # Stopping/recovering owned state must work after cert expiry, DNS loss,
         # credential removal or superseded source approvals.
@@ -336,7 +337,7 @@ def main():
     require(socket.gethostname().split('.')[0] == 'noos', 'existing_noos_host_required')
     run(['docker', 'info', '--format', '{{.ServerVersion}}'])
     if args.command == 'start':
-        check_ports_available(manifest['ports'])
+        check_ports_available({'https': manifest['ports']['https']})
         result = subprocess.run(docker_command(['compose', '-p', PROJECT, '-f', str(HERE / 'compose.yaml'), 'up', '-d', 'graph', 'runtime', 'ingress']), env=compose_env(manifest), capture_output=True, timeout=120)
         require(result.returncode == 0, 'owned_start_failed')
         owned_services(running=True)

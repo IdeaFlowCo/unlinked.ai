@@ -22,7 +22,7 @@ It has not been created or activated.
 A dedicated Neo4j container would use `neo4j-data/` under this root, loopback-only Bolt port 9288, a 1 GiB memory cap and a dedicated database/admin credential.
 The isolated operational HTTP service would bind only `127.0.0.1:9021`; the browser/MCP service binds `127.0.0.1:9367` and receives tailnet-only HTTPS through Tailscale Serve.
 These ports were available at preparation; recheck immediately before launch.
-The separate real guest packet fixes its root at `/srv/unlinked-private-guest-pilot-20261001`, graph Bolt at 9289, operations at 9022, browser at 9367 and HTTPS ingress at 443.
+The separate real guest packet fixes its root at `/srv/unlinked-private-guest-pilot-20261001`; in explicit isolated-container mode it keeps graph Bolt on internal service `graph:7687`, operations on runtime loopback 9022, browser on the unpublished runtime listener 9367 and HTTPS ingress on 443.
 Its helper runs as the private file-owning release operator and uses only the existing noninteractive `sudo -n docker` route for Docker operations, preserving only the UID/GID and three image variables needed by Compose.
 The operational service must use the dedicated driver/database and must never mount the legacy generic query API.
 Private archive/source/oversized-observation bytes use `assets/`, with owner-hashed paths, immutable SHA-256 names and modes 700/600.
@@ -63,3 +63,7 @@ The real guest packet rollback stops only its three labeled containers and prese
 Publication rollback is an irreversible tombstone for that publication; it retains private originals and denies tools.
 A quiesced paired restore must restore journal rows before final publication fences and preserve owner mappings, source IDs, immutable receipt history and grant/publication tombstones.
 The synthetic harness rehearses this pair; power-loss/directory-fsync durability, operational backup ownership/retention and historical live-writer fencing remain separate release evidence.
+
+The private container recipe uses a frontend bridge for nginx/runtime and a separate internal runtime/graph bridge.
+Only non-root nginx publishes 443 to container 8443; neither app nor graph has a published port, and operations remains container loopback.
+The process default remains host loopback; exact isolated-container mode and private service addresses must be explicitly selected.
