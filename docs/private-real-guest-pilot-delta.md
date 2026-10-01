@@ -22,6 +22,7 @@ Proposed new private owner-controlled root: /srv/unlinked-private-guest-pilot-20
 It is separate from every synthetic staging root and existing Noos graph/data volume.
 Subdirectories: runtime/ (reviewed source SHAs), neo4j-data/ (dedicated database), assets/ (700/600 private blobs), identity-state/ (separately persisted identity adapter state), invitations/ (operator recovery bundles), backups/ (paired private snapshots), and audit/ (non-token consent/identity provenance).
 A dedicated1GiB Neo4j container uses only the internal backend bridge at `graph:7687`; the operational API binds runtime loopback9022, and browser/MCP binds only the unpublished runtime listener 9367 behind the new443 ingress.
+The runtime container overlays only the root parent as an operator-owned mode700 tmpfs so Docker cannot synthesize a root-owned 755 parent; durable state remains in the explicit child binds for runtime, assets and audit, with graph, backups and invitations excluded from app mounts.
 The graph entrypoint preserves `tini` and the pinned image startup script while applying `umask 077`, so newly created graph state uses private 700/600 modes; it does not chmod existing graph data.
 No generic graph-query route, raw asset route or operational token is public.
 The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, restores only to new canonical `backups/rehearsal-*` targets under the operator-owned mode-700 backup root, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only UID/GID plus the three approved image variables for Compose.
@@ -77,4 +78,5 @@ Synthetic paired restore has been proven; operational backup scheduling/ownershi
 
 Private container activation publishes only non-root ingress 443:8443.
 The browser wildcard listener is confined to the dedicated frontend bridge with no published app port, and the graph is confined to a separate internal backend bridge with no published Bolt port.
+`root-mount-check.py` is the bounded Docker proof for the runtime parent tmpfs; it uses generated fixtures only and does not start the graph, expose ports or read provider credentials.
 Operational/raw asset services remain runtime loopback; the invitation, owner and delegated tool checks continue to apply before every read/write.
