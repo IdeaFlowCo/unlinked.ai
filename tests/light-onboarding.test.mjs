@@ -44,7 +44,7 @@ test('job status persists across signed views and never treats staged records as
     assert.match(view.content, /name="csrf" value="csrf-value"/)
     assert.match(view.content, /action="\/logout"/)
     assert.match(view.content, /Signed in as Test person/)
-    assert.match(view.content, /Importing · 41% · 412 of 1,005/)
+    assert.match(view.content, /Importing · 41% · 412 of 1,005 records/)
     assert.match(view.content, /<progress aria-label="Import in progress" value="412" max="1005">/)
     assert.match(view.content, /Keeps running even if you leave this page\./)
     assert.match(view.content, /Your profile is ready; connections are still coming in/)
@@ -64,7 +64,20 @@ test('job status persists across signed views and never treats staged records as
   }
   assert.doesNotMatch(renderPeople({ ...account, importJob: { ...importJob, total: null } }).content, /Importing · \d+% ·/)
   assert.match(renderPeople({ ...account, importJob: { ...importJob, status: 'failed' } }).content, /Import could not finish/)
-  assert.match(renderPeople({ ...account, importJob: { ...importJob, status: 'indexed' } }).content, /Import finished · 1,005 connections/)
+  assert.match(renderPeople({ ...account, importJob: { ...importJob, status: 'indexed' } }).content, /Import finished · 1,005 records/)
+})
+
+test('indexed header and Settings totals count records, including profile and skills rows', () => {
+  const importJob = { status: 'indexed', processed: 1005, total: 1005, profileReady: true }
+  const header = renderPeople({ ...account, importJob }).content.match(/<aside class="import-status"[^>]*>(.*?)<\/aside>/s)[1]
+  assert.match(header, /Import finished · 1,005 records/)
+  assert.doesNotMatch(header, /\d[\d,]*\s+connections/i)
+
+  const settings = renderSettings({ ...account, imports: [{ id: 'mixed-records', filename: 'Full.zip', accepted: 1005, indexed: 1003, status: 'partial' }] })
+  const details = settings.content.match(/<details>(.*?)<\/details>/s)[1]
+  assert.match(details, /1,005 records accepted · 1,003 indexed/)
+  assert.doesNotMatch(details, /\d[\d,]*\s+connections/i)
+  assert.doesNotMatch(details, /ready to search/)
 })
 
 test('unknown or inconsistent counts are indeterminate, never invented', () => {
@@ -75,7 +88,7 @@ test('unknown or inconsistent counts are indeterminate, never invented', () => {
     assert.doesNotMatch(view.content.match(/<aside class="import-status"[^>]*>(.*?)<\/aside>/s)[1], /NaN|Infinity|\d+%/)
   }
   for (const [processed, percent] of [[0, 0], [1, 10], [10, 100]]) {
-    assert.match(renderPeople({ ...account, importJob: { status: 'indexing', processed, total: 10 } }).content, new RegExp(`Importing · ${percent}% · ${processed} of 10`))
+    assert.match(renderPeople({ ...account, importJob: { status: 'indexing', processed, total: 10 } }).content, new RegExp(`Importing · ${percent}% · ${processed} of 10 records`))
   }
   for (const status of ['uploaded', 'parsing', 'indexing']) {
     assert.match(renderPeople({ ...account, importJob: { status, total: null } }).content, /Keeps running even if you leave this page/)
@@ -132,7 +145,7 @@ test('member copy avoids forbidden technical and legacy words outside Settings d
     assert.doesNotMatch(view.content, /<script|onclick=|onsubmit=/)
   }
   const settings = views.at(-1)
-  assert.match(settings.content, /<details>.*connections accepted.*SHA-256.*<\/details>/s)
+  assert.match(settings.content, /<details>.*records accepted.*SHA-256.*<\/details>/s)
   assert.match(settings.content, /<h2>Your agent<\/h2>/)
 })
 
@@ -209,7 +222,7 @@ test('fixture previews cover every requested screen and are reproducible without
     assert.equal((own.match(/class="tag"/g) || []).length, 6)
     assert.equal((own.match(/class="initials"/g) || []).length, 8)
     assert.match(own, /Westhaven University/)
-    assert.match(own, /Importing · 41% · 412 of 1,005/)
+    assert.match(own, /Importing · 41% · 412 of 1,005 records/)
     const settings = first[files.findIndex(file => file.endsWith('/settings.html'))]
     assert.equal((settings.match(/action="\/revoke-account"/g) || []).length, 1)
     assert.match(settings, /fictional_fixture_not_a_credential/)
