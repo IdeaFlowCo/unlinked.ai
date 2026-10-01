@@ -178,7 +178,7 @@ export function createScopedImportReader({ readResource, readAsset, grant }) {
     const counts = resource.payload.counts
     if (!counts || !['accepted', 'indexed', 'rejected', 'skippedFiles', 'failedFiles'].every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0) ||
         !Array.isArray(ids) || ids.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || new Set(ids).size !== ids.length || counts.accepted !== ids.length || counts.indexed !== ids.length) throw new Error('private_publication_incomplete')
-    for (const assertionId of ids) {
+    const readRow = async assertionId => {
       signal?.throwIfAborted()
       const assertion = await readResource('assertion', assertionId)
       if (!assertion || assertion.deleted || assertion.sourceOwnerId !== ownerId || assertion.payload?.id !== assertionId || assertion.payload.ownerId !== ownerId || assertion.payload.importId !== id) throw new Error('private_publication_incomplete')
@@ -188,10 +188,20 @@ export function createScopedImportReader({ readResource, readAsset, grant }) {
         row = JSON.parse((await readAsset(row.fullObservationAsset)).toString('utf8'))
         if (!row || row.id !== assertionId || row.ownerId !== ownerId || row.importId !== id || row.sourceId !== assertion.payload.sourceId) throw new Error('private_publication_incomplete')
       }
-      rows.push(row)
+      signal?.throwIfAborted()
+      return row
+    }
+    // Eight in-flight immutable observations bound memory/graph pressure while
+    // avoiding one full transport round trip per connection. Preserve manifest
+    // order and fail the whole read if any row or asset fails its owner checks.
+    for (let start = 0; start < ids.length; start += 8) {
+      signal?.throwIfAborted()
+      rows.push(...await Promise.all(ids.slice(start, start + 8).map(readRow)))
     }
     // Recheck after row retrieval so a tombstone racing a delayed call wins.
+    signal?.throwIfAborted()
     const latest = await readResource('import', id)
+    signal?.throwIfAborted()
     if (!isLiveImport(latest, id, ownerId) || latest.sourceRevision !== resource.sourceRevision) throw new Error('private_import_not_found')
     return { importId: id, status: resource.payload.status, indexGate: resource.payload.indexGate, indexed: resource.payload.counts?.indexed ?? 0, indexVersion: resource.payload.indexVersion, consent: resource.payload.consent, assertions: rows }
   }

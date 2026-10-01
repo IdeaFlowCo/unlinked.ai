@@ -37,3 +37,43 @@ test('server configuration requires explicit owner/token and setup keeps credent
   assert.equal(config.mcpServers['unlinked-private'].url, 'https://private.invalid/mcp')
   assert.equal(config.mcpServers['unlinked-private'].headers.Authorization, 'Bearer synthetic')
 })
+
+test('scoped reads bound parallel work, preserve manifest order and enforce the final deletion fence', async () => {
+  const ids = Array.from({ length: 25 }, (_, ordinal) => ordinal.toString(16).padStart(64, '0'))
+  const live = { ...publication, payload: { ...publication.payload, assertionIds: ids,
+    counts: { ...publication.payload.counts, accepted: ids.length, indexed: ids.length } } }
+  let active = 0, maximum = 0, completed = 0, deleted = false
+  const reader = createScopedImportReader({ grant, readResource: async (type, id) => {
+    if (type === 'import') return deleted ? { ...live, deleted: true } : live
+    active++; maximum = Math.max(maximum, active)
+    await new Promise(resolve => setTimeout(resolve, 1 + (7 - ids.indexOf(id) % 8)))
+    active--; completed++
+    return { ...assertion, payload: { ...assertion.payload, id } }
+  } })
+  assert.deepEqual((await reader(importId)).assertions.map(row => row.id), ids)
+  assert.ok(maximum > 1); assert.ok(maximum <= 8); assert.equal(completed, 25)
+  completed = 0
+  const racing = createScopedImportReader({ grant, readResource: async (type, id) => {
+    if (type === 'import') return deleted ? { ...live, deleted: true } : live
+    completed++; if (completed === ids.length) deleted = true
+    return { ...assertion, payload: { ...assertion.payload, id } }
+  } })
+  await assert.rejects(racing(importId), /private_import_not_found/)
+})
+
+test('aborting a parallel read prevents later batches and an invalid owner row fails the whole read', async () => {
+  const ids = Array.from({ length: 17 }, (_, ordinal) => ordinal.toString(16).padStart(64, '0'))
+  const live = { ...publication, payload: { ...publication.payload, assertionIds: ids,
+    counts: { ...publication.payload.counts, accepted: ids.length, indexed: ids.length } } }
+  const controller = new AbortController(); let calls = 0
+  const reader = createScopedImportReader({ grant, readResource: async (type, id) => {
+    if (type === 'import') return live
+    calls++; if (calls === 8) controller.abort()
+    return { ...assertion, payload: { ...assertion.payload, id } }
+  } })
+  await assert.rejects(reader(importId, { signal: controller.signal }), { name: 'AbortError' })
+  assert.equal(calls, 8)
+  const bad = createScopedImportReader({ grant, readResource: async (type, id) => type === 'import' ? live :
+    { ...assertion, payload: { ...assertion.payload, id, ownerId: id === ids[3] ? 'another-owner' : ownerId } } })
+  await assert.rejects(bad(importId), /private_publication_incomplete/)
+})
