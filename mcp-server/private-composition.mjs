@@ -1,11 +1,13 @@
 import { createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { lstat, open } from 'node:fs/promises'
+import { lstat, mkdir, open } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
 import { createIdeaflowLogin } from './private-browser.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
+import { createArchiveWorker } from '../src/utils/private-import/background-job.mjs'
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -42,10 +44,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, closed = false
+  let server, worker, closed = false
   const close = async () => {
     if (closed) return
     closed = true
+    await worker?.stop()
     if (server?.listening) {
       server.closeIdleConnections?.(); server.closeAllConnections?.()
       await new Promise(resolve => server.close(resolve))
@@ -101,10 +104,29 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       const backend = createNoosOwnerBackend({ baseUrl: `http://127.0.0.1:${operationalPort}/v1`, ownerId: owner.ownerId, accessToken })
       return { ...backend,
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
+        listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listAccountGrantIds: () => store.listAccountGrantIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
       }
     }
-    return { login, getBackend, close,
+    const audit = async event => {
+      const directory = join(root, 'audit')
+      await mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
+      const state = await lstat(directory)
+      if (!state.isDirectory() || state.isSymbolicLink() || (state.mode & 0o077) || state.uid !== process.getuid?.()) throw new Error('private_audit_directory_required')
+      const descriptor = await open(join(directory, 'browser-events.jsonl'), constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
+      try {
+        const stat = await descriptor.stat()
+        if (!stat.isFile() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_audit_file_required')
+        const line = JSON.stringify(event) + '\n'
+        if (stat.size + Buffer.byteLength(line) > 8 * 1024 * 1024) throw new Error('private_audit_capacity')
+        await descriptor.write(line); await descriptor.sync()
+      } finally { await descriptor.close() }
+    }
+    if (typeof store.listPendingImportJobs !== 'function' || typeof store.listImportJobIds !== 'function') throw new Error('private_background_store_required')
+    worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend,
+      onError: event => audit({ ...event, at: new Date().toISOString() }) })
+    worker.start()
+    return { login, getBackend, close, audit, backgroundImports: true,
       resolveOwner: identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null,
       claimInvitation: provisioner.claim.bind(provisioner),
       signup: provisioner.signup.bind(provisioner),

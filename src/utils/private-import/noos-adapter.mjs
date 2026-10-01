@@ -66,16 +66,20 @@ export function createNoosImportAdapter({ baseUrl, accessToken, ownerId, fetchIm
         mutation('import', privateId(ownerId, 'receipt', job.id, job.revision), 1, { ...job, receiptOf: job.id })])
     },
     validatePublication(job, assertions) {
-      const chunks = Math.ceil(assertions.length / CHUNK_ROWS)
+      const chunks = Math.ceil(assertions.length / CHUNK_ROWS) + Number(job.backgroundVersion === 'profile-first-v1')
       if (assertions.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || job.sources.length + 2 > MAX_RESOURCES ||
           Buffer.byteLength(JSON.stringify({ ...job, sources: job.sources.map(source => ({ id: source.id })), assertionChunks: Array.from({ length: chunks }, () => 'a'.repeat(64)) })) > 60 * 1024 ||
           job.sources.some(source => Buffer.byteLength(JSON.stringify(source)) > 60 * 1024)) return 'private_publication_support_limit';
       return null
     },
-    async publish(job, assertions) {
+    async publish(job, assertions, { onChunk } = {}) {
       const chunkIds = []
-      for (let start = 0; start < assertions.length; start += CHUNK_ROWS) {
-        const rows = assertions.slice(start, start + CHUNK_ROWS), chunkId = privateId(ownerId, 'index-chunk', job.id, start / CHUNK_ROWS)
+      const profileCount = job.backgroundVersion === 'profile-first-v1' ? assertions.findIndex(row => !['profile', 'positions', 'education', 'skills'].includes(row.category)) : 0
+      const profileEnd = profileCount === -1 ? assertions.length : profileCount
+      for (let start = 0; start < assertions.length;) {
+        let end = Math.min(start + CHUNK_ROWS, assertions.length)
+        if (start < profileEnd && end > profileEnd) end = profileEnd
+        const ordinal = chunkIds.length, rows = assertions.slice(start, end), chunkId = privateId(ownerId, 'index-chunk', job.id, ordinal)
         const items = []
         for (const row of rows) {
           let indexed = { ...row, privateIndex: { version: 'observation-v1', category: row.category } }
@@ -90,12 +94,15 @@ export function createNoosImportAdapter({ baseUrl, accessToken, ownerId, fetchIm
           }
           items.push(mutation('assertion', row.id, 1, indexed))
         }
-        items.push(mutation('import', chunkId, 1, { kind: 'private_observation_chunk', ownerId, importId: job.id, ordinal: start / CHUNK_ROWS,
-          assertionIds: rows.map(row => row.id), indexedCount: rows.length, indexVersion: 'observation-v1' }))
+        items.push(mutation('import', chunkId, 1, { kind: 'private_observation_chunk', ownerId, importId: job.id, ordinal,
+          assertionIds: rows.map(row => row.id), indexedCount: rows.length, indexVersion: 'observation-v1',
+          ...(job.backgroundVersion === 'profile-first-v1' ? { profileAssertionIds: rows.filter(row => ['profile', 'positions', 'education', 'skills'].includes(row.category)).map(row => row.id) } : {}) }))
         // Immutable batches are invisible to tools until the final publication.
         // Exact retries reuse IDs/content; tombstones can never be resurrected.
         await batch(items)
         chunkIds.push(chunkId)
+        if (onChunk) await onChunk({ chunkId, processed: end, profileReady: end >= profileEnd })
+        start = end
       }
       job.assertionChunks = chunkIds
       job.indexVersion = 'observation-v1'
@@ -167,7 +174,7 @@ export function createScopedImportReader({ readResource, readAsset, grant, maxAs
     const rows = []
     let ids = resource.payload.assertionIds
     if (Array.isArray(resource.payload.assertionChunks)) {
-      if (new Set(resource.payload.assertionChunks).size !== resource.payload.assertionChunks.length || resource.payload.assertionChunks.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || resource.payload.assertionChunks.length > Math.ceil(PRIVATE_PUBLICATION_ASSERTION_LIMIT / CHUNK_ROWS)) throw new Error('private_publication_support_limit')
+      if (new Set(resource.payload.assertionChunks).size !== resource.payload.assertionChunks.length || resource.payload.assertionChunks.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || resource.payload.assertionChunks.length > Math.ceil(PRIVATE_PUBLICATION_ASSERTION_LIMIT / CHUNK_ROWS) + Number(resource.payload.backgroundVersion === 'profile-first-v1')) throw new Error('private_publication_support_limit')
       ids = []
       for (const [ordinal, chunkId] of resource.payload.assertionChunks.entries()) {
         signal?.throwIfAborted()

@@ -78,7 +78,7 @@ test('signup mode does not expose invitation confirmation or account switching r
   assert.equal(signups, 1)
 })
 
-test('private browser sign-in, consent upload, durable replay receipt, search and scoped setup execute over HTTP', { skip: !browser }, async t => {
+test('private browser sign-in, action-disclosed upload, durable replay receipt, search and scoped setup execute over HTTP', { skip: !browser }, async t => {
   const { digest } = await import('../src/utils/private-import/archive.mjs')
   const resources = new Map(), assets = new Map(), issued = []
   const owner = { ownerId: 'synthetic-legacy-owner', userId: 'synthetic-noos-owner' }
@@ -113,15 +113,15 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
   const uploadPage = await (await fetch(endpoint, { headers: { Cookie: sessionCookie } })).text()
   const csrf = uploadPage.match(/name="csrf" value="([^"]+)"/)[1]
   const csv = 'First Name,Last Name,URL,Company,Position\nAda,Example,https://www.linkedin.com/in/synthetic-ada,Synthetic,Engineer\n'
-  const form = consent => { const value = new FormData(); value.set('csrf', csrf); value.set('syntheticConsent', 'yes'); value.set('archive', new Blob([csv]), 'Connections.csv'); if (consent) value.set('consent', 'yes'); return value }
+  const form = (csrfValue = csrf) => { const value = new FormData(); value.set('csrf', csrfValue); value.set('syntheticConsent', 'yes'); value.set('archive', new Blob([csv]), 'Connections.csv'); return value }
   const headers = { Cookie: sessionCookie, Origin: baseUrl }
-  const refused = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(false) })
+  const refused = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form('wrong-csrf') })
   assert.equal(refused.status, 400); assert.equal(resources.size, 0)
-  const uploaded = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(true), redirect: 'manual' })
+  const uploaded = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(), redirect: 'manual' })
   assert.equal(uploaded.status, 303)
   const receiptPath = uploaded.headers.get('location'), importId = receiptPath.split('/').pop()
   assert.equal(assets.has(digest(Buffer.from(csv))), true)
-  assert.equal((await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(true), redirect: 'manual' })).headers.get('location'), receiptPath)
+  assert.equal((await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(), redirect: 'manual' })).headers.get('location'), receiptPath)
   const receiptResponse = await fetch(`${endpoint}${receiptPath}`, { headers: { Cookie: sessionCookie } })
   assert.equal(receiptResponse.status, 200)
   const receiptHtml = await receiptResponse.text()
@@ -152,7 +152,7 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
   assert.equal((await fetch(`${endpoint}/search`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId, query: 'engineer' }) })).status, 400)
   assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })).status, 400)
   assert.equal(providerCalls, beforeCalls); assert.equal(issued.length, 1)
-  await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(true), redirect: 'manual' })
+  await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(), redirect: 'manual' })
   assert.equal(resources.get(importId).payload.consent, undefined)
   resources.get(importId).deleted = true
   assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })).status, 400)

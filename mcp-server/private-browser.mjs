@@ -1,5 +1,5 @@
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import * as oidc from 'openid-client'
 import { ingestArchive } from '../src/utils/private-import/job.mjs'
 import { createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
@@ -7,6 +7,9 @@ import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 import { scopedSetupConfiguration } from '../src/utils/private-import/scoped-setup.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { LIMITS } from '../src/utils/private-import/archive.mjs'
+import { stageArchive, importJobStatus } from '../src/utils/private-import/background-job.mjs'
+import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
+import { renderJoin, renderBringArchive, renderImporting, renderOwnProfile, renderPeople, renderSettings, uploadProgressScript } from './private-onboarding-views.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -56,7 +59,7 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, getBackend, complete, issueGrant, issueAccountGrant, revokeAccountGrant, mcpEndpoint, dataMode = 'synthetic' }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, getBackend, complete, issueGrant, issueAccountGrant, revokeAccountGrant, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -77,6 +80,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const sessionFor = request => { purge(sessions); return sessions.get(cookies(request)['__Host-ul-session']) }
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
+  const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never changes identity authority. */ } }
+  const journey = (response, view, job = null, script = '') => {
+    const nonce = token()
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
+    if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${html(view.title)} · Unlinked</title>${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${view.content}${script ? `<script nonce="${nonce}">${script}</script>` : ''}</html>`)
+  }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   async function establishSession(response, identity, invitationToken = null) {
     let claimed
@@ -102,6 +113,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const sessionId = token()
     sessions.set(sessionId, { owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + 15 * 60000 })
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, 900)])
+    await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     redirect(response, '/')
   }
   return async (request, response) => {
@@ -187,18 +199,43 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       }
       const session = sessionFor(request)
       if (!session) {
-        if (request.method === 'GET' && url.pathname === '/') render(response, 'Your network, within reach', `<p>Join with your chosen account, upload your LinkedIn export, and ask your network a question. Your imported records stay private to your account.</p><a class="action" href="/login">${signup ? 'Sign in or join' : 'Sign in'}</a><p>Complete archive preferred; Connections-only ZIP or CSV also works within the published size limits.</p>`)
+        if (request.method === 'GET' && url.pathname === '/') journey(response, renderJoin())
         else render(response, 'Sign in required', '<a class="action" href="/login">Continue with Ideaflow</a>', 401)
         return
       }
       const accountNav = `<nav><a href="/">Import</a> · <a href="/network">My network</a> · <a href="/settings">Agent setup & settings</a></nav><small>Signed in as ${html(session.accountLabel)}</small><form method="post" action="/logout"><input type="hidden" name="csrf" value="${html(session.csrf)}"><button>Sign out</button></form>`
       const backend = await getBackend(session.owner)
       if (!backend?.adapter || typeof backend.readResource !== 'function') throw new Error('private_backend_unavailable')
+      const jobResources = async () => {
+        const ids = signup ? await (backend.listImportJobIds ?? backend.listImportIds)() : []
+        const resources = []
+        for (let start = 0; start < ids.length; start += 8) resources.push(...await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id))))
+        return resources.filter(resource => resource && !resource.deleted && resource.sourceOwnerId === session.owner.ownerId && resource.payload?.id === resource.sourceId && !resource.payload.kind && !resource.payload.receiptOf)
+      }
+      const jobProps = jobs => {
+        const ordered = [...jobs].sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0))
+        const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
+        return { accountLabel: session.accountLabel, csrf: session.csrf, importJob: active ? importJobStatus(active.payload) : undefined }
+      }
+      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed }))
+      const statusMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/status$/)
+      if (request.method === 'GET' && statusMatch) {
+        const resource = await backend.readResource('import', statusMatch[1])
+        if (!resource || resource.deleted || resource.sourceOwnerId !== session.owner.ownerId || resource.payload?.ownerId !== session.owner.ownerId || resource.payload.id !== statusMatch[1] || resource.payload.kind || resource.payload.receiptOf) { response.writeHead(404).end(); return }
+        response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(importJobStatus(resource.payload))); return
+      }
       if (request.method === 'GET' && url.pathname === '/') {
+        if (signup) { const jobs = await jobResources(); const props = jobProps(jobs); journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic' }), props.importJob, uploadProgressScript()); return }
         const ids = signup ? await backend.listImportIds() : []
         const jobs = await Promise.all(ids.map(id => backend.readResource('import', id)))
         render(response, 'Import your LinkedIn archive', `${signup ? accountNav : ''}<p>Complete archive preferred. Connections-only ZIP or CSV also works. Re-uploading the same named archive returns its durable receipt.</p><form method="post" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>LinkedIn export ZIP or CSV <input required type="file" name="archive" accept=".zip,.csv"></label><small>Maximum 64 MiB and 100,000 parser records. Larger imports fail explicitly and do not publish observations.</small><label><input required type="checkbox" name="consent" value="yes"> I consent to private retention of my archive and observations, and to sending search queries and bounded connection name/company/position/date observations to OpenAI for browser and scoped agent searches.</label>${dataMode === 'synthetic' ? '<label><input required type="checkbox" name="syntheticConsent" value="yes"> This file contains synthetic test data only.</label>' : ''}<button>Import archive</button></form>${signup ? `<h2>Your imports</h2>${jobs.filter(job => job && !job.deleted && job.sourceOwnerId === session.owner.ownerId).map(job => `<article><a href="/imports/${html(job.sourceId)}">${html(job.payload.filename)}</a><p>${html(job.payload.counts?.indexed ?? 0)} observations indexed</p></article>`).join('') || '<p>Your first upload will appear here.</p>'}` : ''}`)
         return
+      }
+      if (signup && request.method === 'GET' && url.pathname === '/profile') {
+        const jobs = await jobResources(), props = jobProps(jobs)
+        if (props.importJob && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
+        const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs, backend }))
+        journey(response, renderOwnProfile({ ...props, profile, imports: summaries(jobs) }), props.importJob); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/network') {
         const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
@@ -208,12 +245,16 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const rows = connections.filter(row => !filter || [row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].some(value => value?.toLowerCase().includes(filter)))
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
-        render(response, 'My network', `${accountNav}<p>${connections.length} connection observations across ${network.imports.length} imports.</p><form method="post" action="/search-account"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>Ask your whole network <input required name="query" type="text" maxlength="1024" placeholder="Who works on distributed systems?"></label><button>Search my network</button></form><form method="get" action="/network"><label>Filter name or company <input name="q" type="text" maxlength="256" value="${html(filter)}"></label><button>Filter</button></form>${rows.slice(index * 100, (index + 1) * 100).map(row => `<article><h2>${html([row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '))}</h2><p>${html(row.fields.position ?? '')} · ${html(row.fields.company ?? '')}</p><small>Archive ${html(row.importId)} · ${html(row.rowId)}</small></article>`).join('')}${rows.length > (index + 1) * 100 ? `<a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a>` : ''}`)
+        const props = jobProps(await jobResources()), contacts = rows.slice(index * 100, (index + 1) * 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url }))
+        const view = renderPeople({ ...props, contacts, query: filter })
+        if (rows.length > (index + 1) * 100) view.content += `<a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a>`
+        journey(response, view, props.importJob)
         return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         const ids = await backend.listAccountGrantIds()
-        render(response, 'Agent setup & settings', `${accountNav}<p>Give your agent search access to all current and future imports in your account. Access lasts until you revoke it.</p><form method="post" action="/setup-account"><input type="hidden" name="csrf" value="${html(session.csrf)}"><button>Create agent setup</button></form><h2>Active agent grants</h2>${ids.map(id => `<form method="post" action="/revoke-account"><input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="grantId" value="${html(id)}"><small>${html(id)}</small><button>Revoke access</button></form>`).join('') || '<p>No active grants.</p>'}`)
+        const jobs = await jobResources(), props = jobProps(jobs)
+        journey(response, renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs) }), props.importJob)
         return
       }
       if (signup && request.method === 'POST' && ['/setup-account', '/revoke-account', '/search-account'].includes(url.pathname)) {
@@ -242,12 +283,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         try {
         const bytes = await body(request, LIMITS.archiveBytes + 65536)
         const form = await new Request(new URL('/upload', base), { method: 'POST', headers: { 'Content-Type': request.headers['content-type'] ?? '' }, body: bytes }).formData()
-        if (form.getAll('csrf').length !== 1 || form.get('csrf') !== session.csrf || form.getAll('consent').length !== 1 || form.get('consent') !== 'yes' || form.getAll('archive').length !== 1 || [...form.keys()].some(key => !['csrf', 'consent', 'archive', 'syntheticConsent'].includes(key))) throw new Error('private_upload_consent_required')
+        if (form.getAll('csrf').length !== 1 || form.get('csrf') !== session.csrf || form.getAll('archive').length !== 1 || [...form.keys()].some(key => !['csrf', 'archive', 'syntheticConsent'].includes(key))) throw new Error('private_browser_csrf')
         if (dataMode === 'synthetic' && (form.getAll('syntheticConsent').length !== 1 || form.get('syntheticConsent') !== 'yes')) throw new Error('synthetic_archive_only')
         const file = form.get('archive')
         if (!file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name)) throw new Error('private_archive_filename_invalid')
-        const receipt = await ingestArchive({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
-        redirect(response, `/imports/${receipt.id}`); return
+        const receipt = await (backgroundImports ? stageArchive : ingestArchive)({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+        redirect(response, signup ? '/profile' : `/imports/${receipt.id}`); return
         } finally { uploadBusy = false }
       }
       const importMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})$/)
@@ -283,6 +324,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       }
       response.writeHead(404).end()
     } catch (error) {
+      if (new URL(request.url, base).pathname === '/auth/callback/ideaflow') await recordAudit({ event: 'auth_callback_denied', reason: ['private_login_transaction_invalid', 'private_owner_recovery_required'].includes(error.message) ? error.message : 'oidc_or_owner_validation_failed' })
       const limited = error.message === 'private_body_limit' || error.message === 'archive_size_limit'
       const recovery = error.message === 'private_owner_recovery_required'
       if (!response.headersSent) render(response, recovery ? 'Account recovery required' : 'Private operation unavailable', recovery ? '<p>Your Ideaflow identity could not be safely mapped to an existing or newly provisioned Unlinked owner. No archive was accepted. Complete the trusted account recovery/provisioning step.</p>' : '<p>The operation did not complete. Retry using your receipt, or return to sign-in. No alternate owner or public backend will be used.</p>', limited ? 413 : recovery ? 409 : 400)
