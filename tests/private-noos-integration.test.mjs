@@ -144,6 +144,28 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   assert.equal(scaled.assertionChunks.length, 6)
   assert.deepEqual(await ingestArchive({ ownerId: owner, filename: 'synthetic-1001-connections.zip', bytes: scaledBytes, adapter }), scaled)
   assert.equal((await fetch(`${baseUrl}/unlinked/import/${scaled.id}`, { headers: { Authorization: `Bearer ${bob}` } })).status, 404)
+  // Deletion wins even after immutable journal chunks are committed and a
+  // delayed publisher is about to make its final CAS-fenced publication.
+  let releasePublisher, notifyPublisher
+  const paused = new Promise(resolve => { notifyPublisher = resolve })
+  const release = new Promise(resolve => { releasePublisher = resolve })
+  const racingAdapter = createNoosImportAdapter({ baseUrl, ownerId: owner, accessToken: alice, fetchImpl: async (url, init) => {
+    if (new URL(url).pathname.endsWith('/batch') && JSON.parse(init.body).some(item => item.payload?.assertionChunks)) { notifyPublisher(); await release }
+    return fetch(url, init)
+  } })
+  const racingInput = { ...input, filename: 'synthetic-deletion-race.zip', adapter: racingAdapter }
+  const publishing = ingestArchive(racingInput)
+  const rejectedPublishing = assert.rejects(publishing, /private_noos_409/)
+  await paused
+  const racingId = privateId(owner, 'import', createHash('sha256').update(bytes).digest('hex'), racingInput.filename, PARSER_VERSION)
+  const actor = { userId: 'synthetic-noos-a', namespaces: ['unlinked'] }
+  const pendingPublication = await store.get(actor, { namespace: 'unlinked', type: 'import', sourceId: racingId })
+  await store.put(actor, { ...pendingPublication, sourceRevision: pendingPublication.sourceRevision + 1,
+    expectedRevision: pendingPublication.sourceRevision, deleted: true, payload: null })
+  releasePublisher(); await rejectedPublishing
+  const deletedJournalReader = createScopedImportReader({ grant: { ownerId: owner, importIds: [racingId] }, readResource: async (type, sourceId) => store.get(actor, { namespace: 'unlinked', type, sourceId }) })
+  await assert.rejects(deletedJournalReader(racingId), /private_import_not_found/)
+  await assert.rejects(ingestArchive(racingInput), /private_import_deleted/)
   const modelReceipts = [], considered = new Set()
   let complete
   if (process.env.UNLINKED_PRIVATE_AI_REMOTE === '1') {
