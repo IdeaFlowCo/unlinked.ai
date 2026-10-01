@@ -1,0 +1,87 @@
+name: unlinked-private-guest-pilot-20261001
+services:
+  graph:
+    image: ${PILOT_NEO4J_IMAGE:?approved digest-pinned image required}
+    container_name: unlinked-private-guest-pilot-20261001-graph
+    user: ${PILOT_UID:?explicit host operator uid required}:${PILOT_GID:?explicit host operator gid required}
+    env_file: /srv/unlinked-private-guest-pilot-20261001/runtime/graph.env
+    environment:
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+      NEO4J_server_http_enabled: 'false'
+      NEO4J_server_https_enabled: 'false'
+    ports: ['127.0.0.1:9289:7687']
+    volumes:
+      - type: bind
+        source: /srv/unlinked-private-guest-pilot-20261001/neo4j-data
+        target: /data
+        bind: {create_host_path: false}
+    mem_limit: 1g
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    logging: {driver: none}
+    labels: {unlinked.private-pilot.root: /srv/unlinked-private-guest-pilot-20261001}
+  runtime:
+    image: ${PILOT_RUNTIME_IMAGE:?approved dependency-complete image required}
+    container_name: unlinked-private-guest-pilot-20261001-runtime
+    user: ${PILOT_UID:?explicit host operator uid required}:${PILOT_GID:?explicit host operator gid required}
+    network_mode: host
+    read_only: true
+    env_file: /srv/unlinked-private-guest-pilot-20261001/runtime/runtime.env
+    environment:
+      PILOT_ROOT: /srv/unlinked-private-guest-pilot-20261001
+      PILOT_ORIGIN: https://private.unlinked.ai
+      PILOT_DATA_MODE: private_live
+      PILOT_HOST: 127.0.0.1
+      PILOT_PORT: '9367'
+      PILOT_OPERATIONS_URL: http://127.0.0.1:9022
+      PILOT_BOLT_URL: bolt://127.0.0.1:9289
+    command: [node, /release/runtime.mjs]
+    volumes:
+      - type: bind
+        source: /srv/unlinked-private-guest-pilot-20261001/runtime
+        target: /srv/unlinked-private-guest-pilot-20261001/runtime
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: /srv/unlinked-private-guest-pilot-20261001/assets
+        target: /srv/unlinked-private-guest-pilot-20261001/assets
+        bind: {create_host_path: false}
+      - type: bind
+        source: /srv/unlinked-private-guest-pilot-20261001/audit
+        target: /srv/unlinked-private-guest-pilot-20261001/audit
+        bind: {create_host_path: false}
+      - type: bind
+        source: .
+        target: /release
+        read_only: true
+    tmpfs: ['/tmp:mode=700']
+    mem_limit: 512m
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    logging: {driver: none}
+    labels: {unlinked.private-pilot.root: /srv/unlinked-private-guest-pilot-20261001}
+  ingress:
+    image: ${PILOT_NGINX_IMAGE:?approved digest-pinned image required}
+    container_name: unlinked-private-guest-pilot-20261001-ingress
+    network_mode: host
+    read_only: true
+    entrypoint: [nginx, -g, 'daemon off;']
+    volumes:
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+      - type: bind
+        source: /srv/unlinked-private-guest-pilot-20261001/runtime/tls
+        target: /tls
+        read_only: true
+        bind: {create_host_path: false}
+    tmpfs: ['/tmp:mode=700']
+    mem_limit: 128m
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, SETUID, SETGID]
+    security_opt: ['no-new-privileges:true']
+    logging: {driver: none}
+    labels: {unlinked.private-pilot.root: /srv/unlinked-private-guest-pilot-20261001}

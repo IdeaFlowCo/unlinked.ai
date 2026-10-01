@@ -5,16 +5,70 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { generateKeyPairSync, createHash, createPrivateKey, createPublicKey } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdtemp, rm, writeFile, cp, readdir, readFile, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdtemp, rm, writeFile, cp, readdir, readFile, mkdir, lstat, realpath, symlink, chmod } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import JSZip from 'jszip'
 import { ingestArchive } from '../src/utils/private-import/job.mjs'
 import { createNoosImportAdapter, createScopedImportReader, createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
+import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
 
 const checkout = process.env.UNLINKED_NOOS_TEST_CHECKOUT
 const uri = process.env.NOOS_OPERATIONAL_TEST_URI
 const remoteApi = process.env.UNLINKED_NOOS_TEST_API
 const diagnosticOnly = process.env.UNLINKED_NOOS_MCP_DIAGNOSTIC === '200'
+const inside = (child, parent) => child === parent || child.startsWith(parent + '/')
+
+async function readExplicitTestKeyFile(file) {
+  if (typeof file !== 'string' || !file) throw new Error('explicit_test_key_file_required')
+  const info = await lstat(file)
+  if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600 || info.uid !== process.getuid?.()) throw new Error('explicit_test_key_file_private_required')
+  const path = await realpath(file), roots = [process.cwd(), checkout].filter(Boolean).map(root => resolve(root))
+  if (roots.some(root => inside(path, root))) throw new Error('explicit_test_key_file_outside_checkout_required')
+  const text = await readFile(path, 'utf8')
+  const line = text.split(/\r?\n/).find(row => /^(?:export\s+)?OPENAI_API_KEY=/.test(row))
+  if (!line) throw new Error('explicit_test_key_file_openai_key_required')
+  const raw = line.replace(/^(?:export\s+)?OPENAI_API_KEY=/, '').trim()
+  const apiKey = raw.replace(/^['"]|['"]$/g, '')
+  if (!apiKey) throw new Error('explicit_test_key_file_openai_key_required')
+  return apiKey
+}
+
+async function createExplicitTestCompletion({ file, onReceipt }) {
+  const apiKey = await readExplicitTestKeyFile(file)
+  return createResponsesCompletion({ apiKey, fetchImpl: async (url, init) => {
+    const request = JSON.parse(init.body)
+    const response = await fetch(url, init)
+    const copy = response.clone()
+    let payload = null
+    try { payload = await copy.json() } catch {}
+    onReceipt?.({ status: response.status, model: payload?.model ?? request.model, usage: payload?.usage ?? null, storeFalse: request.store === false })
+    return response
+  } })
+}
+
+test('explicit private AI test key file refuses unsafe local inputs before provider calls', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'unlinked-ai-key-test-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const good = join(root, 'openai.env')
+  await writeFile(good, 'OPENAI_API_KEY=synthetic-test-key\n', { mode: 0o600 })
+  assert.equal(await readExplicitTestKeyFile(good), 'synthetic-test-key')
+  const loose = join(root, 'loose.env')
+  await writeFile(loose, 'OPENAI_API_KEY=synthetic-test-key\n', { mode: 0o644 })
+  await chmod(loose, 0o644)
+  await assert.rejects(readExplicitTestKeyFile(loose), /explicit_test_key_file_private_required/)
+  const linked = join(root, 'linked.env')
+  await symlink(good, linked)
+  await assert.rejects(readExplicitTestKeyFile(linked), /explicit_test_key_file_private_required/)
+  const insideCheckout = join(process.cwd(), '.synthetic-openai.env')
+  await writeFile(insideCheckout, 'OPENAI_API_KEY=synthetic-test-key\n', { mode: 0o600 })
+  t.after(() => rm(insideCheckout, { force: true }))
+  await assert.rejects(readExplicitTestKeyFile(insideCheckout), /explicit_test_key_file_outside_checkout_required/)
+  let calls = 0
+  await assert.rejects(createExplicitTestCompletion({ file: loose, onReceipt: () => calls++ }), /explicit_test_key_file_private_required/)
+  assert.equal(calls, 0)
+})
+
 test('real archive -> signed private Noos/assets -> per-import hosted MCP receipt', { skip: !checkout || !uri }, async t => {
   if (diagnosticOnly) {
     assert.ok(remoteApi, 'diagnostic requires co-located remote API')
@@ -275,8 +329,9 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const modelReceipts = [], considered = new Set()
   let complete
   if (process.env.UNLINKED_PRIVATE_AI_REMOTE === '1') {
-    const { createRemoteCompletion } = await import('../scripts/private-remote-completion.mjs')
-    const remote = createRemoteCompletion({ sshHost: 'm5', credentialFile: '/Users/jacobcole/.config/openai/openai.env', onReceipt: receipt => modelReceipts.push(receipt) })
+    const remote = process.env.UNLINKED_PRIVATE_AI_TEST_KEY_FILE ?
+      await createExplicitTestCompletion({ file: process.env.UNLINKED_PRIVATE_AI_TEST_KEY_FILE, onReceipt: receipt => modelReceipts.push(receipt) }) :
+      (await import('../scripts/private-remote-completion.mjs')).createRemoteCompletion({ sshHost: 'm5', credentialFile: '/Users/jacobcole/.config/openai/openai.env', onReceipt: receipt => modelReceipts.push(receipt) })
     complete = async input => { input.candidateIds.forEach(id => considered.add(id)); return remote(input) }
   }
   const grantToken = token('signed-a', 'unlinked-private-tools-staging', 'unlinked:read', 'grant-a')

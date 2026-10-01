@@ -31,6 +31,7 @@ This file is the repo-internal guide for autonomous agents and contributors work
 
 The default-off private Noos/OIDC browser/scoped AI and hosted setup slice and its immutable combined upload consent (private retention and bounded OpenAI browser/search-only agent processing), fail-closed legacy import behavior, and production gates are documented in `docs/private-noos-staging.md`.
 The trusted invited-owner browser callback and direct Noos claim/readback wiring are documented in `docs/private-invited-browser.md`; they never infer ownership from email or imported profile data.
+The standalone private runtime composition and guarded deployment/recovery commands are in `mcp-server/private-composition.mjs` and `deploy/private-pilot/README.md`; they remain unmounted in the public Next.js application.
 
 See `docs/private-archive-import.md` for the bounded parser/job adapter contract, the test adapter boundary and links to live activation gates; see `README.md` for the public archive entry.
 
