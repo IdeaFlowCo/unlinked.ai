@@ -23,7 +23,8 @@ It is separate from every synthetic staging root and existing Noos graph/data vo
 Subdirectories: runtime/ (reviewed source SHAs), neo4j-data/ (dedicated database), assets/ (700/600 private blobs), backups/ (paired private snapshots), and audit/ (non-token consent/identity provenance).
 A dedicated1GiB Neo4j container uses loopback Bolt9289; operational API binds loopback9022; browser/MCP binds loopback9367 behind the new443 ingress.
 No generic graph-query route, raw asset route or operational token is public.
-The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, and `runtime.mjs` refuses to launch without reviewed mode600 wiring.
+The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only UID/GID plus the three approved image variables for Compose.
+`runtime.mjs` refuses to launch without reviewed mode600 wiring.
 One invited guest/new owner is the initial cohort; its exact verified production subject is allowlisted before upload can be enabled.
 Every import/index/source/receipt/grant is keyed to that immutable owner UUID in the dedicated graph.
 Prior legacy IDs/data remain unchanged and unlinked; no prior owner or data is imported implicitly.
@@ -68,7 +69,7 @@ Actual real-user delegation must receive its own reviewed approval; synthetic st
 6. Verify the invited guest's actual production sign-in/intended account and approved NEW ownership/principal proof; bind offline, read back both sides, snapshot ACLs and backups.
 7. Enable only this owner, obtain guest archive/AI consent, upload the real archive, verify accepted/indexed counts/replay, search and scoped MCP parity.
 
-Rollback disables only the new ingress/runtime, revokes its grants/client as specifically approved, and preserves private originals/owner UUID/backups.
+Rollback stops only the three labeled new ingress/runtime/graph containers, preserves private originals/owner UUID/backups, and leaves durable grant/client revocation to the separately approved identity-owner operation.
 Do not blindly delete or rebind live identity/owner data.
 Restore is a quiesced paired graph/blob operation with integrity manifest, bindings, journal rows before final publication fences, and preserved tombstones.
 Synthetic paired restore has been proven; operational backup scheduling/ownership, durable directory fsync, real identity/principal proof,443 route and actual browser acceptance remain unproven release gates.
