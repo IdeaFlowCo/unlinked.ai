@@ -1,38 +1,36 @@
 import Link from 'next/link'
 import PublicShell from '@/components/PublicShell'
+import StartLinkedInExport from '@/components/StartLinkedInExport'
 
 export default function Home() {
   return <PublicShell>
     <main className="public-main">
       <section className="hero" aria-labelledby="hero-title">
         <div className="hero-copy">
-          <p className="eyebrow">The people you already know</p>
-          <h1 id="hero-title">Your network.<br /><em>Within reach.</em></h1>
-          <p className="hero-subtitle">Bring your LinkedIn connections together. Find the right person with AI, revisit your own profile, and give your agent a private window into your network.</p>
-          <div className="hero-actions">
-            <Link className="public-button public-button-primary" href="/import-linkedin">Import LinkedIn archive →</Link>
-            <Link className="public-button public-button-quiet" href="/auth/login">Ideaflow ID sign-in</Link>
-          </div>
-          <p className="feature-caption">Private network access is being restored. Upload and sign-in availability below.</p>
+          <p className="eyebrow">Your network, remembered</p>
+          <h1 id="hero-title">You already know<br /><em>someone.</em></h1>
+          <p className="hero-subtitle">Find people in your LinkedIn connections by name, company, title and when you connected. A private network to ask, then share with your agent.</p>
+          <div className="hero-actions"><StartLinkedInExport /></div>
+          <p className="feature-caption">Start with Connections only. Nothing is uploaded here.</p>
+          <Link className="landing-text-link" href="/import-linkedin#next">Already have your file? See the next step →</Link>
         </div>
-        <div className="network-art" aria-hidden="true">
-          <p className="eyebrow">A network, remembered</p>
-          <div className="network-question">Who do I know<br />who can help?</div>
-          <div className="network-thread"><span>your connections</span><span>their experience</span><span>the right introduction</span></div>
-          <div className="network-center">you</div>
-          <p className="art-caption">people first · private by design</p>
-        </div>
+        <aside className="landing-example" aria-label="Illustrative search answer">
+          <p className="eyebrow">Example · fictional people</p>
+          <h2>“Who do I know at a solar company in partnerships?”</h2>
+          <article><span className="landing-initials" aria-hidden="true">AL</span><div><h3>Avery Lee</h3><p>Director of Partnerships<br />Northwind Solar · connected 2019</p><small>Matched on title and company</small></div></article>
+          <p className="feature-caption">An example of the fields in a connections export, not a live search result. No contact biography or work history is inferred.</p>
+        </aside>
       </section>
-      <aside className="availability-note" role="status"><strong>Private sign-in, archive uploads, browsing and AI search are not available yet.</strong> We are restoring the complete private journey. You can request your LinkedIn archive now, and Meet remains available today. No archive upload is accepted on this public site.</aside>
-      <section className="steps" id="how-it-works" aria-labelledby="steps-title">
-        <div><p className="eyebrow">Your network, on your terms</p><h2 id="steps-title">From an archive<br />to an answer.</h2><p className="section-copy">The private journey we are restoring starts with the network you have already built.</p></div>
+      <aside className="availability-note" role="status"><strong>Private import opens to invited guests first. Uploads and sign-in are not active yet.</strong> Download your file and keep it while the private journey is verified. This public site accepts no files. Meet remains available.</aside>
+      <section className="steps" aria-labelledby="steps-title">
+        <div><p className="eyebrow">One file. Your network.</p><h2 id="steps-title">From connections<br />to an answer.</h2><p className="section-copy">Request the export before login. An invitation and Ideaflow ID will be required before a private upload.</p></div>
         <ol>
-          <li><span>01</span><div><h3><Link href="/import-linkedin">Bring your network</Link></h3><p>Request your full LinkedIn archive, including connections, profile and experience. Keep the original ZIP.</p></div></li>
-          <li><span>02</span><div><h3><Link href="/network">Browse and find people</Link></h3><p>Revisit contacts and your own imported profile. Ask AI who fits the experience you need.</p></div></li>
-          <li><span>03</span><div><h3><Link href="/agents">Connect your agent</Link></h3><p>Choose a scoped MCP setup for private search, with access you can revoke.</p></div></li>
+          <li><span>01</span><div><h3>Get your connections</h3><p>Select Connections in LinkedIn’s data export. Download the file when LinkedIn emails you, and keep your copy.</p></div></li>
+          <li><span>02</span><div><h3>Import privately, when invited</h3><p>Confirm your account before upload. The private journey must account for accepted, rejected and searchable connections before claiming readiness.</p></div></li>
+          <li><span>03</span><div><h3>Ask, then connect your agent</h3><p>Search the selected import. Agent access is a separate, scoped choice. Both remain unavailable on this public site.</p></div></li>
         </ol>
       </section>
-      <section className="meet-handoff" aria-labelledby="meet-title"><div><p className="eyebrow">Available today</p><h2 id="meet-title">Someone new?</h2><p>Scan an OpenChat card in person to continue the conversation. Meet is here alongside your existing network.</p></div><Link className="public-button public-button-outline" href="/meet">Meet someone ↗</Link></section>
+      <section className="meet-handoff" aria-labelledby="meet-title"><div><p className="eyebrow">Available today</p><h2 id="meet-title">Someone new?</h2><p>Scan an OpenChat card in person to continue the conversation.</p></div><Link className="public-button public-button-outline" href="/meet">Meet someone ↗</Link></section>
     </main>
   </PublicShell>
 }
