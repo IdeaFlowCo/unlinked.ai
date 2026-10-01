@@ -12,12 +12,15 @@
     "mcp_server_card": "/.well-known/mcp/server-card.json"
   },
   "api": {
+    "status": "historical_reference",
+    "availability": "Private sign-in, uploads and live agent-key creation are unavailable in the deployed product.",
     "base_url": "https://www.unlinked.ai/api",
     "auth": {
       "header": "Authorization",
       "format": "Bearer ul_<key>",
       "key_prefix": "ul_",
-      "mint_url": "https://www.unlinked.ai/settings/agent-keys",
+      "mint_url": null,
+      "historical_mint_path": "/settings/agent-keys",
       "scoping": "Resolved server-side to the authenticated user. Accessible data is strictly limited to the caller's own profile and direct connections."
     },
     "routes": {
@@ -49,10 +52,12 @@
     }
   },
   "mcp": {
+    "status": "historical_reference",
+    "availability": "Live hosted setup and agent-key creation are unavailable today.",
     "server_card": "/.well-known/mcp/server-card.json",
     "package": "@unlinked/mcp-server",
     "command": "node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js",
-    "setup": "git clone https://github.com/IdeaFlowCo/unlinked.ai && cd unlinked.ai/mcp-server && npm install && npm run build",
+    "setup": "reference only: git clone https://github.com/IdeaFlowCo/unlinked.ai && cd unlinked.ai/mcp-server && npm install && npm run build",
     "tools": [
       "unlinked_me",
       "unlinked_search_contacts",

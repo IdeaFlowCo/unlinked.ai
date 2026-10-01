@@ -1,12 +1,13 @@
 {
   "name": "unlinked",
-  "description": "Model Context Protocol server for unlinked.ai — search your network, look up profiles, draft intros, and list LinkedIn imports via the unlinked.ai agent API.",
+  "description": "Historical Model Context Protocol server contract for unlinked.ai. Live private sign-in, agent-key creation and hosted setup are unavailable today.",
   "version": "0.1.0",
   "package": "@unlinked/mcp-server",
   "repository": "https://github.com/IdeaFlowCo/unlinked.ai",
   "homepage": "https://www.unlinked.ai",
   "transports": {
     "stdio": {
+      "status": "historical_reference",
       "command": "node",
       "args": ["/absolute/path/to/unlinked.ai/mcp-server/dist/index.js"],
       "env": ["UNLINKED_API_KEY", "UNLINKED_BASE_URL"],
@@ -14,17 +15,19 @@
         "clone": "git clone https://github.com/IdeaFlowCo/unlinked.ai",
         "build_command": "cd unlinked.ai/mcp-server && npm install && npm run build",
         "entrypoint": "mcp-server/dist/index.js",
-        "note": "Replace /absolute/path/to/unlinked.ai with the absolute path of your clone. The server is not published to npm."
+        "note": "Reference only while live agent-key creation and hosted setup are unavailable. Replace /absolute/path/to/unlinked.ai with the absolute path of your clone. The server is not published to npm."
       }
     }
   },
   "authentication": {
+    "status": "historical_reference",
     "type": "bearer",
     "prefix": "ul_",
     "header": "Authorization",
     "env_var": "UNLINKED_API_KEY",
     "credentials_file": "~/.unlinked/credentials.json",
-    "create_key_url": "https://www.unlinked.ai/settings/agent-keys",
+    "create_key_url": null,
+    "historical_create_key_path": "/settings/agent-keys",
     "scoping": "Resolved server-side to the authenticated user. Accessible data is strictly limited to the caller's own profile and direct connections."
   },
   "tools": [

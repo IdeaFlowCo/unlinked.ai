@@ -22,14 +22,14 @@ See the [private archive foundation contract](docs/private-archive-import.md) fo
 
 ## Agent & MCP Surface
 
-unlinked.ai provides a Model Context Protocol (MCP) server and REST API for autonomous agents:
+unlinked.ai preserves a Model Context Protocol (MCP) server and REST API schema for autonomous agents. Live private sign-in, key creation and hosted MCP setup are unavailable today:
 
-- **Quick start & setup:** [`/agents`](https://www.unlinked.ai/agents) (or see [`mcp-server/README.md`](mcp-server/README.md))
+- **Setup status:** [`/agents`](https://www.unlinked.ai/agents) (or see historical implementation notes in [`mcp-server/README.md`](mcp-server/README.md))
 - **Machine discovery:** [`/llms.txt`](https://www.unlinked.ai/llms.txt), [`/.well-known/unlinked.json`](https://www.unlinked.ai/.well-known/unlinked.json), [`/.well-known/mcp/server-card.json`](https://www.unlinked.ai/.well-known/mcp/server-card.json), and [`/openapi.json`](https://www.unlinked.ai/openapi.json)
 - **Developer & contributor notes:** [`AGENTS.md`](AGENTS.md) (repo-internal) and [`public/AGENTS.md`](public/AGENTS.md) (HTTP agent brief)
-- **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — stdio server supporting Claude Desktop, Claude Code, Cursor, and any MCP client
-- **Agent Keys:** Mint keys starting with `ul_` at **Settings -> Agent keys** (`/settings/agent-keys`)
-- **Strict isolation:** Every tool call and agent API request is resolved server-side to the authenticated user. An agent key can only access the owner's profile and direct connections.
+- **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — historical stdio server implementation supporting Claude Desktop, Claude Code, Cursor, and any MCP client
+- **Agent Keys:** Historical keys start with `ul_`; no live key creation path is advertised.
+- **Strict isolation:** Every legacy tool call and agent API request is resolved server-side to the authenticated user. An agent key can only access the owner's profile and direct connections.
 
 ## Private provider Preview Lab
 
