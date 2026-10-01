@@ -9,6 +9,7 @@ The [workflow](../.github/workflows/source-ci.yml) uses Node 24, including nativ
 Before the suite runs, a runtime import verifies the MCP SDK resolves. If `mcp-server/private-browser.mjs` exists, the preflight also imports it, `private-grants.mjs`, and `private-hosted.mjs`; any import failure fails the job.
 Those private modules and their OIDC/grant tests are not yet on main. When the product branch receives this workflow, the preflight prevents missing runtime dependencies from silently skipping those tests.
 The MCP TypeScript build is explicit.
+Source CI also runs the private deployment consumer checks: `checks.py` with mocked Docker/process boundaries and `topology-check.py` through Docker Compose config normalization with synthetic images and no private env reads.
 Tests use synthetic providers and local fixtures. CI does not provision a graph or call live models; any separate model acceptance evidence belongs to development validation.
 
 No deployment, real account, production auth client, archive ingestion, key provisioning or paid activation is performed.

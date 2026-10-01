@@ -36,7 +36,7 @@ The production identity operation and new persistent OpenAI secret destination r
 
 ## Trusted runtime capability
 
-The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, getBackend, complete, port, host, dataMode})`; its real-data mode is exactly `private_live`.
+The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, getBackend, complete, port, host, networkMode, dataMode})`; its real-data mode is exactly `private_live`.
 `mcp-server/private-composition.mjs` provides the process-only `createPrivatePilotDependencies(options)` implementation.
 Install this packet's `wiring.mjs` as mode 600 at `/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs`; its relative export resolves the exact private Unlinked checkout.
 The factory loads only compiled Noos operational modules from the private Noos checkout, never its legacy auth or generic query application.
