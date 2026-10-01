@@ -24,6 +24,7 @@ The isolated operational HTTP service would bind only `127.0.0.1:9021`; the brow
 These ports were available at preparation; recheck immediately before launch.
 The separate real guest packet fixes its root at `/srv/unlinked-private-guest-pilot-20261001`; in explicit isolated-container mode it keeps graph Bolt on internal service `graph:7687`, operations on runtime loopback 9022, browser on the unpublished runtime listener 9367 and HTTPS ingress on 443.
 Its helper runs as the private file-owning release operator and uses only the existing noninteractive `sudo -n docker` route for Docker operations, preserving only the UID/GID and three image variables needed by Compose.
+The graph service keeps the pinned Neo4j image startup path and `tini`, but sets `umask 077` before launch so newly created graph directories/files satisfy the private 700/600 recovery policy.
 The operational service must use the dedicated driver/database and must never mount the legacy generic query API.
 Private archive/source/oversized-observation bytes use `assets/`, with owner-hashed paths, immutable SHA-256 names and modes 700/600.
 Paired quiesced backups use `backups/` and include graph resources, owner/identity bindings, every referenced blob, integrity manifest and tombstones.
