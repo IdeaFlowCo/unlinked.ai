@@ -1,17 +1,10 @@
 import { type NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { updateSession } from '@/utils/supabase/middleware'
+import { runMiddlewareGate } from '@/utils/middleware-gate.mjs'
 
 export async function middleware(request: NextRequest) {
-    // These entry points must render while the legacy Supabase host is paused.
-    if (request.nextUrl.pathname === '/' || /^\/(?:meet|import-linkedin)\/?$/.test(request.nextUrl.pathname)) {
-        return NextResponse.next()
-    }
-    // Availability pages render without collecting credentials or contacting the legacy backend.
-    if (['GET', 'HEAD'].includes(request.method) && /^\/(?:network|search|agents|auth\/(?:login|signup))\/?$/.test(request.nextUrl.pathname)) {
-        return NextResponse.next()
-    }
-    return await updateSession(request)
+    return await runMiddlewareGate(request, { nextResponse: NextResponse, updateSession })
 }
 
 export const config = {
