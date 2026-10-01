@@ -17,13 +17,15 @@ Synthetic rehearsal mode explicitly adds the required `syntheticConsent` field.
 `uploadProgressScript()` is an optional enhancement; wire it separately with the actual CSP nonce.
 It preserves native form submission and has no simulated completion timer.
 
+`renderJoin` forwards session props only when `signedIn` is true; every signed renderer accepts `accountLabel` and `csrf` for header search and sign-out.
 Every signed renderer accepts optional `importJob` containing `id`, `status`, `profileReady`, `processed`, `total`, `statusUrl`, and optional `errorMessage`.
 Statuses are `uploaded`, `parsing`, `indexing`, `indexed`, `partial`, and `failed`.
 Processed counts represent durably staged records, not globally searchable rows.
 The header renders server-provided progress across routes; this module does not poll an absent API.
 The runtime owner must implement durable job continuation, authenticated same-owner status, and early own-profile staging before enabling those states.
 `total` may remain null until parsing knows the count.
-Only final `indexed` status reports ready.
+Only final `indexed` status reports ready. The importing screen uses terminal status for its title and body, without pending progress or continuation promises.
+The single upload notice covers connected agents, search queries and professional details; Settings preserves private retention and bounded query-time processing details.
 
 Profile editing, shared-member discovery, friends, permanent removal, and data export remain explicitly unavailable.
 Agent setup and revocation use the existing `/setup-account` and `/revoke-account` server actions.
