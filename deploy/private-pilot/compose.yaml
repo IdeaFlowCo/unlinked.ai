@@ -61,7 +61,11 @@ services:
         target: /release
         read_only: true
         bind: {create_host_path: false}
-    tmpfs: ['/tmp:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}']
+    # Docker otherwise creates the unmounted parent as root:root 755.
+    # This private parent is ephemeral; explicit child binds retain all state.
+    tmpfs:
+      - '/srv/unlinked-private-guest-pilot-20261001:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}'
+      - '/tmp:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}'
     mem_limit: 512m
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
