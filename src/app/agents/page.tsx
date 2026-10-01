@@ -161,6 +161,10 @@ export default function ForAgentsPage() {
           </Text>
         </Box>
 
+        <Text as="p" size="2" color="gray">
+          Private archive import, scoped hosted setup and private AI search remain unavailable. This guide describes the legacy agent API. See the <a href="https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md">private staging contract</a> for consent, invited-owner login and release gates. No live invitation URL is advertised.
+        </Text>
+
         <Card size="3" style={{ borderColor: 'var(--accent-6)' }}>
           <Flex gap="3" align="start">
             <Box pt="1">
