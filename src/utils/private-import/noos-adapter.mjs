@@ -6,6 +6,11 @@ const CHUNK_ROWS = 200
 const MAX_RESOURCES = 600
 const MAX_RESOURCE_BYTES = 64 * 1024
 
+export function isLiveImport(resource, id, ownerId) {
+  return Boolean(resource && !resource.deleted && resource.sourceOwnerId === ownerId && resource.payload?.id === id &&
+    !resource.payload.receiptOf && !resource.payload.kind && ['partial', 'indexed'].includes(resource.payload.status))
+}
+
 // Explicit server-only staging configuration. No default URL, token or owner;
 // issuer/subject mapping and Noos binding must already have been verified.
 export function createNoosImportAdapter({ baseUrl, accessToken, ownerId, fetchImpl = fetch }) {
@@ -147,8 +152,7 @@ export function createScopedImportReader({ readResource, readAsset, grant }) {
     signal?.throwIfAborted()
     if (!allowed.has(id)) throw new Error('private_import_not_found')
     const resource = await readResource('import', id)
-    if (!resource || resource.deleted || resource.sourceOwnerId !== ownerId || !resource.payload ||
-        !['partial', 'indexed'].includes(resource.payload.status)) throw new Error('private_import_not_found')
+    if (!isLiveImport(resource, id, ownerId)) throw new Error('private_import_not_found')
     const rows = []
     let ids = resource.payload.assertionIds
     if (Array.isArray(resource.payload.assertionChunks)) {
@@ -176,7 +180,7 @@ export function createScopedImportReader({ readResource, readAsset, grant }) {
     }
     // Recheck after row retrieval so a tombstone racing a delayed call wins.
     const latest = await readResource('import', id)
-    if (!latest || latest.deleted || latest.sourceRevision !== resource.sourceRevision) throw new Error('private_import_not_found')
+    if (!isLiveImport(latest, id, ownerId) || latest.sourceRevision !== resource.sourceRevision) throw new Error('private_import_not_found')
     return { importId: id, status: resource.payload.status, indexGate: resource.payload.indexGate, indexed: resource.payload.counts?.indexed ?? 0, indexVersion: resource.payload.indexVersion, assertions: rows }
   }
 }

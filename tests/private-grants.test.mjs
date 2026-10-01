@@ -6,7 +6,7 @@ try { factory = (await import('../mcp-server/private-grants.mjs')).createPrivate
 
 test('separate signed search-only grant consults durable owner record and publication on every request', { skip: !factory }, async () => {
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), owner = { ownerId: 'legacy-a', userId: 'noos-a' }, importId = 'a'.repeat(64)
-  const records = new Map([[importId, { sourceOwnerId: owner.ownerId, payload: { status: 'indexed' } }]])
+  const records = new Map([[importId, { sourceOwnerId: owner.ownerId, payload: { id: importId, status: 'indexed' } }]])
   const getBackend = async binding => {
     if (binding.ownerId !== owner.ownerId || binding.userId !== owner.userId) throw new Error('untrusted_binding')
     return { readResource: async (_type, id) => records.get(id), writeResource: async resource => records.set(resource.sourceId, structuredClone(resource)) }

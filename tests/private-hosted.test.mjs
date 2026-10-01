@@ -14,7 +14,7 @@ test('staging setup executes owner approval, scope download and host/origin/expi
   t.after(() => new Promise(resolve => server.close(resolve)))
   const host = `127.0.0.1:${server.address().port}`, endpoint = `http://${host}/mcp`
   const readResource = async () => ({ sourceOwnerId: ownerId, deleted, sourceRevision: 1,
-    payload: deleted ? null : { status: 'partial', assertionIds: [] } })
+    payload: deleted ? null : { id, status: 'partial', assertionIds: [] } })
   setup = createScopedSetupHandler({ endpoint, allowLoopbackStaging: true, allowedHosts: [host], allowedOrigins: ['https://approved.invalid'],
     // This unit uses an explicit fixture verifier. The cross-repo graph test proves signed auth.
     authenticateOwner: async req => req.headers.authorization === 'Bearer fixture-owner' ? { ownerId } : null,

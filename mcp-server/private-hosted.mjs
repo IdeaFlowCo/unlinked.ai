@@ -3,7 +3,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod'
 import { scopedSetupConfiguration } from '../src/utils/private-import/scoped-setup.mjs'
 export { scopedSetupConfiguration } from '../src/utils/private-import/scoped-setup.mjs'
-import { createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
+import { createScopedImportReader, isLiveImport } from '../src/utils/private-import/noos-adapter.mjs'
 import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 
 // Staging-only factory, never mounted by the production Next app. authenticateGrant
@@ -82,7 +82,7 @@ export function createScopedSetupHandler({ authenticateOwner, issueGrant, readRe
       try { input = JSON.parse(body) } catch { res.writeHead(400).end(); return }
       if (!input || Object.keys(input).length !== 1 || !/^[a-f0-9]{64}$/.test(input.importId)) { res.writeHead(400).end(); return }
       const publication = await readResource(owner, 'import', input.importId)
-      if (!publication || publication.deleted || publication.sourceOwnerId !== owner.ownerId || !['partial', 'indexed'].includes(publication.payload?.status)) { res.writeHead(404).end(); return }
+      if (!isLiveImport(publication, input.importId, owner.ownerId)) { res.writeHead(404).end(); return }
       const accessToken = await issueGrant(owner, { importIds: [input.importId], tools: grantedTools })
       const config = scopedSetupConfiguration({ endpoint, accessToken, allowLoopbackStaging })
       res.setHeader('Content-Type', 'application/json')

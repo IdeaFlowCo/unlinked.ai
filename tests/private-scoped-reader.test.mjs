@@ -4,7 +4,7 @@ import { createScopedImportReader, createNoosImportAdapter } from '../src/utils/
 import { scopedSetupConfiguration } from '../src/utils/private-import/scoped-setup.mjs'
 
 const ownerId = 'retained-owner', importId = 'a'.repeat(64), assertionId = 'b'.repeat(64)
-const publication = { sourceOwnerId: ownerId, sourceRevision: 3, deleted: false, payload: { status: 'partial', assertionIds: [assertionId], indexGate: 'ai_search_not_connected' } }
+const publication = { sourceOwnerId: ownerId, sourceRevision: 3, deleted: false, payload: { id: importId, status: 'partial', assertionIds: [assertionId], indexGate: 'ai_search_not_connected' } }
 const assertion = { sourceOwnerId: ownerId, deleted: false, payload: { importId, sourceId: 'original-source', subject: 'connection_observation' } }
 const grant = { ownerId, importIds: [importId] }
 test('scope rejects ungranted imports without querying resource IDs', async () => {
@@ -20,7 +20,8 @@ test('live publication fences retained assertions, owner mismatch and deletion r
     return type === 'assertion' ? assertion : calls > 1 ? { ...publication, deleted: true, payload: null } : publication
   } })
   await assert.rejects(reader(importId), /private_import_not_found/)
-  for (const dead of [{ ...publication, deleted: true }, { ...publication, sourceOwnerId: 'other-owner' }, { ...publication, payload: { status: 'parsing' } }]) {
+  for (const dead of [{ ...publication, deleted: true }, { ...publication, sourceOwnerId: 'other-owner' }, { ...publication, payload: { status: 'parsing' } },
+    { ...publication, payload: { ...publication.payload, receiptOf: importId } }, { ...publication, payload: { ...publication.payload, id: 'another-import' } }]) {
     let rows = 0
     const read = createScopedImportReader({ grant, readResource: async type => { rows += Number(type === 'assertion'); return dead } })
     await assert.rejects(read(importId), /private_import_not_found/); assert.equal(rows, 0)
