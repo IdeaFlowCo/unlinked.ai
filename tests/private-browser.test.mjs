@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { generateKeyPairSync, createSign } from 'node:crypto'
+import { generateKeyPairSync, createSign, sign as signBytes } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -174,4 +174,31 @@ test('private browser denies noncanonical or unsafe authorization origins before
       resolveOwner: async () => null, getBackend: async () => null,
     }))
   }
+})
+
+
+test('live-provider EdDSA discovery verifies JWKS signatures and denies other algorithms and invalid claims', { skip: !browser }, async () => {
+  const issuer='https://synthetic-eddsa-ideaflow.invalid', callbackUrl='https://private.invalid/auth/callback/ideaflow'
+  const keys=generateKeyPairSync('ed25519'), wrongKeys=generateKeyPairSync('ed25519'), rsa=generateKeyPairSync('rsa',{modulusLength:2048})
+  const jwk={...keys.publicKey.export({format:'jwk'}),kid:'provider-ed25519',alg:'EdDSA',use:'sig'}
+  const rsaJwk={...rsa.publicKey.export({format:'jwk'}),kid:'unadvertised-rsa',alg:'RS256',use:'sig'}
+  let nonce,override={},badSignature=false,algorithm='EdDSA',exchanges=0
+  const login=await browser.createIdeaflowLogin({issuer,callbackUrl,clientId:'live-compatible-client',clientSecret:'synthetic-secret',fetchImpl:async(url,options)=>{
+    const path=new URL(url).pathname
+    if(path.includes('well-known'))return Response.json({issuer,authorization_endpoint:`${issuer}/authorize`,token_endpoint:`${issuer}/token`,jwks_uri:`${issuer}/jwks`,response_types_supported:['code'],subject_types_supported:['public'],id_token_signing_alg_values_supported:['EdDSA'],authorization_response_iss_parameter_supported:true})
+    if(path==='/jwks')return Response.json({keys:[jwk,rsaJwk]})
+    assert.equal(path,'/token');exchanges++;assert.ok(new URLSearchParams(options.body).get('code_verifier'))
+    const now=Math.floor(Date.now()/1000)
+    const header=Buffer.from(JSON.stringify({alg:algorithm,kid:algorithm==='EdDSA'?jwk.kid:rsaJwk.kid})).toString('base64url')
+    const payload=Buffer.from(JSON.stringify({iss:issuer,aud:'live-compatible-client',sub:'operator-test-subject',iat:now,exp:now+300,nonce,email:'operator@example.invalid',email_verified:false,...override})).toString('base64url')
+    const signature=algorithm==='EdDSA'?signBytes(null,Buffer.from(`${header}.${payload}`),badSignature?wrongKeys.privateKey:keys.privateKey):createSign('RSA-SHA256').update(`${header}.${payload}`).sign(rsa.privateKey)
+    return Response.json({access_token:'synthetic-only',token_type:'Bearer',expires_in:300,id_token:`${header}.${payload}.${signature.toString('base64url')}`})
+  }})
+  const exchange=async()=>{const start=await login.begin();nonce=start.transaction.nonce;return login.finish(new URL(`${callbackUrl}?code=synthetic&state=${start.transaction.state}&iss=${encodeURIComponent(issuer)}`),start.transaction)}
+  const identity=await exchange();assert.equal(identity.issuer,issuer);assert.equal(identity.subject,'operator-test-subject');assert.equal(identity.verifiedEmail,'operator@example.invalid')
+  for(const bad of [{nonce:'wrong'},{iss:'https://wrong.invalid'},{aud:'wrong-client'}]){override=bad;await assert.rejects(exchange())}
+  override={};badSignature=true;await assert.rejects(exchange());badSignature=false
+  algorithm='RS256';await assert.rejects(exchange());algorithm='EdDSA'
+  const start=await login.begin(),before=exchanges
+  await assert.rejects(login.finish(new URL(`${callbackUrl}?code=synthetic&state=wrong&iss=${encodeURIComponent(issuer)}`),start.transaction));assert.equal(exchanges,before)
 })

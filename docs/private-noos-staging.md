@@ -80,3 +80,5 @@ Only explicitly authorized UNLINKED_PRIVATE_AI_REMOTE=1 enables synthetic model 
 The runner owns one capped 1 GiB disposable Neo4j and cleans it in finally.
 The real 1,001-contact ZIP harness requires accepted=indexed=MCP-readable count and, with the model enabled, considers every connection including the last contact; account-launch tests additionally cover Connections-only/full-ZIP parsing, returning import discovery, revoke/replay and whole-owner MCP search.
 Do not claim a live pilot until real provider/browser, storage/recovery and review gates pass.
+
+Private browser OIDC ID-token signature algorithms follow the explicit issuer discovery metadata and JWKS through `openid-client` nonrepudiation checks; they are not pinned to the unrelated internal Noos RS256 access-token algorithm. The production Ideaflow issuer advertises EdDSA. The executable private-browser regression covers EdDSA success, valid but unadvertised RS256 rejection, invalid signatures and issuer/audience/nonce/state failures.
