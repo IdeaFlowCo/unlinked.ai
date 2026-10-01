@@ -1,4 +1,4 @@
-Unlinked helps people carry an in-person introduction into a lasting connection. The public landing and `/meet` work independently of the paused legacy Supabase backend. The existing profile and agent features remain behind their legacy backend.
+Unlinked helps people carry their network into useful introductions. The public landing, network/search/setup availability pages, LinkedIn archive preparation page, Ideaflow ID sign-in status page, and `/meet` work independently of the paused legacy Supabase backend. Legacy profile and agent API implementations remain behind their backend and are preserved as historical reference.
 
 ## Meet someone
 
@@ -37,20 +37,20 @@ See the [private lab guide](docs/provider-lab.md) for tester usage, stage config
 
 ## Getting Started
 
-For the public landing, Meet flow and archive availability page, install dependencies and run the development server on an available high port:
+For the public landing, Meet flow, availability pages and archive preparation page, install dependencies and run the development server on an available high port:
 
 ```bash
 npm ci
 npm run dev -- --port 7743
 ```
 
-Open [http://localhost:7743](http://localhost:7743), `/meet` and `/import-linkedin`. These public entry points bypass legacy session refresh, including the trailing-slash forms of `/meet` and `/import-linkedin`, and need no Supabase environment variables or database access. Existing API and data routes retain their middleware and require the existing Supabase settings and a reachable backend.
+Open [http://localhost:7743](http://localhost:7743), `/meet`, `/import-linkedin`, `/network`, `/search`, `/agents`, `/auth/login`, and `/auth/signup`. These public GET/HEAD entry points bypass legacy session refresh, including trailing-slash forms, and need no Supabase environment variables or database access. Existing API and data routes retain their middleware and require the existing Supabase settings and a reachable backend.
 
-Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, start the server with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` unset and confirm `/`, `/meet`, `/import-linkedin` and `/import-linkedin/` return 200 (following redirects for trailing-slash normalization). A card token with valid syntax can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
+Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, start the server with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` unset and confirm `/`, `/meet`, `/import-linkedin`, `/network`, `/search`, `/agents`, `/auth/login`, and `/auth/signup` return 200 or the expected signup redirect (following redirects for trailing-slash normalization). A card token with valid syntax can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
 
 For lint validation, run `npx eslint` with the changed JavaScript or TypeScript file paths. The existing `npm run lint` invokes unsupported `next lint`; ESLint is configured in `eslint.config.mjs`. No separate formatter is configured.
 
-The landing page lives at `src/app/page.tsx`; the Meet UI lives at `src/app/meet/`.
+The landing page lives at `src/app/page.tsx`; the Meet UI lives at `src/app/meet/`; public private-feature status pages live at `src/app/network/`, `src/app/search/`, `src/app/agents/`, and `src/app/auth/login/`.
 
 ## Learn More
 

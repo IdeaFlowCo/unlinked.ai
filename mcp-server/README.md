@@ -1,12 +1,16 @@
 # unlinked.ai MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) adapter for [unlinked.ai](https://www.unlinked.ai). Lets any MCP-aware client (Claude Desktop, Claude Code, Cursor, Cline, Codex CLI, …) search your network, look up profiles, draft intros, and list your LinkedIn imports.
+A [Model Context Protocol](https://modelcontextprotocol.io) adapter for the historical [unlinked.ai](https://www.unlinked.ai) agent API. It lets any MCP-aware client (Claude Desktop, Claude Code, Cursor, Cline, Codex CLI, ...) search a legacy private network, look up profiles, draft intros, and list LinkedIn imports when a valid legacy agent key and backend are available.
 
 **Scoped by design:** every tool call is resolved to your own account server-side. An agent key can only see your own profile and your direct connections -- never anyone else's network.
 
-## 30-second setup
+## Current availability
 
-1. Sign in to unlinked.ai -> **Settings -> Agent keys -> create key**
+Live private sign-in, archive uploads, agent-key creation, and hosted MCP setup are unavailable in the deployed product today. `/agents` shows setup status rather than an active onboarding flow. The setup examples below are preserved as historical implementation notes for recovery and local development.
+
+## Historical setup reference
+
+1. Sign in to a private unlinked.ai account after private access is enabled -> **Settings -> Agent keys -> create key**
 2. Copy the key (starts with `ul_`)
 3. Build the server from a local clone (see **Local clone** below; it is not published to npm)
 4. Paste one of the snippets below into your MCP client's config, replacing `/absolute/path/to/unlinked.ai` with your clone's path
@@ -41,7 +45,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 }
 ```
 
-Restart Claude Desktop. You'll see the unlinked tools appear in the tools menu.
+Restart Claude Desktop. With a valid legacy key and reachable backend, the unlinked tools appear in the tools menu.
 
 ## Local clone (for development)
 
@@ -54,7 +58,7 @@ UNLINKED_API_KEY=ul_... npm start
 
 ## Authentication
 
-Set the API key one of two ways (checked in this order):
+For the historical API, set the API key one of two ways (checked in this order):
 
 1. `UNLINKED_API_KEY` environment variable
 2. `~/.unlinked/credentials.json`:
@@ -62,7 +66,7 @@ Set the API key one of two ways (checked in this order):
    { "apiKey": "ul_your_key_here", "baseUrl": "https://www.unlinked.ai" }
    ```
 
-The server will fail tool calls with a clear error message if neither is set.
+The server will fail tool calls with a clear error message if neither is set. A configured client is not proof of live private access; confirm with a successful scoped tool call once private access reopens.
 
 ## Environment Variables
 
@@ -85,4 +89,4 @@ The server will fail tool calls with a clear error message if neither is set.
 
 - Agent keys are stored server-side as a sha256 hash only; the plaintext key is shown once at creation time.
 - Every request is resolved to the authenticated caller server-side -- no request parameter selects whose network is being searched.
-- Revoke a key any time from **Settings -> Agent keys**.
+- Revoke a legacy key from **Settings -> Agent keys** when private key management is enabled.
