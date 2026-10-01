@@ -32,7 +32,12 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
     assert.equal(location.searchParams.get('prompt'), 'select_account'); assert.equal(location.searchParams.get('code_challenge_method'), 'S256')
     nonce = start.transaction.nonce; override = bad
     const callback = new URL(`${callbackUrl}?code=synthetic-code&state=${start.transaction.state}`)
-    if (!Object.keys(bad).length) assert.deepEqual(await login.finish(callback, start.transaction), { issuer, subject: 'immutable-synthetic-subject', verifiedEmail: null })
+    if (!Object.keys(bad).length) {
+      const identity = await login.finish(callback, start.transaction)
+      assert.equal(identity.issuer, issuer); assert.equal(identity.subject, 'immutable-synthetic-subject'); assert.equal(identity.verifiedEmail, null)
+      assert.equal(identity.clientId, 'private-client'); assert.ok(Number.isSafeInteger(identity.verifiedAt))
+      assert.match(identity.provenanceReceiptId, /^[A-Za-z0-9_-]{43}$/)
+    }
     else await assert.rejects(login.finish(callback, start.transaction))
   }
   const start = await login.begin(); nonce = start.transaction.nonce; override = {}; signingKey = wrongKeys.privateKey
