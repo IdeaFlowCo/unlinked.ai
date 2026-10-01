@@ -55,7 +55,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const deadline = Date.now() + graphReadyDeadlineMs
     for (;;) {
       try { await driver.verifyConnectivity(); break }
-      catch (error) {
+      catch {
         if (Date.now() + graphReadyRetryMs > deadline) throw new Error('private_graph_not_ready')
         await wait(graphReadyRetryMs)
       }
