@@ -60,8 +60,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
+  const invitationMode = typeof claimInvitation === 'function' && typeof signup !== 'function'
   const authorizationOrigin = login.authorizationOrigin ?? null
-  if (typeof claimInvitation === 'function' && authorizationOrigin === null) throw new Error('explicit_private_authorization_origin_required')
+  if (invitationMode && authorizationOrigin === null) throw new Error('explicit_private_authorization_origin_required')
   if (authorizationOrigin !== null) {
     const authorization = new URL(authorizationOrigin)
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
@@ -113,7 +114,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
       const inviteMatch = url.pathname.match(/^\/invite\/([A-Za-z0-9_-]{43})$/)
-      if (request.method === 'GET' && inviteMatch && typeof claimInvitation === 'function') {
+      if (request.method === 'GET' && inviteMatch && invitationMode) {
         purge(invitations)
         if (invitations.size >= 100) throw new Error('private_login_capacity')
         const id = token(), csrf = token()
@@ -123,7 +124,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         render(response, 'Start your private Unlinked profile', `<p>Sign in with Ideaflow for this separate, private Unlinked profile. After Ideaflow returns, Unlinked shows the verified account and asks you to confirm it before creating your owner. Your existing OpenChat account stays separate.</p><form method="post" action="/invite"><input type="hidden" name="csrf" value="${html(csrf)}"><p>You can review the archive retention and AI search disclosure when you upload.</p><button>Continue with Ideaflow</button></form>`)
         return
       }
-      if (request.method === 'POST' && url.pathname === '/invite' && typeof claimInvitation === 'function') {
+      if (request.method === 'POST' && url.pathname === '/invite' && invitationMode) {
         purge(invitations); purge(pending); purge(confirmations)
         const id = cookies(request)['__Host-ul-invite'], invitation = invitations.get(id)
         invitations.delete(id)
@@ -136,7 +137,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         response.setHeader('Set-Cookie', [cookie('__Host-ul-invite', '', 0), cookie('__Host-ul-login', transactionId, 300)])
         redirect(response, result.location); return
       }
-      if (request.method === 'POST' && url.pathname === '/invite/confirm' && typeof claimInvitation === 'function') {
+      if (request.method === 'POST' && url.pathname === '/invite/confirm' && invitationMode) {
         purge(confirmations); purge(pending)
         const id = cookies(request)['__Host-ul-confirm'], confirmation = confirmations.get(id)
         confirmations.delete(id)

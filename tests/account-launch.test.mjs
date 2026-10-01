@@ -146,3 +146,29 @@ test('open browser signup →1001 ConnectionsZIP→whole-owner search→durable 
   const publication=f.resources.get(id);publication.deleted=true
   await assert.rejects(createAccountNetwork({owner,getBackend:async binding=>({...await f.getBackend(binding),listImportIds:async()=>[id]}),complete}).search({query:'Zephyr'}),/not_found/)
 })
+
+test('account network rejects an oversized next import before reading its rows or assets', async () => {
+  const owner = { ownerId: 'budget-owner', userId: 'budget-user' }
+  const firstImport = '1'.repeat(64), secondImport = '2'.repeat(64), firstRow = '3'.repeat(64)
+  const secondRows = ['4'.repeat(64), '5'.repeat(64)]
+  let secondRowReads = 0, assetReads = 0
+  const importResource = (id, assertionIds) => ({ sourceOwnerId: owner.ownerId, sourceRevision: 1, deleted: false,
+    payload: { id, status: 'indexed', assertionIds, counts: { accepted: assertionIds.length, indexed: assertionIds.length, rejected: 0, skippedFiles: 0, failedFiles: 0 }, consent: COMBINED_UPLOAD_CONSENT } })
+  const resources = new Map([
+    [firstImport, importResource(firstImport, [firstRow])],
+    [secondImport, importResource(secondImport, secondRows)],
+    [firstRow, { sourceOwnerId: owner.ownerId, deleted: false, payload: { id: firstRow, ownerId: owner.ownerId, importId: firstImport, sourceId: firstImport, rowId: 'Connections.csv#record=2', category: 'connections', fields: { company: 'One' } } }],
+  ])
+  const readResource = async (type, id) => {
+    if (type === 'assertion' && secondRows.includes(id)) secondRowReads++
+    return resources.get(id) ?? null
+  }
+  const network = createAccountNetwork({ owner, observationLimit: 1, getBackend: async () => ({
+    listImportIds: async () => [firstImport, secondImport],
+    readResource,
+    readAsset: async () => { assetReads++; return Buffer.from('{}') },
+  }) })
+  await assert.rejects(network.readNetwork(), /account_observation_limit/)
+  assert.equal(secondRowReads, 0)
+  assert.equal(assetReads, 0)
+})
