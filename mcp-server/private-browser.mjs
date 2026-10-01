@@ -24,7 +24,8 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
     async finish(url, transaction) {
       const tokens = await oidc.authorizationCodeGrant(config, url, { pkceCodeVerifier: transaction.verifier, expectedState: transaction.state, expectedNonce: transaction.nonce, idTokenExpected: true })
       const claims = tokens.claims()
-      if (!claims || claims.iss !== issuer || typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 512 || /[\x00-\x1f\x7f]/.test(claims.sub)) throw new Error('verified_ideaflow_identity_required')
+      const now = Math.floor(Date.now() / 1000)
+      if (!claims || !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp) || claims.iat > now + 30 || claims.exp <= claims.iat || claims.exp <= now || claims.iss !== issuer || typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 512 || /[\x00-\x1f\x7f]/.test(claims.sub)) throw new Error('verified_ideaflow_identity_required')
       // No access/ID token reaches an agent, cookie or imported source record.
       return { issuer: claims.iss, subject: claims.sub, verifiedEmail: claims.email_verified === true && typeof claims.email === 'string' ? claims.email : null }
     },
@@ -49,10 +50,13 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getBackend, complete, issueGrant, mcpEndpoint }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getBackend, complete, issueGrant, mcpEndpoint, dataMode = 'synthetic' }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
+  if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   const pending = new Map(), sessions = new Map()
+  const render = (response, title, content, status = 200) => page(response, title,
+    (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
   const sessionFor = request => { purge(sessions); return sessions.get(cookies(request)['__Host-ul-session']) }
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
@@ -94,12 +98,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
       }
       const session = sessionFor(request)
       if (!session) {
-        if (request.method === 'GET' && url.pathname === '/') page(response, 'Your network, privately', '<p>Sign in with Ideaflow to import your own LinkedIn archive. Existing account ownership must be verified before upload.</p><a class="action" href="/login">Continue with Ideaflow</a><p>This isolated pilot accepts up to 100,000 parser records and a 20 MiB archive. Larger imports remain unsupported.</p>')
-        else page(response, 'Sign in required', '<a class="action" href="/login">Continue with Ideaflow</a>', 401)
+        if (request.method === 'GET' && url.pathname === '/') render(response, 'Your network, privately', '<p>Sign in with Ideaflow to import your own LinkedIn archive. Existing account ownership must be verified before upload.</p><a class="action" href="/login">Continue with Ideaflow</a><p>This isolated pilot accepts up to 100,000 parser records and a 20 MiB archive. Larger imports remain unsupported.</p>')
+        else render(response, 'Sign in required', '<a class="action" href="/login">Continue with Ideaflow</a>', 401)
         return
       }
       if (request.method === 'GET' && url.pathname === '/') {
-        page(response, 'Import your LinkedIn archive', `<p>Your archive and observations stay scoped to your verified account. Re-uploading the same named archive returns its durable receipt.</p><form method="post" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>LinkedIn export ZIP or CSV <input required type="file" name="archive" accept=".zip,.csv"></label><small>Maximum 20 MiB and 100,000 parser records. Larger imports fail explicitly and do not publish observations.</small><label><input required type="checkbox" name="consent" value="yes"> I consent to privately storing my archive and its observations for this pilot.</label><button>Import archive</button></form>`)
+        render(response, 'Import your LinkedIn archive', `<p>Your archive and observations stay scoped to your verified account. Re-uploading the same named archive returns its durable receipt.</p><form method="post" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>LinkedIn export ZIP or CSV <input required type="file" name="archive" accept=".zip,.csv"></label><small>Maximum 20 MiB and 100,000 parser records. Larger imports fail explicitly and do not publish observations.</small><label><input required type="checkbox" name="consent" value="yes"> I consent to privately storing my archive and its observations for this pilot.</label>${dataMode === 'synthetic' ? '<label><input required type="checkbox" name="syntheticConsent" value="yes"> This file contains synthetic test data only.</label>' : ''}<button>Import archive</button></form>`)
         return
       }
       const backend = await getBackend(session.owner)
@@ -107,7 +111,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
       if (request.method === 'POST' && url.pathname === '/upload') {
         const bytes = await body(request, 20 * 1024 * 1024 + 65536)
         const form = await new Request(new URL('/upload', base), { method: 'POST', headers: { 'Content-Type': request.headers['content-type'] ?? '' }, body: bytes }).formData()
-        if (form.getAll('csrf').length !== 1 || form.get('csrf') !== session.csrf || form.getAll('consent').length !== 1 || form.get('consent') !== 'yes' || form.getAll('archive').length !== 1 || [...form.keys()].some(key => !['csrf', 'consent', 'archive'].includes(key))) throw new Error('private_upload_consent_required')
+        if (form.getAll('csrf').length !== 1 || form.get('csrf') !== session.csrf || form.getAll('consent').length !== 1 || form.get('consent') !== 'yes' || form.getAll('archive').length !== 1 || [...form.keys()].some(key => !['csrf', 'consent', 'archive', 'syntheticConsent'].includes(key))) throw new Error('private_upload_consent_required')
+        if (dataMode === 'synthetic' && (form.getAll('syntheticConsent').length !== 1 || form.get('syntheticConsent') !== 'yes')) throw new Error('synthetic_archive_only')
         const file = form.get('archive')
         if (!file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name)) throw new Error('private_archive_filename_invalid')
         const receipt = await ingestArchive({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter })
@@ -118,7 +123,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
         const id = importMatch[1], resource = await backend.readResource('import', id)
         if (!resource || resource.deleted || resource.sourceOwnerId !== session.owner.ownerId || resource.payload?.id !== id || resource.payload.receiptOf || resource.payload.kind) { response.writeHead(404).end(); return }
         const job = resource.payload
-        page(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><label><input required type="checkbox" name="aiConsent" value="yes"> I consent to sending this query and bounded connection name/company/position observations to OpenAI for this search.</label><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Query-time search; no shared people index.</small>'}</form>${typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a read-only agent to search this import. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
+        render(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><label><input required type="checkbox" name="aiConsent" value="yes"> I consent to sending this query and bounded connection name/company/position observations to OpenAI for this search.</label><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Query-time search; no shared people index.</small>'}</form>${typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a read-only agent to search this import. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
         return
       }
       if (request.method === 'POST' && ['/search', '/setup', '/logout'].includes(url.pathname)) {
@@ -133,7 +138,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
           const result = await createPrivateSearch({ readImport: reader, complete })({ importId: id, query: input.get('query'), signal: controller.signal })
-          page(response, 'Search results', `<p>${result.matches.length} matching observations.</p>${result.matches.map(match => `<article><h2>${html([match.fields['first name'], match.fields['last name']].filter(Boolean).join(' '))}</h2><p>${html(match.fields.position ?? '')} · ${html(match.fields.company ?? '')}</p><p>${html(match.reason)}</p><small>Source ${html(match.sourceId)}<br>${html(match.rowId)}</small></article>`).join('')}<a href="/imports/${id}">Back to import receipt</a>`)
+          render(response, 'Search results', `<p>${result.matches.length} matching observations.</p>${result.matches.map(match => `<article><h2>${html([match.fields['first name'], match.fields['last name']].filter(Boolean).join(' '))}</h2><p>${html(match.fields.position ?? '')} · ${html(match.fields.company ?? '')}</p><p>${html(match.reason)}</p><small>Source ${html(match.sourceId)}<br>${html(match.rowId)}</small></article>`).join('')}<a href="/imports/${id}">Back to import receipt</a>`)
           return
         }
         if (typeof issueGrant !== 'function' || typeof complete !== 'function') throw new Error('private_agent_setup_unavailable')
@@ -148,7 +153,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
     } catch (error) {
       const limited = error.message === 'private_body_limit' || error.message === 'archive_size_limit'
       const recovery = error.message === 'private_owner_recovery_required'
-      if (!response.headersSent) page(response, recovery ? 'Account recovery required' : 'Private operation unavailable', recovery ? '<p>Your Ideaflow identity could not be safely mapped to an existing or newly provisioned Unlinked owner. No archive was accepted. Complete the trusted account recovery/provisioning step.</p>' : '<p>The operation did not complete. Retry using your receipt, or return to sign-in. No alternate owner or public backend will be used.</p>', limited ? 413 : recovery ? 409 : 400)
+      if (!response.headersSent) render(response, recovery ? 'Account recovery required' : 'Private operation unavailable', recovery ? '<p>Your Ideaflow identity could not be safely mapped to an existing or newly provisioned Unlinked owner. No archive was accepted. Complete the trusted account recovery/provisioning step.</p>' : '<p>The operation did not complete. Retry using your receipt, or return to sign-in. No alternate owner or public backend will be used.</p>', limited ? 413 : recovery ? 409 : 400)
     }
   }
 }
