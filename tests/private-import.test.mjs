@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import JSZip from 'jszip'
@@ -21,6 +21,64 @@ async function fixture(t, options) {
   t.after(() => rm(root, { recursive: true, force: true }))
   return { root, adapter: isolatedStore(root, options) }
 }
+
+test('persisted job journey records uploaded and parsing before atomic partial publication', async t => {
+  const { root, adapter } = await fixture(t)
+  const ownerId = 'synthetic-journey-owner'
+  const bytes = await archive({
+    'Connections.csv': header + contact() + 'Missing,URL,,Synthetic,Designer\r\n',
+    'Profile.csv': 'First Name,Last Name\nAda,Example\n',
+    'Positions.csv': 'Company Name,Title\nSynthetic,Engineer\n',
+    'Education.csv': 'School Name\nSynthetic University\n',
+    'Skills.csv': 'Name\nSynthetic skill\n',
+    'Other.txt': 'original unsupported bytes',
+  })
+  const states = []
+  const observingAdapter = {
+    withImport: (owner, id, work) => adapter.withImport(owner, id, store => work({
+      ...store,
+      async saveJob(job) {
+        await store.saveJob(job)
+        const persisted = await isolatedStore(root).job(owner, id)
+        assert.equal(persisted.status, job.status)
+        assert.deepEqual(await adapter.asset(owner, job.archiveSha256), bytes)
+        assert.equal((await adapter.assertions(owner)).length, 0)
+        states.push(persisted)
+      },
+    })),
+  }
+  const request = { ownerId, filename: 'archive.zip', bytes, adapter: observingAdapter }
+  const result = await ingestArchive(request)
+  const reopened = isolatedStore(root)
+  assert.deepEqual(states.map(job => job.status), ['uploaded', 'parsing'])
+  assert.deepEqual(await reopened.job(ownerId, result.id), result)
+  assert.equal(result.status, 'partial')
+  assert.equal(result.phase, 'awaiting_private_index')
+  assert.equal(result.indexGate, 'noos_private_index_not_connected')
+  assert.deepEqual(result.counts, { accepted: 5, rejected: 1, skippedFiles: 1, failedFiles: 0, indexed: 0 })
+  const assertions = await reopened.assertions(ownerId)
+  assert.equal(assertions.length, 5)
+  for (const source of result.sources) {
+    assert.ok(await reopened.asset(ownerId, source.sha256))
+    assert.equal(source.indexedCount, 0)
+  }
+  assert.deepEqual(await ingestArchive({ ...request, adapter: reopened }), result)
+  assert.equal(await reopened.job('another-synthetic-owner', result.id), null)
+  assert.equal(await reopened.asset('another-synthetic-owner', result.archiveSha256), null)
+  const failedBytes = Buffer.from('synthetic corrupt ZIP')
+  const failed = await ingestArchive({ ...request, bytes: failedBytes, adapter: reopened })
+  assert.equal(failed.status, 'failed')
+  assert.deepEqual(await reopened.asset(ownerId, failed.archiveSha256), failedBytes)
+  if (process.env.PRIVATE_IMPORT_EVIDENCE) {
+    await writeFile(process.env.PRIVATE_IMPORT_EVIDENCE, JSON.stringify({
+      proofBoundary: 'Synthetic executable parser/job journey using durable isolated filesystem adapter. No real Noos authentication, authorization, indexing, historical recovery or live private data is demonstrated.',
+      transitions: [...states, result], persistedAssertions: assertions,
+      replay: 'Exact terminal receipt replayed without additional assertions',
+      otherOwnerLookup: { job: null, asset: null },
+      corruptArchive: failed, originalBytesRetained: true,
+    }, null, 2))
+  }
+})
 
 test('real ZIP and CSV bytes discover variable preambles and preserve rejected/unknown sources', async () => {
   const bytes = await archive({
