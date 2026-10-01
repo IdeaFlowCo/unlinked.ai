@@ -8,17 +8,18 @@ The public import entry still shows its availability gate.
 
 Owner/archive/parser/path/hash/row IDs and original bytes retain PR11 provenance.
 Uploaded/parsing updates each add an immutable revision receipt.
-Immutable batches hold at most 200 rows and one ordinal chunk manifest.
+Immutable batches hold at most 200 rows and one ordinal chunk manifest. Profile-first background imports may add one extra profile boundary chunk so own profile rows can be staged before connection chunks without making those rows searchable.
 Each accepted row is indexed by its owner-derived resource ID in the isolated Noos observation index (`observation-v1`), not a vector index.
 Graph resources remain bounded to 64 KiB and transactions to 600 resources/32 MiB.
 Oversized observations use digest-verified private assets plus graph provenance metadata.
 Source receipts store accurate rejection counts; original bytes and parser version retain the exact rejected records for recovery.
 One final CAS-fenced transaction publishes the current job, immutable receipt, source receipts and all ordered chunk references together.
 Tools require this live terminal fence and never enumerate provisional rows.
+The browser's own-profile page is the only provisional reader: it rechecks the live owner/job fence, reads only bounded Profile/Positions/Education/Skills chunk IDs, and does not call the scoped search/MCP reader.
 Exact chunk replay is immutable; interrupted writers reconstruct the deterministic journal.
 Lost final responses return the terminal receipt; concurrent publishers may receive a revision conflict and retry.
 A tombstoned publication cannot be reopened by a delayed writer.
-Indexed counts appear only at final publication and equal all accepted observations.
+Indexed counts appear only at final publication and equal all accepted observations. Background progress counts describe durably staged observations; they are not indexed/searchable counts until the final fence.
 Rejected/malformed records remain reported and may make an import partial.
 
 There is no 500-row truncation or rejection gate.
@@ -42,17 +43,18 @@ Archive email/profile fields never select or rebind ownership.
 Unknown/conflicting ownership fails closed before upload.
 Bounded random sessions use Secure/HttpOnly/SameSite cookies and disappear on restart.
 Same-origin requests and CSRF protect mutations; one combined upload disclosure/action authorizes private retention and bounded OpenAI processing for browser and search-only scoped agent searches. Versioned consent persists in immutable import/source receipts; search and grant issuance/verification fail closed for older imports lacking it. Replays reuse the original consent without changing prior receipts.
-Receipt/replay and one-action scoped setup forms are implemented.
+Receipt/replay and one-action scoped setup forms are implemented. In open-account mode, upload records the combined disclosure by action rather than accepting a separate consent checkbox; the native multipart form contains only `csrf`, `archive` and the synthetic-only rehearsal confirmation when applicable.
 Browser responses use `Referrer-Policy: strict-origin`; invited landing pages additionally allow the exact HTTPS provider origin in CSP `form-action`, while all other forms stay self-only.
 Invited setup downloads a fifteen-minute search-only grant for exactly one import; raw archive access is excluded.
 Open-account setup issues a durable account-scoped bearer for `unlinked_search_network`, covering all current and future owner imports until revoked, with no raw archive, global graph or caller-selected owner access.
+Open-account upload can redirect to `/profile` after only durable staging; `/profile`, `/network` and `/settings` rediscover active job history on return, poll authenticated same-owner status, and show technical receipts under Settings.
 The separate signed tool audiences use durable owner-private Noos grant records and live publication/revocation checks. Invited grants use ephemeral signing keys that invalidate grants on restart; account grants derive a domain-separated key from the approved private graph secret, so unchanged secrets preserve grants and secret replacement revokes them.
 Operational bearers and provider ID tokens never become agent credentials.
 
 The synthetic standalone runtime binds loopback only.
 Reserved tailnet origin is https://m4-mini.tailb2a35c.ts.net:9367 and callback /auth/callback/ideaflow.
 This reservation is not a running or verified upload URL.
-The proposed real guest packet uses the separate rollback `https://private.unlinked.ai` origin, can be prepared for the canonical `https://www.unlinked.ai` cutover, and uses the process-only composition in `mcp-server/private-composition.mjs`; see [Private pilot release packet](../deploy/private-pilot/README.md) and [Canonical app host cutover](../deploy/private-pilot/CANONICAL-HOST.md).
+The proposed real guest packet uses the separate rollback `https://private.unlinked.ai` origin, can be prepared for the canonical `https://www.unlinked.ai` cutover, and uses the process-only composition in `mcp-server/private-composition.mjs`; see [Private pilot release packet](../deploy/private-pilot/README.md), [Durable archive import](durable-archive-import.md) and [Canonical app host cutover](../deploy/private-pilot/CANONICAL-HOST.md).
 Actual provider client/redirect acceptance and immutable legacy/new-owner provisioning remain release gates. The optional trusted invited-owner callback and exact owner/principal readback are documented in [Private invited-owner browser](private-invited-browser.md); the open account launch is summarized in [Open account launch](../deploy/private-pilot/ACCOUNT-LAUNCH.md).
 Production provider granular delegation is not assumed or enabled.
 

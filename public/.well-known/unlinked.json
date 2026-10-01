@@ -1,7 +1,7 @@
 {
   "$schema": "https://www.unlinked.ai/.well-known/unlinked.json",
   "name": "unlinked.ai",
-  "description": "AI-powered LinkedIn network search, profile exploration, and intro drafting for autonomous agents and MCP clients.",
+  "description": "AI-powered LinkedIn network search with open-beta browser upload and agent setup at private.unlinked.ai; legacy REST/MCP schemas remain available as reference.",
   "site": "https://www.unlinked.ai",
   "repo": "https://github.com/IdeaFlowCo/unlinked.ai",
   "docs": {
@@ -13,7 +13,7 @@
   },
   "api": {
     "status": "historical_reference",
-    "availability": "Private sign-in, uploads and live agent-key creation are unavailable in the deployed product.",
+    "availability": "Open-beta sign-in, upload, own-network AI search and Agent setup are at https://private.unlinked.ai/login. Legacy REST agent-key creation remains historical reference.",
     "base_url": "https://www.unlinked.ai/api",
     "auth": {
       "header": "Authorization",
@@ -53,7 +53,7 @@
   },
   "mcp": {
     "status": "historical_reference",
-    "availability": "Live hosted setup and agent-key creation are unavailable today.",
+    "availability": "Current hosted Agent setup is in the beta app at https://private.unlinked.ai/login. This stdio package documents the historical legacy server.",
     "server_card": "/.well-known/mcp/server-card.json",
     "package": "@unlinked/mcp-server",
     "command": "node /absolute/path/to/unlinked.ai/mcp-server/dist/index.js",
@@ -68,16 +68,16 @@
   },
   "private_archive_availability": {
     "status": "staging_only_unmounted",
-    "production_setup": "unavailable",
-    "ai_search": "unavailable",
-    "note": "Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live private account or invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend."
+    "production_setup": "beta_app",
+    "ai_search": "beta_app",
+    "note": "Open-beta upload, own-network AI search and Agent setup are at https://private.unlinked.ai/login while the source contracts remain default-off in this public app. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md and https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/durable-archive-import.md for the staging contracts and release gates; synthetic receipts do not verify a production rollout."
   },
   "browser_entry": {
     "path": "/auth/login",
     "provider": "Ideaflow ID",
-    "status": "unavailable",
+    "status": "beta_external",
     "signup_path": "/auth/login",
     "agent_setup_path": "/agents",
-    "note": "No live private account, invitation or setup URL is advertised. Legacy auth/key fields describe historical API schemas."
+    "note": "The public www app bridges to the separate beta host. Legacy auth/key fields describe historical API schemas."
   }
 }

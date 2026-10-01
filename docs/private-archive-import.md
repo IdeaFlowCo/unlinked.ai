@@ -1,7 +1,7 @@
 # Private LinkedIn archive foundation
 
 This slice implements the parser/job foundation. See [README.md](../README.md#import-linkedin-archive) for the public archive entry and upload availability.
-Production ingestion, AI search, identity binding, agent linking, migration and backend activation remain unavailable. The default-off staging adapter/browser/search implementation is documented in [Private Noos staging](private-noos-staging.md).
+Production ingestion, AI search, identity binding, agent linking, migration and backend activation remain unavailable. The default-off staging adapter/browser/search implementation is documented in [Private Noos staging](private-noos-staging.md), and the profile-first background import path is documented in [Durable archive import](durable-archive-import.md).
 The legacy onboarding/agent endpoints are not connected to this module.
 
 ## Parser and receipts
@@ -27,12 +27,13 @@ An exact replay returns the original terminal receipt; revised bytes or filename
 There is no person directory, cross-owner merge, public publication or account claim inferred from archive data.
 No active-person materialization or supersession resolver exists yet: a future owner-scoped resolver must select/supersede only this owner's prior assertions. Staging observation indexing is not embedding generation.
 
-Job metadata and original bytes are written before parsing.
+Job metadata and original bytes are written before parsing. In the default-off background path, `stageArchive` commits only that `uploaded` receipt before the browser redirects to `/profile`; `runArchiveJob` then parses and publishes from the durable asset outside the request lifecycle.
 A job advances from `uploaded` to `parsing`, then publishes an adapter-specific terminal receipt, or `failed` when none are accepted or the archive is invalid.
+For `profile-first-v1` background jobs, Profile, Positions, Education and Skills observations are staged before connection observations so `/profile` can read its own bounded chunks before the final search/MCP publication fence. Pending rows remain unavailable to the scoped import reader.
 Every source receipt records accepted/rejected counts and unsupported/error outcomes. The Noos adapter stores compact rejection counts; original bytes and parser version preserve exact rejected records.
 Without an index adapter, accepted rows yield `partial` with `phase: awaiting_private_index`, zero `counts.indexed` and a missing-index `indexGate`. The staging Noos adapter instead uses the [fenced observation publication contract](private-noos-staging.md#publication-and-scale); parsing alone never establishes indexed completeness.
 Persistence errors reject the operation; they are never translated into archive success. Once the `parsing` receipt is saved, later persistence errors leave that retryable receipt. Failures during initial asset/job writes can leave no job or an `uploaded` receipt, depending on the last successful write.
-The adapter must serialize one owner's job, preserve immutable assets/assertions and expose assertions only through the final publication fence.
+The adapter must serialize one owner's job, preserve immutable assets/assertions and expose assertions only through the final publication fence. Background adapters additionally need owner-scoped pending-job and job-history discovery so the singleton worker and browser Settings/Profile pages can resume after restart without a separate jobs database.
 Retry starts its counters from zero, so an interrupted publication cannot duplicate counts.
 
 ## Noos boundary and activation gate

@@ -27,7 +27,7 @@ The graph entrypoint preserves `tini` and the pinned image startup script while 
 No generic graph-query route, raw asset route or operational token is public.
 The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, restores only to new canonical `backups/rehearsal-*` targets under the operator-owned mode-700 backup root, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only the validated origin, UID/GID plus the three approved image variables for Compose.
 `runtime.mjs` refuses to launch without reviewed mode600 wiring.
-Open account signup is the proposed initial cohort path. The exact verified production issuer/subject resolves an existing active private owner or atomically creates one through the reviewed private signup capability before upload is enabled.
+Open account signup is the proposed initial cohort path. The exact verified production issuer/subject resolves an existing active private owner or atomically creates one through the reviewed private signup capability before upload is enabled. The runtime must include the reviewed background import worker and Noos pending-job/job-history discovery before accepting real archives.
 Every import/index/source/receipt/grant is keyed to that immutable owner UUID in the dedicated graph.
 Prior legacy IDs/data remain unchanged and unlinked; no prior owner or data is imported implicitly.
 Storage retains immutable originals and receipts for recovery. No automatic physical deletion is promised.
@@ -54,7 +54,7 @@ An actual existing legacy account still needs independent supported legacy-owner
 Public ingress exposes only sign-in/account setup; all receipts/uploads/search are session/CSRF/same-origin and exact owner gated.
 Ingress uses `Referrer-Policy: strict-origin` so provider navigation keeps the Origin header without sending sensitive paths in referrers. Invitation mode, when used, permits only the exact HTTPS identity provider in CSP `form-action`; subsequent private forms remain self-only.
 Secure HttpOnly SameSite cookies contain random fifteen-minute session IDs, not identity/access tokens.
-One combined upload disclosure/action authorizes private archive retention and bounded OpenAI processing of queries and observed name/company/position/date fields for browser and search-only scoped agent searches. Immutable import/source receipts retain versioned consent. Older imports without this disclosure fail closed for search and grants; replay never upgrades prior consent.
+One combined upload disclosure/action authorizes private archive retention and bounded OpenAI processing of queries and observed name/company/position/date fields for browser and search-only scoped agent searches; no separate production consent checkbox is required. Immutable import/source receipts retain versioned consent. Older imports without this disclosure fail closed for search and grants; replay never upgrades prior consent.
 Agent setup is a separate explicit owner action for `unlinked_search_network` across all current and future owner imports until revoked, with a distinct tool audience, durable grant record and live revocation/publication checks.
 Operational/provider tokens and raw recovery APIs are never delegated to the agent.
 Scoped publication reads fetch at most eight observations concurrently, preserve manifest order and recheck the live publication fence after all rows so a deletion/revocation race wins.
@@ -68,7 +68,7 @@ Actual real-user delegation must receive its own reviewed approval; synthetic st
 4. After approval only, create the separate target and verify anonymous/cross-owner denial, public443/callback Host/Origin behavior, privacy boundaries and the M5 browser route.
 5. Complete a signed-in disposable end-to-end browser rehearsal on the SAME reviewed runtime/code; paired graph/blob restore must preserve all1,001 rows, original bytes, source IDs and tombstones.
 6. Verify the guest's actual production sign-in/intended account and approved NEW ownership/principal proof; read back both sides, snapshot ACLs and backups.
-7. Enable only this owner, obtain guest archive/AI consent, upload the real archive, verify accepted/indexed counts/replay, owner-wide search and account MCP parity.
+7. Enable only this owner, obtain the guest's upload action disclosure, upload the real archive, verify prompt `/profile` return, background continuation after navigation/close, profile-first display, Settings receipts, accepted/indexed counts/replay, owner-wide search and account MCP parity.
 
 Rollback stops only the three labeled new ingress/runtime/graph containers, preserves private originals/owner UUID/backups, and leaves durable grant/client revocation to the separately approved identity-owner operation.
 Do not blindly delete or rebind live identity/owner data.

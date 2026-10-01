@@ -110,15 +110,16 @@ test('open browser signup →1001 ConnectionsZIP→whole-owner search→durable 
   zip.file('Connections.csv',csv)
   const bytes = await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'})
   const upload = async (value,name) => {
-    const form=new FormData();form.set('csrf',signed.csrf);form.set('consent','yes');form.set('syntheticConsent','yes');form.set('archive',new Blob([value]),name)
+    const form=new FormData();form.set('csrf',signed.csrf);form.set('syntheticConsent','yes');form.set('archive',new Blob([value]),name)
     return fetch(`${endpoint}/upload`,{method:'POST',redirect:'manual',headers:{Cookie:signed.cookie,Origin:baseUrl},body:form})
   }
-  const imported=await upload(bytes,'Connections-only.zip');assert.equal(imported.status,303)
-  const id=imported.headers.get('location').split('/').pop(),job=f.resources.get(id).payload
+  const imported=await upload(bytes,'Connections-only.zip');assert.equal(imported.status,303);assert.equal(imported.headers.get('location'),'/profile')
+  const id=[...f.resources.values()].find(row => row.sourceOwnerId === owner.ownerId && row.payload?.filename === 'Connections-only.zip' && row.payload?.id === row.sourceId && !row.payload.receiptOf && !row.payload.kind).sourceId,job=f.resources.get(id).payload
   assert.equal(job.counts.accepted,1001);assert.equal(job.counts.indexed,1001)
   assert.equal((await upload(bytes,'Connections-only.zip')).headers.get('location'),imported.headers.get('location'))
   const second=await upload(Buffer.from(header+'Second,Import,https://www.linkedin.com/in/synthetic-second,Other,Designer\n'),'Connections.csv');assert.equal(second.status,303)
-  const returned=await signIn();assert.equal(signupCalls,1);assert.ok(returned.page.includes('Connections-only.zip'))
+  const returned=await signIn();assert.equal(signupCalls,1)
+  assert.ok((await (await fetch(endpoint + '/settings',{headers:{Cookie:returned.cookie}})).text()).includes('Connections-only.zip'))
   const post=(path,input)=>fetch(endpoint+path,{method:'POST',redirect:'manual',headers:{Cookie:signed.cookie,Origin:baseUrl},body:new URLSearchParams({csrf:signed.csrf,...input})})
   const searched=await post('/search-account',{query:'Zephyr engineer'});assert.equal(searched.status,200);assert.match(await searched.text(),/Synthetic1000 Contact/);assert.equal(seen.size,1002)
   const setup=await post('/setup-account',{});assert.equal(setup.status,200)
