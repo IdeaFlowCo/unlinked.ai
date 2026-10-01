@@ -91,6 +91,16 @@ async function namedProfileArchive(first, last, headline, count = 5) {
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 }
 
+async function correctedProfileArchive({ first, headline, connection, role, skill }) {
+  const zip = new JSZip()
+  zip.file('Connections.csv', `First Name,Last Name,URL,Company,Position\n${connection},Owner,https://www.linkedin.com/in/${connection.toLowerCase()}-owner,Network Co,Collaborator\n`)
+  zip.file('Profile.csv', `First Name,Last Name,Headline\n${first},Owner,${headline}\n`)
+  zip.file('Positions.csv', `Company Name,Title,Started On,Finished On,Description\n${role} Co,${role},2020,,${role} description\n`)
+  zip.file('Education.csv', 'School Name,Degree Name,Start Date,End Date\nStable University,BS Graphs,2010,2014\n')
+  zip.file('Skills.csv', `Name\n${skill}\n`)
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+}
+
 test('stage returns durable uploaded receipt; crash after profile before connections resumes all 1,003 once', async t => {
   const f = await fixture(t), ownerId = 'owner-a', backend = f.backend(ownerId), bytes = await fullArchive()
   const request = { ownerId, filename: 'full.zip', bytes, adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT, now: () => 1000 }
@@ -304,6 +314,65 @@ test('profile page selects newest successful profile from reverse job discovery 
   assert.match(profile, /Current profile/)
   assert.doesNotMatch(profile, /Older Owner/)
   assert.doesNotMatch(profile, /Legacy profile/)
+})
+
+test('profile page renders own sections from same corrected successful import', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listImportIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && ['indexed', 'partial'].includes(row.payload?.status) && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listAccountGrantIds: async () => [] }
+  }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const upload = async (bytes, name) => {
+    const page = await (await fetch(endpoint, { headers: { Cookie: cookie } })).text()
+    const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
+    const form = new FormData(); form.set('csrf', csrf); form.set('archive', new Blob([bytes]), name)
+    const response = await fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })
+    assert.equal(response.status, 303); assert.equal(response.headers.get('location'), '/profile')
+    const job = Object.values(await f.snapshot()).find(row => row.sourceOwnerId === owner.ownerId && row.payload?.filename === name && row.payload?.backgroundVersion && !row.payload.receiptOf)
+    await runArchiveJob({ ownerId: owner.ownerId, id: job.sourceId, adapter: (await getBackend(owner)).adapter, readAsset: (await getBackend(owner)).readAsset })
+  }
+  await upload(await correctedProfileArchive({ first: 'Old', headline: 'Old headline', connection: 'Oldcontact', role: 'Old Role', skill: 'Old Skill' }), 'old-full.zip')
+  await upload(await correctedProfileArchive({ first: 'Current', headline: 'Current headline', connection: 'Newcontact', role: 'Current Role', skill: 'Current Skill' }), 'current-full.zip')
+  const profile = await (await fetch(endpoint + '/profile', { headers: { Cookie: cookie } })).text()
+  assert.match(profile, /Current Owner/)
+  assert.match(profile, /Current headline/)
+  assert.match(profile, /Current Role/)
+  assert.match(profile, /Current Skill/)
+  assert.doesNotMatch(profile, /Old Role/)
+  assert.doesNotMatch(profile, /Old Skill/)
+  const network = await (await fetch(endpoint + '/network', { headers: { Cookie: cookie } })).text()
+  assert.match(network, /Oldcontact Owner/)
+  assert.match(network, /Newcontact Owner/)
+})
+
+test('profile rows without import metadata fall back to final profile group', () => {
+  const profile = profileFromRows([
+    { category: 'profile', fields: { 'first name': 'Old', 'last name': 'Owner', headline: 'Old headline' } },
+    { category: 'positions', fields: { title: 'Old Role', 'company name': 'Old Co' } },
+    { category: 'skills', fields: { name: 'Old Skill' } },
+    { category: 'profile', fields: { 'first name': 'Current', 'last name': 'Owner', headline: 'Current headline' } },
+    { category: 'positions', fields: { title: 'Current Role', 'company name': 'Current Co' } },
+    { category: 'skills', fields: { name: 'Current Skill' } },
+  ])
+  assert.equal(profile.name, 'Current Owner')
+  assert.deepEqual(profile.positions, [{ title: 'Current Role', company: 'Current Co', description: undefined, startDate: undefined, endDate: undefined }])
+  assert.deepEqual(profile.skills, ['Current Skill'])
 })
 
 test('profile page accepts legacy receipts without createdAt before newer profile-first jobs', async t => {

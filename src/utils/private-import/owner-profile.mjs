@@ -45,9 +45,12 @@ export async function readOwnerProfileRows({ ownerId, jobs, backend }) {
 }
 
 export function profileFromRows(rows) {
-  const profile = rows.findLast(row => row.category === 'profile')?.fields ?? {}
+  const profileIndex = rows.findLastIndex(row => row.category === 'profile')
+  const profileRow = profileIndex >= 0 ? rows[profileIndex] : null
+  const profile = profileRow?.fields ?? {}
+  const profileRows = typeof profileRow?.importId === 'string' ? rows.filter(row => row.importId === profileRow.importId) : rows.slice(Math.max(profileIndex, 0))
   return { name: [profile['first name'], profile['last name']].filter(Boolean).join(' '), headline: profile.headline ?? '',
-    positions: rows.filter(row => row.category === 'positions').map(({ fields }) => ({ title: fields.title, company: fields['company name'], description: fields.description, startDate: fields['started on'], endDate: fields['finished on'] })),
-    education: rows.filter(row => row.category === 'education').map(({ fields }) => ({ institution: fields['school name'], degree: fields['degree name'], startDate: fields['start date'], endDate: fields['end date'] })),
-    skills: [...new Set(rows.filter(row => row.category === 'skills').map(row => row.fields.name))] }
+    positions: profileRows.filter(row => row.category === 'positions').map(({ fields }) => ({ title: fields.title, company: fields['company name'], description: fields.description, startDate: fields['started on'], endDate: fields['finished on'] })),
+    education: profileRows.filter(row => row.category === 'education').map(({ fields }) => ({ institution: fields['school name'], degree: fields['degree name'], startDate: fields['start date'], endDate: fields['end date'] })),
+    skills: [...new Set(profileRows.filter(row => row.category === 'skills').map(row => row.fields.name))] }
 }
