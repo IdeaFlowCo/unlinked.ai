@@ -46,7 +46,8 @@ Before provisioning or exposing HTTP readiness, it waits for the dedicated Bolt 
 The server-side operations key never leaves the runtime; hosted MCP uses its separate search-only grants and live publication fences.
 The private env, production client, TLS/DNS, dependency-complete source artifacts and built deployment images remain activation inputs.
 It must start the isolated operational service only at container `127.0.0.1:9022` and return `login`, `resolveOwner`, `claimInvitation`, `getBackend`, `complete` and `close` capabilities.
-The login object must implement `begin` and `finish` using `createIdeaflowLogin` with the exact verified production issuer/client and callback.
+The login object must implement `begin`, `finish` and the exact HTTPS `authorizationOrigin` using `createIdeaflowLogin` with the verified production issuer/client and callback.
+The authorization request uses `prompt=login`; Unlinked confirms the returned verified account before an invited owner claim, rather than silently binding by email.
 The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `claimInvitation` is its guarded claim method and `resolveOwner` resolves the same verified issuer/subject mapping.
 `getBackend` must revalidate active immutable owner/principal and publication access on every operation.
 The operational API exposes only its scoped router, never the legacy generic graph query routes.
@@ -97,6 +98,7 @@ All services run as the private operator with all capabilities dropped; nginx te
 If a separately owned maintenance-only ingress occupies 443, verify its exact saved ID/root/maintenance labels and stop it before starting the full recipe; retain its config/certificates for rollback.
 Existing port-80 nginx, legacy Noos containers, shared graph, existing assets and synthetic fixture roots are not mounted or stopped.
 Proxy request/error logging is disabled, so `/invite/<token>` and query strings cannot leak there.
+Ingress sends `Referrer-Policy: strict-origin`; the browser app's invited landing page allows only self plus the configured HTTPS identity origin in CSP `form-action`, and later private forms remain self-only.
 Wrong Host headers and raw operations/asset/query paths are rejected; application session/CSRF/owner authorization remains the trusted product's responsibility.
 `backup` requires all three owned containers stopped, pairs `neo4j-data`, `assets`, `identity-state`, `invitations` and `audit`, and captures the complete graph including bindings/principals/revocation fences.
 `identity-state` stores any separately persisted identity adapter state; it must exist even when empty because identities are entirely in the graph.
