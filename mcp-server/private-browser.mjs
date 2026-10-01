@@ -212,6 +212,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         for (let start = 0; start < ids.length; start += 8) resources.push(...await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id))))
         return resources.filter(resource => resource && !resource.deleted && resource.sourceOwnerId === session.owner.ownerId && resource.payload?.id === resource.sourceId && !resource.payload.kind && !resource.payload.receiptOf)
       }
+      const profileJobs = jobs => [...jobs].sort((a, b) => {
+        const createdA = a.payload.createdAt, createdB = b.payload.createdAt
+        if (!Number.isSafeInteger(createdA) || !Number.isSafeInteger(createdB)) throw new Error('private_import_created_at_invalid')
+        return createdA - createdB || a.sourceId.localeCompare(b.sourceId)
+      })
       const jobProps = jobs => {
         const ordered = [...jobs].sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0))
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
@@ -234,7 +239,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
         const jobs = await jobResources(), props = jobProps(jobs)
         if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
-        const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs, backend }))
+        const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs: profileJobs(jobs), backend }))
         journey(response, renderOwnProfile({ ...props, profile, imports: summaries(jobs) }), props.importJob); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/network') {
