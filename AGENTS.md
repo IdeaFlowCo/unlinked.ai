@@ -29,10 +29,7 @@ This file is the repo-internal guide for autonomous agents and contributors work
 
 ## Public entry availability
 
-The public homepage restores the network/import/search/agent purpose alongside Meet.
-Browser entry at `/auth/login` is Ideaflow ID only and explicitly unavailable until private activation; `/auth/signup` redirects there.
-The public `/network`, `/search`, and `/agents` pages describe availability, without mounting the private backend or collecting archives.
-Legacy API schemas remain historical reference documentation.
+See [README.md](README.md#import-linkedin-archive) for the public export-first journey and availability, and its [Getting Started](README.md#getting-started) section for backend-independent public routes. Legacy API schemas remain historical reference documentation.
 
 ## Private archive foundation
 

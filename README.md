@@ -8,7 +8,11 @@ The page displays the legacy network's unavailable state without querying Supaba
 
 ## Import LinkedIn archive
 
-**Import LinkedIn archive** remains visible beside Meet and opens `/import-linkedin`. The page displays an unavailable state and accepts no uploads. Keep your original LinkedIn archive while the private service is being restored.
+The homepage's primary action, **Start my LinkedIn export**, opens LinkedIn's data-export settings in a new tab and, with JavaScript enabled, takes the Unlinked tab to `/import-linkedin` for guidance. Request the export before login: on a personal computer, select **Connections only**, wait for LinkedIn's email, and keep the downloaded file. See [LinkedIn's current export guidance](https://www.linkedin.com/help/linkedin/answer/a1339364?lang=en) for delivery timing, download expiry and device availability. Unlinked cannot detect delivery or save your place.
+
+The fictional homepage answer illustrates matching on company and title from connection fields; it is not a live search result and does not infer biographies or work history. The navigation offers Meet, For agents and Sign-in availability. Visitors who already have a file can go directly to `/import-linkedin#next`.
+
+Login is the next step, with an invitation and Ideaflow ID required before private upload once activated. Sign-in and uploads are not active yet; there is no public signup or invitation request form. The public site accepts no files, and private browsing, AI search and agent setup remain unavailable. Parser handling of Connections-only CSV or ZIP does not establish supported browser upload: the file-picker journey still needs verification. Legacy account access remains paused.
 
 See the [private archive foundation contract](docs/private-archive-import.md) for the parser/job scope, adapter requirements and activation gates.
 
@@ -71,8 +75,5 @@ The isolated private Noos adapter, bounded publication journal, OIDC browser con
 
 ### Public network entry
 
-The homepage links to network, LinkedIn archive preparation, AI-search availability, agent-setup availability and Meet.
-Private sign-in, uploads, browsing, search and hosted MCP are not yet live; the public pages collect no archive or login.
-`/auth/login` shows the Ideaflow ID path and current availability; `/auth/signup` returns there.
-Meet remains available, and LinkedIn export preparation links directly to LinkedIn.
+See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/auth/login` shows the Ideaflow ID path and current availability; `/auth/signup` returns there.
 The private runtime still searches a selected import; owner-wide multi-import browsing/search remains follow-up work.
