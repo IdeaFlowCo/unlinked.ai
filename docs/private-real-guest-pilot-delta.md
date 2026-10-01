@@ -73,3 +73,7 @@ Rollback stops only the three labeled new ingress/runtime/graph containers, pres
 Do not blindly delete or rebind live identity/owner data.
 Restore is a quiesced paired graph/blob operation with integrity manifest, bindings, journal rows before final publication fences, and preserved tombstones.
 Synthetic paired restore has been proven; operational backup scheduling/ownership, durable directory fsync, real identity/principal proof,443 route and actual browser acceptance remain unproven release gates.
+
+Private container activation publishes only non-root ingress 443:8443.
+The browser wildcard listener is confined to the dedicated frontend bridge with no published app port, and the graph is confined to a separate internal backend bridge with no published Bolt port.
+Operational/raw asset services remain runtime loopback; the invitation, owner and delegated tool checks continue to apply before every read/write.

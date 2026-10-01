@@ -49,3 +49,7 @@ jobs:
       - name: Compile MCP server
         working-directory: mcp-server
         run: npm run build
+      - name: Verify private deployment consumer contracts
+        run: |
+          python3 deploy/private-pilot/checks.py
+          python3 deploy/private-pilot/topology-check.py
