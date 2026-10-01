@@ -30,8 +30,10 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
       const claims = tokens.claims()
       const now = Math.floor(Date.now() / 1000)
       if (!claims || !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp) || claims.iat > now + 30 || claims.exp <= claims.iat || claims.exp <= now || claims.iss !== issuer || typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 512 || /[\x00-\x1f\x7f]/.test(claims.sub)) throw new Error('verified_ideaflow_identity_required')
+      // Prototype policy accepts the authenticated IdP email for display, even
+      // without email_verified. Owner authority remains exact signed issuer/sub.
       // No access/ID token reaches an agent, cookie or imported source record.
-      return { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), verifiedEmail: claims.email_verified === true && typeof claims.email === 'string' ? claims.email : null }
+      return { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), verifiedEmail: typeof claims.email === 'string' ? claims.email : null }
     },
   }
 }
