@@ -36,14 +36,18 @@ export function createPrivateSearch({ readImport, complete }) {
     }
     // Every connection is considered in bounded contexts. Only ranked IDs are
     // reduced between rounds; no first-N archive truncation or shared index.
+    const envelopeBytes = Buffer.byteLength(JSON.stringify({ query: query.trim(), observations: [] }))
     let round = candidates, winners
     do {
       winners = []
       for (let start = 0; start < round.length;) {
-        const group = []; let bytes = Buffer.byteLength(query) + 128
+        const group = []; let bytes = envelopeBytes
         while (start < round.length && group.length < 200) {
-          const rowBytes = Buffer.byteLength(JSON.stringify(round[start])) + 1
-          if (group.length && bytes + rowBytes > MAX_INPUT_BYTES) break
+          const rowBytes = Buffer.byteLength(JSON.stringify(round[start])) + Number(group.length > 0)
+          if (bytes + rowBytes > MAX_INPUT_BYTES) {
+            if (!group.length) throw new Error('private_search_context_limit')
+            break
+          }
           group.push(round[start++]); bytes += rowBytes
         }
         winners.push(...await rank(group))
