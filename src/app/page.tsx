@@ -11,6 +11,7 @@ export default function Home() {
           <p className="hero-subtitle">An introduction should be the start of a conversation. Scan an OpenChat card to connect with the person in front of you.</p>
           <div className="hero-actions">
             <Link className="public-button public-button-primary" href="/meet">Meet someone <span aria-hidden="true">↗</span></Link>
+            <Link className="public-button public-button-quiet" href="/import-linkedin">Import LinkedIn archive</Link>
             <a className="public-button public-button-quiet" href="#how-it-works">How it works <span aria-hidden="true">↓</span></a>
           </div>
         </div>
