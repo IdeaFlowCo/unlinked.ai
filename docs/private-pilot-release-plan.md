@@ -35,7 +35,7 @@ Any new persistent credential copy or actual pilot resource creation must use it
 
 ## Identity and private runtime wiring
 
-The client uses code flow, PKCE S256, state/nonce, RS256 ID-token verification, `prompt=login` reauthentication and explicit post-callback account confirmation for invited owner creation, with scopes `openid profile email` and client_secret_basic.
+The client uses code flow, PKCE S256, state/nonce, issuer-discovered JWKS ID-token verification, `prompt=login` reauthentication and explicit post-callback account confirmation for invited owner creation, with scopes `openid profile email` and client_secret_basic.
 The exact issuer comes from the verified isolated provider rehearsal, never a guessed production URL.
 The identity owner's approved private registration output is consumed in place; do not print or copy client secrets into reports.
 The callback calls only the read-only exact `(issuer,opaque subject)` resolver.
