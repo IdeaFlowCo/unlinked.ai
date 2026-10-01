@@ -74,7 +74,7 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
   const uploadPage = await (await fetch(endpoint, { headers: { Cookie: sessionCookie } })).text()
   const csrf = uploadPage.match(/name="csrf" value="([^"]+)"/)[1]
   const csv = 'First Name,Last Name,URL,Company,Position\nAda,Example,https://www.linkedin.com/in/synthetic-ada,Synthetic,Engineer\n'
-  const form = consent => { const value = new FormData(); value.set('csrf', csrf); value.set('archive', new Blob([csv]), 'Connections.csv'); if (consent) value.set('consent', 'yes'); return value }
+  const form = consent => { const value = new FormData(); value.set('csrf', csrf); value.set('syntheticConsent', 'yes'); value.set('archive', new Blob([csv]), 'Connections.csv'); if (consent) value.set('consent', 'yes'); return value }
   const headers = { Cookie: sessionCookie, Origin: baseUrl }
   const refused = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(false) })
   assert.equal(refused.status, 400); assert.equal(resources.size, 0)
