@@ -1,4 +1,4 @@
-Unlinked helps people carry their network into useful introductions. The public landing, network/search/setup availability pages, LinkedIn archive preparation page, Ideaflow ID sign-in status page, and `/meet` work independently of the paused legacy Supabase backend. Legacy profile and agent API implementations remain behind their backend and are preserved as historical reference.
+Unlinked helps people carry their network into useful introductions. The public landing, network/search/setup availability pages, LinkedIn archive preparation page, Ideaflow ID sign-in bridge, and `/meet` work independently of the paused legacy Supabase backend. Legacy profile and agent API implementations remain behind their backend and are preserved as historical reference.
 
 ## Meet someone
 
@@ -8,11 +8,16 @@ The page displays the legacy network's unavailable state without querying Supaba
 
 ## Import LinkedIn archive
 
-The homepage's primary action, **Start my LinkedIn export**, opens LinkedIn's data-export settings in a new tab and, with JavaScript enabled, takes the Unlinked tab to `/import-linkedin` for guidance. Request the export before login: on a personal computer, select **Connections only**, wait for LinkedIn's email, and keep the downloaded file. See [LinkedIn's current export guidance](https://www.linkedin.com/help/linkedin/answer/a1339364?lang=en) for delivery timing, download expiry and device availability. Unlinked cannot detect delivery or save your place.
+The homepage **Start** and navigation **Sign in** links open the working beta login at https://private.unlinked.ai/login.
+Anyone can sign in or create an account through Ideaflow ID; no invitation is needed.
+The beta app currently runs on private.unlinked.ai, separately from the public www.unlinked.ai homepage.
+This is an interim bridge, not a same-origin app migration.
 
-The fictional homepage answer illustrates matching on company and title from connection fields; it is not a live search result and does not infer biographies or work history. The navigation offers Meet, For agents and Sign-in availability. Visitors who already have a file can go directly to `/import-linkedin#next`.
-
-Login is the next step, using Ideaflow ID once the private account runtime is activated. Sign-in and uploads are not active on the public site yet; there is no live private account or invitation URL. The public site accepts no files, and private browsing, AI search and agent setup remain unavailable. Parser handling of Connections-only CSV or ZIP does not establish supported browser upload on the public site. Legacy account access remains paused.
+Prefer the full LinkedIn ZIP; Connections-only is also supported.
+`/import-linkedin` explains how to request and keep the export, then links to sign-in and upload.
+`/auth/login` provides the same working login bridge, and `/agents` points to Agent setup inside the app.
+The fictional homepage answer illustrates title/company matching, not a live search result or inferred biography.
+Private upload, own-network AI search and agent setup live in the beta app; legacy Supabase APIs remain historical and are not the new login path.
 
 See the [private archive foundation contract](docs/private-archive-import.md) for the parser/job scope, adapter requirements and activation gates.
 

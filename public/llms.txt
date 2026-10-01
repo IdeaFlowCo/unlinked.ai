@@ -1,12 +1,14 @@
 # unlinked.ai
 
-Public browser entry uses Ideaflow ID only; private sign-in and uploads are not live yet. /auth/login shows current availability, /auth/signup returns there, and /agents shows setup availability without instructing users to mint a legacy key. Legacy API schemas below are reference documentation, not a working onboarding path.
-> AI-powered LinkedIn network search, profile exploration, and intro drafting for autonomous agents and MCP clients.
-
-Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live private account or invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend.
+Public Start and Sign in links lead to the working open-beta app at https://private.unlinked.ai/login.
+Sign in or create an account through Ideaflow ID; no invitation is needed.
+Prefer a full LinkedIn ZIP; Connections-only is also supported.
+Upload and ask AI about your own network, then open Agent setup in the beta app for its MCP configuration.
+The app currently runs separately from the www.unlinked.ai homepage; this is an interim bridge.
+Legacy API schemas below are historical reference documentation, not the beta onboarding or MCP setup path.
 
 ## Documentation
-- [Agent setup status](/agents): current availability for private sign-in, uploads, and scoped MCP setup
+- [Agent setup status](/agents): sign-in bridge and instructions for Agent setup in the beta app
 - [Developer notes for agents](/AGENTS.md): agent-readable brief on authentication, server-side scoping guarantees, and REST API endpoints
 - [Well-known product descriptor](/.well-known/unlinked.json): machine-readable bootstrap manifest
 - [MCP server card](/.well-known/mcp/server-card.json): Model Context Protocol server card for `@unlinked/mcp-server`
@@ -14,7 +16,7 @@ Private archive import, scoped hosted setup and AI search remain unavailable in 
 
 ## Machine Access Reference
 - Base URL: `https://www.unlinked.ai`
-- Availability: Private sign-in, uploads, live key creation and hosted MCP setup are unavailable today; no private account or invitation URL is advertised.
+- Availability: Open-beta sign-in, upload, own-network AI search and Agent setup are at https://private.unlinked.ai/login. Legacy API availability remains separate.
 - Historical Authentication: `Authorization: Bearer ul_<key>` header on legacy agent requests.
 - Historical Key Format: Keys start with prefix `ul_`; no live key creation URL is advertised.
 - Scoping Guarantee: Agent API requests are scoped to the caller; see /AGENTS.md for details.
