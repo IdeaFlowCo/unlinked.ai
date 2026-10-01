@@ -20,8 +20,8 @@ python3 /release/pilot.py start --manifest /private/release.json --execute
 python3 /release/pilot.py stop --manifest /private/release.json --execute
 python3 /release/pilot.py backup --manifest /private/release.json --execute
 python3 /release/pilot.py verify-backup --backup /private/cold-pair --checksum /private/cold-pair.sha256
-python3 /release/pilot.py restore --backup /private/cold-pair --checksum /private/cold-pair.sha256 --rehearsal /srv/unlinked-private-guest-pilot-20261001-rehearsal-restore1
-python3 /release/pilot.py restore --backup /private/cold-pair --checksum /private/cold-pair.sha256 --rehearsal /srv/unlinked-private-guest-pilot-20261001-rehearsal-restore1 --execute
+python3 /release/pilot.py restore --backup /private/cold-pair --checksum /private/cold-pair.sha256 --rehearsal /srv/unlinked-private-guest-pilot-20261001/backups/rehearsal-restore1
+python3 /release/pilot.py restore --backup /private/cold-pair --checksum /private/cold-pair.sha256 --rehearsal /srv/unlinked-private-guest-pilot-20261001/backups/rehearsal-restore1 --execute
 python3 /release/pilot.py rollback --manifest /private/release.json --execute
 ```
 
@@ -96,7 +96,8 @@ Wrong Host headers and raw operations/asset/query paths are rejected; applicatio
 `backup` requires all three owned containers stopped, pairs `neo4j-data`, `assets`, `identity-state`, `invitations` and `audit`, and captures the complete graph including bindings/principals/revocation fences.
 `identity-state` stores any separately persisted identity adapter state; it must exist even when empty because identities are entirely in the graph.
 Manifest and file digests, private modes and fsync are checked; retain the adjacent checksum in operator-controlled storage because a checksum is integrity evidence rather than an external signature.
-Restore only creates a NEW sibling `-rehearsal-*` root, verifies every copied byte and never starts a graph, mounts the restored graph live or overwrites pilot/legacy storage.
+Restore only creates a NEW uniquely named `backups/rehearsal-*` directory under the existing operator-owned mode-700 backup root, verifies every copied byte and never starts a graph, mounts the restored graph live or overwrites pilot/legacy storage.
+The target must be canonical, absent and without symlinks; parent ownership/mode are checked and atomic creation refuses competing writers. No sudo or /srv write permission is needed.
 The application writer must verify graph queries, source/owner/principal readback, receipts, blob references, counts and tombstones on that separately approved rehearsal before accepting recovery.
 Rollback stops only labeled owned services and preserves all state, invitation bundles, source receipts and backups.
 It invalidates ephemeral browser sessions and MCP signing keys through runtime stop; durable invitation/grant or provider-client revocation is a separate owner operation using the retained recovery bundle.

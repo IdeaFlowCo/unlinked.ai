@@ -42,11 +42,42 @@ with tempfile.TemporaryDirectory(prefix='private-pilot-release-check-') as tempo
     pilot.verify_snapshot(backup, checksum)
     original_root = pilot.ROOT
     pilot.ROOT = temporary / 'pilot-root'
-    target = temporary / 'pilot-root-rehearsal-1'
+    pilot.ROOT.mkdir(mode=0o700)
+    (pilot.ROOT / 'backups').mkdir(mode=0o700)
+    target = pilot.ROOT / 'backups' / 'rehearsal-1'
     pilot.restore_snapshot(backup, checksum, target)
     assert (target / 'invitations/fixture').read_bytes() == b'synthetic-invitations'
     refused(lambda: pilot.restore_snapshot(backup, checksum, pilot.ROOT))
     refused(lambda: pilot.restore_snapshot(backup, checksum, target))
+    assert (target / 'invitations/fixture').read_bytes() == b'synthetic-invitations'
+    refused(lambda: pilot.restore_snapshot(backup, checksum, temporary / 'pilot-root-rehearsal-old'))
+    refused(lambda: pilot.restore_snapshot(backup, checksum, pilot.ROOT / 'neo4j-data'))
+    refused(lambda: pilot.restore_snapshot(backup, checksum, pilot.ROOT / 'backups' / 'cold-pair-reused'))
+    refused(lambda: pilot.restore_snapshot(backup, checksum, Path('relative/backups/rehearsal-1')))
+    broken = pilot.ROOT / 'backups' / 'rehearsal-broken'
+    broken.symlink_to(temporary / 'missing-target')
+    refused(lambda: pilot.restore_snapshot(backup, checksum, broken))
+    broken.unlink()
+    parent = pilot.ROOT / 'backups'
+    parent.chmod(0o755)
+    refused(lambda: pilot.restore_snapshot(backup, checksum, parent / 'rehearsal-wide-parent'))
+    parent.chmod(0o700)
+    race = parent / 'rehearsal-race'
+    original_mkdir = Path.mkdir
+    def racing_mkdir(path, *args, **kwargs):
+        if path == race:
+            original_mkdir(path, mode=0o700)
+            (path / 'sentinel').write_bytes(b'preserve competing writer')
+        return original_mkdir(path, *args, **kwargs)
+    with patch.object(Path, 'mkdir', racing_mkdir):
+        try:
+            pilot.restore_snapshot(backup, checksum, race)
+            raise AssertionError('raced overwrite accepted')
+        except FileExistsError:
+            pass
+    assert list(race.iterdir()) == [race / 'sentinel']
+    assert (race / 'sentinel').read_bytes() == b'preserve competing writer'
+
     (backup / 'assets/fixture').write_bytes(b'corrupted')
     refused(lambda: pilot.verify_snapshot(backup, checksum))
     (source / 'assets/fixture').unlink()
