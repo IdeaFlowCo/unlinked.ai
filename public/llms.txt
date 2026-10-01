@@ -1,5 +1,7 @@
 # unlinked.ai
 
+> AI-powered LinkedIn network search over your own uploaded archive, available through the open-beta app.
+
 Public Start and Sign in links lead to the working open-beta app at https://private.unlinked.ai/login.
 Sign in or create an account through Ideaflow ID; no invitation is needed.
 Prefer a full LinkedIn ZIP; Connections-only is also supported.
