@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { renderJoin, renderBringArchive, renderOwnProfile, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
+import { buildPreviews } from '../mcp-server/private-onboarding-preview.mjs'
 
 const account = { accountLabel: 'Test person', csrf: 'csrf-value' }
 
@@ -184,4 +188,32 @@ test('agent copy enhancement is nonce-ready, copies exact setup and selects it o
   assert.match(view.content, /method="post" action="\/revoke-account"/)
   assert.match(view.content, /name="grantId" value="grant"/)
   assert.doesNotMatch(view.content, /<script|onclick=/)
+})
+
+test('fixture previews cover every requested screen and are reproducible without scripts', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'unlinked-onboarding-test-'))
+  try {
+    const files = await buildPreviews(directory)
+    assert.equal(files.length, 9)
+    const first = await Promise.all(files.map(file => readFile(file, 'utf8')))
+    await buildPreviews(directory)
+    const second = await Promise.all(files.map(file => readFile(file, 'utf8')))
+    assert.deepEqual(second, first)
+    for (const content of first) {
+      assert.match(content, /^<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>/)
+      assert.match(content, /<body><main><h1>.*?<\/h1><style>/s)
+      assert.doesNotMatch(content, /<script|type="checkbox"|observations|parser records|durable receipt|Ideaflow ID|invitation|private pilot/i)
+    }
+    const own = first[files.findIndex(file => file.endsWith('/own-profile-importing.html'))]
+    assert.equal((own.match(/<article class="person"><div>/g) || []).length, 3)
+    assert.equal((own.match(/class="tag"/g) || []).length, 6)
+    assert.equal((own.match(/class="initials"/g) || []).length, 8)
+    assert.match(own, /Westhaven University/)
+    assert.match(own, /Importing · 41% · 412 of 1,005/)
+    const settings = first[files.findIndex(file => file.endsWith('/settings.html'))]
+    assert.equal((settings.match(/action="\/revoke-account"/g) || []).length, 1)
+    assert.match(settings, /fictional_fixture_not_a_credential/)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
