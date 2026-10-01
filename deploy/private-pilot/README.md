@@ -64,6 +64,9 @@ The helper uses noninteractive sudo only for Docker commands and preserves exact
 It verifies daemon access before launching or stopping owned services; secret values remain in explicit private env files and never enter command arguments or the preserved environment allowlist.
 Container user IDs are set explicitly from the local operator and no bind source can be automatically created by Compose.
 Neo4j graph files must satisfy the private recovery permission checks; verify the approved image's file ownership/modes before enabling guest data.
+The graph entrypoint retains `tini` and the pinned image's startup script with `umask 077`, so newly created graph directories/files use private 700/600 modes.
+This does not repair earlier files; preserve those synthetic rehearsal receipts and use a fresh private pilot root, or a separately reviewed recovery operation for any existing data.
+Readiness probes run through a separate bounded Node driver, rather than adding a second JVM inside the graph's 1 GiB memory limit.
 `runtime.env`, `graph.env` and `operator.json` are proposed destinations, not files to populate automatically.
 The recipe uses explicit `isolated-container` mode.
 A dedicated frontend bridge contains only nginx and runtime; a separate internal backend bridge contains only runtime and graph.
