@@ -8,6 +8,8 @@ The page displays the legacy network's unavailable state without querying Supaba
 
 ## Import LinkedIn archive
 
+The public archive availability page bypasses legacy session refresh so it remains readable while the backend is unavailable.
+
 **Import LinkedIn archive** remains visible beside Meet and opens `/import-linkedin`. The page displays an unavailable state and accepts no uploads. Keep your original LinkedIn archive while the private service is being restored.
 
 The parser/job foundation does not provide live ingestion, indexing/search, historical data recovery or agent linking. See the [private archive foundation contract](docs/private-archive-import.md) for adapter requirements and activation gates.
