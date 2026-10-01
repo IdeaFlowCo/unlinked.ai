@@ -48,6 +48,32 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
   assert.equal(exchanges, before)
 })
 
+test('signup mode does not expose invitation confirmation or account switching routes', { skip: !browser }, async t => {
+  let claims = 0, signups = 0
+  const owner = { ownerId: 'signup-owner', userId: 'signup-user' }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  handler = browser.createPrivateBrowserHandler({ baseUrl,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/account-choice', transaction: { state: 'synthetic-state' } }), finish: async () => ({ issuer: 'https://synthetic.invalid', subject: 'signup-sub' }) },
+    resolveOwner: async identity => identity.subject === 'signup-sub' && signups ? owner : null,
+    signup: async () => { signups++; return owner },
+    claimInvitation: async () => { claims++; return owner },
+    getBackend: async () => ({ adapter: {}, readResource: async () => null, listImportIds: async () => [] }),
+    issueAccountGrant: async () => 'grant',
+    revokeAccountGrant: async () => {},
+  })
+  const invite = await fetch(`${endpoint}/invite/${'a'.repeat(43)}`)
+  assert.equal(invite.status, 401)
+  assert.equal((await invite.text()).includes('Use another account'), false)
+  assert.equal(claims, 0)
+  const start = await fetch(`${endpoint}/login`, { redirect: 'manual' })
+  const callback = await fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic&state=synthetic-state`, { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  assert.equal(callback.status, 303)
+  assert.equal(signups, 1)
+})
+
 test('private browser sign-in, consent upload, durable replay receipt, search and scoped setup execute over HTTP', { skip: !browser }, async t => {
   const { digest } = await import('../src/utils/private-import/archive.mjs')
   const resources = new Map(), assets = new Map(), issued = []

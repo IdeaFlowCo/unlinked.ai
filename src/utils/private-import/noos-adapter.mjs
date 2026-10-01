@@ -155,8 +155,9 @@ export function createNoosOwnerBackend({ baseUrl, accessToken, ownerId, fetchImp
 
 // Agent grants never get the operational token or direct resource/asset access.
 // Every call reads the live publication: retained rows cannot bypass tombstones.
-export function createScopedImportReader({ readResource, readAsset, grant }) {
+export function createScopedImportReader({ readResource, readAsset, grant, maxAssertions = PRIVATE_PUBLICATION_ASSERTION_LIMIT, limitError = 'private_publication_support_limit' }) {
   if (!grant || !grant.ownerId || !Array.isArray(grant.importIds) || grant.importIds.length > 32) throw new Error('explicit_import_grant_required')
+  if (!Number.isSafeInteger(maxAssertions) || maxAssertions < 0 || maxAssertions > PRIVATE_PUBLICATION_ASSERTION_LIMIT) throw new Error('private_publication_support_limit')
   const ownerId = grant.ownerId, allowed = new Set(grant.importIds)
   return async function readImport(id, { signal } = {}) {
     signal?.throwIfAborted()
@@ -178,6 +179,7 @@ export function createScopedImportReader({ readResource, readAsset, grant }) {
     const counts = resource.payload.counts
     if (!counts || !['accepted', 'indexed', 'rejected', 'skippedFiles', 'failedFiles'].every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0) ||
         !Array.isArray(ids) || ids.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || new Set(ids).size !== ids.length || counts.accepted !== ids.length || counts.indexed !== ids.length) throw new Error('private_publication_incomplete')
+    if (ids.length > maxAssertions) throw new Error(limitError)
     const readRow = async assertionId => {
       signal?.throwIfAborted()
       const assertion = await readResource('assertion', assertionId)

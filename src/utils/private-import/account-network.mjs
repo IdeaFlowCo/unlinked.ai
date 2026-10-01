@@ -5,8 +5,9 @@ import { createPrivateSearch } from './ai-search.mjs'
 
 // One authenticated account, all its currently published imports. Source
 // assertions keep their original IDs and provenance; no email/URL ownership.
-export function createAccountNetwork({ owner, getBackend, complete }) {
+export function createAccountNetwork({ owner, getBackend, complete, observationLimit = 100000 }) {
   if (!owner?.ownerId || !owner.userId || typeof getBackend !== 'function') throw new Error('verified_owner_required')
+  if (!Number.isSafeInteger(observationLimit) || observationLimit < 0 || observationLimit > 100000) throw new Error('account_observation_limit')
   const networkId = privateId(owner.ownerId, 'account-network-v1')
   const readNetwork = async (_id, { signal } = {}) => {
     signal?.throwIfAborted()
@@ -18,10 +19,9 @@ export function createAccountNetwork({ owner, getBackend, complete }) {
     let indexed = 0
     for (const id of ids) {
       signal?.throwIfAborted()
-      const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] } })
+      const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit' })
       const publication = await readImport(id, { signal })
       requireCombinedUploadConsent(publication.consent)
-      if (assertions.length + publication.assertions.length > 100000) throw new Error('account_observation_limit')
       for (const row of publication.assertions) assertions.push(row)
       indexed += publication.indexed ?? 0
       imports.push(id)
