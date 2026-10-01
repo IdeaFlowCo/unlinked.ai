@@ -27,6 +27,13 @@ This file is the repo-internal guide for autonomous agents and contributors work
 - **Backend Deployment Note:**
   - The Supabase backend is hosted on a free plan and may be paused. Local builds and tests should not depend on live database uptime.
 
+## Public entry availability
+
+The public homepage restores the network/import/search/agent purpose alongside Meet.
+Browser entry at `/auth/login` is Ideaflow ID only and explicitly unavailable until private activation; `/auth/signup` redirects there.
+The public `/network`, `/search`, and `/agents` pages describe availability, without mounting the private backend or collecting archives.
+Legacy API schemas remain historical reference documentation.
+
 ## Private archive foundation
 
 The default-off private Noos/OIDC browser/scoped AI and hosted setup slice and its immutable combined upload consent (private retention and bounded OpenAI browser/search-only agent processing), fail-closed legacy import behavior, and production gates are documented in `docs/private-noos-staging.md`.
