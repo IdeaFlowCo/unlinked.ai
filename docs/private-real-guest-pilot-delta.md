@@ -20,11 +20,11 @@ DNS/TLS/routing and runtime installation are approval operations; no change has 
 
 Proposed new private owner-controlled root: /srv/unlinked-private-guest-pilot-20261001 (mode700).
 It is separate from every synthetic staging root and existing Noos graph/data volume.
-Subdirectories: runtime/ (reviewed source SHAs), neo4j-data/ (dedicated database), assets/ (700/600 private blobs), backups/ (paired private snapshots), and audit/ (non-token consent/identity provenance).
+Subdirectories: runtime/ (reviewed source SHAs), neo4j-data/ (dedicated database), assets/ (700/600 private blobs), identity-state/ (separately persisted identity adapter state), invitations/ (operator recovery bundles), backups/ (paired private snapshots), and audit/ (non-token consent/identity provenance).
 A dedicated1GiB Neo4j container uses only the internal backend bridge at `graph:7687`; the operational API binds runtime loopback9022, and browser/MCP binds only the unpublished runtime listener 9367 behind the new443 ingress.
 The graph entrypoint preserves `tini` and the pinned image startup script while applying `umask 077`, so newly created graph state uses private 700/600 modes; it does not chmod existing graph data.
 No generic graph-query route, raw asset route or operational token is public.
-The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only UID/GID plus the three approved image variables for Compose.
+The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, restores only to new canonical `backups/rehearsal-*` targets under the operator-owned mode-700 backup root, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only UID/GID plus the three approved image variables for Compose.
 `runtime.mjs` refuses to launch without reviewed mode600 wiring.
 One invited guest/new owner is the initial cohort; its exact verified production subject is allowlisted before upload can be enabled.
 Every import/index/source/receipt/grant is keyed to that immutable owner UUID in the dedicated graph.
@@ -72,7 +72,7 @@ Actual real-user delegation must receive its own reviewed approval; synthetic st
 
 Rollback stops only the three labeled new ingress/runtime/graph containers, preserves private originals/owner UUID/backups, and leaves durable grant/client revocation to the separately approved identity-owner operation.
 Do not blindly delete or rebind live identity/owner data.
-Restore is a quiesced paired graph/blob operation with integrity manifest, bindings, journal rows before final publication fences, and preserved tombstones.
+Restore is a quiesced paired graph/blob operation with integrity manifest, bindings, journal rows before final publication fences, and preserved tombstones; rehearsal targets are new canonical `backups/rehearsal-*` directories and are never pilot or legacy storage.
 Synthetic paired restore has been proven; operational backup scheduling/ownership, durable directory fsync, real identity/principal proof,443 route and actual browser acceptance remain unproven release gates.
 
 Private container activation publishes only non-root ingress 443:8443.

@@ -4,7 +4,7 @@
 Commands: plan, preflight, start, stop, backup, verify-backup, restore, rollback.
 No DNS, certificate, identity-provider or credential registration command exists.
 Cold recovery pairs graph (including identities), assets, invitation bundles and
-audit state. Restore creates a new isolated rehearsal directory, never the pilot.
+audit state. Restore creates a new backups/rehearsal-* directory, never the pilot.
 """
 import argparse
 import hashlib
