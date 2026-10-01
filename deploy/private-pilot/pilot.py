@@ -60,6 +60,38 @@ def run(args):
     return result.stdout.strip()
 
 
+def listening_tcp_ports():
+    ports = set()
+    for table in ('/proc/net/tcp', '/proc/net/tcp6'):
+        try:
+            with open(table) as stream:
+                next(stream, None)
+                for line in stream:
+                    columns = line.split()
+                    if len(columns) >= 4 and columns[3] == '0A':
+                        ports.add(int(columns[1].rsplit(':', 1)[1], 16))
+        except FileNotFoundError:
+            continue
+    return ports
+
+
+def check_ports_available(ports):
+    listeners = listening_tcp_ports()
+    for port in ports.values():
+        if port < 1024:
+            if listeners:
+                require(port not in listeners, 'owned_port_occupied')
+            else:
+                probe = socket.socket()
+                try:
+                    require(probe.connect_ex(('127.0.0.1', port)) != 0, 'owned_port_occupied')
+                finally:
+                    probe.close()
+            continue
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', port))
+
+
 def inventory(root):
     private(root, True)
     files, directories = {}, []
@@ -291,10 +323,7 @@ def main():
     require(sys.platform == 'linux', 'existing_gcp_linux_host_required')
     require(socket.gethostname().split('.')[0] == 'noos', 'existing_noos_host_required')
     if args.command == 'start':
-        # Socket probes allocate no persistent service or firewall rule.
-        for port in manifest['ports'].values():
-            with socket.socket() as probe:
-                probe.bind(('127.0.0.1', port))
+        check_ports_available(manifest['ports'])
         result = subprocess.run(['docker', 'compose', '-p', PROJECT, '-f', str(HERE / 'compose.yaml'), 'up', '-d', 'graph', 'runtime', 'ingress'], env=compose_env(manifest), capture_output=True, timeout=120)
         require(result.returncode == 0, 'owned_start_failed')
         owned_services(running=True)
