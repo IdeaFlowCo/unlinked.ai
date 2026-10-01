@@ -7,7 +7,7 @@ This file is the repo-internal guide for autonomous agents and contributors work
 
 ## Architecture & Core Invariants
 
-- **Authentication & Agent Keys:**
+- **Legacy Authentication & Agent Keys:**
   - Browser sessions authenticate via Supabase cookies.
   - Agent and MCP requests authenticate via `Authorization: Bearer ul_<key>`.
   - Keys start with `ul_` followed by 32 base64url random bytes. Stored as SHA-256 hashes in `agent_keys` with owner-only RLS.
@@ -18,7 +18,7 @@ This file is the repo-internal guide for autonomous agents and contributors work
   - Endpoints (`/api/search-contacts`, `/api/profiles/[id]`, `/api/draft-intro`) strictly verify direct connections (`isDirectConnection`).
   - `/api/profiles/[id]` returns 404 (never 403) for an unrelated profile ID, preventing enumeration of whether an unrelated profile exists.
   - Drafting intros (`/api/draft-intro`) is read-only and never writes to the database.
-- **MCP Server:**
+- **Legacy MCP Server:**
   - Package `@unlinked/mcp-server` lives in `mcp-server/`. Runs as a stdio server (`@modelcontextprotocol/sdk`).
   - Reads `UNLINKED_API_KEY` or `~/.unlinked/credentials.json`.
   - Exposes 5 tools: `unlinked_me`, `unlinked_search_contacts`, `unlinked_get_profile`, `unlinked_list_imports`, and `unlinked_draft_intro`.
@@ -26,6 +26,13 @@ This file is the repo-internal guide for autonomous agents and contributors work
   - `/api/cron/embed` is an internal Vercel Cron job guarded by `CRON_SECRET`. It is not an agent-facing route.
 - **Backend Deployment Note:**
   - The Supabase backend is hosted on a free plan and may be paused. Local builds and tests should not depend on live database uptime.
+
+## Public entry availability
+
+The public homepage restores the network/import/search/agent purpose alongside Meet.
+Browser entry at `/auth/login` is Ideaflow ID only and explicitly unavailable until private activation; `/auth/signup` redirects there.
+The public `/network`, `/search`, and `/agents` pages describe availability, without mounting the private backend or collecting archives.
+Legacy API schemas remain historical reference documentation.
 
 ## Private archive foundation
 
@@ -38,7 +45,8 @@ See `docs/private-archive-import.md` for the bounded parser/job adapter contract
 ## Directory Structure
 
 - `src/app/`: Next.js App Router pages and API routes (`src/app/api/`).
-- `src/app/agents/`: Human-readable guide for agent users (served at `/agents`).
+- `src/app/agents/`: Human-readable setup availability page for agent users (served at `/agents`).
+- `src/app/network/` and `src/app/search/`: Public private-feature availability pages that avoid legacy backend calls.
 - `src/components/`: Reusable React components (Radix UI Themes).
 - `src/utils/agent-auth.ts`: Agent key hashing, JWT minting, caller resolution, and scoping helpers.
 - `src/utils/contact-search.ts`: Scoped connection filtering and OpenAI LLM re-ranking.
@@ -73,7 +81,7 @@ When modifying agent endpoints, tools, or authentication, always update the full
 3. `public/.well-known/unlinked.json` — machine-readable product descriptor
 4. `public/.well-known/mcp/server-card.json` — MCP server card
 5. `public/openapi.json` — OpenAPI 3.1.0 specification
-6. `src/app/agents/page.tsx` — human-readable setup guide at `/agents`
+6. `src/app/agents/page.tsx` — human-readable setup availability page at `/agents`
 7. Root `AGENTS.md` — repo-internal agent memory
 
 ## Maintaining this file

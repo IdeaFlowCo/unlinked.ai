@@ -7,7 +7,7 @@ import Providers from './providers'
 
 export const metadata: Metadata = {
   title: 'unlinked.ai',
-  description: 'Meet in person. Stay in touch. Scan an OpenChat card to connect.',
+  description: 'Your private LinkedIn network, profile and AI search. Meet new people with an OpenChat card.',
 }
 
 export default function RootLayout({

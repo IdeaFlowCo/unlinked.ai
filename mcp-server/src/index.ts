@@ -5,7 +5,7 @@
  * Transport: stdio (the universal MCP transport for Claude Desktop / Claude Code).
  *
  * Env vars:
- *   UNLINKED_API_KEY    Bearer token, starts `ul_` (mint one at /settings/agent-keys)
+ *   UNLINKED_API_KEY    Historical bearer token, starts `ul_` (live minting unavailable)
  *   UNLINKED_BASE_URL   default https://www.unlinked.ai
  *
  * Credentials file (fallback if env vars are unset):
