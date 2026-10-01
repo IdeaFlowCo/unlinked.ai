@@ -22,10 +22,14 @@ export async function readOwnerProfileRows({ ownerId, jobs, backend }) {
     if (!job.progress?.profileReady) continue
     const chunkIds = job.assertionChunks ?? job.stagedChunks
     if (!Array.isArray(chunkIds) || chunkIds.length > 501 || new Set(chunkIds).size !== chunkIds.length) throw new Error('private_profile_incomplete')
+    if (job.profileChunkCount !== undefined && (!Number.isSafeInteger(job.profileChunkCount) || job.profileChunkCount < 0 || job.profileChunkCount > chunkIds.length)) throw new Error('private_profile_incomplete')
+    const profileChunkCount = job.profileChunkCount ?? null
     for (const [ordinal, chunkId] of chunkIds.entries()) {
+      if (profileChunkCount !== null && ordinal >= profileChunkCount) break
       if (chunkId !== privateId(ownerId, 'index-chunk', id, ordinal)) throw new Error('private_profile_incomplete')
       const chunk = await backend.readResource('import', chunkId), payload = chunk?.payload
       if (!chunk || chunk.deleted || chunk.sourceOwnerId !== ownerId || payload?.ownerId !== ownerId || payload.importId !== id || payload.ordinal !== ordinal || payload.kind !== 'private_observation_chunk' || !Array.isArray(payload.profileAssertionIds) || !Array.isArray(payload.assertionIds) || payload.assertionIds.length > 200 || payload.indexedCount !== payload.assertionIds.length || payload.profileAssertionIds.length > payload.assertionIds.length || new Set(payload.profileAssertionIds).size !== payload.profileAssertionIds.length || payload.profileAssertionIds.some(key => !payload.assertionIds.includes(key))) throw new Error('private_profile_incomplete')
+      if (profileChunkCount === null && payload.profileAssertionIds.length === 0) break
       for (const key of payload.profileAssertionIds) {
         const assertion = await backend.readResource('assertion', key)
         let row = assertion?.payload

@@ -76,6 +76,7 @@ export function createNoosImportAdapter({ baseUrl, accessToken, ownerId, fetchIm
       const chunkIds = []
       const profileCount = job.backgroundVersion === 'profile-first-v1' ? assertions.findIndex(row => !['profile', 'positions', 'education', 'skills'].includes(row.category)) : 0
       const profileEnd = profileCount === -1 ? assertions.length : profileCount
+      let profileChunkCount = job.backgroundVersion === 'profile-first-v1' && profileEnd === 0 ? 0 : null
       for (let start = 0; start < assertions.length;) {
         let end = Math.min(start + CHUNK_ROWS, assertions.length)
         if (start < profileEnd && end > profileEnd) end = profileEnd
@@ -101,10 +102,12 @@ export function createNoosImportAdapter({ baseUrl, accessToken, ownerId, fetchIm
         // Exact retries reuse IDs/content; tombstones can never be resurrected.
         await batch(items)
         chunkIds.push(chunkId)
+        if (job.backgroundVersion === 'profile-first-v1' && profileChunkCount === null && end >= profileEnd) profileChunkCount = chunkIds.length
         if (onChunk) await onChunk({ chunkId, processed: end, profileReady: end >= profileEnd })
         start = end
       }
       job.assertionChunks = chunkIds
+      if (job.backgroundVersion === 'profile-first-v1') job.profileChunkCount = profileChunkCount ?? chunkIds.length
       job.indexVersion = 'observation-v1'
       const sources = job.sources.map(source => source.acceptedCount ? { ...source, indexedCount: source.acceptedCount, status: 'indexed' } : source)
       job.sources = sources.map(source => ({ id: source.id }))
