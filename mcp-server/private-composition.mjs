@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomUUID } from 'node:crypto'
+import { createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { lstat, open } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
@@ -66,6 +66,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId,
     })
     await provisioner.initialize()
+    await store.initialize()
     const login = await loginFactory({ issuer: config.issuer, clientId: config.clientId, clientSecret: config.clientSecret,
       callbackUrl: new URL('/auth/callback/ideaflow', base).href })
     const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), internalSubjects = new Set()
@@ -97,11 +98,19 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       const accessToken = await new SignJWT({ scope: 'unlinked:read unlinked:write', token_use: 'access' })
         .setProtectedHeader({ alg: 'RS256', typ: 'at+jwt' }).setIssuer(operationsIssuer).setAudience('unlinked-private-operations')
         .setSubject(owner.userId).setJti(randomUUID()).setIssuedAt().setExpirationTime('15m').sign(keys.privateKey)
-      return createNoosOwnerBackend({ baseUrl: `http://127.0.0.1:${operationalPort}/v1`, ownerId: owner.ownerId, accessToken })
+      const backend = createNoosOwnerBackend({ baseUrl: `http://127.0.0.1:${operationalPort}/v1`, ownerId: owner.ownerId, accessToken })
+      return { ...backend,
+        listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
+        listAccountGrantIds: () => store.listAccountGrantIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
+      }
     }
     return { login, getBackend, close,
       resolveOwner: identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null,
       claimInvitation: provisioner.claim.bind(provisioner),
+      signup: provisioner.signup.bind(provisioner),
+      // Separate domain/audience from operational credentials. Stable across
+      // process restarts; private root credential replacement revokes all grants.
+      accountGrantKey: createHmac('sha256', config.graphPassword).update(`unlinked-account-tools-v1:${base.origin}`).digest(),
       complete: completionFactory({ apiKey: config.apiKey }),
     }
   } catch (error) { await close().catch(() => {}); throw error }
