@@ -172,3 +172,15 @@ test('explicit container mode keeps operations loopback and allows only private 
   assert.deepEqual(await backend.readResource('import', 'a'.repeat(64)), state.resource)
   await assert.rejects(dependencies.getBackend({ ...owner, ownerId: 'wrong-owner' }), /owner_denied/)
 })
+
+
+test('canonical origin uses its exact OIDC callback and keeps owner operations private', async t => {
+  const { options, state, port } = await fixture(t)
+  const dependencies = await createPrivatePilotDependencies({ ...options, baseUrl: 'https://www.unlinked.ai' })
+  t.after(dependencies.close)
+  assert.equal(state.login.callbackUrl, 'https://www.unlinked.ai/auth/callback/ideaflow')
+  const owner = await dependencies.resolveOwner({ issuer: configuration.issuer, subject: 'chosen-subject' })
+  assert.deepEqual(await (await dependencies.getBackend(owner)).readResource('import', 'a'.repeat(64)), state.resource)
+  await assert.rejects(dependencies.getBackend({ ...owner, ownerId: 'another-owner' }), /owner_denied/)
+  assert.equal((await fetch(`http://127.0.0.1:${port}/v1/unlinked/import/${'a'.repeat(64)}`)).status, 401)
+})

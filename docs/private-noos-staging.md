@@ -52,7 +52,7 @@ Operational bearers and provider ID tokens never become agent credentials.
 The synthetic standalone runtime binds loopback only.
 Reserved tailnet origin is https://m4-mini.tailb2a35c.ts.net:9367 and callback /auth/callback/ideaflow.
 This reservation is not a running or verified upload URL.
-The proposed real guest packet uses the separate `https://private.unlinked.ai` origin and the process-only composition in `mcp-server/private-composition.mjs`; see [Private pilot release packet](../deploy/private-pilot/README.md).
+The proposed real guest packet uses the separate rollback `https://private.unlinked.ai` origin, can be prepared for the canonical `https://www.unlinked.ai` cutover, and uses the process-only composition in `mcp-server/private-composition.mjs`; see [Private pilot release packet](../deploy/private-pilot/README.md) and [Canonical app host cutover](../deploy/private-pilot/CANONICAL-HOST.md).
 Actual provider client/redirect acceptance and immutable legacy/new-owner provisioning remain release gates. The optional trusted invited-owner callback and exact owner/principal readback are documented in [Private invited-owner browser](private-invited-browser.md); the open account launch is summarized in [Open account launch](../deploy/private-pilot/ACCOUNT-LAUNCH.md).
 Production provider granular delegation is not assumed or enabled.
 

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Private release packet. Default is read-only plan; --execute is explicit.
 
-Commands: plan, preflight, start, stop, backup, verify-backup, restore, rollback.
+Commands: plan, preflight, start, canonical-readiness, stop, backup, verify-backup, restore, rollback.
 No DNS, certificate, identity-provider or credential registration command exists.
 Cold recovery pairs graph (including identities), assets, invitation bundles and
 audit state. Restore creates a new backups/rehearsal-* directory, never the pilot.
 """
 import argparse
 import hashlib
+from http.client import HTTPMessage
 import json
 import os
 from pathlib import Path
@@ -18,10 +19,14 @@ import stat
 import subprocess
 import sys
 import time
+from urllib.parse import urlparse
 
 ROOT = Path('/srv/unlinked-private-guest-pilot-20261001')
 PROJECT = 'unlinked-private-guest-pilot-20261001'
 ORIGIN = 'https://private.unlinked.ai'
+CANONICAL_ORIGIN = 'https://www.unlinked.ai'
+CANONICAL_HOST = 'www.unlinked.ai'
+NOOS_IP = '34.10.134.247'
 PARTS = ('neo4j-data', 'assets', 'identity-state', 'invitations', 'audit')
 HERE = Path(__file__).resolve().parent
 
@@ -53,7 +58,7 @@ def digest(path):
     return result.hexdigest()
 
 
-COMPOSE_VARIABLES = ('PILOT_UID', 'PILOT_GID', 'PILOT_NEO4J_IMAGE', 'PILOT_RUNTIME_IMAGE', 'PILOT_NGINX_IMAGE')
+COMPOSE_VARIABLES = ('PILOT_ORIGIN', 'PILOT_UID', 'PILOT_GID', 'PILOT_NEO4J_IMAGE', 'PILOT_RUNTIME_IMAGE', 'PILOT_NGINX_IMAGE')
 
 
 def docker_command(args):
@@ -207,11 +212,12 @@ def restore_snapshot(backup, checksum, target):
     fsync_tree(target)
 
 
-def validate_manifest(path, execution=False, recovery=False):
+def validate_manifest(path, execution=False, recovery=False, predns_canonical=False):
     no_links(path)
     manifest = json.loads(path.read_text())
-    require(manifest['root'] == str(ROOT) and manifest['project'] == PROJECT and manifest['origin'] == ORIGIN, 'exact_target_required')
-    require(manifest['callback'] == ORIGIN + '/auth/callback/ideaflow', 'exact_callback_required')
+    require(manifest['root'] == str(ROOT) and manifest['project'] == PROJECT and manifest['origin'] in (ORIGIN, CANONICAL_ORIGIN), 'exact_target_required')
+    require(not predns_canonical or manifest['origin'] == CANONICAL_ORIGIN, 'canonical_predns_origin_required')
+    require(manifest['callback'] == manifest['origin'] + '/auth/callback/ideaflow', 'exact_callback_required')
     require(manifest['gcp'] == {'project': 'lightsail-migration', 'instance': 'noos', 'zone': 'us-central1-a'}, 'existing_host_required')
     require(manifest.get('network_mode') == 'isolated-container', 'isolated_container_network_required')
     require(manifest['ports'] == {'bolt': 7687, 'operations': 9022, 'browser': 9367, 'https': 443}, 'owned_ports_required')
@@ -254,7 +260,8 @@ def validate_manifest(path, execution=False, recovery=False):
             blockers.append('image_verification_pending:' + name)
     for flag in ('target_isolation_verified', 'provider_client_registered', 'dns_tls_ready', 'persistent_private_inputs_ready', 'invitation_ready'):
         if not manifest[flag]:
-            blockers.append(flag)
+            if not (predns_canonical and flag == 'dns_tls_ready'):
+                blockers.append(flag)
     if not manifest['openai_persistent_destination_confirmed']:
         blockers.append('openai_persistent_destination_confirmation')
     for name in ('runtime_env', 'graph_env', 'operator_config', 'invitation_bundle', 'wiring', 'certificate', 'certificate_key'):
@@ -279,8 +286,9 @@ def validate_manifest(path, execution=False, recovery=False):
         for part in (*PARTS, 'runtime', 'backups', 'runtime/tls'):
             private(ROOT / part, True)
         require(not blockers, 'activation_blocked:' + ','.join(blockers))
-        require({item[4][0] for item in socket.getaddrinfo('private.unlinked.ai', 443, family=socket.AF_INET)} == {'34.10.134.247'}, 'exact_private_dns_target_required')
-        run(['openssl', 'x509', '-in', manifest['destinations']['certificate'], '-noout', '-checkhost', 'private.unlinked.ai'])
+        if not predns_canonical:
+            require({item[4][0] for item in socket.getaddrinfo(manifest['origin'].split('://', 1)[1], 443, family=socket.AF_INET)} == {NOOS_IP}, 'exact_private_dns_target_required')
+        run(['openssl', 'x509', '-in', manifest['destinations']['certificate'], '-noout', '-checkhost', manifest['origin'].split('://', 1)[1]])
         run(['openssl', 'x509', '-in', manifest['destinations']['certificate'], '-noout', '-checkend', '86400'])
     return manifest, blockers
 
@@ -300,11 +308,53 @@ def owned_services(stopped=False, running=False):
 def compose_env(manifest):
     # Only approved image digests are added to child environment; no secret reads.
     environment = dict(os.environ)
+    environment['PILOT_ORIGIN'] = manifest['origin']
     environment['PILOT_UID'] = str(os.getuid())
     environment['PILOT_GID'] = str(os.getgid())
     for name, variable in (('neo4j', 'PILOT_NEO4J_IMAGE'), ('runtime', 'PILOT_RUNTIME_IMAGE'), ('nginx', 'PILOT_NGINX_IMAGE')):
         environment[variable] = manifest['images'][name]
     return environment
+
+
+def curl_headers(path):
+    result = subprocess.run(['curl', '--silent', '--show-error', '--max-time', '10', '--connect-timeout', '5',
+        '--resolve', CANONICAL_HOST + ':443:' + NOOS_IP, '--include', '--output', '-', CANONICAL_ORIGIN + path],
+        capture_output=True, text=True, timeout=15)
+    require(result.returncode == 0, 'canonical_probe_failed')
+    head = result.stdout.split('\r\n\r\n', 1)[0]
+    lines = head.splitlines()
+    require(lines and lines[0].startswith('HTTP/'), 'canonical_probe_response_required')
+    status = int(lines[0].split()[1])
+    headers = HTTPMessage()
+    for line in lines[1:]:
+        if ':' in line:
+            name, value = line.split(':', 1)
+            headers.add_header(name, value.strip())
+    return status, headers
+
+
+def require_cookie_attributes(headers, name):
+    cookies = headers.get_all('Set-Cookie', [])
+    cookie = next((value for value in cookies if value.startswith(name + '=')), None)
+    require(cookie, 'canonical_login_cookie_required')
+    parts = {part.strip().lower() for part in cookie.split(';')[1:]}
+    require({'path=/', 'secure', 'httponly', 'samesite=lax', 'max-age=300'}.issubset(parts), 'canonical_login_cookie_attributes_required')
+
+
+def verify_canonical_readiness(manifest):
+    require(manifest['origin'] == CANONICAL_ORIGIN, 'canonical_readiness_origin_required')
+    owned_services(running=True)
+    status, headers = curl_headers('/')
+    require(status == 200 and headers.get('cache-control') == 'no-store', 'canonical_anonymous_probe_required')
+    status, headers = curl_headers('/auth/callback/ideaflow')
+    require(status == 400 and headers.get('cache-control') == 'no-store', 'canonical_transactionless_callback_required')
+    status, headers = curl_headers('/login')
+    location = headers.get('location')
+    require(status == 303 and location, 'canonical_auth_start_redirect_required')
+    redirect = urlparse(location)
+    provider = urlparse(manifest['provider_request']['issuer'])
+    require(redirect.scheme == 'https' and redirect.netloc == provider.netloc, 'canonical_auth_start_provider_required')
+    require_cookie_attributes(headers, '__Host-ul-login')
 
 
 def stop(manifest):
@@ -316,7 +366,7 @@ def stop(manifest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['plan', 'preflight', 'start', 'stop', 'backup', 'verify-backup', 'restore', 'rollback'])
+    parser.add_argument('command', choices=['plan', 'preflight', 'start', 'canonical-readiness', 'stop', 'backup', 'verify-backup', 'restore', 'rollback'])
     parser.add_argument('--manifest', type=Path, default=HERE / 'manifest.example.json')
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--backup', type=Path)
@@ -338,7 +388,8 @@ def main():
         print(json.dumps({'status': 'restored_isolated_rehearsal' if args.execute else 'restore_dry_run'}))
         return
     recovery = args.execute and args.command in ('stop', 'rollback', 'backup')
-    manifest, blockers = validate_manifest(args.manifest, execution=args.execute or args.command == 'preflight', recovery=recovery)
+    predns_canonical = args.command == 'canonical-readiness'
+    manifest, blockers = validate_manifest(args.manifest, execution=args.execute or args.command == 'preflight', recovery=recovery, predns_canonical=predns_canonical)
     if not args.execute:
         print(json.dumps({'status': 'blocked' if blockers else 'ready_plan_only', 'action': args.command, 'root': str(ROOT), 'blockers': blockers, 'mutations': False}, indent=2))
         return
@@ -346,12 +397,16 @@ def main():
     require(sys.platform == 'linux', 'existing_gcp_linux_host_required')
     require(socket.gethostname().split('.')[0] == 'noos', 'existing_noos_host_required')
     run(['docker', 'info', '--format', '{{.ServerVersion}}'])
-    if args.command == 'start':
+    if args.command in ('start', 'canonical-readiness'):
         check_ports_available({'https': manifest['ports']['https']})
         result = subprocess.run(docker_command(['compose', '-p', PROJECT, '-f', str(HERE / 'compose.yaml'), 'up', '-d', 'graph', 'runtime', 'ingress']), env=compose_env(manifest), capture_output=True, timeout=120)
         require(result.returncode == 0, 'owned_start_failed')
         owned_services(running=True)
-        print(json.dumps({'status': 'started_not_live_accepted', 'real_guest_acceptance': 'unlinked-9a9'}))
+        if args.command == 'canonical-readiness':
+            verify_canonical_readiness(manifest)
+            print(json.dumps({'status': 'canonical_predns_ready_not_live_accepted', 'probe': CANONICAL_HOST + '@' + NOOS_IP}))
+        else:
+            print(json.dumps({'status': 'started_not_live_accepted', 'real_guest_acceptance': 'unlinked-9a9'}))
     elif args.command in ('stop', 'rollback'):
         stop(manifest)
         # No down -v, purge, legacy stop, provider mutation or receipt deletion.
