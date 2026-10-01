@@ -32,7 +32,7 @@ Reopening the original invitation starts fresh authentication and can recover a 
 The graph's permanent revocation fence controls claims and subsequent resource/tool access.
 Browser memory loss requires sign-in again; the owner mapping and archive receipts remain durable in Noos.
 
-Upload then records one combined retention/OpenAI-processing consent, imports all accepted records through bounded journal chunks and one publication fence, and provides the existing private AI search and one-action scoped MCP setup.
+After sign-in, upload, consent, publication, AI search and scoped MCP setup follow the [staging contract](private-noos-staging.md#scoped-search-and-browser).
 The invitation action adds no second AI consent.
 
 Focused source proof runs `node --test --test-concurrency=1 tests/private-browser.test.mjs tests/private-invitation-browser.test.mjs` with the locked root and MCP dependencies.

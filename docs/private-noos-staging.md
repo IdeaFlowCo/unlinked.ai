@@ -22,7 +22,7 @@ Indexed counts appear only at final publication and equal all accepted observati
 Rejected/malformed records remain reported and may make an import partial.
 
 There is no 500-row truncation or rejection gate.
-The parser retains 100,000-record, 20 MiB archive, 8 MiB file, 40 MiB expanded and 200-file bounds.
+Parser limits remain unchanged; the authoritative bounds are `LIMITS` in `src/utils/private-import/archive.mjs`, as described in the [parser contract](private-archive-import.md#parser-and-receipts).
 The final manifest references bounded source/chunk IDs rather than every row.
 Older failed support-limit receipts remain immutable; restaging them needs an explicit publication-version migration.
 
@@ -30,7 +30,7 @@ Older failed support-limit receipts remain immutable; restaging them needs an ex
 
 AI search uses the same live owner-scoped publication as MCP.
 Every connection is considered in contexts of at most 200 bounded name/company/position/date observations, followed by bounded reduction of ranked IDs.
-OpenAI requests use store:false, strict ID-only structured results and a 30-second per-call timeout.
+OpenAI requests use store:false, strict known-ID structured results and a 30-second provider timeout. Incomplete/refused responses and invalid results fail closed. Caller cancellation propagates through row reads and completion; the SSH completion bridge also bounds the local operation to 45 seconds.
 Returned identity, fields and provenance come from stored rows.
 Publication checks after delayed model work deny deleted/changed imports.
 This is query-time AI ranking over a private observation index, with no shared people database or embedding completeness claim.
@@ -50,7 +50,7 @@ Operational bearers and provider ID tokens never become agent credentials.
 The explicit standalone runtime binds loopback only.
 Reserved tailnet origin is https://m4-mini.tailb2a35c.ts.net:9367 and callback /auth/callback/ideaflow.
 This reservation is not a running or verified upload URL.
-Actual provider client/redirect acceptance and immutable legacy/new-owner provisioning remain release gates.
+Actual provider client/redirect acceptance and immutable legacy/new-owner provisioning remain release gates. The optional trusted invited-owner callback and exact owner/principal readback are documented in [Private invited-owner browser](private-invited-browser.md).
 Production provider granular delegation is not assumed or enabled.
 
 ## Assets, recovery and credentials
