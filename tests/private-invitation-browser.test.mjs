@@ -87,6 +87,9 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   }
   const callback = response => fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic-code&state=${new URL(response.headers.get('location')).searchParams.get('state')}`, { headers: { Cookie: cookie(response) }, redirect: 'manual' })
   const confirmationIntent = async response => {
+    const policy = new Map(response.headers.get('content-security-policy').split(';').map(value => value.trim().split(/\s+/)).map(([key, ...values]) => [key, values]))
+    assert.deepEqual(policy.get('form-action'), ["'self'", issuer])
+    assert.deepEqual(policy.get('default-src'), ["'none'"])
     const text = await response.text()
     assert.match(text, /Confirm your Ideaflow account/)
     assert.match(text, /same-email@example.invalid/)
