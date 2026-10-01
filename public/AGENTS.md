@@ -1,16 +1,16 @@
 # unlinked.ai — for agents
 
-Public browser entry uses Ideaflow ID only; private sign-in and uploads are not live yet. /auth/login shows current availability, /auth/signup returns there, and /agents shows setup availability without instructing users to mint a legacy key. Legacy API schemas below are reference documentation, not a working onboarding path.
+Public browser entry uses Ideaflow ID only. `/auth/login`, `/auth/signup`, and `/agents` bridge to the open-beta app at https://private.unlinked.ai, where users can sign in, upload a LinkedIn export, search their own network, and open Agent setup. Legacy API schemas below are reference documentation, not the beta onboarding path.
 
-Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live private account or invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend.
+The beta app currently runs separately from the public www.unlinked.ai homepage. The default-off source contracts for durable private archive import, scoped hosted setup and AI search remain documented at https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md and https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/durable-archive-import.md; synthetic receipts do not verify a production rollout.
 
 This is the agent-facing brief served at `/AGENTS.md` for autonomous agents arriving at unlinked.ai over HTTP. For agents and developers working inside this repository, see `AGENTS.md` at the repo root.
 
 ## What this is
 
-See the repository [README](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/README.md) for current product behavior and availability. The API and MCP instructions below describe the legacy backend surface; they do not expose the new [private archive parser/job foundation](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-archive-import.md).
+See the repository [README](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/README.md) for current product behavior and availability. The API and MCP instructions below describe the legacy backend surface; beta Agent setup is reached through the app rather than these legacy key examples.
 
-The sections below preserve the historical agent API and MCP contract for recovery work. They are not live setup instructions while private sign-in, uploads and hosted MCP access remain unavailable.
+The sections below preserve the historical agent API and MCP contract for recovery work. They are not beta setup instructions.
 
 ## Historical Scoping Guarantee
 
@@ -23,7 +23,7 @@ The legacy agent API authenticates every request server-side to the user owning 
 
 ## Historical Authentication Reference
 
-There is no live agent-key creation path in the deployed product today. The legacy implementation used the following contract:
+The open-beta app supplies its own Agent setup. The legacy implementation used the following agent-key contract:
 
 1. **Minting a Key:** A signed-in private account created keys from **Settings -> Agent keys** after private access was enabled.
 2. **Format:** Agent keys start with the prefix `ul_` followed by base64url-encoded random bytes (e.g. `ul_...`).
@@ -36,7 +36,7 @@ There is no live agent-key creation path in the deployed product today. The lega
 
 ## Historical MCP Server Reference
 
-unlinked.ai includes a Model Context Protocol server under `@unlinked/mcp-server` for the legacy agent API. Because live agent-key creation and hosted setup are unavailable, the snippets below are reference examples only.
+unlinked.ai includes a Model Context Protocol server under `@unlinked/mcp-server` for the legacy agent API. The snippets below are reference examples only; use Agent setup in the beta app for the current onboarding path.
 
 ### Build the server from source
 

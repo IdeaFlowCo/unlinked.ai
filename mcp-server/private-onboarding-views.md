@@ -1,6 +1,6 @@
 # Lightweight onboarding views
 
-`private-onboarding-views.mjs` is an unwired renderer module, not a released onboarding flow.
+`private-onboarding-views.mjs` is the renderer module used by the default-off private browser, not a released public onboarding flow.
 Its indigo styling and journey follow the accepted onboarding and app storyboards.
 The runtime owner must integrate it without changing authorization boundaries.
 
@@ -36,7 +36,7 @@ are indeterminate, with no invented counts or timers. `indexed` displays the pro
 `total` as the final record count. Header counts and Settings accepted/indexed
 totals use records wording without changing props. A future explicit connection-count
 prop could restore connections wording; the current totals cannot supply that count.
-The runtime owner must implement durable job continuation, authenticated same-owner status, and early own-profile staging before enabling those states.
+The background private browser path implements durable job continuation, authenticated same-owner status, and early own-profile staging when `backgroundImports` is enabled; any other runtime must supply equivalent behavior before enabling those states.
 `total` may remain null until parsing knows the count.
 Only final `indexed` status reports ready. The importing screen uses terminal status for its title and body, without pending progress or continuation promises.
 The upload notice says profile and connections join the member's own network and are
@@ -50,7 +50,7 @@ Each optional import `sha256` value is escaped and shown only inside its `<detai
 alongside the existing `accepted`, `indexed`, `filename`, `status` and `id` fields.
 Join offers Google and email buttons, both forwarding to `/login`. Skip goes to
 `/profile`; Looks good goes to `/network`. My profile navigation also uses `/profile`.
-Route destinations and post-upload profile navigation must be wired by the runtime owner; no handler is changed by this slice.
+Route destinations and post-upload profile navigation are wired by the default-off private browser handler when open-account signup is enabled. Other hosts must keep the same owner/session boundaries if they reuse the renderers.
 
 Generate fictional, static preview pages with
 `node mcp-server/private-onboarding-preview.mjs /tmp/unlinked-ui-previews`.
