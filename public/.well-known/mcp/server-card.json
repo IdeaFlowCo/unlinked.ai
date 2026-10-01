@@ -106,5 +106,11 @@
     "rest_api": "https://www.unlinked.ai/api",
     "docs": "https://www.unlinked.ai/agents",
     "openapi": "https://www.unlinked.ai/openapi.json"
+  },
+  "private_archive_availability": {
+    "status": "staging_only_unmounted",
+    "production_setup": "unavailable",
+    "ai_search": "unavailable",
+    "note": "Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend."
   }
 }

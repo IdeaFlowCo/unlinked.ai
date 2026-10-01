@@ -1,7 +1,7 @@
 # Private LinkedIn archive foundation
 
 This slice implements the parser/job foundation. See [README.md](../README.md#import-linkedin-archive) for the public archive entry and upload availability.
-There is no live ingestion, AI search, identity binding, agent linking, migration or backend activation in this change.
+Production ingestion, AI search, identity binding, agent linking, migration and backend activation remain unavailable. The default-off staging adapter/browser/search implementation is documented in [Private Noos staging](private-noos-staging.md).
 The legacy onboarding/agent endpoints are not connected to this module.
 
 ## Parser and receipts
@@ -21,38 +21,33 @@ Unknown files, invalid UTF-8, absent headers, invalid URLs and malformed records
 Logical record identifiers count parsed nonempty or malformed CSV records, including preamble/header records, not physical line numbers (quoted fields may span lines).
 Imported URLs and emails are observations, never proof of an app login identity.
 
-`src/utils/private-import/job.mjs` binds deterministic job, source and assertion IDs to a caller-supplied verified historical owner ID.
+`src/utils/private-import/job.mjs` binds deterministic job, source and assertion IDs to a caller-supplied verified Unlinked owner ID.
 The ID includes the archive hash/upload filename/parser version, and assertions include the source hash/path/record identifier.
 An exact replay returns the original terminal receipt; revised bytes or filenames create a new job and preserve the old source/assertions.
-There is no person directory, cross-owner merge, automatic publication or account claim.
-No active-person materialization or supersession resolver exists yet: a future owner-scoped resolver must select/supersede only this owner's prior assertions and invalidate its embeddings.
+There is no person directory, cross-owner merge, public publication or account claim inferred from archive data.
+No active-person materialization or supersession resolver exists yet: a future owner-scoped resolver must select/supersede only this owner's prior assertions. Staging observation indexing is not embedding generation.
 
 Job metadata and original bytes are written before parsing.
-A job advances from `uploaded` to `parsing`, then `partial` with `phase: awaiting_private_index` when rows are durably accepted, or `failed` when none are accepted or the archive is invalid.
-Every source receipt records accepted/rejected counts and unsupported/error outcomes.
-`counts.indexed` remains zero and `indexGate` names the missing Noos private index; this foundation never reports `indexed` merely because parsing succeeded.
-The future index adapter must prove accepted source-backed assertions are indexed before publishing an `indexed` receipt.
+A job advances from `uploaded` to `parsing`, then publishes an adapter-specific terminal receipt, or `failed` when none are accepted or the archive is invalid.
+Every source receipt records accepted/rejected counts and unsupported/error outcomes. The Noos adapter stores compact rejection counts; original bytes and parser version preserve exact rejected records.
+Without an index adapter, accepted rows yield `partial` with `phase: awaiting_private_index`, zero `counts.indexed` and a missing-index `indexGate`. The staging Noos adapter instead uses the [fenced observation publication contract](private-noos-staging.md#publication-and-scale); parsing alone never establishes indexed completeness.
 Persistence errors reject the operation; they are never translated into archive success. Once the `parsing` receipt is saved, later persistence errors leave that retryable receipt. Failures during initial asset/job writes can leave no job or an `uploaded` receipt, depending on the last successful write.
-The adapter must serialize one owner's job, preserve immutable assets/assertions and atomically publish assertions plus the final job receipt.
+The adapter must serialize one owner's job, preserve immutable assets/assertions and expose assertions only through the final publication fence.
 Retry starts its counters from zero, so an interrupted publication cannot duplicate counts.
 
 ## Noos boundary and activation gate
 
-The Noos owner’s operational v1 foundation defines `GET/PUT /api/operational/v1/unlinked/:type/:sourceId` for `import`, `source` and `assertion` resources.
-Each PUT has `{sourceOwnerId, sourceRevision, expectedRevision, audience: 'owner', deleted, payload}` and an immutable verified historical-owner-to-Noos mapping provisioned by the identity owner.
-The importer will map job ID to `import`, source ID to `source` and row assertion ID to `assertion`; all IDs already include historical owner scope.
-Immutable source/assertion records use first-create revision 1 and exact-content replay; mutable job status advances through CAS revisions.
-Source payloads need private asset references and content hashes; original bytes need an authorized private asset store, not public Storage objects or broadly readable graph payloads.
-The Noos v1 single-resource contract alone does not provide atomic multi-resource publication or assets: an adapter must add verified batch/commit semantics (or fenced committed-job reads), replay/recovery and private asset authorization before runtime hookup.
+`src/utils/private-import/noos-adapter.mjs` implements the explicit server-only HTTP adapter and scoped reader against the isolated Noos operational API.
+Its batch publication, private asset, immutable revision and read-fence contract is owned by [Private Noos staging](private-noos-staging.md#publication-and-scale).
+No production route mounts this adapter and no generic Noos graph is written.
 Noos labels are not isolation by themselves; the destination must be inaccessible to legacy generic query, graph, search, counts, export, attachments and agent credentials.
-No HTTP adapter is mounted by this slice and no generic Noos graph is written.
 
-The browser identity seam remains verified `(issuer, subject)` to existing Unlinked owner ID to Noos user ID, preserving account choice and established bindings.
+The browser identity seam remains verified `(issuer, subject)` to an immutable Unlinked owner ID and Noos user ID, preserving account choice and established bindings. The optional new-owner claim is owned by [Private invited-owner browser](private-invited-browser.md).
 A LinkedIn slug, imported email or a call to the legacy `claim_linkedin_profile` is not that mapping.
 The identity owner owns token verification and subject resolution; the import module accepts only the resolved owner, not an owner from browser upload input.
-Future browser search and scoped agent search must read the same committed owner-specific assertions and private index.
+Browser and scoped agent search use the same committed owner-specific dataset in staging; see [Private Noos staging](private-noos-staging.md#scoped-search-and-browser).
 
-Activation requires the real isolated Noos transaction/authorization tests, private assets, verified identity mapping, owner-scoped indexing/search with genuine provider receipts, and subsequent scoped hosted-agent delegation proof.
+Synthetic parser evidence alone does not authorize activation. The remaining provider, identity, storage/recovery and deployment gates are owned by the [pilot release plan](private-pilot-release-plan.md) and [real guest pilot proposal](private-real-guest-pilot-delta.md).
 The old Supabase source, archived bytes and historical IDs must remain available for recovery and rollback.
 A parser test or a fresh synthetic import does not prove historical migration parity.
 This unmounted slice changes no existing writer, auth deployment, paid service or provider setting; reverting its code needs no live data rollback.
