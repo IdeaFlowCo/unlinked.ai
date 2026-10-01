@@ -147,7 +147,7 @@ export function createNoosOwnerBackend({ baseUrl, accessToken, ownerId, fetchImp
       const response = await request(`assets/${encodeURIComponent(ownerId)}/${sha256}`)
       if (!response) throw new Error('private_observation_recovery_unavailable')
       const bytes = Buffer.from(await response.arrayBuffer())
-      if (bytes.length > 20 * 1024 * 1024 || digest(bytes) !== sha256) throw new Error('private_asset_invalid')
+      if (bytes.length > 64 * 1024 * 1024 || digest(bytes) !== sha256) throw new Error('private_asset_invalid')
       return bytes
     },
   }

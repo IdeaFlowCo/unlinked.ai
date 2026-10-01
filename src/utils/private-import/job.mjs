@@ -60,7 +60,7 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter, consent
       })
       job.counts.accepted += accepted.length
       job.counts.rejected += source.rejected.length
-      job.counts.skippedFiles += Number(source.skipped)
+      job.counts.skippedFiles += source.skipped ? source.skippedFileCount ?? 1 : 0
       job.counts.failedFiles += Number(status === 'failed')
     }
     const supportError = store.validatePublication?.(job, assertions)

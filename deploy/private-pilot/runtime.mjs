@@ -17,9 +17,10 @@ try {
   const { createPrivatePilotDependencies } = await import(pathToFileURL(wiring).href)
   if (typeof createPrivatePilotDependencies !== 'function') throw new Error()
   dependencies = await createPrivatePilotDependencies({ root, baseUrl: process.env.PILOT_ORIGIN, host: '127.0.0.1', operationalPort: 9022, boltUrl, networkMode, dataMode: 'private_live' })
-  for (const key of ['login', 'resolveOwner', 'claimInvitation', 'getBackend', 'complete', 'close']) {
+  for (const key of ['login', 'resolveOwner', 'signup', 'getBackend', 'complete', 'close']) {
     if (typeof dependencies[key] !== (key === 'login' ? 'object' : 'function') || dependencies[key] === null) throw new Error()
   }
+  if (!(dependencies.accountGrantKey instanceof Uint8Array) || dependencies.accountGrantKey.length < 32) throw new Error()
   const { startPrivatePilot } = await import(pathToFileURL(root + '/runtime/unlinked/mcp-server/private-pilot.mjs').href)
   pilot = await startPrivatePilot({ ...dependencies, baseUrl: process.env.PILOT_ORIGIN, host: browserHost, port: 9367, networkMode, dataMode: 'private_live' })
   const stop = async () => { await pilot.stop(); await dependencies.close(); process.exit(0) }
