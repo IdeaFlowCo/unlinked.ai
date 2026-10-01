@@ -36,7 +36,7 @@ Publication checks after delayed model work deny deleted/changed imports.
 This is query-time AI ranking over a private observation index, with no shared people database or embedding completeness claim.
 At the parser maximum many model calls/resource reads are required; the 1,001-contact receipt is the acceptance target, not a 100,000-record latency/cost claim.
 
-The isolated OIDC browser factory uses confidential code flow, client_secret_basic, PKCE S256, nonce/state, signed ID tokens, fresh-provider authentication with `prompt=login` and explicit in-browser account confirmation for invited owner creation.
+The isolated OIDC browser factory uses confidential code flow, client_secret_basic, PKCE S256, nonce/state and signed ID tokens. Invited-owner mode uses fresh-provider authentication with `prompt=login` and explicit in-browser account confirmation before invitation claim. Open-account mode resolves the exact issuer/subject to an existing owner or calls the trusted signup capability to create one; authenticated email is display-only and never merges owners.
 Only verified issuer plus opaque subject enters the trusted immutable existing/new owner mapping.
 Archive email/profile fields never select or rebind ownership.
 Unknown/conflicting ownership fails closed before upload.
@@ -44,15 +44,16 @@ Bounded random sessions use Secure/HttpOnly/SameSite cookies and disappear on re
 Same-origin requests and CSRF protect mutations; one combined upload disclosure/action authorizes private retention and bounded OpenAI processing for browser and search-only scoped agent searches. Versioned consent persists in immutable import/source receipts; search and grant issuance/verification fail closed for older imports lacking it. Replays reuse the original consent without changing prior receipts.
 Receipt/replay and one-action scoped setup forms are implemented.
 Browser responses use `Referrer-Policy: strict-origin`; invited landing pages additionally allow the exact HTTPS provider origin in CSP `form-action`, while all other forms stay self-only.
-Setup downloads a fifteen-minute search-only grant for exactly one import; raw archive access is excluded.
-The separate signed tool audience uses a durable owner-private Noos grant record, live expiry/publication/revocation checks, and ephemeral signing keys that invalidate grants on restart.
+Invited setup downloads a fifteen-minute search-only grant for exactly one import; raw archive access is excluded.
+Open-account setup issues a durable account-scoped bearer for `unlinked_search_network`, covering all current and future owner imports until revoked, with no raw archive, global graph or caller-selected owner access.
+The separate signed tool audiences use durable owner-private Noos grant records and live publication/revocation checks. Invited grants use ephemeral signing keys that invalidate grants on restart; account grants derive a domain-separated key from the approved private graph secret, so unchanged secrets preserve grants and secret replacement revokes them.
 Operational bearers and provider ID tokens never become agent credentials.
 
 The synthetic standalone runtime binds loopback only.
 Reserved tailnet origin is https://m4-mini.tailb2a35c.ts.net:9367 and callback /auth/callback/ideaflow.
 This reservation is not a running or verified upload URL.
 The proposed real guest packet uses the separate `https://private.unlinked.ai` origin and the process-only composition in `mcp-server/private-composition.mjs`; see [Private pilot release packet](../deploy/private-pilot/README.md).
-Actual provider client/redirect acceptance and immutable legacy/new-owner provisioning remain release gates. The optional trusted invited-owner callback and exact owner/principal readback are documented in [Private invited-owner browser](private-invited-browser.md).
+Actual provider client/redirect acceptance and immutable legacy/new-owner provisioning remain release gates. The optional trusted invited-owner callback and exact owner/principal readback are documented in [Private invited-owner browser](private-invited-browser.md); the open account launch is summarized in [Open account launch](../deploy/private-pilot/ACCOUNT-LAUNCH.md).
 Production provider granular delegation is not assumed or enabled.
 
 ## Assets, recovery and credentials
@@ -72,10 +73,10 @@ Any new persistent secret destination requires confirmation before copying; none
 
 ## Verification
 
-Install locked MCP dependencies and run the private AI/browser/grant/hosted/scope test files with node --test.
+Install locked MCP dependencies and run the private AI/browser/grant/hosted/scope/account test files with node --test.
 Signed disposable OIDC responses prove client validation, not an actual provider login.
 Set UNLINKED_NOOS_TEST_CHECKOUT, NOOS_OPERATIONAL_EXTRA_TEST, UNLINKED_NOOS_RECEIPT and NOOS_SIGNED_TEST_EVIDENCE to isolated external-SSD paths, then run the Noos checkout's node scripts/test-operational.mjs.
 Only explicitly authorized UNLINKED_PRIVATE_AI_REMOTE=1 enables synthetic model calls through the existing M5 bridge or the explicit private key-file fallback; ordinary CI has no provider call.
 The runner owns one capped 1 GiB disposable Neo4j and cleans it in finally.
-The real 1,001-contact ZIP harness requires accepted=indexed=MCP-readable count and, with the model enabled, considers every connection including the last contact.
+The real 1,001-contact ZIP harness requires accepted=indexed=MCP-readable count and, with the model enabled, considers every connection including the last contact; account-launch tests additionally cover Connections-only/full-ZIP parsing, returning import discovery, revoke/replay and whole-owner MCP search.
 Do not claim a live pilot until real provider/browser, storage/recovery and review gates pass.
