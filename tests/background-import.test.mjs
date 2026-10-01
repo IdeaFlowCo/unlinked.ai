@@ -82,6 +82,14 @@ async function richProfileArchive(count = 401) {
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 }
 
+async function namedProfileArchive(first, last, headline, count = 5) {
+  const zip = new JSZip()
+  zip.file('Connections.csv', 'First Name,Last Name,URL,Company,Position\n' + Array.from({ length: count }, (_, i) => `Contact${i},${last},https://www.linkedin.com/in/${first.toLowerCase()}-${i},Example Co,Engineer\n`).join(''))
+  zip.file('Profile.csv', `First Name,Last Name,Headline\n${first},${last},${headline}\n`)
+  zip.file('Skills.csv', 'Name\nShared systems\n')
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+}
+
 test('stage returns durable uploaded receipt; crash after profile before connections resumes all 1,003 once', async t => {
   const f = await fixture(t), ownerId = 'owner-a', backend = f.backend(ownerId), bytes = await fullArchive()
   const request = { ownerId, filename: 'full.zip', bytes, adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT, now: () => 1000 }
@@ -257,6 +265,44 @@ test('profile page keeps prior indexed profile when newer malformed upload fails
   const settings = await (await fetch(endpoint + '/settings', { headers: { Cookie: cookie } })).text()
   assert.match(settings, /newer-broken\.zip/)
   assert.match(settings, /failed/)
+})
+
+test('profile page selects newest successful profile from reverse job discovery order', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  let jobOrder = []
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => jobOrder,
+      listImportIds: async () => jobOrder,
+      listAccountGrantIds: async () => [] }
+  }
+  const olderBackend = await getBackend(owner)
+  const older = await stageArchive({ ownerId: owner.ownerId, filename: 'older.zip', bytes: await namedProfileArchive('Older', 'Owner', 'Legacy profile'), adapter: olderBackend.adapter, consent: COMBINED_UPLOAD_CONSENT, now: () => 1000 })
+  await runArchiveJob({ ownerId: owner.ownerId, id: older.id, adapter: olderBackend.adapter, readAsset: olderBackend.readAsset, now: () => 1000 })
+  const newerBackend = await getBackend(owner)
+  const newer = await stageArchive({ ownerId: owner.ownerId, filename: 'newer.zip', bytes: await namedProfileArchive('Newer', 'Owner', 'Current profile'), adapter: newerBackend.adapter, consent: COMBINED_UPLOAD_CONSENT, now: () => 2000 })
+  await runArchiveJob({ ownerId: owner.ownerId, id: newer.id, adapter: newerBackend.adapter, readAsset: newerBackend.readAsset, now: () => 2000 })
+  jobOrder = [newer.id, older.id]
+
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const profile = await (await fetch(endpoint + '/profile', { headers: { Cookie: cookie } })).text()
+  assert.match(profile, /Newer Owner/)
+  assert.match(profile, /Current profile/)
+  assert.doesNotMatch(profile, /Older Owner/)
+  assert.doesNotMatch(profile, /Legacy profile/)
 })
 
 test('owner profile reads only bounded profile chunks and preserves full fields', async t => {
