@@ -161,6 +161,10 @@ export default function ForAgentsPage() {
           </Text>
         </Box>
 
+        <Text as="p" size="2" color="gray">
+          Private archive import and scoped hosted setup remain unavailable. This guide describes the legacy agent API.
+        </Text>
+
         <Card size="3" style={{ borderColor: 'var(--accent-6)' }}>
           <Flex gap="3" align="start">
             <Box pt="1">

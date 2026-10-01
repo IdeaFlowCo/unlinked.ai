@@ -56,11 +56,19 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
       job.counts.skippedFiles += Number(source.skipped)
       job.counts.failedFiles += Number(status === 'failed')
     }
+    const supportError = store.validatePublication?.(job, assertions)
+    if (supportError) {
+      job.status = 'failed'; job.phase = 'unsupported_private_publication'; job.error = supportError
+      job.unsupportedSourceIds = job.sources.map(source => source.id); job.sources = []
+      job.indexGate = store.publicationGate ?? 'noos_private_index_not_connected'; job.revision++
+      await store.saveJob(job)
+      return job
+    }
     // Publication is one atomic operation. Retrying an interrupted parsing job
     // cannot accumulate row counts or reveal only half an owner's assertions.
     job.status = job.counts.accepted ? 'partial' : 'failed'
-    job.phase = job.counts.accepted ? 'awaiting_private_index' : 'no_accepted_rows'
-    job.indexGate = 'noos_private_index_not_connected'; job.revision++
+    job.phase = job.counts.accepted ? (store.publicationPhase ?? 'awaiting_private_index') : 'no_accepted_rows'
+    job.indexGate = store.publicationGate ?? 'noos_private_index_not_connected'; job.revision++
     await store.publish(job, assertions)
     return job
   })

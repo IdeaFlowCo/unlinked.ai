@@ -106,5 +106,11 @@
     "rest_api": "https://www.unlinked.ai/api",
     "docs": "https://www.unlinked.ai/agents",
     "openapi": "https://www.unlinked.ai/openapi.json"
+  },
+  "private_archive_availability": {
+    "status": "staging_only_unmounted",
+    "production_setup": "unavailable",
+    "ai_search": "unavailable",
+    "note": "Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The private Noos adapter and hosted read tool are unmounted staging-only source; their synthetic receipt does not verify this legacy backend."
   }
 }
