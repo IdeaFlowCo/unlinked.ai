@@ -47,9 +47,10 @@ Setup downloads a fifteen-minute search-only grant for exactly one import; raw a
 The separate signed tool audience uses a durable owner-private Noos grant record, live expiry/publication/revocation checks, and ephemeral signing keys that invalidate grants on restart.
 Operational bearers and provider ID tokens never become agent credentials.
 
-The explicit standalone runtime binds loopback only.
+The synthetic standalone runtime binds loopback only.
 Reserved tailnet origin is https://m4-mini.tailb2a35c.ts.net:9367 and callback /auth/callback/ideaflow.
 This reservation is not a running or verified upload URL.
+The proposed real guest packet uses the separate `https://private.unlinked.ai` origin and the process-only composition in `mcp-server/private-composition.mjs`; see [Private pilot release packet](../deploy/private-pilot/README.md).
 Actual provider client/redirect acceptance and immutable legacy/new-owner provisioning remain release gates. The optional trusted invited-owner callback and exact owner/principal readback are documented in [Private invited-owner browser](private-invited-browser.md).
 Production provider granular delegation is not assumed or enabled.
 
@@ -64,6 +65,7 @@ No production graph or historical personal data is used in tests.
 
 Existing OpenAI credential reuse was explicitly approved.
 The staging remote completion bridge reads the verified M5 credential in place over authenticated SSH, never copies/persists it locally or exposes it in logs.
+Final test execution may instead use `UNLINKED_PRIVATE_AI_TEST_KEY_FILE` only when the operator supplies an explicit mode-600 regular non-symlink env file outside the Unlinked and Noos checkouts; the file is read directly into the existing Responses completion path and the receipt records status/model/usage without printing the key.
 A bounded synthetic Responses request returned HTTP 200.
 Any new persistent secret destination requires confirmation before copying; none is configured here.
 
@@ -72,7 +74,7 @@ Any new persistent secret destination requires confirmation before copying; none
 Install locked MCP dependencies and run the private AI/browser/grant/hosted/scope test files with node --test.
 Signed disposable OIDC responses prove client validation, not an actual provider login.
 Set UNLINKED_NOOS_TEST_CHECKOUT, NOOS_OPERATIONAL_EXTRA_TEST, UNLINKED_NOOS_RECEIPT and NOOS_SIGNED_TEST_EVIDENCE to isolated external-SSD paths, then run the Noos checkout's node scripts/test-operational.mjs.
-Only explicitly authorized UNLINKED_PRIVATE_AI_REMOTE=1 enables existing-key synthetic model calls; ordinary CI has no provider call.
+Only explicitly authorized UNLINKED_PRIVATE_AI_REMOTE=1 enables synthetic model calls through the existing M5 bridge or the explicit private key-file fallback; ordinary CI has no provider call.
 The runner owns one capped 1 GiB disposable Neo4j and cleans it in finally.
 The real 1,001-contact ZIP harness requires accepted=indexed=MCP-readable count and, with the model enabled, considers every connection including the last contact.
 Do not claim a live pilot until real provider/browser, storage/recovery and review gates pass.

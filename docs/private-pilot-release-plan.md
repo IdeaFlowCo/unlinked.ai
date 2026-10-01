@@ -1,8 +1,9 @@
 # Reviewable isolated private pilot target
 
-No guest upload URL is verified. The reserved origin is `https://m4-mini.tailb2a35c.ts.net:9367`; callback is `/auth/callback/ideaflow`.
+No guest upload URL is verified. The synthetic rehearsal origin remains `https://m4-mini.tailb2a35c.ts.net:9367`; callback is `/auth/callback/ideaflow`.
 The source browser is default-off and explicitly marks its default synthetic mode; synthetic mode requires an additional confirmation that the archive contains only test data.
 Do not upload a real guest archive to that rehearsal.
+The proposed real guest deployment packet is `deploy/private-pilot/`; it targets `https://private.unlinked.ai` only after its manifest gates are satisfied.
 
 ## Source and approval dependencies
 
@@ -16,17 +17,18 @@ Noos login/register routes and their deployed no-passwordHash guard are untouche
 
 ## Proposed runtime and storage targets
 
-A new operator-controlled mode-700 root is proposed at `/Volumes/External_SSD/code-overflow/unlinked-private-pilot-20261001/`.
+A new operator-controlled mode-700 synthetic rehearsal root is proposed at `/Volumes/External_SSD/code-overflow/unlinked-private-pilot-20261001/`.
 It has not been created or activated.
 A dedicated Neo4j container would use `neo4j-data/` under this root, loopback-only Bolt port 9288, a 1 GiB memory cap and a dedicated database/admin credential.
 The isolated operational HTTP service would bind only `127.0.0.1:9021`; the browser/MCP service binds `127.0.0.1:9367` and receives tailnet-only HTTPS through Tailscale Serve.
 These ports were available at preparation; recheck immediately before launch.
+The separate real guest packet fixes its root at `/srv/unlinked-private-guest-pilot-20261001`, graph Bolt at 9289, operations at 9022, browser at 9367 and HTTPS ingress at 443.
 The operational service must use the dedicated driver/database and must never mount the legacy generic query API.
 Private archive/source/oversized-observation bytes use `assets/`, with owner-hashed paths, immutable SHA-256 names and modes 700/600.
 Paired quiesced backups use `backups/` and include graph resources, owner/identity bindings, every referenced blob, integrity manifest and tombstones.
 Existing storage backends remain replaceable; binary ZIP bytes are not graph properties.
-The model bridge reads the existing M5 credential in place over SSH; no new persistent OpenAI secret destination is needed for this rehearsal.
-Any new persistent credential copy or actual pilot resource creation must use its reviewed exact target/approval, not this proposal alone.
+The model bridge reads the existing M5 credential in place over SSH for the synthetic rehearsal, or a final test may opt into an explicit mode-600 key file outside all checkouts through `UNLINKED_PRIVATE_AI_TEST_KEY_FILE`.
+Any new persistent credential copy or actual pilot resource creation must use its reviewed exact target/approval, not this proposal alone; the real guest packet proposes `runtime/runtime.env` as the OpenAI destination and keeps it blocked until explicitly confirmed.
 
 ## Identity and private runtime wiring
 
@@ -39,7 +41,8 @@ No browser binding endpoint or email/profile/archive auto-link exists.
 A real legacy owner requires independent supported legacy-owner proof in addition to verified Ideaflow identity and explicit live-bind approval.
 The paused legacy Supabase route is not such proof.
 
-`startPrivatePilot` needs reviewed `login`, `resolveOwner`, `getBackend`, `complete`, and `baseUrl` configuration.
+`startPrivatePilot` needs reviewed `login`, `resolveOwner`, `claimInvitation`, `getBackend`, `complete`, and `baseUrl` configuration.
+`mcp-server/private-composition.mjs` supplies the real process-only factory for the deployment launcher. It loads only compiled Noos operational modules from the dedicated private checkout, waits for graph connectivity before provisioning, uses callback-role invitation claiming and mints internal operations bearers only after owner/principal revalidation.
 `getBackend` rechecks the immutable owner UUID/Noos user binding and returns an owner-specific private operational adapter; arbitrary browser fields cannot select it.
 MCP uses an independent short-lived tool audience and durable Noos grant record, scoped to exactly one import and only search.
 Noos operational tokens and provider tokens never enter the download.
@@ -54,7 +57,8 @@ Revocation/deletion is checked live, and ephemeral stage signing keys revoke all
 5. Verify HTTPS from the M5 before sharing a URL. Report it explicitly as synthetic rehearsal unless a distinct isolated real-data target/live-bind decision has passed.
 6. Only a separately reviewed real-data pilot may accept the guest's archive, with the guest's combined upload consent to private retention and bounded OpenAI processing. Do not switch the synthetic fixture into a real-data cohort implicitly.
 
-Rollback stops the owned browser/operational services, removes only their Tailscale Serve port, preserves private data/receipts/backups, and invalidates ephemeral grants.
+Rollback stops the owned browser/operational services, removes only their Tailscale Serve port for the synthetic rehearsal, preserves private data/receipts/backups, and invalidates ephemeral grants.
+The real guest packet rollback stops only its three labeled containers and preserves state, source receipts, invitation bundles and backups; provider client/grant revocation remains a separate owner operation.
 Publication rollback is an irreversible tombstone for that publication; it retains private originals and denies tools.
 A quiesced paired restore must restore journal rows before final publication fences and preserve owner mappings, source IDs, immutable receipt history and grant/publication tombstones.
 The synthetic harness rehearses this pair; power-loss/directory-fsync durability, operational backup ownership/retention and historical live-writer fencing remain separate release evidence.

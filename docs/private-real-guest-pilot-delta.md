@@ -23,6 +23,7 @@ It is separate from every synthetic staging root and existing Noos graph/data vo
 Subdirectories: runtime/ (reviewed source SHAs), neo4j-data/ (dedicated database), assets/ (700/600 private blobs), backups/ (paired private snapshots), and audit/ (non-token consent/identity provenance).
 A dedicated1GiB Neo4j container uses loopback Bolt9289; operational API binds loopback9022; browser/MCP binds loopback9367 behind the new443 ingress.
 No generic graph-query route, raw asset route or operational token is public.
+The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, and `runtime.mjs` refuses to launch without reviewed mode600 wiring.
 One invited guest/new owner is the initial cohort; its exact verified production subject is allowlisted before upload can be enabled.
 Every import/index/source/receipt/grant is keyed to that immutable owner UUID in the dedicated graph.
 Prior legacy IDs/data remain unchanged and unlinked; no prior owner or data is imported implicitly.
@@ -30,7 +31,8 @@ Storage retains immutable originals and receipts for recovery. No automatic phys
 At pilot closure/guest withdrawal ingress and grants are disabled; any physical purge is a separately consented, owner-verified operation, including backups.
 No new cloud instance, paid provider activation or credential purchase is proposed.
 A durable private database/admin secret and registered OAuth client credentials require exact reviewed mode600 destinations; no files/resources are created by this plan.
-The existing approved M5 model credential can be read in place over SSH for an isolated pilot; any persistent deployment copy requires its own exact destination confirmation.
+The existing approved M5 model credential can be read in place over SSH for an isolated pilot, and final source testing can use an explicit mode600 non-symlink key file outside any checkout through `UNLINKED_PRIVATE_AI_TEST_KEY_FILE`.
+Any persistent deployment copy requires its own exact destination confirmation; the proposed packet records `runtime/runtime.env` as the destination but blocks activation until that confirmation exists.
 
 ## NEW guest account/owner creation route
 
@@ -40,6 +42,7 @@ The app uses confidential code+PKCE/state/nonce/signed ID tokens and account cho
 Its read-only resolver returns only an established exact issuer/subject mapping.
 An unknown subject cannot upload and receives the setup/recovery gate; it never auto-claims an email, archive, LinkedIn slug, legacy UUID or existing Noos account.
 For a NEW private account, the reviewed offline operation generates a fresh Unlinked UUID, obtains/provisions its independently verified Noos principal through the approved identity adapter, and binds the verified production tuple in one transaction with a provenance receipt.
+The runtime composition uses the Noos callback-role `InvitedOwnerProvisioner` for the browser callback and exact issuer/subject readback; no operator invitation capability is exposed over HTTP.
 The existing Noos auth/main/deployed no-passwordHash divergence must not be used as an auto-claim or invented Noos-principal proof.
 The captain's new-owner/bind decision and the guest's explicit new-account intent must be recorded before this operation.
 No browser-callable binding endpoint or automatic legacy merge is added.
@@ -52,6 +55,7 @@ Secure HttpOnly SameSite cookies contain random fifteen-minute session IDs, not 
 One combined upload disclosure/action authorizes private archive retention and bounded OpenAI processing of queries and observed name/company/position/date fields for browser and search-only scoped agent searches. Immutable import/source receipts retain versioned consent. Older imports without this disclosure fail closed for search and grants; replay never upgrades prior consent.
 Agent setup is a separate explicit owner action, exactly one import and only search, with distinct tool audience, fifteen-minute expiry, durable grant record and live revocation/publication checks.
 Operational/provider tokens and raw recovery APIs are never delegated to the agent.
+Scoped publication reads fetch at most eight observations concurrently, preserve manifest order and recheck the live publication fence after all rows so a deletion/revocation race wins.
 Actual real-user delegation must receive its own reviewed approval; synthetic stage issuer behavior is not production provider delegated consent.
 
 ## Proof and activation order
