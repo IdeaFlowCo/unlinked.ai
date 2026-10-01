@@ -17,7 +17,7 @@ export function createPrivateSearch({ readImport, complete }) {
       id: row.id,
       fields: Object.fromEntries(allowedFields.filter(key => typeof row.fields?.[key] === 'string').map(key => [key, row.fields[key].slice(0, 256)])),
     }))
-    if (!candidates.length) return { importId, mode: 'query_time_ai', indexed: publication.indexed ?? 0, matches: [] }
+    if (!candidates.length) return { importId, mode: 'query_time_ai', indexed: publication.indexed ?? 0, considered: 0, matches: [] }
     const rows = new Map(publication.assertions.map(row => [row.id, row]))
     const byId = new Map(candidates.map(row => [row.id, row]))
     const eligible = new Set(candidates.map(row => row.id)), seen = new Set()
@@ -65,7 +65,7 @@ export function createPrivateSearch({ readImport, complete }) {
     // it was running. The reader also performs live owner/publication checks.
     const current = await readImport(importId, { signal })
     if (digest(JSON.stringify(current)) !== digest(JSON.stringify(publication))) throw new Error('private_import_not_found')
-    return { importId, mode: 'query_time_ai', indexed: publication.indexed ?? 0, matches }
+    return { importId, mode: 'query_time_ai', indexed: publication.indexed ?? 0, considered: candidates.length, matches }
   }
 }
 

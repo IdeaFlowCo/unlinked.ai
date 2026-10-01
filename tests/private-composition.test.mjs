@@ -26,11 +26,16 @@ async function fixture(t) {
   // Explicit process-side contract doubles. Real Noos graph/provisioning evidence
   // is separate; this test executes composition, signed bearer and HTTP routing.
   class OperationalStore {
+    ready = false
+    async initialize() { this.ready = true; state.storeInitialized = true }
+    checkReady() { if (!this.ready) throw new Error('operational_unavailable') }
     async authorizeOwner(principal, namespace, ownerId) {
+      this.checkReady()
       assert.equal(namespace, 'unlinked')
       if (!state.active || principal?.userId !== 'user-one' || ownerId !== 'owner-one') throw new Error('owner_denied')
     }
     async resolveIdentity(namespace, issuer, subject) {
+      this.checkReady()
       return namespace === 'unlinked' && issuer === configuration.issuer && subject === 'chosen-subject' && state.active ?
         { ownerId: 'owner-one', userId: 'user-one' } : null
     }
@@ -38,6 +43,7 @@ async function fixture(t) {
   class InvitedOwnerProvisioner {
     constructor(driver, database, capability) { state.capability = capability }
     async initialize() { state.initialized = true }
+    async signup(identity) { state.signup = identity; return { ownerId: 'owner-one', userId: 'user-one' } }
     async claim(token, identity) {
       state.claim = { token, identity }
       if (token !== 'synthetic-invite' || identity.subject !== 'chosen-subject') throw new Error('invitation_denied')
@@ -99,6 +105,7 @@ test('private composition connects exact callback, immutable owner resolution an
   const dependencies = await createPrivatePilotDependencies(options)
   t.after(dependencies.close)
   assert.equal(state.initialized, true)
+  assert.equal(state.storeInitialized, true)
   assert.deepEqual(state.capability, { role: 'callback', actorId: 'unlinked-private-browser', issuer: configuration.issuer, clientId: configuration.clientId })
   assert.equal(state.login.callbackUrl, 'https://private-test.invalid/auth/callback/ideaflow')
   assert.deepEqual(state.mounts, ['/v1', '/v1'])
@@ -138,6 +145,7 @@ test('composition waits for graph readiness before provisioning', async t => {
   t.after(dependencies.close)
   assert.equal(state.readinessChecks, 3)
   assert.equal(state.initialized, true)
+  assert.equal(state.storeInitialized, true)
 })
 
 test('composition fails closed when graph readiness deadline expires', async t => {

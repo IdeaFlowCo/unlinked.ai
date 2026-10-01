@@ -92,7 +92,11 @@ test('real ZIP and CSV bytes discover variable preambles and preserve rejected/u
   assert.equal(parsed.sources[0].rejected[0].reason, 'missing_required_field')
   assert.equal(parsed.sources[1].accepted[0].fields.name, 'Synthetic, skill')
   assert.equal(parsed.sources[2].skipped, true)
-  assert.equal(parsed.sources[2].rawBytes.toString(), 'raw,unknown\nkeep,me\n')
+  const ignored = JSON.parse(parsed.sources[2].rawBytes.toString()).entries
+  assert.equal(ignored[0].path, 'Unknown.csv')
+  assert.equal(ignored[0].expandedBytes, Buffer.byteLength('raw,unknown\nkeep,me\n'))
+  const retainedUnknown = (await JSZip.loadAsync(bytes)).file('Unknown.csv')
+  assert.equal(await retainedUnknown.async('string'), 'raw,unknown\nkeep,me\n')
   assert.equal(parseArchive(Buffer.from(header + contact()), 'Connections.csv').sources[0].accepted.length, 1)
 })
 
@@ -353,10 +357,13 @@ test('inherited category names remain unsupported retained ZIP members', async t
   assert.equal(job.counts.accepted, 1)
   assert.equal(job.counts.skippedFiles, 1)
   assert.equal(job.counts.failedFiles, 0)
-  const unsupported = job.sources.find(source => source.path === 'constructor')
+  const unsupported = job.sources.find(source => source.path === '__archive_manifest__/ignored-entries.json')
   assert.equal(unsupported.category, 'unsupported')
   assert.equal(unsupported.status, 'skipped')
-  assert.deepEqual(await adapter.asset(job.ownerId, unsupported.sha256), raw)
+  const ignored = JSON.parse((await adapter.asset(job.ownerId, unsupported.sha256)).toString()).entries
+  assert.equal(ignored[0].path, 'constructor')
+  const retained = await JSZip.loadAsync(await adapter.asset(job.ownerId, job.archiveSha256))
+  assert.deepEqual(await retained.file('constructor').async('nodebuffer'), raw)
   const prototype = parseSource({ path: '__proto__', bytes: raw })
   assert.equal(prototype.skipped, true)
   assert.equal(prototype.category, 'unsupported')

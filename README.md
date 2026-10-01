@@ -12,7 +12,7 @@ The homepage's primary action, **Start my LinkedIn export**, opens LinkedIn's da
 
 The fictional homepage answer illustrates matching on company and title from connection fields; it is not a live search result and does not infer biographies or work history. The navigation offers Meet, For agents and Sign-in availability. Visitors who already have a file can go directly to `/import-linkedin#next`.
 
-Login is the next step, with an invitation and Ideaflow ID required before private upload once activated. Sign-in and uploads are not active yet; there is no public signup or invitation request form. The public site accepts no files, and private browsing, AI search and agent setup remain unavailable. Parser handling of Connections-only CSV or ZIP does not establish supported browser upload: the file-picker journey still needs verification. Legacy account access remains paused.
+Login is the next step, using Ideaflow ID once the private account runtime is activated. Sign-in and uploads are not active on the public site yet; there is no live private account or invitation URL. The public site accepts no files, and private browsing, AI search and agent setup remain unavailable. Parser handling of Connections-only CSV or ZIP does not establish supported browser upload on the public site. Legacy account access remains paused.
 
 See the [private archive foundation contract](docs/private-archive-import.md) for the parser/job scope, adapter requirements and activation gates.
 
@@ -71,9 +71,9 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-The isolated private Noos adapter, bounded publication journal, OIDC browser controller, scoped query-time AI tools and setup download are documented in [Private Noos staging](docs/private-noos-staging.md). Production setup and AI search remain unavailable.
+The isolated private Noos adapter, bounded publication journal, OIDC browser controller, scoped query-time AI tools and setup flows are documented in [Private Noos staging](docs/private-noos-staging.md). Production setup and AI search remain unavailable.
 
 ### Public network entry
 
 See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/auth/login` shows the Ideaflow ID path and current availability; `/auth/signup` returns there.
-The private runtime still searches a selected import; owner-wide multi-import browsing/search remains follow-up work.
+The default-off private runtime includes owner-wide multi-import browsing/search and account-scoped MCP grants, but it remains unmounted from the public app until the private release gates pass.

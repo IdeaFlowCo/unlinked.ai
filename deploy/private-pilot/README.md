@@ -37,17 +37,18 @@ The production identity operation and new persistent OpenAI secret destination r
 
 ## Trusted runtime capability
 
-The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, getBackend, complete, port, host, networkMode, dataMode})`; its real-data mode is exactly `private_live`.
+The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, signup, accountGrantKey, getBackend, complete, port, host, networkMode, dataMode})`; its real-data mode is exactly `private_live`.
 `mcp-server/private-composition.mjs` provides the process-only `createPrivatePilotDependencies(options)` implementation.
 Install this packet's `wiring.mjs` as mode 600 at `/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs`; its relative export resolves the exact private Unlinked checkout.
 The factory loads only compiled Noos operational modules from the private Noos checkout, never its legacy auth or generic query application.
-It validates the dedicated root and exact live origin/ports, initializes callback-only invitation provisioning, and mints internal ephemeral operations credentials only after active owner/principal authorization.
+It validates the dedicated root and exact live origin/ports, initializes callback-only invitation provisioning plus open-account signup, and mints internal ephemeral operations credentials only after active owner/principal authorization.
 Before provisioning or exposing HTTP readiness, it waits for the dedicated Bolt driver to report graph connectivity with the same bounded driver timeouts.
 The server-side operations key never leaves the runtime; hosted MCP uses its separate search-only grants and live publication fences.
 The private env, production client, TLS/DNS, dependency-complete source artifacts and built deployment images remain activation inputs.
-It must start the isolated operational service only at container `127.0.0.1:9022` and return `login`, `resolveOwner`, `claimInvitation`, `getBackend`, `complete` and `close` capabilities.
-The login object must implement `begin` and `finish` using `createIdeaflowLogin` with the exact verified production issuer/client and callback.
-The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `claimInvitation` is its guarded claim method and `resolveOwner` resolves the same verified issuer/subject mapping.
+It must start the isolated operational service only at container `127.0.0.1:9022` and return `login`, `resolveOwner`, `signup`, `accountGrantKey`, `getBackend`, `complete` and `close` capabilities; invitation-capable deployments may also return `claimInvitation`.
+The login object must implement `begin`, `finish` and the exact HTTPS `authorizationOrigin` using `createIdeaflowLogin` with the verified production issuer/client and callback.
+The authorization request uses `prompt=login`; Unlinked confirms the returned verified account before an invited owner claim, rather than silently binding by email.
+The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `signup` is its guarded open-account method, `claimInvitation` remains its guarded invitation method, and `resolveOwner` resolves the same verified issuer/subject mapping.
 `getBackend` must revalidate active immutable owner/principal and publication access on every operation.
 The operational API exposes only its scoped router, never the legacy generic graph query routes.
 The returned `close` capability must stop its operational listener and graph driver on shutdown.
@@ -97,6 +98,7 @@ All services run as the private operator with all capabilities dropped; nginx te
 If a separately owned maintenance-only ingress occupies 443, verify its exact saved ID/root/maintenance labels and stop it before starting the full recipe; retain its config/certificates for rollback.
 Existing port-80 nginx, legacy Noos containers, shared graph, existing assets and synthetic fixture roots are not mounted or stopped.
 Proxy request/error logging is disabled, so `/invite/<token>` and query strings cannot leak there.
+Ingress sends `Referrer-Policy: strict-origin`; the browser app's invited landing page allows only self plus the configured HTTPS identity origin in CSP `form-action`, and later private forms remain self-only.
 Wrong Host headers and raw operations/asset/query paths are rejected; application session/CSRF/owner authorization remains the trusted product's responsibility.
 `backup` requires all three owned containers stopped, pairs `neo4j-data`, `assets`, `identity-state`, `invitations` and `audit`, and captures the complete graph including bindings/principals/revocation fences.
 `identity-state` stores any separately persisted identity adapter state; it must exist even when empty because identities are entirely in the graph.

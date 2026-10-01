@@ -66,7 +66,7 @@ services:
     tmpfs:
       - '/srv/unlinked-private-guest-pilot-20261001:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}'
       - '/tmp:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}'
-    mem_limit: 512m
+    mem_limit: 1g
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     logging: {driver: none}

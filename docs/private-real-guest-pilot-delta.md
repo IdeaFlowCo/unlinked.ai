@@ -27,7 +27,7 @@ The graph entrypoint preserves `tini` and the pinned image startup script while 
 No generic graph-query route, raw asset route or operational token is public.
 The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, restores only to new canonical `backups/rehearsal-*` targets under the operator-owned mode-700 backup root, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only UID/GID plus the three approved image variables for Compose.
 `runtime.mjs` refuses to launch without reviewed mode600 wiring.
-One invited guest/new owner is the initial cohort; its exact verified production subject is allowlisted before upload can be enabled.
+Open account signup is the proposed initial cohort path. The exact verified production issuer/subject resolves an existing active private owner or atomically creates one through the reviewed private signup capability before upload is enabled.
 Every import/index/source/receipt/grant is keyed to that immutable owner UUID in the dedicated graph.
 Prior legacy IDs/data remain unchanged and unlinked; no prior owner or data is imported implicitly.
 Storage retains immutable originals and receipts for recovery. No automatic physical deletion is promised.
@@ -37,26 +37,25 @@ A durable private database/admin secret and registered OAuth client credentials 
 The existing approved M5 model credential can be read in place over SSH for an isolated pilot, and final source testing can use an explicit mode600 non-symlink key file outside any checkout through `UNLINKED_PRIVATE_AI_TEST_KEY_FILE`.
 Any persistent deployment copy requires its own exact destination confirmation; the proposed packet records `runtime/runtime.env` as the destination but blocks activation until that confirmation exists.
 
-## NEW guest account/owner creation route
+## Open account/owner creation route
 
 The production Id provider's supported existing Google sign-in is the candidate identity route.
-If the invited guest has no Ideaflow ID account, Google-based creation/cohort invitation requires the explicit production account decision; native signup/reset must not be advertised while deployment/mail gates remain unresolved.
-The app uses confidential code+PKCE/state/nonce/signed ID tokens and account choice.
-Its read-only resolver returns only an established exact issuer/subject mapping.
-An unknown subject cannot upload and receives the setup/recovery gate; it never auto-claims an email, archive, LinkedIn slug, legacy UUID or existing Noos account.
-For a NEW private account, the reviewed offline operation generates a fresh Unlinked UUID, obtains/provisions its independently verified Noos principal through the approved identity adapter, and binds the verified production tuple in one transaction with a provenance receipt.
-The runtime composition uses the Noos callback-role `InvitedOwnerProvisioner` for the browser callback and exact issuer/subject readback; no operator invitation capability is exposed over HTTP.
+If a guest has no Ideaflow ID account, Google-based creation requires the explicit production account decision; native password signup/reset must not be advertised while deployment/mail gates remain unresolved.
+The app uses confidential code+PKCE/state/nonce/signed ID tokens, `prompt=login` reauthentication and an Unlinked confirmation screen for the returned verified account.
+Its resolver returns only an established exact issuer/subject mapping; if none exists, the trusted signup capability creates a fresh Unlinked UUID, obtains/provisions its independently verified Noos principal through the approved identity adapter, and binds the verified production tuple in one transaction with a provenance receipt.
+An unknown subject cannot select an owner from email, archive, LinkedIn slug, legacy UUID or existing Noos account.
+The runtime composition uses the Noos callback-role `InvitedOwnerProvisioner` for browser signup and exact issuer/subject readback; no operator invitation capability is exposed over HTTP.
 The existing Noos auth/main/deployed no-passwordHash divergence must not be used as an auto-claim or invented Noos-principal proof.
-The captain's new-owner/bind decision and the guest's explicit new-account intent must be recorded before this operation.
 No browser-callable binding endpoint or automatic legacy merge is added.
 An actual existing legacy account still needs independent supported legacy-owner proof and a separate live-bind decision.
 
 ## Access, consent and delegation
 
-Public ingress exposes only sign-in/account setup; all receipts/uploads/search are session/CSRF/same-origin and exact invited-owner gated.
+Public ingress exposes only sign-in/account setup; all receipts/uploads/search are session/CSRF/same-origin and exact owner gated.
+Ingress uses `Referrer-Policy: strict-origin` so provider navigation keeps the Origin header without sending sensitive paths in referrers. Invitation mode, when used, permits only the exact HTTPS identity provider in CSP `form-action`; subsequent private forms remain self-only.
 Secure HttpOnly SameSite cookies contain random fifteen-minute session IDs, not identity/access tokens.
 One combined upload disclosure/action authorizes private archive retention and bounded OpenAI processing of queries and observed name/company/position/date fields for browser and search-only scoped agent searches. Immutable import/source receipts retain versioned consent. Older imports without this disclosure fail closed for search and grants; replay never upgrades prior consent.
-Agent setup is a separate explicit owner action, exactly one import and only search, with distinct tool audience, fifteen-minute expiry, durable grant record and live revocation/publication checks.
+Agent setup is a separate explicit owner action for `unlinked_search_network` across all current and future owner imports until revoked, with a distinct tool audience, durable grant record and live revocation/publication checks.
 Operational/provider tokens and raw recovery APIs are never delegated to the agent.
 Scoped publication reads fetch at most eight observations concurrently, preserve manifest order and recheck the live publication fence after all rows so a deletion/revocation race wins.
 Actual real-user delegation must receive its own reviewed approval; synthetic stage issuer behavior is not production provider delegated consent.
@@ -68,8 +67,8 @@ Actual real-user delegation must receive its own reviewed approval; synthetic st
 3. Present DNS/TLS/private runtime/data/secret destinations plus production client/account/bind/guest-data/delegation operations and rollback together to Firstmate for the actual approval decisions.
 4. After approval only, create the separate target and verify anonymous/cross-owner denial, public443/callback Host/Origin behavior, privacy boundaries and the M5 browser route.
 5. Complete a signed-in disposable end-to-end browser rehearsal on the SAME reviewed runtime/code; paired graph/blob restore must preserve all1,001 rows, original bytes, source IDs and tombstones.
-6. Verify the invited guest's actual production sign-in/intended account and approved NEW ownership/principal proof; bind offline, read back both sides, snapshot ACLs and backups.
-7. Enable only this owner, obtain guest archive/AI consent, upload the real archive, verify accepted/indexed counts/replay, search and scoped MCP parity.
+6. Verify the guest's actual production sign-in/intended account and approved NEW ownership/principal proof; read back both sides, snapshot ACLs and backups.
+7. Enable only this owner, obtain guest archive/AI consent, upload the real archive, verify accepted/indexed counts/replay, owner-wide search and account MCP parity.
 
 Rollback stops only the three labeled new ingress/runtime/graph containers, preserves private originals/owner UUID/backups, and leaves durable grant/client revocation to the separately approved identity-owner operation.
 Do not blindly delete or rebind live identity/owner data.
@@ -79,4 +78,4 @@ Synthetic paired restore has been proven; operational backup scheduling/ownershi
 Private container activation publishes only non-root ingress 443:8443.
 The browser wildcard listener is confined to the dedicated frontend bridge with no published app port, and the graph is confined to a separate internal backend bridge with no published Bolt port.
 `root-mount-check.py` is the bounded Docker proof for the runtime parent tmpfs; it uses generated fixtures only and does not start the graph, expose ports or read provider credentials.
-Operational/raw asset services remain runtime loopback; the invitation, owner and delegated tool checks continue to apply before every read/write.
+Operational/raw asset services remain runtime loopback; the owner and delegated tool checks continue to apply before every read/write.
