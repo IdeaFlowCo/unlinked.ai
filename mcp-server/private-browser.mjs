@@ -283,7 +283,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           view.content += `<p>${result.considered} connection observations searched across your own files.</p>`
           journey(response, view, props.importJob); return
         }
-        const { accessToken, grantId } = await issueAccountGrant(session.owner)
+        const { accessToken } = await issueAccountGrant(session.owner)
         const configuration = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
         const jobs = await jobResources(), props = jobProps(jobs)
         const grants = await backend.listAccountGrantIds()
