@@ -72,6 +72,16 @@ async function fullArchive(count = 1001) {
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 }
 
+async function richProfileArchive(count = 401) {
+  const zip = new JSZip()
+  zip.file('Connections.csv', 'First Name,Last Name,URL,Company,Position\n' + Array.from({ length: count }, (_, i) => `Person${i},Synthetic,https://www.linkedin.com/in/rich-${i},Synthetic Co,Engineer\n`).join(''))
+  zip.file('Profile.csv', 'First Name,Last Name,Headline\nOwn,Synthetic,Graph engineer\n')
+  zip.file('Positions.csv', 'Company Name,Title,Started On,Finished On,Description\nSynthetic Labs,Principal Engineer,2020,,Built durable import systems\n')
+  zip.file('Education.csv', 'School Name,Degree Name,Start Date,End Date\nGraph University,MS Systems,2012,2014\n')
+  zip.file('Skills.csv', 'Name\nGraph systems\n')
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+}
+
 test('stage returns durable uploaded receipt; crash after profile before connections resumes all 1,003 once', async t => {
   const f = await fixture(t), ownerId = 'owner-a', backend = f.backend(ownerId), bytes = await fullArchive()
   const request = { ownerId, filename: 'full.zip', bytes, adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT, now: () => 1000 }
@@ -199,4 +209,69 @@ test('actual HTTP upload returns profile before processing; authenticated status
   assert.equal(persisted.payload.status, 'indexed'); assert.equal(persisted.payload.counts.indexed, 203)
   const profile = profileFromRows(await readOwnerProfileRows({ ownerId: 'owner-a', jobs: [persisted], backend: await getBackend({ ownerId: 'owner-a' }) }))
   assert.equal(profile.name, 'Own Synthetic')
+})
+
+test('profile page keeps prior indexed profile when newer malformed upload fails', async t => {
+  const f = await fixture(t)
+  const getBackend = async owner => {
+    const backend = f.backend(owner.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => Object.values(await f.snapshot()).filter(row => row.sourceOwnerId === owner.ownerId && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(row => row.sourceId),
+      listImportIds: async () => Object.values(await f.snapshot()).filter(row => row.sourceOwnerId === owner.ownerId && ['indexed', 'partial'].includes(row.payload?.status) && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(row => row.sourceId),
+      listAccountGrantIds: async () => [] }
+  }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === 'owner-a' ? { ownerId: identity.subject, userId: identity.subject } : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const upload = async (bytes, name) => {
+    const page = await (await fetch(endpoint, { headers: { Cookie: cookie } })).text()
+    const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
+    const form = new FormData(); form.set('csrf', csrf); form.set('archive', new Blob([bytes]), name)
+    const response = await fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })
+    assert.equal(response.status, 303); assert.equal(response.headers.get('location'), '/profile')
+  }
+  await upload(await richProfileArchive(201), 'good.zip')
+  let jobs = Object.values(await f.snapshot()).filter(row => row.payload?.backgroundVersion && !row.payload.receiptOf)
+  await runArchiveJob({ ownerId: 'owner-a', id: jobs[0].sourceId, adapter: (await getBackend({ ownerId: 'owner-a' })).adapter, readAsset: (await getBackend({ ownerId: 'owner-a' })).readAsset })
+  let profile = await (await fetch(endpoint + '/profile', { headers: { Cookie: cookie } })).text()
+  assert.match(profile, /Own Synthetic/)
+  assert.match(profile, /Principal Engineer/)
+  await upload(Buffer.from('not a zip'), 'newer-broken.zip')
+  jobs = Object.values(await f.snapshot()).filter(row => row.payload?.backgroundVersion && !row.payload.receiptOf)
+  const failed = jobs.find(row => row.payload.status === 'uploaded')
+  await runArchiveJob({ ownerId: 'owner-a', id: failed.sourceId, adapter: (await getBackend({ ownerId: 'owner-a' })).adapter, readAsset: (await getBackend({ ownerId: 'owner-a' })).readAsset })
+  profile = await (await fetch(endpoint + '/profile', { headers: { Cookie: cookie } })).text()
+  assert.match(profile, /Own Synthetic/)
+  assert.match(profile, /Import could not finish/)
+  assert.doesNotMatch(profile, /Reading your profile and connections/)
+  const settings = await (await fetch(endpoint + '/settings', { headers: { Cookie: cookie } })).text()
+  assert.match(settings, /newer-broken\.zip/)
+  assert.match(settings, /failed/)
+})
+
+test('owner profile reads only bounded profile chunks and preserves full fields', async t => {
+  const f = await fixture(t), ownerId = 'owner-a', backend = f.backend(ownerId), staged = await stageArchive({ ownerId, filename: 'rich.zip', bytes: await richProfileArchive(401), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const completed = await runArchiveJob({ ownerId, id: staged.id, adapter: backend.adapter, readAsset: backend.readAsset })
+  assert.equal(completed.profileChunkCount, 1)
+  assert.ok(completed.assertionChunks.length > 2)
+  const calls = []
+  const observed = { ...backend, readResource: async (type, id) => { calls.push(`${type}/${id}`); return backend.readResource(type, id) } }
+  const profile = profileFromRows(await readOwnerProfileRows({ ownerId, jobs: [await backend.readResource('import', staged.id)], backend: observed }))
+  assert.equal(profile.name, 'Own Synthetic')
+  assert.equal(profile.headline, 'Graph engineer')
+  assert.deepEqual(profile.positions, [{ title: 'Principal Engineer', company: 'Synthetic Labs', description: 'Built durable import systems', startDate: '2020', endDate: '' }])
+  assert.deepEqual(profile.education, [{ institution: 'Graph University', degree: 'MS Systems', startDate: '2012', endDate: '2014' }])
+  assert.deepEqual(profile.skills, ['Graph systems'])
+  assert.ok(calls.includes(`import/${completed.assertionChunks[0]}`))
+  assert.equal(calls.includes(`import/${completed.assertionChunks[1]}`), false)
 })

@@ -233,7 +233,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       }
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
         const jobs = await jobResources(), props = jobProps(jobs)
-        if (props.importJob && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
+        if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
         const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs, backend }))
         journey(response, renderOwnProfile({ ...props, profile, imports: summaries(jobs) }), props.importJob); return
       }
