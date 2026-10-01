@@ -14,7 +14,12 @@ import { createNoosImportAdapter, createScopedImportReader, createNoosOwnerBacke
 const checkout = process.env.UNLINKED_NOOS_TEST_CHECKOUT
 const uri = process.env.NOOS_OPERATIONAL_TEST_URI
 const remoteApi = process.env.UNLINKED_NOOS_TEST_API
+const diagnosticOnly = process.env.UNLINKED_NOOS_MCP_DIAGNOSTIC === '200'
 test('real archive -> signed private Noos/assets -> per-import hosted MCP receipt', { skip: !checkout || !uri }, async t => {
+  if (diagnosticOnly) {
+    assert.ok(remoteApi, 'diagnostic requires co-located remote API')
+    assert.notEqual(process.env.UNLINKED_PRIVATE_AI_REMOTE, '1', 'diagnostic forbids provider calls')
+  }
   const { createPrivateHostedHandler, scopedSetupConfiguration, createScopedSetupHandler } = await import('../mcp-server/private-hosted.mjs')
   const { Client } = await import('../mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js')
   const { StreamableHTTPClientTransport } = await import('../mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js')
@@ -95,6 +100,73 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
     assert.equal(receipt.status, 'indexed'); assert.equal(receipt.counts.indexed, 200)
     control = { accepted: receipt.counts.accepted, indexed: receipt.counts.indexed, elapsedMs: Math.round(performance.now() - started), requests: observed.slice(offset), requestTimeoutMs: 30000 }
     if (process.env.UNLINKED_NOOS_CONTROL_RECEIPT) await writeFile(process.env.UNLINKED_NOOS_CONTROL_RECEIPT, JSON.stringify(control, null, 2))
+    if (diagnosticOnly) {
+      // Opt-in measurement only: never reaches the scaled/model/restore acceptance.
+      const diagnostic = { diagnosticOnly: true, finalAcceptancePassed: false, control, stages: [], gets: [], deadlineMs: 180000 }
+      const stage = name => { diagnostic.stages.push({ name, at: new Date().toISOString() }); console.log(`diagnostic:${name}`) }
+      const grantToken = token('signed-a', 'unlinked-private-tools-staging', 'unlinked:read', 'diagnostic-200')
+      const grant = { ownerId: owner, userId: 'synthetic-noos-a', importIds: [receipt.id], tools: ['unlinked_read_import'], expiresAt: Date.now() + 300000 }
+      let handler
+      toolServer = createServer((req, res) => handler(req, res))
+      await new Promise(resolve => toolServer.listen(0, '127.0.0.1', resolve))
+      const endpoint = `http://127.0.0.1:${toolServer.address().port}/mcp`
+      handler = createPrivateHostedHandler({ allowedHosts: [`127.0.0.1:${toolServer.address().port}`],
+        authenticateGrant: async req => {
+          const principal = await toolAuth({ headers: req.headers, method: 'GET', params: { namespace: 'unlinked' } })
+          return principal?.userId === grant.userId && req.headers.authorization === `Bearer ${grantToken}` ? grant : null
+        },
+        readResource: async (_grant, type, id) => {
+          const started = performance.now()
+          const entry = { type, id }
+          diagnostic.gets.push(entry)
+          try {
+            const response = await fetch(`${baseUrl}/unlinked/${type}/${id}`, { headers: { Authorization: `Bearer ${alice}` }, signal: AbortSignal.timeout(30000) })
+            entry.status = response.status
+            if (response.status === 404) return null
+            assert.equal(response.status, 200)
+            return await response.json()
+          } finally { entry.elapsedMs = Math.round(performance.now() - started) }
+        } })
+      client = new Client({ name: 'signed-200-read-diagnostic', version: '1.0.0' })
+      const started = performance.now()
+      try {
+        stage('connect')
+        await client.connect(new StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers: { Authorization: `Bearer ${grantToken}` } } }))
+        assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), grant.tools)
+        stage('read-200')
+        const output = await client.callTool({ name: 'unlinked_read_import', arguments: { importId: receipt.id } }, undefined,
+          { timeout: diagnostic.deadlineMs, signal: AbortSignal.timeout(diagnostic.deadlineMs) })
+        diagnostic.mcpElapsedMs = Math.round(performance.now() - started)
+        assert.equal(output.isError, undefined)
+        const rows = JSON.parse(output.content[0].text)
+        assert.equal(rows.indexed, 200); assert.equal(rows.assertions.length, 200)
+        assert.equal(new Set(rows.assertions.map(row => row.id)).size, 200)
+        diagnostic.returned = rows.assertions.length
+        diagnostic.primaryGetCount = diagnostic.gets.length
+        stage('scope-and-owner-denials')
+        assert.equal((await client.callTool({ name: 'unlinked_read_import', arguments: { importId: '0'.repeat(64) } })).isError, true)
+        assert.equal((await fetch(`${baseUrl}/unlinked/import/${receipt.id}`, { headers: { Authorization: `Bearer ${bob}` } })).status, 404)
+        assert.equal((await fetch(`${baseUrl}/unlinked/assets/${owner}/${receipt.archiveSha256}`, { headers: { Authorization: `Bearer ${grantToken}` } })).status, 401)
+        stage('publication-fence')
+        const actor = { userId: grant.userId, namespaces: ['unlinked'] }
+        const publication = await store.get(actor, { namespace: 'unlinked', type: 'import', sourceId: receipt.id })
+        await store.put(actor, { ...publication, sourceRevision: publication.sourceRevision + 1, expectedRevision: publication.sourceRevision, deleted: true, payload: null })
+        assert.equal((await client.callTool({ name: 'unlinked_read_import', arguments: { importId: receipt.id } })).isError, true)
+        revoked.add('diagnostic-200')
+        await assert.rejects(client.listTools())
+        diagnostic.passed = true
+        stage('complete')
+      } catch (error) {
+        diagnostic.error = { name: error.name, message: error.message, cause: error.cause?.code }
+        throw error
+      } finally {
+        diagnostic.elapsedMs = Math.round(performance.now() - started)
+        const times = diagnostic.gets.slice(0, diagnostic.primaryGetCount ?? diagnostic.gets.length).map(entry => entry.elapsedMs).filter(Number.isFinite).sort((a, b) => a - b)
+        diagnostic.latencyMs = { count: times.length, p50: times[Math.ceil(times.length * .5) - 1], p95: times[Math.ceil(times.length * .95) - 1], max: times.at(-1) }
+        if (process.env.UNLINKED_NOOS_DIAGNOSTIC_RECEIPT) await writeFile(process.env.UNLINKED_NOOS_DIAGNOSTIC_RECEIPT, JSON.stringify(diagnostic, null, 2))
+      }
+      return
+    }
     // Reset only this disposable owner's control data before the acceptance.
     const session = driver.session({ database: 'neo4j' })
     try { await session.executeWrite(tx => tx.run('MATCH (r:OperationalResource {userId: $id}) DELETE r', { id: 'synthetic-noos-a' })) }
