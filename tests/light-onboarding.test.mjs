@@ -182,6 +182,64 @@ test('signed-out Join header keeps logo and Meet without member navigation or se
   }
 })
 
+test('Join and Bring-export offer one quiet LinkedIn export link with safe outbound attributes', () => {
+  for (const view of [renderJoin(), renderBringArchive(account), renderBringArchive({ ...account, state: 'error' })]) {
+    const links = [...view.content.matchAll(/<a\b[^>]*href="https:\/\/www\.linkedin\.com\/mypreferences\/d\/download-my-data"[^>]*>.*?<\/a>/gs)]
+    assert.equal(links.length, 1)
+    assert.match(links[0][0], /target="_blank"/)
+    assert.match(links[0][0], /rel="noopener noreferrer"/)
+    assert.match(links[0][0], />Don't have your LinkedIn export yet\? Request it now ↗<\/a>/)
+    assert.doesNotMatch(links[0][0], /class="button/)
+    assert.match(view.content, /<p class="small">It takes LinkedIn a few minutes for Connections, up to a day for the complete archive\. Sign up while you wait\.<\/p>/)
+  }
+  assert.doesNotMatch(renderJoin({ ...account, signedIn: true }).content, /download-my-data/)
+  assert.match(renderBringArchive(account).content, /<details><summary>Don’t have your export yet\?<\/summary><ol><li>Open LinkedIn’s data download settings/)
+})
+
+test('own-profile lookup is optional and uses a separate native POST with the existing CSRF token', () => {
+  assert.doesNotMatch(renderOwnProfile(account).content, /Find yourself on Unlinked|name="linkedinUrl"|Is this you\?|Yes, that's me/)
+  const view = renderOwnProfile({ ...account, linkedinLookup: { action: '/find-me' }, contacts: [{ name: 'Avery Lee' }] })
+  const form = view.content.match(/<form class="linkedin-lookup"[^>]*>(.*?)<\/form>/s)[0]
+  assert.match(form, /method="post" action="\/find-me"/)
+  assert.deepEqual([...form.matchAll(/name="([^"]+)"/g)].map(match => match[1]), ['csrf', 'linkedinUrl'])
+  assert.match(form, /name="csrf" value="csrf-value"/)
+  assert.match(form, /Find yourself on Unlinked/)
+  assert.match(form, /Your LinkedIn address/)
+  assert.match(form, /placeholder="linkedin.com\/in\/your-name"/)
+  assert.match(form, /class="quiet" type="submit">Find me/)
+  assert.match(form, /Shows what Unlinked already knows about you: your old profile and members who list you\. Nothing is claimed until you confirm\./)
+  assert.doesNotMatch(form, /required|<script|Import from LinkedIn/i)
+  assert.ok(view.content.indexOf(form) > view.content.indexOf('Editing comes soon.'))
+  assert.ok(view.content.indexOf(form) < view.content.indexOf('People from your file'))
+  assert.doesNotMatch(renderOwnProfile({ ...account, linkedinLookup: { action: '/find-me' }, lookupResult: { status: 'none', claimAction: '/claim-me' } }).content, /Is this you\?|Yes, that's me/)
+})
+
+test('found lookup results render escaped information and an explicit native claim confirmation', () => {
+  const view = renderOwnProfile({ ...account, csrf: 'csrf-"<&', lookupResult: { status: 'found', profileName: '<script>name</script>', headline: '<img src=x>', listedBy: 1234, claimAction: '/claim-me?match="<sam>&source=old' } })
+  const card = view.content.match(/<div class="panel lookup-result">(.*?)<\/form><\/div>/s)[0]
+  assert.match(card, /Is this you\?/)
+  assert.match(card, /&lt;script&gt;name&lt;\/script&gt;/)
+  assert.match(card, /&lt;img src=x&gt;/)
+  assert.match(card, /Listed by 1,234 members/)
+  assert.match(card, /method="post" action="\/claim-me\?match=&quot;&lt;sam&gt;&amp;source=old"/)
+  assert.match(card, /name="csrf" value="csrf-&quot;&lt;&amp;"/)
+  assert.deepEqual([...card.matchAll(/name="([^"]+)"/g)].map(match => match[1]), ['csrf'])
+  assert.match(card, /type="submit">Yes, that's me/)
+  assert.match(card, /href="\/profile">Not me/)
+  assert.doesNotMatch(card, /<script|<img|onclick=|onsubmit=/)
+  const oneMember = renderOwnProfile({ ...account, lookupResult: { status: 'found', listedBy: 1, claimAction: '/claim-me' } })
+  assert.match(oneMember.content, /Listed by 1 member<\/p>/)
+})
+
+test('lookup and claim forms reject actions that could send CSRF tokens off-host', () => {
+  for (const action of ['https://evil.test/find-me', '//evil.test/find-me', 'javascript:alert(1)', '/\\evil.test', '/find-me\n', '/find-me\u0000', '/find-me#fragment', undefined]) {
+    const view = renderOwnProfile({ ...account, linkedinLookup: { action }, lookupResult: { status: 'found', profileName: 'Sam', claimAction: action } })
+    assert.doesNotMatch(view.content, /class="linkedin-lookup"|class="panel lookup-result"|name="linkedinUrl"/)
+  }
+  const view = renderOwnProfile({ ...account, linkedinLookup: { action: '/find-me?from="profile"&mode=lookup' } })
+  assert.match(view.content, /action="\/find-me\?from=&quot;profile&quot;&amp;mode=lookup"/)
+})
+
 test('member copy avoids forbidden technical and legacy words outside Settings details', () => {
   const imports = [{ id: 'fixture', filename: 'Fictional.zip', accepted: 1005, indexed: 1005, status: 'indexed', sha256: 'a'.repeat(64) }]
   const views = [renderJoin(), renderBringArchive(account), renderBringArchive({ ...account, state: 'error' }), renderImporting(account), renderOwnProfile(account), renderPeople(account), renderSettings({ ...account, imports })]
@@ -255,7 +313,7 @@ test('fixture previews cover every requested screen and are reproducible without
   const directory = await mkdtemp(join(tmpdir(), 'unlinked-onboarding-test-'))
   try {
     const files = await buildPreviews(directory)
-    assert.equal(files.length, 10)
+    assert.equal(files.length, 11)
     const first = await Promise.all(files.map(file => readFile(file, 'utf8')))
     await buildPreviews(directory)
     const second = await Promise.all(files.map(file => readFile(file, 'utf8')))
@@ -282,6 +340,11 @@ test('fixture previews cover every requested screen and are reproducible without
     assert.match(first[files.findIndex(file => file.endsWith('/people-no-match.html'))], /No people matched\. Try another name or company\./)
     const joinHeader = first[files.findIndex(file => file.endsWith('/join.html'))].match(/<header>(.*?)<\/header>/s)[1]
     assert.doesNotMatch(joinHeader, /href="\/(?:network|profile|settings)"/)
+    const lookup = first[files.findIndex(file => file.endsWith('/own-profile-lookup-found.html'))]
+    assert.match(lookup, /method="post" action="\/find-me"/)
+    assert.match(lookup, /Is this you\?/)
+    assert.match(lookup, /Listed by 3 members/)
+    assert.match(lookup, /method="post" action="\/claim-me\?match=fictional-sam"/)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
