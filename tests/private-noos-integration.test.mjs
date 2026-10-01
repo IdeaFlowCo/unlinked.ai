@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { generateKeyPairSync, createHash } from 'node:crypto'
+import { generateKeyPairSync, createHash, createPrivateKey, createPublicKey } from 'node:crypto'
 import { createServer } from 'node:http'
 import { mkdtemp, rm, writeFile, cp, readdir, readFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -13,6 +13,7 @@ import { createNoosImportAdapter, createScopedImportReader, createNoosOwnerBacke
 
 const checkout = process.env.UNLINKED_NOOS_TEST_CHECKOUT
 const uri = process.env.NOOS_OPERATIONAL_TEST_URI
+const remoteApi = process.env.UNLINKED_NOOS_TEST_API
 test('real archive -> signed private Noos/assets -> per-import hosted MCP receipt', { skip: !checkout || !uri }, async t => {
   const { createPrivateHostedHandler, scopedSetupConfiguration, createScopedSetupHandler } = await import('../mcp-server/private-hosted.mjs')
   const { Client } = await import('../mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js')
@@ -40,7 +41,10 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const owner = 'synthetic-retained-unlinked-a', otherOwner = 'synthetic-retained-unlinked-b'
   await store.bindOwner('unlinked', owner, 'synthetic-noos-a')
   await store.bindOwner('unlinked', otherOwner, 'synthetic-noos-b')
-  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const keys = remoteApi ? (() => {
+    const privateKey = createPrivateKey(process.env.UNLINKED_NOOS_TEST_SIGNING_KEY)
+    return { privateKey, publicKey: createPublicKey(privateKey) }
+  })() : generateKeyPairSync('rsa', { modulusLength: 2048 })
   const issuer = 'https://disposable.identity.invalid', revoked = new Set()
   const mapped = async (iss, sub) => iss === issuer && ['signed-a', 'signed-b'].includes(sub) ?
     { userId: sub === 'signed-a' ? 'synthetic-noos-a' : 'synthetic-noos-b', namespaces: ['unlinked'] } : null
@@ -50,7 +54,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const opsAuth = auth('noos-operations-staging'), toolAuth = auth('unlinked-private-tools-staging')
   const token = (sub, audience, scope, jti) => {
     const iat = Math.floor(Date.now() / 1000)
-    return jwt.sign({ iss: issuer, aud: audience, sub, scope, jti, token_use: 'access', iat, exp: iat + 300 }, keys.privateKey,
+    return jwt.sign({ iss: issuer, aud: audience, sub, scope, jti, token_use: 'access', iat, exp: iat + (remoteApi ? 900 : 300) }, keys.privateKey,
       { algorithm: 'RS256', header: { alg: 'RS256', typ: 'at+jwt' } })
   }
   const alice = token('signed-a', 'noos-operations-staging', 'unlinked:read unlinked:write', 'ops-a')
@@ -58,16 +62,45 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const app = express()
   const assets = new StagingFileAssets(join(root, 'assets'))
   app.use('/v1', createPrivateAssetRouter(store, assets, opsAuth))
-  app.use('/v1', createOperationalRouter(store, opsAuth))
+  if (remoteApi) {
+    assert.match(remoteApi, /^http:\/\/127\.0\.0\.1:\d+$/)
+    // Only the private Noos API is remote; assets and the app remain local.
+    app.use(async (req, res, next) => {
+      try {
+        const response = await fetch(`${remoteApi}${req.originalUrl}`, { method: req.method,
+          headers: { authorization: req.headers.authorization, 'content-type': req.headers['content-type'] ?? 'application/json' },
+          ...(['GET', 'HEAD'].includes(req.method) ? {} : { body: req, duplex: 'half' }), signal: AbortSignal.timeout(30000) })
+        res.status(response.status).type(response.headers.get('content-type') ?? 'application/json').send(Buffer.from(await response.arrayBuffer()))
+      } catch (error) { next(error) }
+    })
+  } else app.use('/v1', createOperationalRouter(store, opsAuth))
   api = app.listen(0, '127.0.0.1'); await new Promise(resolve => api.once('listening', resolve))
   const baseUrl = `http://127.0.0.1:${api.address().port}/v1`
   const observed = []
   const recordingFetch = async (url, init) => {
+    const started = performance.now()
     const response = await fetch(url, init)
-    observed.push({ method: init.method, path: new URL(url).pathname, status: response.status })
+    observed.push({ method: init.method, path: new URL(url).pathname, status: response.status, elapsedMs: Math.round(performance.now() - started) })
     return response
   }
   const adapter = createNoosImportAdapter({ baseUrl, ownerId: owner, accessToken: alice, fetchImpl: recordingFetch })
+  let control
+  if (remoteApi) {
+    const controlZip = new JSZip()
+    controlZip.file('Connections.csv', 'First Name,Last Name,URL,Company,Position\n' + Array.from({ length: 200 }, (_, i) =>
+      `Control${i},Example,https://www.linkedin.com/in/synthetic-control-${i},Synthetic,Engineer\n`).join(''))
+    const started = performance.now(), offset = observed.length
+    const receipt = await ingestArchive({ consent: COMBINED_UPLOAD_CONSENT, ownerId: owner, filename: 'synthetic-control-200.zip',
+      bytes: await controlZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), adapter })
+    assert.equal(receipt.status, 'indexed'); assert.equal(receipt.counts.indexed, 200)
+    control = { accepted: receipt.counts.accepted, indexed: receipt.counts.indexed, elapsedMs: Math.round(performance.now() - started), requests: observed.slice(offset), requestTimeoutMs: 30000 }
+    if (process.env.UNLINKED_NOOS_CONTROL_RECEIPT) await writeFile(process.env.UNLINKED_NOOS_CONTROL_RECEIPT, JSON.stringify(control, null, 2))
+    // Reset only this disposable owner's control data before the acceptance.
+    const session = driver.session({ database: 'neo4j' })
+    try { await session.executeWrite(tx => tx.run('MATCH (r:OperationalResource {userId: $id}) DELETE r', { id: 'synthetic-noos-a' })) }
+    finally { await session.close() }
+    await rm(join(root, 'assets'), { recursive: true, force: true })
+  }
   const zip = new JSZip()
   zip.file('Connections.csv', 'Notes:\nSynthetic archive\n\nFirst Name,Last Name,URL,Company,Position\nAda,Example,https://www.linkedin.com/in/synthetic-ada,Synthetic,Engineer\n')
   zip.file('Skills.csv', 'Name\nSynthetic systems\n')
@@ -175,7 +208,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
     complete = async input => { input.candidateIds.forEach(id => considered.add(id)); return remote(input) }
   }
   const grantToken = token('signed-a', 'unlinked-private-tools-staging', 'unlinked:read', 'grant-a')
-  const grant = { ownerId: owner, userId: 'synthetic-noos-a', importIds: [result.id, scaled.id], tools: ['unlinked_read_import', ...(complete ? ['unlinked_search_import'] : [])], expiresAt: Date.now() + 300000 }
+  const grant = { ownerId: owner, userId: 'synthetic-noos-a', importIds: [result.id, scaled.id], tools: ['unlinked_read_import', ...(complete ? ['unlinked_search_import'] : [])], expiresAt: Date.now() + (remoteApi ? 900000 : 300000) }
   const readResource = async (_grant, type, id) => {
     const response = await fetch(`${baseUrl}/unlinked/${type}/${id}`, { headers: { Authorization: `Bearer ${alice}` } })
     if (response.status === 404) return null
@@ -230,7 +263,8 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['unlinked_read_import', ...(complete ? ['unlinked_search_import'] : [])])
   const receipt = await client.callTool({ name: 'unlinked_read_import', arguments: { importId: result.id } })
   assert.equal(receipt.isError, undefined); assert.equal(JSON.parse(receipt.content[0].text).assertions.length, 2)
-  const scaledReceipt = await client.callTool({ name: 'unlinked_read_import', arguments: { importId: scaled.id } })
+  const sdkOptions = remoteApi ? { timeout: 600000 } : undefined
+  const scaledReceipt = await client.callTool({ name: 'unlinked_read_import', arguments: { importId: scaled.id } }, undefined, sdkOptions)
   assert.equal(scaledReceipt.isError, undefined)
   const indexedRows = JSON.parse(scaledReceipt.content[0].text)
   assert.equal(indexedRows.assertions.length, 1001); assert.equal(indexedRows.indexed, 1001)
@@ -241,7 +275,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
     searchClient = new Client({ name: 'real-private-search-grant', version: '1.0.0' })
     await searchClient.connect(new StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers: { Authorization: `Bearer ${scopedSearchToken}` } } }))
     assert.deepEqual((await searchClient.listTools()).tools.map(tool => tool.name), ['unlinked_search_import'])
-    searchReceipt = await searchClient.callTool({ name: 'unlinked_search_import', arguments: { importId: scaled.id, query: 'Who is a quantum compiler engineer?' } })
+    searchReceipt = await searchClient.callTool({ name: 'unlinked_search_import', arguments: { importId: scaled.id, query: 'Who is a quantum compiler engineer?' } }, undefined, sdkOptions)
     assert.equal(searchReceipt.isError, undefined)
     const matches = JSON.parse(searchReceipt.content[0].text).matches
     assert.ok(matches.some(match => match.subject === 'https://www.linkedin.com/in/synthetic-scale-1000'))
@@ -318,7 +352,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   if (process.env.UNLINKED_NOOS_RECEIPT) await writeFile(process.env.UNLINKED_NOOS_RECEIPT, JSON.stringify({
     boundary: 'Real synthetic ZIP, RS256 access verification, offline disposable issuer/subject mapping, dedicated temporary Neo4j, private asset bytes and actual MCP SDK client. No real provider login/consent, production mount, production deployment or live personal data. Optional explicitly configured existing-key synthetic AI receipt is recorded separately.',
     archiveSha256: createHash('sha256').update(bytes).digest('hex'), import: result,
-    observed, toolReceipt: receipt, lostResponseRecovery: recovered.id, assetInterruptionRecovery: assetRecovered.id, publicationInterruptionRecovery: publicationRecovered.id, simultaneousReplay: parallel[0].id, scaledImport: scaled, scaledToolReceipt: { indexed: indexedRows.indexed, assertionCount: indexedRows.assertions.length }, searchReceipt, modelReceipts, consideredConnections: considered.size, midJournalLostResponseCommits: chunkCommits, durableSearchGrant: scopedGrantId, pairedRestore: snapshot,
+    control, observed, toolReceipt: receipt, lostResponseRecovery: recovered.id, assetInterruptionRecovery: assetRecovered.id, publicationInterruptionRecovery: publicationRecovered.id, simultaneousReplay: parallel[0].id, scaledImport: scaled, scaledToolReceipt: { indexed: indexedRows.indexed, assertionCount: indexedRows.assertions.length }, searchReceipt, modelReceipts, consideredConnections: considered.size, midJournalLostResponseCommits: chunkCommits, durableSearchGrant: scopedGrantId, pairedRestore: snapshot,
     verified: ['other owner cannot read import/raw asset', 'different tool audience cannot read raw asset', 'ungranted import denied', 'tombstone denies retained assertions', 'revoked token denies next SDK request', 'single authenticated setup action returns download configuration for only the approved import', 'deleted publication denies new setup', '1001 connections indexed and scoped SDK-readable'], indexed: scaled.counts.indexed,
     cleanup: 'owned server connections, private filesystem root and disposable container removed by finally hooks',
   }, null, 2))
