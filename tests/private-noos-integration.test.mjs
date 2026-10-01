@@ -72,8 +72,8 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
   const input = { ownerId: owner, filename: 'synthetic.zip', bytes, adapter }
   const result = await ingestArchive(input)
-  assert.equal(result.status, 'partial'); assert.equal(result.indexGate, 'ai_search_not_connected')
-  assert.equal(result.counts.accepted, 2); assert.equal(result.counts.indexed, 0)
+  assert.equal(result.status, 'indexed'); assert.equal(result.indexGate, null)
+  assert.equal(result.counts.accepted, 2); assert.equal(result.counts.indexed, 2)
   assert.deepEqual(await ingestArchive(input), result)
   const archivePath = `${baseUrl}/unlinked/assets/${owner}/${result.archiveSha256}`
   const raw = await fetch(archivePath, { headers: { Authorization: `Bearer ${alice}` } })
@@ -85,12 +85,12 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const lostResponseAdapter = createNoosImportAdapter({ baseUrl, ownerId: owner, accessToken: alice,
     fetchImpl: async (url, init) => {
       const response = await fetch(url, init)
-      if (!lost && new URL(url).pathname.endsWith('/batch') && JSON.parse(init.body).some(r => r.type === 'assertion')) { lost = true; throw new Error('synthetic_lost_response') }
+      if (!lost && new URL(url).pathname.endsWith('/batch') && JSON.parse(init.body).some(r => r.type === 'import' && r.payload?.assertionChunks)) { lost = true; throw new Error('synthetic_lost_response') }
       return response
     } })
   await assert.rejects(ingestArchive({ ...input, filename: 'lost-response.zip', adapter: lostResponseAdapter }), /synthetic_lost_response/)
   const recovered = await ingestArchive({ ...input, filename: 'lost-response.zip', adapter: lostResponseAdapter })
-  assert.equal(recovered.counts.accepted, 2); assert.equal(recovered.status, 'partial')
+  assert.equal(recovered.counts.accepted, 2); assert.equal(recovered.status, 'indexed')
   // Crash after authenticated raw upload and before any graph receipt: orphan
   // bytes stay private and immutable, and a fresh adapter can complete the same import.
   let assetInterrupted = false
@@ -104,32 +104,38 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
     } })
   await assert.rejects(ingestArchive({ ...input, filename: 'asset-interrupted.zip', adapter: interruptedAssetAdapter }), /synthetic_asset_response_lost/)
   const assetRecovered = await ingestArchive({ ...input, filename: 'asset-interrupted.zip', adapter })
-  assert.equal(assetRecovered.status, 'partial'); assert.equal(assetRecovered.counts.accepted, 2)
+  assert.equal(assetRecovered.status, 'indexed'); assert.equal(assetRecovered.counts.accepted, 2)
   let publishInterrupted = false
   const interruptedPublishAdapter = createNoosImportAdapter({ baseUrl, ownerId: owner, accessToken: alice,
     fetchImpl: async (url, init) => {
-      if (!publishInterrupted && new URL(url).pathname.endsWith('/batch') && JSON.parse(init.body).some(r => r.type === 'assertion')) {
+      if (!publishInterrupted && new URL(url).pathname.endsWith('/batch') && JSON.parse(init.body).some(r => r.type === 'import' && r.payload?.assertionChunks)) {
         publishInterrupted = true; throw new Error('synthetic_before_publication_commit')
       }
       return fetch(url, init)
     } })
   await assert.rejects(ingestArchive({ ...input, filename: 'publish-interrupted.zip', adapter: interruptedPublishAdapter }), /synthetic_before_publication_commit/)
   const publicationRecovered = await ingestArchive({ ...input, filename: 'publish-interrupted.zip', adapter })
-  assert.equal(publicationRecovered.counts.accepted, 2); assert.equal(publicationRecovered.status, 'partial')
+  assert.equal(publicationRecovered.counts.accepted, 2); assert.equal(publicationRecovered.status, 'indexed')
   const parallel = await Promise.all([ingestArchive({ ...input, filename: 'parallel.zip', adapter }), ingestArchive({ ...input, filename: 'parallel.zip', adapter })])
   assert.deepEqual(parallel[0], parallel[1])
-  const large = Buffer.from('Name\n' + Array.from({ length: 501 }, (_, i) => `Synthetic skill ${i}\n`).join(''))
-  const unsupported = await ingestArchive({ ownerId: owner, filename: 'Skills.csv', bytes: large, adapter })
-  assert.equal(unsupported.status, 'failed'); assert.equal(unsupported.phase, 'unsupported_private_publication')
-  assert.equal(unsupported.error, 'private_publication_support_limit'); assert.equal(unsupported.counts.indexed, 0)
-  assert.equal(unsupported.assertionIds, undefined)
-  const verification = driver.session({ database: 'neo4j' })
-  try {
-    const count = await verification.run('MATCH (r:OperationalResource {namespace: "unlinked", type: "assertion"}) WHERE r.document CONTAINS $importId RETURN count(r) AS count', { importId: unsupported.id })
-    assert.equal(count.records[0].get('count').toNumber(), 0)
-  } finally { await verification.close() }
+  const scaledZip = new JSZip()
+  scaledZip.file('Connections.csv', 'First Name,Last Name,URL,Company,Position\n' + Array.from({ length: 1001 }, (_, i) =>
+    `Synthetic${i},Example,https://www.linkedin.com/in/synthetic-scale-${i},Synthetic company ${i},${i === 1000 ? 'Quantum compiler engineer' : 'Bakery manager'}\n`).join(''))
+  const scaledBytes = await scaledZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  const scaled = await ingestArchive({ ownerId: owner, filename: 'synthetic-1001-connections.zip', bytes: scaledBytes, adapter })
+  assert.equal(scaled.status, 'indexed'); assert.equal(scaled.counts.accepted, 1001); assert.equal(scaled.counts.indexed, 1001)
+  assert.equal(scaled.assertionChunks.length, 6)
+  assert.deepEqual(await ingestArchive({ ownerId: owner, filename: 'synthetic-1001-connections.zip', bytes: scaledBytes, adapter }), scaled)
+  assert.equal((await fetch(`${baseUrl}/unlinked/import/${scaled.id}`, { headers: { Authorization: `Bearer ${bob}` } })).status, 404)
+  const modelReceipts = [], considered = new Set()
+  let complete
+  if (process.env.UNLINKED_PRIVATE_AI_REMOTE === '1') {
+    const { createRemoteCompletion } = await import('../scripts/private-remote-completion.mjs')
+    const remote = createRemoteCompletion({ sshHost: 'm5', credentialFile: '/Users/jacobcole/.config/openai/openai.env', onReceipt: receipt => modelReceipts.push(receipt) })
+    complete = async input => { input.candidateIds.forEach(id => considered.add(id)); return remote(input) }
+  }
   const grantToken = token('signed-a', 'unlinked-private-tools-staging', 'unlinked:read', 'grant-a')
-  const grant = { ownerId: owner, userId: 'synthetic-noos-a', importIds: [result.id], tools: ['unlinked_read_import'], expiresAt: Date.now() + 300000 }
+  const grant = { ownerId: owner, userId: 'synthetic-noos-a', importIds: [result.id, scaled.id], tools: ['unlinked_read_import', ...(complete ? ['unlinked_search_import'] : [])], expiresAt: Date.now() + 300000 }
   const readResource = async (_grant, type, id) => {
     const response = await fetch(`${baseUrl}/unlinked/${type}/${id}`, { headers: { Authorization: `Bearer ${alice}` } })
     if (response.status === 404) return null
@@ -145,7 +151,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
     authenticateGrant: async req => {
       const principal = await toolAuth({ headers: req.headers, method: 'GET', params: { namespace: 'unlinked' } })
       return principal?.userId === grant.userId && req.headers.authorization === `Bearer ${grantToken}` ? grant : null
-    }, readResource })
+    }, readResource, complete })
   setupHandler = createScopedSetupHandler({ endpoint, allowLoopbackStaging: true,
     allowedHosts: [`127.0.0.1:${toolServer.address().port}`],
     authenticateOwner: async req => {
@@ -170,9 +176,23 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers: { Authorization: `Bearer ${grantToken}` } } })
 
   await client.connect(transport)
-  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['unlinked_read_import'])
+  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['unlinked_read_import', ...(complete ? ['unlinked_search_import'] : [])])
   const receipt = await client.callTool({ name: 'unlinked_read_import', arguments: { importId: result.id } })
   assert.equal(receipt.isError, undefined); assert.equal(JSON.parse(receipt.content[0].text).assertions.length, 2)
+  const scaledReceipt = await client.callTool({ name: 'unlinked_read_import', arguments: { importId: scaled.id } })
+  assert.equal(scaledReceipt.isError, undefined)
+  const indexedRows = JSON.parse(scaledReceipt.content[0].text)
+  assert.equal(indexedRows.assertions.length, 1001); assert.equal(indexedRows.indexed, 1001)
+  assert.equal(new Set(indexedRows.assertions.map(row => row.id)).size, 1001)
+  assert.ok(indexedRows.assertions.every(row => row.privateIndex.version === 'observation-v1'))
+  let searchReceipt
+  if (complete) {
+    searchReceipt = await client.callTool({ name: 'unlinked_search_import', arguments: { importId: scaled.id, query: 'Who is a quantum compiler engineer?' } })
+    assert.equal(searchReceipt.isError, undefined)
+    const matches = JSON.parse(searchReceipt.content[0].text).matches
+    assert.ok(matches.some(match => match.subject === 'https://www.linkedin.com/in/synthetic-scale-1000'))
+    assert.equal(considered.size, 1001)
+  }
   assert.equal((await client.callTool({ name: 'unlinked_read_import', arguments: { importId: recovered.id } })).isError, true)
   assert.equal((await fetch(archivePath, { headers: { Authorization: `Bearer ${grantToken}` } })).status, 401)
   // Publication tombstone blocks retained source/assertions through the actual SDK client.
@@ -188,10 +208,10 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const reader = createScopedImportReader({ grant, readResource: (type, id) => readResource(grant, type, id) })
   await assert.rejects(reader(result.id), /private_import_not_found/)
   if (process.env.UNLINKED_NOOS_RECEIPT) await writeFile(process.env.UNLINKED_NOOS_RECEIPT, JSON.stringify({
-    boundary: 'Real synthetic ZIP, RS256 access verification, offline disposable issuer/subject mapping, dedicated temporary Neo4j, private asset bytes and actual MCP SDK client. No real provider login/consent, production mount, AI search, paid call or live personal data.',
+    boundary: 'Real synthetic ZIP, RS256 access verification, offline disposable issuer/subject mapping, dedicated temporary Neo4j, private asset bytes and actual MCP SDK client. No real provider login/consent, production mount, production deployment or live personal data. Optional explicitly configured existing-key synthetic AI receipt is recorded separately.',
     archiveSha256: createHash('sha256').update(bytes).digest('hex'), import: result,
-    observed, toolReceipt: receipt, lostResponseRecovery: recovered.id, assetInterruptionRecovery: assetRecovered.id, publicationInterruptionRecovery: publicationRecovered.id, simultaneousReplay: parallel[0].id, unsupportedArchive: unsupported,
-    verified: ['other owner cannot read import/raw asset', 'different tool audience cannot read raw asset', 'ungranted import denied', 'tombstone denies retained assertions', 'revoked token denies next SDK request', 'single authenticated setup action returns download configuration for only the approved import', 'deleted publication denies new setup'], indexed: 0,
+    observed, toolReceipt: receipt, lostResponseRecovery: recovered.id, assetInterruptionRecovery: assetRecovered.id, publicationInterruptionRecovery: publicationRecovered.id, simultaneousReplay: parallel[0].id, scaledImport: scaled, scaledToolReceipt: { indexed: indexedRows.indexed, assertionCount: indexedRows.assertions.length }, searchReceipt, modelReceipts, consideredConnections: considered.size,
+    verified: ['other owner cannot read import/raw asset', 'different tool audience cannot read raw asset', 'ungranted import denied', 'tombstone denies retained assertions', 'revoked token denies next SDK request', 'single authenticated setup action returns download configuration for only the approved import', 'deleted publication denies new setup', '1001 connections indexed and scoped SDK-readable'], indexed: scaled.counts.indexed,
     cleanup: 'owned server connections, private filesystem root and disposable container removed by finally hooks',
   }, null, 2))
 })

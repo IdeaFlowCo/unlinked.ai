@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "unlinked.ai Agent API",
-    "description": "Programmatic API for unlinked.ai. Provides personal network search, profile exploration, intro drafting, and archive import inspection for autonomous agents and MCP clients.\n\nAll agent requests authenticate using a Bearer token starting with 'ul_' (created in the web interface at /settings/agent-keys). Every request is resolved to the authenticated user server-side, enforcing strict isolation to the caller's own profile and direct connections.\n\nPrivate archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The private Noos adapter and hosted read tool are unmounted staging-only source; their synthetic receipt does not verify this legacy backend.",
+    "description": "Programmatic API for unlinked.ai. Provides personal network search, profile exploration, intro drafting, and archive import inspection for autonomous agents and MCP clients.\n\nAll agent requests authenticate using a Bearer token starting with 'ul_' (created in the web interface at /settings/agent-keys). Every request is resolved to the authenticated user server-side, enforcing strict isolation to the caller's own profile and direct connections.\n\nPrivate archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The isolated private Noos, OIDC browser and scoped AI/MCP factories are staging-only source; synthetic receipts do not verify this legacy backend.",
     "version": "1.0.0",
     "contact": {
       "name": "unlinked.ai Support",

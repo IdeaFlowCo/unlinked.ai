@@ -43,6 +43,11 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
       const sourceId = privateId(ownerId, 'source', id, source.path, source.sha256)
       const { accepted } = source
       const receipt = { ...source }; delete receipt.rawBytes; delete receipt.accepted
+      if (store.compactSourceReceipts) {
+        // Original bytes + parser version preserve every rejected record for
+        // recovery; the bounded graph receipt stores the accurate count.
+        receipt.rejectedCount = receipt.rejected.length; delete receipt.rejected
+      }
       const status = source.error ? 'failed' : source.skipped ? 'skipped' : accepted.length ? 'partial' : 'failed'
       job.sources.push({ ...receipt, id: sourceId, acceptedCount: accepted.length, indexedCount: 0,
         status,
@@ -66,7 +71,9 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
     }
     // Publication is one atomic operation. Retrying an interrupted parsing job
     // cannot accumulate row counts or reveal only half an owner's assertions.
-    job.status = job.counts.accepted ? 'partial' : 'failed'
+    job.status = job.counts.accepted ? (store.publicationStatus ?? 'partial') : 'failed'
+    if (job.status === 'indexed' && (job.counts.rejected || job.counts.failedFiles)) job.status = 'partial'
+    if (job.counts.accepted && store.publicationStatus === 'indexed') job.counts.indexed = job.counts.accepted
     job.phase = job.counts.accepted ? (store.publicationPhase ?? 'awaiting_private_index') : 'no_accepted_rows'
     job.indexGate = store.publicationGate ?? 'noos_private_index_not_connected'; job.revision++
     await store.publish(job, assertions)

@@ -1,77 +1,78 @@
-# Private Noos staging receipt
+# Isolated private Noos pilot source
 
-This is an unmounted, synthetic-only adapter slice stacked on draft PR11.
-It requires a separately isolated Noos follow-up stacked on draft PR45.
-Neither production authentication nor private import is activated by importing these factories.
-The public archive entry continues to show its availability gate.
+These default-off factories stack on draft PR11 and require the separately isolated Noos follow-up stacked on PR45.
+They are never mounted by production Next.js or production Noos.
+The public import entry still shows its availability gate.
 
-`src/utils/private-import/noos-adapter.mjs` sends real parsed jobs, immutable per-revision receipts, source observations and assertions to Noos operational HTTP APIs.
-The trusted caller supplies the verified legacy Unlinked owner ID and an audience-bound operational access token.
-Archive URLs, email fields and contact subjects never identify the principal.
-The identity seam remains verified issuer + opaque subject -> established account -> historical owner mapping, with account choice and historical provider unknowns preserved.
+## Publication and scale
 
-The Noos follow-up verifies RS256 access tokens with exact issuer and single audience, `at+jwt`/access purpose, at most fifteen-minute lifetime, namespace/operation scopes, trusted subject mapping and revocation callback.
-Those factories remain unmounted; no provider registration, production cookie adapter, anonymous identity header or default secret is added.
-Disposable signed identities prove cryptographic verification and authorization, not a real Ideaflow login or delegated provider consent.
+Owner/archive/parser/path/hash/row IDs and original bytes retain PR11 provenance.
+Uploaded/parsing updates each add an immutable revision receipt.
+Immutable batches hold at most 200 rows and one ordinal chunk manifest.
+Each accepted row is indexed by its owner-derived resource ID in the isolated Noos observation index (`observation-v1`), not a vector index.
+Graph resources remain bounded to 64 KiB and transactions to 600 resources/32 MiB.
+Oversized observations use digest-verified private assets plus graph provenance metadata.
+Source receipts store accurate rejection counts; original bytes and parser version retain the exact rejected records for recovery.
+One final CAS-fenced transaction publishes the current job, immutable receipt, source receipts and all ordered chunk references together.
+Tools require this live terminal fence and never enumerate provisional rows.
+Exact chunk replay is immutable; interrupted writers reconstruct the deterministic journal.
+Lost final responses return the terminal receipt; concurrent publishers may receive a revision conflict and retry.
+A tombstoned publication cannot be reopened by a delayed writer.
+Indexed counts appear only at final publication and equal all accepted observations.
+Rejected/malformed records remain reported and may make an import partial.
 
-## Publication and capacity
+There is no 500-row truncation or rejection gate.
+The parser retains 100,000-record, 20 MiB archive, 8 MiB file, 40 MiB expanded and 200-file bounds.
+The final manifest references bounded source/chunk IDs rather than every row.
+Older failed support-limit receipts remain immutable; restaging them needs an explicit publication-version migration.
 
-Original archive/source bytes upload through a separately authenticated private asset API.
-Uploaded/parsing job updates each atomically add an immutable revision receipt.
-Final publication atomically commits the current job, its receipt, source receipts and assertions.
-Source/assertion IDs retain the PR11 owner/archive/path/hash/row derivation and always write revision one with exact replay.
-A failed transaction creates no assertions or final publication.
-A lost successful commit response is resolved by reading the exact terminal job on retry.
-Local duplicate calls serialize; cross-process contention is fenced by Noos revision CAS and may require a caller retry.
+## Scoped search and browser
 
-This first adapter supports **500 assertions**, at most 600 publication resources, 64 KiB per resource, and 32 MiB per Noos batch.
-The parser still accepts its larger 100,000-record bounded input.
-Larger or oversized publication manifests return a durable `failed` / `unsupported_private_publication` receipt before committing observations.
-The archive remains retained for recovery; no subset is falsely published as a successful import.
-Support-limit failures need a later publication-version/retry policy before a higher capacity adapter can restage them.
-Indexed count stays zero and `indexGate` is `ai_search_not_connected`; parsed observations are not an AI index.
+AI search uses the same live owner-scoped publication as MCP.
+Every connection is considered in contexts of at most 200 bounded name/company/position/date observations, followed by bounded reduction of ranked IDs.
+OpenAI requests use store:false, strict ID-only structured results and a 30-second per-call timeout.
+Returned identity, fields and provenance come from stored rows.
+Publication checks after delayed model work deny deleted/changed imports.
+This is query-time AI ranking over a private observation index, with no shared people database or embedding completeness claim.
+At the parser maximum many model calls/resource reads are required; the 1,001-contact receipt is the acceptance target, not a 100,000-record latency/cost claim.
 
-A larger-archive follow-up must journal bounded immutable assertion batches, fence the active writer, verify every batch digest and count, and atomically publish one final manifest referencing the complete journal.
-Tests must interrupt every boundary, replay lost responses, race duplicate writers and tombstones, and prove tools never read an incomplete or deleted journal.
-Receipt history remains immutable even when a new publication version is staged.
+The isolated OIDC browser factory uses confidential code flow, client_secret_basic, PKCE S256, nonce/state, signed ID tokens and account choice.
+Only verified issuer plus opaque subject enters the trusted immutable existing/new owner mapping.
+Archive email/profile fields never select or rebind ownership.
+Unknown/conflicting ownership fails closed before upload.
+Bounded random sessions use Secure/HttpOnly/SameSite cookies and disappear on restart.
+Same-origin requests and CSRF protect mutations; guest storage consent is required at upload and separate OpenAI data consent at search.
+Receipt/replay and one-action scoped setup forms are implemented.
+Setup downloads a fifteen-minute search-only grant for exactly one import; raw archive access is excluded.
+The separate signed tool audience uses a durable owner-private Noos grant record, live expiry/publication/revocation checks, and ephemeral signing keys that invalidate grants on restart.
+Operational bearers and provider ID tokens never become agent credentials.
 
-## Private asset decision
+The explicit standalone runtime binds loopback only.
+Reserved tailnet origin is https://m4-mini.tailb2a35c.ts.net:9367 and callback /auth/callback/ideaflow.
+This reservation is not a running or verified upload URL.
+Actual provider client/redirect acceptance and immutable legacy/new-owner provisioning remain release gates.
+Production provider granular delegation is not assumed or enabled.
 
-The archive limit is 20 MiB; source files are at most 8 MiB and total decoded ZIP members at most 40 MiB.
-No ZIP paths are extracted to disk.
-No binary archive chunks are stored as graph properties.
-The Noos `PrivateAssets` interface permits private object storage later; only an explicit disposable filesystem staging backend exists now.
-It uses private owner-hashed directories and hash-named immutable blobs, modes 700/600, no-follow reads, atomic exclusive writes and digest verification.
-Asset reads first verify the immutable historical owner binding, then read one bounded blob; they do not fan out over graph nodes.
-The configured root and its ancestors must be controlled by the isolated service operator.
+## Assets, recovery and credentials
 
-Publication rollback is a Noos tombstone; original assets, receipt history, sources and assertions remain private for recovery.
-Tools deny tombstoned publications before and after loading rows.
-Raw archive recovery is a separate owner-only audience and never an agent grant.
-Physical deletion/retention, object storage, fsync/backup durability, coordinated blob/graph backup and restore rehearsal remain production cutover gates.
-The staging proof cleans up only its owned disposable root/container; it does not exercise a production backup or historical migration rollback.
+ZIP bytes remain private assets behind a replaceable Noos storage interface, not graph properties.
+The explicit operator-controlled filesystem root uses modes 700/600, owner-hashed directories, hash-addressed immutable writes, digest verification and no-follow reads.
+Raw recovery authorizes the historical owner before fetching one bounded blob, without graph fan-out.
+Publication rollback retains private originals/receipts and denies agent tools.
+Physical retention/deletion, paired graph/blob backups, directory-fsync durability, restore rehearsal and historical writer fencing remain release/cutover gates.
+No production graph or historical personal data is used in tests.
 
-## Hosted read tool and setup
+Existing OpenAI credential reuse was explicitly approved.
+The staging remote completion bridge reads the verified M5 credential in place over authenticated SSH, never copies/persists it locally or exposes it in logs.
+A bounded synthetic Responses request returned HTTP 200.
+Any new persistent secret destination requires confirmation before copying; none is configured here.
 
-`mcp-server/private-hosted.mjs` exposes an opt-in Streamable HTTP MCP factory with only `unlinked_read_import`.
-A trusted grant resolver must verify a **separate tool audience**, owner binding, explicit import allowlist, tool allowlist, expiry and current revocation.
-An operational `unlinked:read` bearer is never handed to the hosted agent.
-Every invocation checks the live publication and rechecks it after row reads; credentials, raw archive APIs and arbitrary assertion IDs are absent from the tool interface.
-Host/Origin validation and no-store responses protect the staging surface.
+## Verification
 
-The separate authenticated setup factory returns a downloadable client configuration for exactly one live owner-approved import in one POST action.
-It places a short-lived scoped bearer only in the configuration body, never a query string or shareable setup URL.
-It requires a trusted issuer callback; production setup remains unavailable until granular consent, audience registration, client binding, revocation and the verified account session adapter are proven.
-The disposable test uses real signed synthetic tokens and an actual MCP SDK client over loopback; it does not expose a hosted production link.
-
-## Executable evidence
-
-Run focused parser/scope checks with `node --test tests/private-import.test.mjs tests/private-scoped-reader.test.mjs` after locked dependency installation in the web app and `mcp-server`.
-For the cross-repo receipt, set `UNLINKED_NOOS_TEST_CHECKOUT` to the isolated Noos follow-up checkout, `NOOS_OPERATIONAL_EXTRA_TEST` to this repo's absolute `tests/private-noos-integration.test.mjs` path, and invoke that checkout's `node scripts/test-operational.mjs`.
-Use external SSD paths for `UNLINKED_NOOS_RECEIPT`, `NOOS_SIGNED_TEST_EVIDENCE` and temporary storage.
-The Noos runner provisions one owned 1 GiB capped disposable Neo4j container, serializes tests, and removes it in `finally`.
-Do not supply production Neo4j URLs or user data.
-
-The receipt proves actual ZIP parsing, private Noos/assets persistence, signed mapped-owner authorization, two-owner denial, publication/replay/interruption, explicit 501-row rejection, setup download and an actual scoped MCP invocation with revoked/tombstoned/raw-audience denial.
-It does not prove real provider login/consent, production routing, AI search, large-archive migration, historical provider completeness, paid activation or restore/cutover readiness.
-OpenAI/provider-unspecified AI API code and credential inspection remain held pending the credential choice.
+Install locked MCP dependencies and run the private AI/browser/grant/hosted/scope test files with node --test.
+Signed disposable OIDC responses prove client validation, not an actual provider login.
+Set UNLINKED_NOOS_TEST_CHECKOUT, NOOS_OPERATIONAL_EXTRA_TEST, UNLINKED_NOOS_RECEIPT and NOOS_SIGNED_TEST_EVIDENCE to isolated external-SSD paths, then run the Noos checkout's node scripts/test-operational.mjs.
+Only explicitly authorized UNLINKED_PRIVATE_AI_REMOTE=1 enables existing-key synthetic model calls; ordinary CI has no provider call.
+The runner owns one capped 1 GiB disposable Neo4j and cleans it in finally.
+The real 1,001-contact ZIP harness requires accepted=indexed=MCP-readable count and, with the model enabled, considers every connection including the last contact.
+Do not claim a live pilot until real provider/browser, storage/recovery and review gates pass.

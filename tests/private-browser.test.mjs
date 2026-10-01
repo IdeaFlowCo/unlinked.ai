@@ -1,0 +1,99 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
+import { generateKeyPairSync, createSign } from 'node:crypto'
+
+let browser
+try { browser = await import('../mcp-server/private-browser.mjs') } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error }
+
+test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE and preserves account choice', { skip: !browser }, async () => {
+  const issuer = 'https://synthetic-ideaflow.invalid', callbackUrl = 'https://private.invalid/auth/callback/ideaflow'
+  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), wrongKeys = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const jwk = { ...keys.publicKey.export({ format: 'jwk' }), kid: 'synthetic-rsa', alg: 'RS256', use: 'sig' }
+  let nonce, override = {}, signingKey = keys.privateKey, exchanges = 0
+  const sign = claims => {
+    const header = Buffer.from(JSON.stringify({ alg: 'RS256', kid: jwk.kid })).toString('base64url'), payload = Buffer.from(JSON.stringify(claims)).toString('base64url')
+    return `${header}.${payload}.${createSign('RSA-SHA256').update(`${header}.${payload}`).sign(signingKey).toString('base64url')}`
+  }
+  const login = await browser.createIdeaflowLogin({ issuer, callbackUrl, clientId: 'private-client', clientSecret: 'synthetic-client-secret', fetchImpl: async (url, options) => {
+    const path = new URL(url).pathname
+    if (path.includes('well-known')) return Response.json({ issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, jwks_uri: `${issuer}/jwks`, response_types_supported: ['code'], subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'] })
+    if (path === '/jwks') return Response.json({ keys: [jwk] })
+    assert.equal(path, '/token'); exchanges++
+    assert.deepEqual(Buffer.from(new Headers(options.headers).get('authorization').slice(6), 'base64').toString().split(':').map(decodeURIComponent), ['private-client', 'synthetic-client-secret'])
+    assert.ok(new URLSearchParams(options.body).get('code_verifier'))
+    const now = Math.floor(Date.now() / 1000)
+    return Response.json({ access_token: 'synthetic-identity-only', token_type: 'Bearer', expires_in: 300, id_token: sign({ iss: issuer, aud: 'private-client', sub: 'immutable-synthetic-subject', iat: now, exp: now + 300, nonce, email: 'unverified@example.invalid', email_verified: false, ...override }) })
+  } })
+  for (const bad of [{}, { nonce: 'wrong' }, { iss: 'https://other.invalid' }, { aud: 'other-client' }]) {
+    const start = await login.begin(), location = new URL(start.location)
+    assert.equal(location.searchParams.get('prompt'), 'select_account'); assert.equal(location.searchParams.get('code_challenge_method'), 'S256')
+    nonce = start.transaction.nonce; override = bad
+    const callback = new URL(`${callbackUrl}?code=synthetic-code&state=${start.transaction.state}`)
+    if (!Object.keys(bad).length) assert.deepEqual(await login.finish(callback, start.transaction), { issuer, subject: 'immutable-synthetic-subject', verifiedEmail: null })
+    else await assert.rejects(login.finish(callback, start.transaction))
+  }
+  const start = await login.begin(); nonce = start.transaction.nonce; override = {}; signingKey = wrongKeys.privateKey
+  await assert.rejects(login.finish(new URL(`${callbackUrl}?code=code&state=${start.transaction.state}`), start.transaction))
+  const before = exchanges
+  await assert.rejects(login.finish(new URL(`${callbackUrl}?code=code&state=wrong`), start.transaction))
+  assert.equal(exchanges, before)
+})
+
+test('private browser sign-in, consent upload, durable replay receipt, search and scoped setup execute over HTTP', { skip: !browser }, async t => {
+  const { digest } = await import('../src/utils/private-import/archive.mjs')
+  const resources = new Map(), assets = new Map(), issued = []
+  const owner = { ownerId: 'synthetic-legacy-owner', userId: 'synthetic-noos-owner' }
+  const adapter = { withImport: async (caller, id, work) => {
+    assert.equal(caller, owner.ownerId)
+    return work({ getJob: async () => resources.get(id)?.payload, putAsset: async (id, bytes) => { assets.set(id, Buffer.from(bytes)) },
+      saveJob: async job => { resources.set(id, { sourceOwnerId: caller, sourceRevision: job.revision, payload: structuredClone(job) }) },
+      publish: async (job, assertions) => {
+        job.assertionIds = assertions.map(row => row.id)
+        resources.set(id, { sourceOwnerId: caller, sourceRevision: job.revision, payload: structuredClone(job) })
+        for (const row of assertions) resources.set(row.id, { sourceOwnerId: caller, payload: row })
+      } })
+  } }
+  let currentHandler, finishes = 0
+  const server = createServer((req, res) => currentHandler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  currentHandler = browser.createPrivateBrowserHandler({ baseUrl,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/account-choice', transaction: { state: 'synthetic-state' } }), finish: async () => { finishes++; return { issuer: 'https://synthetic.invalid', subject: 'synthetic-sub' } } },
+    resolveOwner: async identity => identity.subject === 'synthetic-sub' ? owner : null,
+    getBackend: async verified => { assert.deepEqual(verified, owner); return { adapter, readResource: async (_type, id) => resources.get(id) } },
+    complete: async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Observed engineer' }] }),
+    issueGrant: async (verified, scope) => { issued.push({ verified, scope }); return 'synthetic-scoped-grant' }, mcpEndpoint: `${baseUrl}/mcp`,
+  })
+  const loginResponse = await fetch(`${endpoint}/login`, { redirect: 'manual' })
+  const loginCookie = loginResponse.headers.get('set-cookie').split(';')[0]
+  assert.match(loginResponse.headers.get('set-cookie'), /Secure; HttpOnly; SameSite=Lax/)
+  const callback = await fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic&state=synthetic-state`, { headers: { Cookie: loginCookie }, redirect: 'manual' })
+  assert.equal(callback.status, 303)
+  const sessionCookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const uploadPage = await (await fetch(endpoint, { headers: { Cookie: sessionCookie } })).text()
+  const csrf = uploadPage.match(/name="csrf" value="([^"]+)"/)[1]
+  const csv = 'First Name,Last Name,URL,Company,Position\nAda,Example,https://www.linkedin.com/in/synthetic-ada,Synthetic,Engineer\n'
+  const form = consent => { const value = new FormData(); value.set('csrf', csrf); value.set('archive', new Blob([csv]), 'Connections.csv'); if (consent) value.set('consent', 'yes'); return value }
+  const headers = { Cookie: sessionCookie, Origin: baseUrl }
+  const refused = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(false) })
+  assert.equal(refused.status, 400); assert.equal(resources.size, 0)
+  const uploaded = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(true), redirect: 'manual' })
+  assert.equal(uploaded.status, 303)
+  const receiptPath = uploaded.headers.get('location'), importId = receiptPath.split('/').pop()
+  assert.equal(assets.has(digest(Buffer.from(csv))), true)
+  assert.equal((await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(true), redirect: 'manual' })).headers.get('location'), receiptPath)
+  assert.equal((await fetch(`${endpoint}${receiptPath}`, { headers: { Cookie: sessionCookie } })).status, 200)
+  const search = await fetch(`${endpoint}/search`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId, query: 'engineer', aiConsent: 'yes' }) })
+  assert.match(await search.text(), /Observed engineer/)
+  assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers: { ...headers, Origin: 'https://wrong.invalid' }, body: new URLSearchParams({ csrf, importId }) })).status, 403)
+  const setup = await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })
+  assert.equal(setup.status, 200)
+  assert.deepEqual(issued[0].scope, { importIds: [importId], tools: ['unlinked_search_import'] })
+  assert.equal((await setup.json()).mcpServers['unlinked-private'].url, `${baseUrl}/mcp`)
+  resources.get(importId).deleted = true
+  assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })).status, 400)
+  assert.equal(issued.length, 1)
+  assert.equal((await fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic&state=synthetic-state`, { headers: { Cookie: loginCookie } })).status, 400)
+  assert.equal(finishes, 1)
+})
