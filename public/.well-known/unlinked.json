@@ -65,6 +65,6 @@
     "status": "staging_only_unmounted",
     "production_setup": "unavailable",
     "ai_search": "unavailable",
-    "note": "Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The isolated private Noos, OIDC browser and scoped AI/MCP factories are staging-only source; synthetic receipts do not verify this legacy backend. Staging upload uses one versioned consent for private retention and bounded OpenAI browser/search-only agent processing; immutable receipts preserve it, replay never upgrades it, and older imports fail closed for search/grants. The default-off invited-owner browser verifies chosen-account OIDC before a guarded private Noos claim and exact owner readback; email never links an owner. No live invitation URL is advertised."
+    "note": "Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend."
   }
 }

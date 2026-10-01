@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { generateKeyPairSync, createSign } from 'node:crypto'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createIdeaflowLogin, createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 
 test('invitation intent executes signed chosen-account OIDC before guarded claim and owner session', async t => {
@@ -10,6 +12,20 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const jwk = { ...keys.publicKey.export({ format: 'jwk' }), kid: 'invited-rsa', alg: 'RS256', use: 'sig' }
   const owner = { ownerId: 'fresh-private-owner', userId: 'fresh-private-principal' }
   const invitationToken = 'a'.repeat(43), claims = [], bindings = new Map()
+  const resources = new Map(), assets = new Map(), issued = []
+  const adapter = { withImport: async (caller, id, work) => {
+    assert.equal(caller, owner.ownerId)
+    return work({ getJob: async () => resources.get(id)?.payload,
+      putAsset: async (hash, bytes) => assets.set(hash, Buffer.from(bytes)), publicationStatus: 'indexed',
+      saveJob: async job => resources.set(id, { sourceOwnerId: caller, payload: structuredClone(job) }),
+      publish: async (job, rows) => {
+        job.assertionIds = rows.map(row => row.id)
+        resources.set(id, { sourceOwnerId: caller, payload: structuredClone(job) })
+        for (const row of rows) resources.set(row.id, { sourceOwnerId: caller, payload: row })
+      },
+    })
+  } }
+  let invitationHtml
   let nonce, handler, override = {}, claimFailure, returnedOwner = owner, tokenExchanges = 0
   const server = createServer((req, res) => handler(req, res))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -45,7 +61,13 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
       return returnedOwner
     },
     resolveOwner: async identity => bindings.get(`${identity.issuer}:${identity.subject}`),
-    getBackend: async () => { throw new Error('not_needed_before_upload') },
+    getBackend: async verified => {
+      assert.deepEqual(verified, owner)
+      return { adapter, readResource: async (_type, id) => resources.get(id) }
+    },
+    complete: async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic engineer match' }] }),
+    issueGrant: async (verified, scope) => { assert.deepEqual(verified, owner); issued.push(scope); return 'synthetic-invited-grant' },
+    mcpEndpoint: `${baseUrl}/mcp`,
   })
   const cookie = response => response.headers.getSetCookie().find(value => value.startsWith('__Host-ul-login=')).split(';')[0]
   const begin = async (extra = {}) => {
@@ -53,6 +75,7 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
     assert.equal(landing.status, 200)
     assert.equal(landing.headers.get('referrer-policy'), 'no-referrer')
     const text = await landing.text()
+    invitationHtml = text
     assert.match(text, /Create my private profile with Ideaflow/)
     assert.equal(text.includes(invitationToken), false)
     const csrf = text.match(/name="csrf" value="([^"]+)"/)[1]
@@ -69,7 +92,43 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   assert.equal(completed.status, 303); assert.equal(claims.length, 1)
   const sessionCookie = completed.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
   const upload = await fetch(endpoint, { headers: { Cookie: sessionCookie } })
-  assert.match(await upload.text(), /LinkedIn export ZIP or CSV/)
+  const uploadHtml = await upload.text()
+  assert.match(uploadHtml, /LinkedIn export ZIP or CSV/)
+  const csrfUpload = uploadHtml.match(/name="csrf" value="([^"]+)"/)[1]
+  const uploadForm = new FormData()
+  uploadForm.set('csrf', csrfUpload); uploadForm.set('consent', 'yes'); uploadForm.set('syntheticConsent', 'yes')
+  const csv = 'First Name,Last Name,URL,Company,Position\nInvited,Example,https://www.linkedin.com/in/synthetic-invited,Synthetic,Engineer\n'
+  uploadForm.set('archive', new Blob([csv]), 'Connections.csv')
+  const headers = { Cookie: sessionCookie, Origin: baseUrl }
+  const imported = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: uploadForm, redirect: 'manual' })
+  assert.equal(imported.status, 303)
+  const receiptPath = imported.headers.get('location'), importId = receiptPath.split('/').pop()
+  const stored = resources.get(importId)
+  assert.equal(stored.sourceOwnerId, owner.ownerId)
+  assert.equal(stored.payload.counts.accepted, 1); assert.equal(stored.payload.counts.indexed, 1)
+  assert.equal(stored.payload.consent.version, 'private-archive-openai-v1')
+  assert.ok([...assets.values()].some(bytes => bytes.equals(Buffer.from(csv))))
+  const receipt = await fetch(`${endpoint}${receiptPath}`, { headers }), receiptHtml = await receipt.text()
+  assert.equal(receipt.status, 200)
+  const search = await fetch(`${endpoint}/search`, { method: 'POST', headers, body: new URLSearchParams({ csrf: csrfUpload, importId, query: 'engineer' }) })
+  const searchHtml = await search.text()
+  assert.equal(search.status, 200); assert.match(searchHtml, /Invited Example/)
+  const setup = await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf: csrfUpload, importId }) })
+  assert.equal(setup.status, 200)
+  const configuration = await setup.json()
+  assert.deepEqual(issued, [{ importIds: [importId], tools: ['unlinked_search_import'] }])
+  assert.equal(configuration.mcpServers['unlinked-private'].url, `${baseUrl}/mcp`)
+  if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) {
+    for (const [name, output] of [['invitation', invitationHtml], ['upload', uploadHtml], ['receipt', receiptHtml], ['search', searchHtml]]) {
+      await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `invited-${name}.html`), output)
+    }
+    await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, 'invited-journey.json'), JSON.stringify({
+      boundary: 'Real HTTP controller and signed synthetic OIDC; in-memory claim/storage, deterministic completion and synthetic setup grant. No live login, Noos or model proof; one-row BASIC journey is not scale acceptance.',
+      owner, accountChoice: authorization.searchParams.get('prompt'), pkce: authorization.searchParams.get('code_challenge_method'),
+      callbackStatus: completed.status, uploadStatus: imported.status, receiptStatus: receipt.status,
+      counts: stored.payload.counts, searchStatus: search.status, setupStatus: setup.status, scope: issued[0], configuration,
+    }, null, 2))
+  }
   assert.equal((await callback(started)).status, 400); assert.equal(claims.length, 1)
   // A fresh OIDC transaction can recover a lost callback response by replaying the same durable invitation.
   assert.equal((await callback(await begin())).status, 303); assert.equal(claims.length, 2)

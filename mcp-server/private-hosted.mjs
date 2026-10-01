@@ -9,7 +9,7 @@ import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 
 // Staging-only factory, never mounted by the production Next app. authenticateGrant
 // must verify a distinct tool audience + trusted grant record + live revocation.
-// Operational access tokens, raw archives and assertion IDs are never exposed.
+// Operational access tokens and raw archives are never exposed.
 export function createPrivateHostedHandler({ authenticateGrant, readResource, readAsset, complete, allowedHosts, allowedOrigins = [] }) {
   if (typeof authenticateGrant !== 'function' || typeof readResource !== 'function' || !Array.isArray(allowedHosts) || !allowedHosts.length) throw new Error('explicit_private_host_configuration_required')
   const hosts = new Set(allowedHosts), origins = new Set(allowedOrigins)
