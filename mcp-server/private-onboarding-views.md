@@ -24,6 +24,14 @@ actual CSP nonce on Settings. It copies the configuration, selects it when clipb
 access fails, and leaves a readonly, selectable textarea and instructions without JS.
 
 `renderJoin` forwards session props only when `signedIn` is true; every signed renderer accepts `accountLabel` and `csrf` for header search and sign-out.
+Signed-out Join shows only the logo and outbound Meet link in its header. Member
+navigation uses the same session CSRF presence as header search and sign-out.
+People has one search input, in the shared header: POST `/search-account` with
+`csrf` and `query`. It retains the escaped current query; there is no separate
+in-page search or GET `/network?q` filter form. Empty `contacts` shows the import
+prompt regardless of query. Nonempty `contacts` with a query and empty results
+shows the no-match message; callers retain existing contacts alongside searchResults
+to distinguish those states. No renderer props or server actions were added.
 Every signed renderer accepts optional `importJob` containing `id`, `status`, `profileReady`, `processed`, `total`, `statusUrl`, and optional `errorMessage`.
 Statuses are `uploaded`, `parsing`, `indexing`, `indexed`, `partial`, and `failed`.
 Processed counts and import accepted/indexed totals include Profile and Skills rows
