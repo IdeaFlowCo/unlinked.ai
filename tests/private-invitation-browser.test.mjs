@@ -69,7 +69,7 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
     issueGrant: async (verified, scope) => { assert.deepEqual(verified, owner); issued.push(scope); return 'synthetic-invited-grant' },
     mcpEndpoint: `${baseUrl}/mcp`,
   })
-  const cookie = response => response.headers.getSetCookie().find(value => value.startsWith('__Host-ul-login=')).split(';')[0]
+  const cookie = (response, name = '__Host-ul-login') => response.headers.getSetCookie().find(value => value.startsWith(`${name}=`)).split(';')[0]
   const begin = async (extra = {}) => {
     const landing = await fetch(`${endpoint}/invite/${invitationToken}`)
     assert.equal(landing.status, 200)
@@ -79,19 +79,32 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
     assert.deepEqual(directives.get('default-src'), ["'none'"])
     const text = await landing.text()
     invitationHtml = text
-    assert.match(text, /Create my private profile with Ideaflow/)
+    assert.match(text, /Continue with Ideaflow/)
     assert.equal(text.includes(invitationToken), false)
     const csrf = text.match(/name="csrf" value="([^"]+)"/)[1]
     const response = await fetch(`${endpoint}/invite`, { method: 'POST', redirect: 'manual', headers: { Origin: baseUrl, Cookie: landing.headers.get('set-cookie').split(';')[0] }, body: new URLSearchParams({ csrf, ...extra }) })
     return response
   }
   const callback = response => fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic-code&state=${new URL(response.headers.get('location')).searchParams.get('state')}`, { headers: { Cookie: cookie(response) }, redirect: 'manual' })
+  const confirmationIntent = async response => {
+    const text = await response.text()
+    assert.match(text, /Confirm your Ideaflow account/)
+    assert.match(text, /same-email@example.invalid/)
+    const csrf = text.match(/name="csrf" value="([^"]+)"/)[1]
+    return { csrf, cookie: cookie(response, '__Host-ul-confirm') }
+  }
+  const postConfirm = (intent, action = 'confirm', extra = {}) =>
+    fetch(`${endpoint}/invite/confirm`, { method: 'POST', redirect: 'manual', headers: { Origin: baseUrl, Cookie: intent.cookie }, body: new URLSearchParams({ csrf: intent.csrf, action, ...extra }) })
+  const confirm = async (response, action = 'confirm', extra = {}) => postConfirm(await confirmationIntent(response), action, extra)
   const started = await begin()
   assert.equal(started.status, 303)
   const authorization = new URL(started.headers.get('location'))
   assert.equal(authorization.searchParams.get('prompt'), 'login')
   assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256')
-  const completed = await callback(started)
+  const verified = await callback(started)
+  assert.equal(verified.status, 200); assert.equal(claims.length, 0)
+  const verifiedIntent = await confirmationIntent(verified)
+  const completed = await postConfirm(verifiedIntent)
   assert.equal(completed.status, 303); assert.equal(claims.length, 1)
   const sessionCookie = completed.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
   const upload = await fetch(endpoint, { headers: { Cookie: sessionCookie } })
@@ -130,13 +143,15 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
     await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, 'invited-journey.json'), JSON.stringify({
       boundary: 'Real HTTP controller and signed synthetic OIDC; in-memory claim/storage, deterministic completion and synthetic setup grant. No live login, Noos or model proof; one-row BASIC journey is not scale acceptance.',
       owner, accountChoice: authorization.searchParams.get('prompt'), pkce: authorization.searchParams.get('code_challenge_method'),
-      callbackStatus: completed.status, uploadStatus: imported.status, receiptStatus: receipt.status,
+      callbackStatus: verified.status, confirmStatus: completed.status, uploadStatus: imported.status, receiptStatus: receipt.status,
       counts: stored.payload.counts, searchStatus: search.status, setupStatus: setup.status, scope: issued[0], configuration,
     }, null, 2))
   }
   assert.equal((await callback(started)).status, 400); assert.equal(claims.length, 1)
-  // A fresh OIDC transaction can recover a lost callback response by replaying the same durable invitation.
-  assert.equal((await callback(await begin())).status, 303); assert.equal(claims.length, 2)
+  assert.equal((await postConfirm(verifiedIntent)).status, 400); assert.equal(claims.length, 1)
+  const recovered = await callback(await begin())
+  assert.equal(recovered.status, 200)
+  assert.equal((await confirm(recovered)).status, 303); assert.equal(claims.length, 2)
   for (const bad of [{ nonce: 'wrong' }, { aud: 'other-client' }, { iss: 'https://other.invalid' }]) {
     const response = await begin(); override = bad
     assert.equal((await callback(response)).status, 400)
@@ -168,17 +183,27 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const noSession = response => assert.equal(response.headers.getSetCookie().some(value => value.startsWith('__Host-ul-session=')), false)
   for (const reason of ['invitation_unavailable', 'invitation_expired']) {
     claimFailure = reason
-    const denied = await callback(await begin())
+    const denied = await confirm(await callback(await begin()))
     assert.equal(denied.status, 400); noSession(denied)
   }
   claimFailure = undefined
+  const beforeWrongSubject = claims.length
   const otherSubject = await begin(); override = { sub: 'other-subject-same-email' }
   const otherResult = await callback(otherSubject)
-  assert.equal(otherResult.status, 400); noSession(otherResult)
+  assert.equal(otherResult.status, 200); noSession(otherResult)
   assert.equal(bindings.has(`${issuer}:other-subject-same-email`), false)
+  const restarted = await confirm(otherResult, 'restart')
+  assert.equal(restarted.status, 303); assert.equal(claims.length, beforeWrongSubject)
+  override = {}
+  const intendedAfterRestart = await callback(restarted)
+  assert.equal(intendedAfterRestart.status, 200)
+  assert.equal((await confirm(intendedAfterRestart, 'confirm', { subject: 'attacker-selected-subject' })).status, 400)
+  assert.equal(claims.length, beforeWrongSubject)
+  assert.equal((await confirm(await callback(await begin()))).status, 303)
+  assert.equal(claims.length, beforeWrongSubject + 1)
   override = {}
   claimFailure = undefined; returnedOwner = { ownerId: 'wrong-owner', userId: owner.userId }
-  const mismatch = await callback(await begin())
+  const mismatch = await confirm(await callback(await begin()))
   assert.equal(mismatch.status, 409)
   noSession(mismatch)
   // Ordinary sign-in cannot claim a profile from email or an uninvited unknown subject.
