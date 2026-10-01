@@ -68,3 +68,11 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
 The isolated private Noos adapter, bounded publication journal, OIDC browser controller, scoped query-time AI tools and setup download are documented in [Private Noos staging](docs/private-noos-staging.md). Production setup and AI search remain unavailable.
+
+### Public network entry
+
+The homepage links to network, LinkedIn archive preparation, AI-search availability, agent-setup availability and Meet.
+Private sign-in, uploads, browsing, search and hosted MCP are not yet live; the public pages collect no archive or login.
+`/auth/login` shows the Ideaflow ID path and current availability; `/auth/signup` returns there.
+Meet remains available, and LinkedIn export preparation links directly to LinkedIn.
+The private runtime still searches a selected import; owner-wide multi-import browsing/search remains follow-up work.

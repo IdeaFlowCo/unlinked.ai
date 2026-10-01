@@ -1,5 +1,7 @@
 # unlinked.ai — for agents
 
+Public browser entry uses Ideaflow ID only; private sign-in and uploads are not live yet. /auth/login shows current availability, /auth/signup returns there, and /agents shows setup availability without instructing users to mint a legacy key. Legacy API schemas below are reference documentation, not a working onboarding path.
+
 Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend.
 
 This is the agent-facing brief served at `/AGENTS.md` for autonomous agents arriving at unlinked.ai over HTTP. For agents and developers working inside this repository, see `AGENTS.md` at the repo root.

@@ -7,6 +7,10 @@ export async function middleware(request: NextRequest) {
     if (request.nextUrl.pathname === '/' || /^\/(?:meet|import-linkedin)\/?$/.test(request.nextUrl.pathname)) {
         return NextResponse.next()
     }
+    // Availability pages render without collecting credentials or contacting the legacy backend.
+    if (['GET', 'HEAD'].includes(request.method) && /^\/(?:network|search|agents|auth\/(?:login|signup))\/?$/.test(request.nextUrl.pathname)) {
+        return NextResponse.next()
+    }
     return await updateSession(request)
 }
 

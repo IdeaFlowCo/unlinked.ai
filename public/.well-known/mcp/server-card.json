@@ -112,5 +112,13 @@
     "production_setup": "unavailable",
     "ai_search": "unavailable",
     "note": "Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend."
+  },
+  "browser_entry": {
+    "path": "/auth/login",
+    "provider": "Ideaflow ID",
+    "status": "unavailable",
+    "signup_path": "/auth/login",
+    "agent_setup_path": "/agents",
+    "note": "No live private invitation or setup URL is advertised. Legacy auth/key fields describe historical API schemas."
   }
 }
