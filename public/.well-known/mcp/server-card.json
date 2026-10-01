@@ -111,6 +111,6 @@
     "status": "staging_only_unmounted",
     "production_setup": "unavailable",
     "ai_search": "unavailable",
-    "note": "Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The private Noos adapter and hosted read tool are unmounted staging-only source; their synthetic receipt does not verify this legacy backend."
+    "note": "Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The isolated private Noos, OIDC browser and scoped AI/MCP factories are staging-only source; synthetic receipts do not verify this legacy backend."
   }
 }

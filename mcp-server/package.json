@@ -1,7 +1,7 @@
 {
   "name": "@unlinked/mcp-server",
   "version": "0.1.0",
-  "description": "Model Context Protocol server for unlinked.ai — lets Claude / Cursor / any MCP client search your network, look up profiles, draft intros, and list your LinkedIn imports via the unlinked.ai agent API.",
+  "description": "Model Context Protocol server for unlinked.ai \u2014 lets Claude / Cursor / any MCP client search your network, look up profiles, draft intros, and list your LinkedIn imports via the unlinked.ai agent API.",
   "type": "module",
   "private": true,
   "bin": {
@@ -23,7 +23,9 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "openid-client": "6.6.2",
+    "jose": "6.0.11"
   },
   "devDependencies": {
     "@types/node": "20.19.9",
@@ -31,5 +33,11 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "overrides": {
+    "openid-client": {
+      "jose": "6.0.11",
+      "oauth4webapi": "3.5.4"
+    }
   }
 }

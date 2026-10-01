@@ -67,4 +67,4 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-The unmounted private Noos staging adapter, signed synthetic receipt, scoped read tool and setup download are documented in [Private Noos staging](docs/private-noos-staging.md). Production setup and AI search remain unavailable.
+The isolated private Noos adapter, bounded publication journal, OIDC browser controller, scoped query-time AI tools and setup download are documented in [Private Noos staging](docs/private-noos-staging.md). Production setup and AI search remain unavailable.
