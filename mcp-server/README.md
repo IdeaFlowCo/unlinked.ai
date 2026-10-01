@@ -6,13 +6,13 @@ A [Model Context Protocol](https://modelcontextprotocol.io) adapter for the hist
 
 ## Current availability
 
-Live private sign-in, archive uploads, agent-key creation, and hosted MCP setup are unavailable in the deployed product today. `/agents` shows setup status rather than an active onboarding flow. The setup examples below are preserved as historical implementation notes for recovery and local development.
+Current private sign-in, archive upload, own-network search, and hosted Agent setup are in the open-beta app linked from `/agents`. The setup examples below are preserved as historical implementation notes for the legacy stdio server, recovery and local development.
 
 The default-off private runtime also contains a hosted account MCP handler for the private pilot. That handler uses a separate bearer audience, exposes only `unlinked_search_network`, searches all current owner imports plus future imports until revoked, and is documented in `../deploy/private-pilot/ACCOUNT-LAUNCH.md`; it is not the public stdio server below.
 
 ## Historical setup reference
 
-1. Sign in to a private unlinked.ai account after private access is enabled -> **Settings -> Agent keys -> create key**
+1. Sign in to a legacy private unlinked.ai account after that historical access is enabled -> **Settings -> Agent keys -> create key**
 2. Copy the key (starts with `ul_`)
 3. Build the server from a local clone (see **Local clone** below; it is not published to npm)
 4. Paste one of the snippets below into your MCP client's config, replacing `/absolute/path/to/unlinked.ai` with your clone's path
@@ -68,7 +68,7 @@ For the historical API, set the API key one of two ways (checked in this order):
    { "apiKey": "ul_your_key_here", "baseUrl": "https://www.unlinked.ai" }
    ```
 
-The server will fail tool calls with a clear error message if neither is set. A configured client is not proof of live private access; confirm with a successful scoped tool call once private access reopens.
+The server will fail tool calls with a clear error message if neither is set. A configured legacy client is not proof of access; current beta setup is confirmed by a successful scoped tool call from the beta app's Agent setup.
 
 ## Environment Variables
 
@@ -91,4 +91,4 @@ The server will fail tool calls with a clear error message if neither is set. A 
 
 - Agent keys are stored server-side as a sha256 hash only; the plaintext key is shown once at creation time.
 - Every request is resolved to the authenticated caller server-side -- no request parameter selects whose network is being searched.
-- Revoke a legacy key from **Settings -> Agent keys** when private key management is enabled.
+- Revoke a legacy key from **Settings -> Agent keys** when historical private key management is enabled.

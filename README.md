@@ -19,7 +19,7 @@ Prefer the full LinkedIn ZIP; Connections-only is also supported.
 The fictional homepage answer illustrates title/company matching, not a live search result or inferred biography.
 Private upload, own-network AI search and agent setup live in the beta app; legacy Supabase APIs remain historical and are not the new login path.
 
-See the [private archive foundation contract](docs/private-archive-import.md) for the parser/job scope, adapter requirements and activation gates.
+See the [private archive foundation contract](docs/private-archive-import.md) for the parser/job scope and adapter requirements, and [durable archive import](docs/durable-archive-import.md) for the default-off profile-first background worker.
 
 ## Core Features & Technologies
 
@@ -31,13 +31,13 @@ See the [private archive foundation contract](docs/private-archive-import.md) fo
 
 ## Agent & MCP Surface
 
-unlinked.ai preserves a Model Context Protocol (MCP) server and REST API schema for autonomous agents. Live private sign-in, key creation and hosted MCP setup are unavailable today:
+unlinked.ai preserves a Model Context Protocol (MCP) server and REST API schema for autonomous agents. Current upload/search/Agent setup onboarding is in the beta app; the legacy REST schema and stdio package remain historical reference:
 
-- **Setup status:** [`/agents`](https://www.unlinked.ai/agents) (or see historical implementation notes in [`mcp-server/README.md`](mcp-server/README.md))
+- **Setup status:** [`/agents`](https://www.unlinked.ai/agents) bridges to the beta app; see historical implementation notes in [`mcp-server/README.md`](mcp-server/README.md)
 - **Machine discovery:** [`/llms.txt`](https://www.unlinked.ai/llms.txt), [`/.well-known/unlinked.json`](https://www.unlinked.ai/.well-known/unlinked.json), [`/.well-known/mcp/server-card.json`](https://www.unlinked.ai/.well-known/mcp/server-card.json), and [`/openapi.json`](https://www.unlinked.ai/openapi.json)
 - **Developer & contributor notes:** [`AGENTS.md`](AGENTS.md) (repo-internal) and [`public/AGENTS.md`](public/AGENTS.md) (HTTP agent brief)
 - **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — historical stdio server implementation supporting Claude Desktop, Claude Code, Cursor, and any MCP client
-- **Agent Keys:** Historical keys start with `ul_`; no live key creation path is advertised.
+- **Agent Keys:** Historical REST keys start with `ul_`; beta Agent setup is supplied by the app.
 - **Strict isolation:** Every legacy tool call and agent API request is resolved server-side to the authenticated user. An agent key can only access the owner's profile and direct connections.
 
 ## Private provider Preview Lab
@@ -81,4 +81,4 @@ The isolated private Noos adapter, bounded publication journal, OIDC browser con
 ### Public network entry
 
 See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/auth/login` shows the Ideaflow ID path and current availability; `/auth/signup` returns there.
-The default-off private runtime includes owner-wide multi-import browsing/search and account-scoped MCP grants, but it remains unmounted from the public app until the private release gates pass.
+The default-off private runtime includes durable profile-first archive processing, owner-wide multi-import browsing/search and account-scoped MCP grants, but it remains unmounted from the public app until the private release gates pass.
