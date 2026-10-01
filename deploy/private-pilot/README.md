@@ -17,6 +17,7 @@ python3 deploy/private-pilot/root-mount-check.py
 node --check deploy/private-pilot/runtime.mjs
 # Later, on the exact approved GCP host, with a mode-600 reviewed manifest:
 python3 /release/pilot.py preflight --manifest /private/release.json
+python3 /release/pilot.py canonical-readiness --manifest /private/canonical-release.json --execute
 python3 /release/pilot.py start --manifest /private/release.json --execute
 python3 /release/pilot.py stop --manifest /private/release.json --execute
 python3 /release/pilot.py backup --manifest /private/release.json --execute
@@ -30,6 +31,7 @@ Every command defaults to no mutation except verification, which only reads its 
 `preflight` requires final source receipts, exact clean checkout heads, reviewed wiring digest, verified image artifacts, existing mode-700 roots/directories and mode-600 inputs.
 There is no implicit directory creation during deployment and no command to obtain a certificate, alter DNS, register a client, create an invitation or copy credentials.
 The start command fails on occupied owned ports; services must be explicitly checked after start before any claim of availability.
+For the first canonical cutover only, `canonical-readiness` accepts exactly `https://www.unlinked.ai` before public DNS is switched, still requires the reviewed client/provider, source receipts, image artifacts, private inputs and certificate, starts only the same owned three-service composition, verifies owned labels, and probes `https://www.unlinked.ai` directly at `34.10.134.247` with www SNI/Host and normal TLS validation. It must observe anonymous 200, transactionless callback 400, Ideaflow auth-start redirect and the secure `__Host-ul-login` cookie attributes. Normal `start` keeps the live DNS guard.
 HTTPS availability is checked without requiring the operator to bind port 443 directly; app, operations and graph ports are not published by the private container recipe.
 Production client and identity operations remain with the identity owner.
 Readiness booleans record verified source, image, isolation and input facts; they do not introduce routine human approval gates for reversible preparation.
