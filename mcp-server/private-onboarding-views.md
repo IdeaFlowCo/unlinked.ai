@@ -26,12 +26,16 @@ access fails, and leaves a readonly, selectable textarea and instructions withou
 `renderJoin` forwards session props only when `signedIn` is true; every signed renderer accepts `accountLabel` and `csrf` for header search and sign-out.
 Every signed renderer accepts optional `importJob` containing `id`, `status`, `profileReady`, `processed`, `total`, `statusUrl`, and optional `errorMessage`.
 Statuses are `uploaded`, `parsing`, `indexing`, `indexed`, `partial`, and `failed`.
-Processed counts represent durably staged records, not globally searchable rows.
+Processed counts and import accepted/indexed totals include Profile and Skills rows
+as well as connections. They represent records, not a connection count; processed
+counts represent durably staged records, not globally searchable rows.
 The header renders server-provided progress across routes; this module does not poll an absent API.
 With a positive safe-integer `total` and `processed` between zero and total, progress
 uses those exact values and a rounded percentage. Missing, zero or inconsistent totals
 are indeterminate, with no invented counts or timers. `indexed` displays the provided
-`total` as the final connection count; the controller must supply an accurate count.
+`total` as the final record count. Header counts and Settings accepted/indexed
+totals use records wording without changing props. A future explicit connection-count
+prop could restore connections wording; the current totals cannot supply that count.
 The runtime owner must implement durable job continuation, authenticated same-owner status, and early own-profile staging before enabling those states.
 `total` may remain null until parsing knows the count.
 Only final `indexed` status reports ready. The importing screen uses terminal status for its title and body, without pending progress or continuation promises.
