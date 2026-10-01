@@ -1,0 +1,51 @@
+name: Source CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    # This repository is public. Fork code runs only on disposable hosted runners.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mcp-server/package-lock.json
+      - name: Install locked web dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install locked MCP dependencies
+        working-directory: mcp-server
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify MCP runtime dependencies
+        working-directory: mcp-server
+        run: node --input-type=module -e "await import('@modelcontextprotocol/sdk/client/index.js')"
+      - name: Verify optional private browser and grant runtime dependencies
+        shell: bash
+        run: |
+          if [[ -f mcp-server/private-browser.mjs ]]; then
+            node --input-type=module -e "await Promise.all([import('./mcp-server/private-browser.mjs'), import('./mcp-server/private-grants.mjs'), import('./mcp-server/private-hosted.mjs')])"
+          fi
+      - name: Run executable web and private OIDC/grant tests
+        run: npm test
+      - name: Compile MCP server
+        working-directory: mcp-server
+        run: npm run build
