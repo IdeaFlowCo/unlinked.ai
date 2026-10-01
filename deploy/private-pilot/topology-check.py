@@ -38,6 +38,10 @@ for service in services.values():
         if mount.get('source', '').startswith('/srv/'):
             # Compose JSON omits this normalized field when it is false.
             assert mount.get('bind', {}).get('create_host_path', False) is False
+runtime_tmpfs = services['runtime']['tmpfs']
+private_parent = '/srv/unlinked-private-guest-pilot-20261001:mode=700,uid=1002,gid=1003'
+assert private_parent in runtime_tmpfs
+assert len(runtime_tmpfs) == 2
 runtime = services['runtime']['environment']
 assert runtime['PILOT_HOST'] == '0.0.0.0' and runtime['PILOT_NETWORK_MODE'] == 'isolated-container'
 assert runtime['PILOT_BOLT_URL'] == 'bolt://graph:7687'
