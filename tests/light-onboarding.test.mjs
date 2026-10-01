@@ -119,7 +119,7 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   const people = renderPeople({ ...account, state: 'welcome' })
   assert.match(people.content, /You're in\. The people you know, ready to search\./)
   assert.match(people.content, /placeholder="Search people, roles, companies"/)
-  for (const view of [join, archive, own, people, renderSettings(account), renderImporting(account)]) {
+  for (const view of [renderJoin({ ...account, signedIn: true }), archive, own, people, renderSettings(account), renderImporting(account)]) {
     const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
     assert.match(header, /href="https:\/\/www\.unlinked\.ai\/"/)
     assert.match(header, /href="\/network">People/)
@@ -132,6 +132,54 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   assert.match(importing.content, /You can leave this page\. The import keeps running\./)
   assert.match(importing.content, /href="\/profile">See your profile/)
   assert.doesNotMatch(renderImporting({ ...account, importJob: { status: 'parsing' } }).content, /See your profile/)
+})
+
+test('People has one shared header search, preserving its action, fields and escaped query', () => {
+  const query = '<"climate&>'
+  for (const props of [{}, { state: 'welcome', contacts: [{ name: 'Avery Lee' }] }, { query, contacts: [], searchResults: [] }, { state: 'error' }]) {
+    const view = renderPeople({ ...account, ...props })
+    const forms = [...view.content.matchAll(/<form\b[^>]*action="\/search-account"[^>]*>.*?<\/form>/gs)]
+    assert.equal(forms.length, 1)
+    const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
+    assert.ok(header.includes(forms[0][0]))
+    assert.match(forms[0][0], /method="post" action="\/search-account" role="search"/)
+    assert.match(forms[0][0], /name="csrf" value="csrf-value"/)
+    assert.match(forms[0][0], /name="query" type="search"/)
+    assert.equal([...view.content.matchAll(/<input\b[^>]*type="(?:search|text)"/g)].length, 1)
+    assert.doesNotMatch(view.content, /Ask your network|Search my people|Filter by name or company|name="q"|method="get" action="\/network"/)
+    const journey = view.content.match(/<section class="journey">(.*?)<\/section>/s)[1]
+    assert.doesNotMatch(journey, /<form|<input/)
+    if (props.query) assert.match(header, /value="&lt;&quot;climate&amp;&gt;"/)
+  }
+})
+
+test('People distinguishes an empty network from a query with no matches', () => {
+  for (const query of ['', 'climate']) {
+    for (const searchResults of [undefined, []]) {
+      const view = renderPeople({ ...account, query, contacts: [], searchResults })
+      assert.match(view.content, /Bring your LinkedIn export to see your people\./)
+      assert.match(view.content, /href="\/">Add a file →/)
+      assert.doesNotMatch(view.content, /No people matched/)
+      assert.match(view.content, /Friends and member search come soon\./)
+    }
+  }
+  const contacts = [{ name: 'Avery Lee' }]
+  const noMatch = renderPeople({ ...account, contacts, query: 'ocean logistics', searchResults: [] })
+  assert.match(noMatch.content, /No people matched\. Try another name or company\./)
+  assert.doesNotMatch(noMatch.content, /Bring your LinkedIn export/)
+  assert.match(noMatch.content, /Friends and member search come soon\./)
+  assert.match(renderPeople({ ...account, contacts }).content, /Avery Lee/)
+  assert.doesNotMatch(renderPeople({ ...account, contacts }).content, /No people matched|Bring your LinkedIn export/)
+})
+
+test('signed-out Join header keeps logo and Meet without member navigation or session controls', () => {
+  for (const props of [{}, { ...account, signedIn: false }]) {
+    const view = renderJoin(props)
+    const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
+    assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', 'https://www.unlinked.ai/meet'])
+    assert.doesNotMatch(header, /href="\/(?:network|profile|settings)"|<form|<input/)
+    assert.doesNotMatch(view.content, /action="\/logout"|Signed in as/)
+  }
 })
 
 test('member copy avoids forbidden technical and legacy words outside Settings details', () => {
@@ -207,7 +255,7 @@ test('fixture previews cover every requested screen and are reproducible without
   const directory = await mkdtemp(join(tmpdir(), 'unlinked-onboarding-test-'))
   try {
     const files = await buildPreviews(directory)
-    assert.equal(files.length, 9)
+    assert.equal(files.length, 10)
     const first = await Promise.all(files.map(file => readFile(file, 'utf8')))
     await buildPreviews(directory)
     const second = await Promise.all(files.map(file => readFile(file, 'utf8')))
@@ -226,6 +274,14 @@ test('fixture previews cover every requested screen and are reproducible without
     const settings = first[files.findIndex(file => file.endsWith('/settings.html'))]
     assert.equal((settings.match(/action="\/revoke-account"/g) || []).length, 1)
     assert.match(settings, /fictional_fixture_not_a_credential/)
+    for (const file of ['people-welcome.html', 'people-empty.html', 'people-no-match.html']) {
+      const content = first[files.findIndex(path => path.endsWith('/' + file))]
+      assert.equal([...content.matchAll(/<input\b[^>]*type="(?:search|text)"/g)].length, 1)
+    }
+    assert.match(first[files.findIndex(file => file.endsWith('/people-empty.html'))], /Bring your LinkedIn export to see your people\./)
+    assert.match(first[files.findIndex(file => file.endsWith('/people-no-match.html'))], /No people matched\. Try another name or company\./)
+    const joinHeader = first[files.findIndex(file => file.endsWith('/join.html'))].match(/<header>(.*?)<\/header>/s)[1]
+    assert.doesNotMatch(joinHeader, /href="\/(?:network|profile|settings)"/)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
