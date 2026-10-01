@@ -65,7 +65,7 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
     if (supportError) {
       job.status = 'failed'; job.phase = 'unsupported_private_publication'; job.error = supportError
       job.unsupportedSourceIds = job.sources.map(source => source.id); job.sources = []
-      job.indexGate = store.publicationGate ?? 'noos_private_index_not_connected'; job.revision++
+      job.indexGate = Object.hasOwn(store, 'publicationGate') ? store.publicationGate : 'noos_private_index_not_connected'; job.revision++
       await store.saveJob(job)
       return job
     }
@@ -75,7 +75,7 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
     if (job.status === 'indexed' && (job.counts.rejected || job.counts.failedFiles)) job.status = 'partial'
     if (job.counts.accepted && store.publicationStatus === 'indexed') job.counts.indexed = job.counts.accepted
     job.phase = job.counts.accepted ? (store.publicationPhase ?? 'awaiting_private_index') : 'no_accepted_rows'
-    job.indexGate = store.publicationGate ?? 'noos_private_index_not_connected'; job.revision++
+    job.indexGate = Object.hasOwn(store, 'publicationGate') ? store.publicationGate : 'noos_private_index_not_connected'; job.revision++
     await store.publish(job, assertions)
     return job
   })

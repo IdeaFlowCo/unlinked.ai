@@ -8,7 +8,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import JSZip from 'jszip'
 import { ingestArchive } from '../src/utils/private-import/job.mjs'
-import { createNoosImportAdapter, createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
+import { createNoosImportAdapter, createScopedImportReader, createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 
 const checkout = process.env.UNLINKED_NOOS_TEST_CHECKOUT
 const uri = process.env.NOOS_OPERATIONAL_TEST_URI
@@ -27,8 +27,9 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const { StagingFileAssets, createPrivateAssetRouter } = await load('assets')
   const root = await mkdtemp('/Volumes/External_SSD/code-overflow/unlinked-auth-receipt-')
   const driver = neo4j.driver(uri, neo4j.auth.basic('neo4j', 'synthetic-contract-only'))
-  let api, toolServer, client, setupHandler
+  let api, toolServer, client, searchClient, setupHandler
   t.after(async () => {
+    await searchClient?.close()
     await client?.close()
     if (toolServer) await new Promise(resolve => toolServer.close(resolve))
     if (api) await new Promise(resolve => api.close(resolve))
@@ -122,7 +123,23 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   scaledZip.file('Connections.csv', 'First Name,Last Name,URL,Company,Position\n' + Array.from({ length: 1001 }, (_, i) =>
     `Synthetic${i},Example,https://www.linkedin.com/in/synthetic-scale-${i},Synthetic company ${i},${i === 1000 ? 'Quantum compiler engineer' : 'Bakery manager'}\n`).join(''))
   const scaledBytes = await scaledZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
-  const scaled = await ingestArchive({ ownerId: owner, filename: 'synthetic-1001-connections.zip', bytes: scaledBytes, adapter })
+  const scaledInput = { ownerId: owner, filename: 'synthetic-1001-connections.zip', bytes: scaledBytes }
+  let chunkCommits = 0
+  const interruptedJournal = createNoosImportAdapter({ baseUrl, ownerId: owner, accessToken: alice, fetchImpl: async (url, init) => {
+    const response = await fetch(url, init)
+    if (new URL(url).pathname.endsWith('/batch') && JSON.parse(init.body).some(item => item.type === 'assertion') && ++chunkCommits === 2) throw new Error('synthetic_mid_journal_response_lost')
+    return response
+  } })
+  await assert.rejects(ingestArchive({ ...scaledInput, adapter: interruptedJournal }), /synthetic_mid_journal_response_lost/)
+  const { privateId } = await import('../src/utils/private-import/job.mjs')
+  const { PARSER_VERSION } = await import('../src/utils/private-import/archive.mjs')
+  const scaledId = privateId(owner, 'import', createHash('sha256').update(scaledBytes).digest('hex'), scaledInput.filename, PARSER_VERSION)
+  const provisionalReader = createScopedImportReader({ grant: { ownerId: owner, importIds: [scaledId] }, readResource: async (type, id) => {
+    const response = await fetch(`${baseUrl}/unlinked/${type}/${id}`, { headers: { Authorization: `Bearer ${alice}` } })
+    return response.status === 404 ? null : response.json()
+  } })
+  await assert.rejects(provisionalReader(scaledId), /private_import_not_found/)
+  const scaled = await ingestArchive({ ...scaledInput, adapter })
   assert.equal(scaled.status, 'indexed'); assert.equal(scaled.counts.accepted, 1001); assert.equal(scaled.counts.indexed, 1001)
   assert.equal(scaled.assertionChunks.length, 6)
   assert.deepEqual(await ingestArchive({ ownerId: owner, filename: 'synthetic-1001-connections.zip', bytes: scaledBytes, adapter }), scaled)
@@ -142,6 +159,15 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
     assert.equal(response.status, 200)
     return response.json()
   }
+  const { createPrivateGrantService } = await import('../mcp-server/private-grants.mjs')
+  const ownerBackend = createNoosOwnerBackend({ baseUrl, ownerId: owner, accessToken: alice })
+  const privateGrants = createPrivateGrantService({ issuer: 'https://disposable-private-tools.invalid', ...keys,
+    getBackend: async verified => {
+      if (verified.ownerId !== owner || verified.userId !== 'synthetic-noos-a') throw new Error('private_owner_mismatch')
+      return ownerBackend
+    } })
+  const scopedSearchToken = await privateGrants.issueGrant({ ownerId: owner, userId: 'synthetic-noos-a' }, { importIds: [scaled.id], tools: ['unlinked_search_import'] })
+  const scopedGrantId = JSON.parse(Buffer.from(scopedSearchToken.split('.')[1], 'base64url')).grantId
   let allowedHost
   // Recreate handler after selecting the actual private test host.
   toolServer = createServer((req, res) => req.url === '/setup' ? setupHandler(req, res) : allowedHost(req, res))
@@ -149,6 +175,8 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   const endpoint = `http://127.0.0.1:${toolServer.address().port}/mcp`
   allowedHost = createPrivateHostedHandler({ allowedHosts: [`127.0.0.1:${toolServer.address().port}`],
     authenticateGrant: async req => {
+      const privateGrant = await privateGrants.authenticateGrant(req)
+      if (privateGrant) return privateGrant
       const principal = await toolAuth({ headers: req.headers, method: 'GET', params: { namespace: 'unlinked' } })
       return principal?.userId === grant.userId && req.headers.authorization === `Bearer ${grantToken}` ? grant : null
     }, readResource, complete })
@@ -187,11 +215,18 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   assert.ok(indexedRows.assertions.every(row => row.privateIndex.version === 'observation-v1'))
   let searchReceipt
   if (complete) {
-    searchReceipt = await client.callTool({ name: 'unlinked_search_import', arguments: { importId: scaled.id, query: 'Who is a quantum compiler engineer?' } })
+    searchClient = new Client({ name: 'real-private-search-grant', version: '1.0.0' })
+    await searchClient.connect(new StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers: { Authorization: `Bearer ${scopedSearchToken}` } } }))
+    assert.deepEqual((await searchClient.listTools()).tools.map(tool => tool.name), ['unlinked_search_import'])
+    searchReceipt = await searchClient.callTool({ name: 'unlinked_search_import', arguments: { importId: scaled.id, query: 'Who is a quantum compiler engineer?' } })
     assert.equal(searchReceipt.isError, undefined)
     const matches = JSON.parse(searchReceipt.content[0].text).matches
     assert.ok(matches.some(match => match.subject === 'https://www.linkedin.com/in/synthetic-scale-1000'))
     assert.equal(considered.size, 1001)
+    assert.equal((await fetch(archivePath, { headers: { Authorization: `Bearer ${scopedSearchToken}` } })).status, 401)
+    assert.equal((await searchClient.callTool({ name: 'unlinked_search_import', arguments: { importId: result.id, query: 'engineer' } })).isError, true)
+    await privateGrants.revoke({ ownerId: owner, userId: 'synthetic-noos-a' }, scopedGrantId)
+    await assert.rejects(searchClient.listTools())
   }
   assert.equal((await client.callTool({ name: 'unlinked_read_import', arguments: { importId: recovered.id } })).isError, true)
   assert.equal((await fetch(archivePath, { headers: { Authorization: `Bearer ${grantToken}` } })).status, 401)
@@ -210,7 +245,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   if (process.env.UNLINKED_NOOS_RECEIPT) await writeFile(process.env.UNLINKED_NOOS_RECEIPT, JSON.stringify({
     boundary: 'Real synthetic ZIP, RS256 access verification, offline disposable issuer/subject mapping, dedicated temporary Neo4j, private asset bytes and actual MCP SDK client. No real provider login/consent, production mount, production deployment or live personal data. Optional explicitly configured existing-key synthetic AI receipt is recorded separately.',
     archiveSha256: createHash('sha256').update(bytes).digest('hex'), import: result,
-    observed, toolReceipt: receipt, lostResponseRecovery: recovered.id, assetInterruptionRecovery: assetRecovered.id, publicationInterruptionRecovery: publicationRecovered.id, simultaneousReplay: parallel[0].id, scaledImport: scaled, scaledToolReceipt: { indexed: indexedRows.indexed, assertionCount: indexedRows.assertions.length }, searchReceipt, modelReceipts, consideredConnections: considered.size,
+    observed, toolReceipt: receipt, lostResponseRecovery: recovered.id, assetInterruptionRecovery: assetRecovered.id, publicationInterruptionRecovery: publicationRecovered.id, simultaneousReplay: parallel[0].id, scaledImport: scaled, scaledToolReceipt: { indexed: indexedRows.indexed, assertionCount: indexedRows.assertions.length }, searchReceipt, modelReceipts, consideredConnections: considered.size, midJournalLostResponseCommits: chunkCommits, durableSearchGrant: scopedGrantId,
     verified: ['other owner cannot read import/raw asset', 'different tool audience cannot read raw asset', 'ungranted import denied', 'tombstone denies retained assertions', 'revoked token denies next SDK request', 'single authenticated setup action returns download configuration for only the approved import', 'deleted publication denies new setup', '1001 connections indexed and scoped SDK-readable'], indexed: scaled.counts.indexed,
     cleanup: 'owned server connections, private filesystem root and disposable container removed by finally hooks',
   }, null, 2))
