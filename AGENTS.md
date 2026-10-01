@@ -27,6 +27,12 @@ This file is the repo-internal guide for autonomous agents and contributors work
 - **Backend Deployment Note:**
   - The Supabase backend is hosted on a free plan and may be paused. Local builds and tests should not depend on live database uptime.
 
+## Private archive foundation
+
+`docs/private-archive-import.md` owns the bounded parser/job adapter contract and live activation gates.
+The `/import-linkedin` entry is unavailable until private Noos persistence/indexing and verified identity mapping are proven; parser receipts are never search readiness.
+The durable filesystem adapter in `tests/private-import-store.mjs` is test-only and must not become a production people store.
+
 ## Directory Structure
 
 - `src/app/`: Next.js App Router pages and API routes (`src/app/api/`).
