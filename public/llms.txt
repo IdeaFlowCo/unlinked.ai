@@ -6,7 +6,7 @@ Public browser entry uses Ideaflow ID only; private sign-in and uploads are not 
 Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. No live invitation URL is advertised. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md for the default-off staging contract, consent and release gates; synthetic receipts do not verify this legacy backend.
 
 ## Documentation
-- [Agent setup status](/agents): current availability plus historical client configuration and tool roster
+- [Agent setup status](/agents): current availability for private sign-in, uploads, and scoped MCP setup
 - [Developer notes for agents](/AGENTS.md): agent-readable brief on authentication, server-side scoping guarantees, and REST API endpoints
 - [Well-known product descriptor](/.well-known/unlinked.json): machine-readable bootstrap manifest
 - [MCP server card](/.well-known/mcp/server-card.json): Model Context Protocol server card for `@unlinked/mcp-server`
