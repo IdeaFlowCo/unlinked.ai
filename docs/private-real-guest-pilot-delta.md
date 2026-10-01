@@ -21,7 +21,7 @@ DNS/TLS/routing and runtime installation are approval operations; no change has 
 Proposed new private owner-controlled root: /srv/unlinked-private-guest-pilot-20261001 (mode700).
 It is separate from every synthetic staging root and existing Noos graph/data volume.
 Subdirectories: runtime/ (reviewed source SHAs), neo4j-data/ (dedicated database), assets/ (700/600 private blobs), backups/ (paired private snapshots), and audit/ (non-token consent/identity provenance).
-A dedicated1GiB Neo4j container uses loopback Bolt9289; operational API binds loopback9022; browser/MCP binds loopback9367 behind the new443 ingress.
+A dedicated1GiB Neo4j container uses only the internal backend bridge at `graph:7687`; the operational API binds runtime loopback9022, and browser/MCP binds only the unpublished runtime listener 9367 behind the new443 ingress.
 No generic graph-query route, raw asset route or operational token is public.
 The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only UID/GID plus the three approved image variables for Compose.
 `runtime.mjs` refuses to launch without reviewed mode600 wiring.
@@ -73,3 +73,7 @@ Rollback stops only the three labeled new ingress/runtime/graph containers, pres
 Do not blindly delete or rebind live identity/owner data.
 Restore is a quiesced paired graph/blob operation with integrity manifest, bindings, journal rows before final publication fences, and preserved tombstones.
 Synthetic paired restore has been proven; operational backup scheduling/ownership, durable directory fsync, real identity/principal proof,443 route and actual browser acceptance remain unproven release gates.
+
+Private container activation publishes only non-root ingress 443:8443.
+The browser wildcard listener is confined to the dedicated frontend bridge with no published app port, and the graph is confined to a separate internal backend bridge with no published Bolt port.
+Operational/raw asset services remain runtime loopback; the invitation, owner and delegated tool checks continue to apply before every read/write.

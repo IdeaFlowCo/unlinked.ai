@@ -11,7 +11,7 @@ services:
       NEO4J_server_memory_pagecache_size: 256m
       NEO4J_server_http_enabled: 'false'
       NEO4J_server_https_enabled: 'false'
-    ports: ['127.0.0.1:9289:7687']
+    networks: [backend]
     volumes:
       - type: bind
         source: /srv/unlinked-private-guest-pilot-20261001/neo4j-data
@@ -26,17 +26,18 @@ services:
     image: ${PILOT_RUNTIME_IMAGE:?approved dependency-complete image required}
     container_name: unlinked-private-guest-pilot-20261001-runtime
     user: ${PILOT_UID:?explicit host operator uid required}:${PILOT_GID:?explicit host operator gid required}
-    network_mode: host
+    networks: [frontend, backend]
     read_only: true
     env_file: /srv/unlinked-private-guest-pilot-20261001/runtime/runtime.env
     environment:
       PILOT_ROOT: /srv/unlinked-private-guest-pilot-20261001
       PILOT_ORIGIN: https://private.unlinked.ai
       PILOT_DATA_MODE: private_live
-      PILOT_HOST: 127.0.0.1
+      PILOT_HOST: 0.0.0.0
+      PILOT_NETWORK_MODE: isolated-container
       PILOT_PORT: '9367'
       PILOT_OPERATIONS_URL: http://127.0.0.1:9022
-      PILOT_BOLT_URL: bolt://127.0.0.1:9289
+      PILOT_BOLT_URL: bolt://graph:7687
     command: [node, /release/runtime.mjs]
     volumes:
       - type: bind
@@ -56,7 +57,8 @@ services:
         source: .
         target: /release
         read_only: true
-    tmpfs: ['/tmp:mode=700']
+        bind: {create_host_path: false}
+    tmpfs: ['/tmp:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}']
     mem_limit: 512m
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
@@ -65,7 +67,9 @@ services:
   ingress:
     image: ${PILOT_NGINX_IMAGE:?approved digest-pinned image required}
     container_name: unlinked-private-guest-pilot-20261001-ingress
-    network_mode: host
+    networks: [frontend]
+    ports: ['443:8443']
+    user: ${PILOT_UID:?explicit host operator uid required}:${PILOT_GID:?explicit host operator gid required}
     read_only: true
     entrypoint: [nginx, -g, 'daemon off;']
     volumes:
@@ -73,15 +77,19 @@ services:
         source: ./nginx.conf
         target: /etc/nginx/nginx.conf
         read_only: true
+        bind: {create_host_path: false}
       - type: bind
         source: /srv/unlinked-private-guest-pilot-20261001/runtime/tls
         target: /tls
         read_only: true
         bind: {create_host_path: false}
-    tmpfs: ['/tmp:mode=700']
+    tmpfs: ['/tmp:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}']
     mem_limit: 128m
     cap_drop: [ALL]
-    cap_add: [NET_BIND_SERVICE, SETUID, SETGID]
     security_opt: ['no-new-privileges:true']
     logging: {driver: none}
     labels: {unlinked.private-pilot.root: /srv/unlinked-private-guest-pilot-20261001}
+
+networks:
+  frontend: {}
+  backend: {internal: true}

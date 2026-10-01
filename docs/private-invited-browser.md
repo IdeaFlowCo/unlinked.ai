@@ -14,13 +14,14 @@ Supply the initialized Noos callback-role provisioner and operational store insi
 
 ```js
 await startPrivatePilot({
-  baseUrl, login, getBackend, complete, port, dataMode,
+  baseUrl, login, getBackend, complete, port, networkMode, dataMode,
   claimInvitation: provisioner.claim.bind(provisioner),
   resolveOwner: identity => store.resolveIdentity('unlinked', identity.issuer, identity.subject),
 })
 ```
 
 `login` is `createIdeaflowLogin` configured with the exact issuer, client and `/auth/callback/ideaflow` URL.
+`networkMode` defaults to host loopback; the deployment launcher is the only path that selects the exact `isolated-container` topology.
 `provisioner` is Noos `InvitedOwnerProvisioner` with role `callback` and that same issuer/client; the operator capability is kept out of the browser runtime.
 `getBackend` revalidates the active immutable owner/principal binding on each private operation.
 These are private process capabilities, not HTTP endpoints accepting claimed identity fields.
