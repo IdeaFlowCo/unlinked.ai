@@ -8,11 +8,9 @@ The page displays the legacy network's unavailable state without querying Supaba
 
 ## Import LinkedIn archive
 
-The public archive availability page bypasses legacy session refresh so it remains readable while the backend is unavailable.
-
 **Import LinkedIn archive** remains visible beside Meet and opens `/import-linkedin`. The page displays an unavailable state and accepts no uploads. Keep your original LinkedIn archive while the private service is being restored.
 
-The parser/job foundation does not provide live ingestion, indexing/search, historical data recovery or agent linking. See the [private archive foundation contract](docs/private-archive-import.md) for adapter requirements and activation gates.
+See the [private archive foundation contract](docs/private-archive-import.md) for the parser/job scope, adapter requirements and activation gates.
 
 ## Core Features & Technologies
 
@@ -39,16 +37,16 @@ See the [private lab guide](docs/provider-lab.md) for tester usage, stage config
 
 ## Getting Started
 
-For the public landing and Meet flow, install dependencies and run the development server on an available high port:
+For the public landing, Meet flow and archive availability page, install dependencies and run the development server on an available high port:
 
 ```bash
 npm ci
 npm run dev -- --port 7743
 ```
 
-Open [http://localhost:7743](http://localhost:7743) and `/meet`. Neither page needs Supabase environment variables or database access. Legacy routes require the existing Supabase settings and a reachable backend.
+Open [http://localhost:7743](http://localhost:7743), `/meet` and `/import-linkedin`. These public entry points bypass legacy session refresh, including the trailing-slash forms of `/meet` and `/import-linkedin`, and need no Supabase environment variables or database access. Existing API and data routes retain their middleware and require the existing Supabase settings and a reachable backend.
 
-Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, set `NEXT_PUBLIC_SUPABASE_URL=https://db.unlinked.ai` while that host is unresolved and confirm `/` and `/meet` still return 200. A card token with valid syntax can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
+Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, start the server with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` unset and confirm `/`, `/meet`, `/import-linkedin` and `/import-linkedin/` return 200 (following redirects for trailing-slash normalization). A card token with valid syntax can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
 
 For lint validation, run `npx eslint` with the changed JavaScript or TypeScript file paths. The existing `npm run lint` invokes unsupported `next lint`; ESLint is configured in `eslint.config.mjs`. No separate formatter is configured.
 
