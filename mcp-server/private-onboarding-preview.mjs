@@ -46,7 +46,8 @@ export async function buildPreviews(outDir) {
     ['importing-indexed', renderImporting({ ...account, importJob: indexed })],
     ['own-profile-importing', renderOwnProfile({ ...account, profile, contacts, imports, importJob: importing })],
     ['people-welcome', renderPeople({ ...account, state: 'welcome', contacts })],
-    ['people-empty', renderPeople({ ...account, contacts: [] })],
+    ['people-empty', renderPeople({ ...account, query: 'climate', contacts: [], searchResults: [] })],
+    ['people-no-match', renderPeople({ ...account, query: 'ocean logistics', contacts, searchResults: [] })],
     ['settings', renderSettings({ ...account, agentConfiguration, imports, grants: [{ id: 'fictional-grant' }] })],
   ]
   await mkdir(directory, { recursive: true })
