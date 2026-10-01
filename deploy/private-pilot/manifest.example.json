@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "root": "/srv/unlinked-private-guest-pilot-20261001",
+  "project": "unlinked-private-guest-pilot-20261001",
+  "origin": "https://private.unlinked.ai",
+  "callback": "https://private.unlinked.ai/auth/callback/ideaflow",
+  "gcp": {
+    "project": "lightsail-migration",
+    "instance": "noos",
+    "zone": "us-central1-a"
+  },
+  "ports": {
+    "bolt": 9289,
+    "operations": 9022,
+    "browser": 9367,
+    "https": 443
+  },
+  "sources": {
+    "unlinked": {
+      "checkout": "/srv/unlinked-private-guest-pilot-20261001/runtime/unlinked",
+      "sha": "55114ae338bb2c0c7527de8b14b45699a74760b6",
+      "approved": false,
+      "final_receipt": "/srv/unlinked-private-guest-pilot-20261001/audit/unlinked-source-ready.json",
+      "final_receipt_sha256": ""
+    },
+    "noos": {
+      "checkout": "/srv/unlinked-private-guest-pilot-20261001/runtime/noos",
+      "sha": "5d91686ade1f39112a4dfe5b5985f997635f1017",
+      "approved": false,
+      "final_receipt": "/srv/unlinked-private-guest-pilot-20261001/audit/noos-source-ready.json",
+      "final_receipt_sha256": ""
+    }
+  },
+  "images": {
+    "neo4j": "neo4j@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "runtime": "runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "nginx": "nginx@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "images_approved": false,
+  "target_security_approved": false,
+  "provider_client_registered": false,
+  "dns_tls_ready": false,
+  "persistent_secret_destinations_approved": false,
+  "invitation_activation_approved": false,
+  "openai_persistent_destination_confirmed": false,
+  "wiring_sha256": "",
+  "destinations": {
+    "runtime_env": "/srv/unlinked-private-guest-pilot-20261001/runtime/runtime.env",
+    "graph_env": "/srv/unlinked-private-guest-pilot-20261001/runtime/graph.env",
+    "operator_config": "/srv/unlinked-private-guest-pilot-20261001/runtime/operator.json",
+    "invitation_bundle": "/srv/unlinked-private-guest-pilot-20261001/invitations/operator-recovery.json",
+    "wiring": "/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs",
+    "certificate": "/srv/unlinked-private-guest-pilot-20261001/runtime/tls/fullchain.pem",
+    "certificate_key": "/srv/unlinked-private-guest-pilot-20261001/runtime/tls/key.pem"
+  },
+  "dns_proposal": {
+    "type": "A",
+    "name": "private.unlinked.ai",
+    "value": "34.10.134.247",
+    "ttl": 300,
+    "status": "PROPOSED_ONLY"
+  },
+  "provider_request": {
+    "issuer": "REQUIRES_IDENTITY_OWNER_VERIFIED_ISSUER",
+    "client_id": "REQUIRES_IDENTITY_OWNER_REGISTRATION",
+    "redirect_uri": "https://private.unlinked.ai/auth/callback/ideaflow",
+    "method": "client_secret_basic",
+    "pkce": "S256",
+    "status": "IDENTITY_OWNER_GATE"
+  },
+  "model_secret_proposal": {
+    "destination": "/srv/unlinked-private-guest-pilot-20261001/runtime/runtime.env",
+    "status": "EXPLICIT_PERSISTENT_DESTINATION_CONFIRMATION_REQUIRED",
+    "synthetic_alternative": "Existing M5 key read in place; never copy to CI VM"
+  }
+}
