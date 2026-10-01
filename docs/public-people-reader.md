@@ -6,14 +6,14 @@ This source module changes no route, Noos adapter, authentication, publication o
 The factory injects `readPublishedSnapshot({maxProfiles,maxConnections,maxTextBytes,signal,viewer})`.
 The provider returns `{state:'published',complete:true,revision,profiles,connections}` only after one immutable final migration publication fence.
 It must enforce current visibility on every profile and both endpoints of every connection before returning any row used in search, ranking or pagination.
-`viewer` is null or an immutable server-resolved identity passed through factory configuration; query input cannot supply identity authority.
+`viewer` is null or an immutable server-resolved identity passed through factory configuration; query input cannot supply identity authority. Identity objects and arrays must be recursively frozen plain data, with no accessors, cycles, sparse arrays or mutable nested values.
 Unknown, unpublished, unavailable, incomplete, malformed or over-limit snapshots fail closed.
 Provider exceptions are replaced with data-free errors.
 Requests time out and receive an abort signal; adapters must honor that signal to stop their own work.
 
 Default maxima are20,000profiles,100,000directed public edges,16MiB accepted DTO text and3seconds per snapshot call.
 The provider must bound its own fetch/serialization before returning; these maxima are not permission to read private operational rows.
-The factory validates all rows before computing counts/order, never truncates an oversized snapshot, and rejects duplicate IDs/edges or dangling endpoints.
+All entity arrays must have their own data entries at every index. The factory validates all rows before computing counts/order, never truncates an oversized snapshot, and rejects duplicate IDs/edges or dangling endpoints.
 Empty published snapshots are valid, distinguishable from unavailable publication.
 
 Each published profile has `id`, `name`, optional `headline`, `location`, `about`, optional search-only `company`, and arrays `positions`, `education`, `skills`.
@@ -26,7 +26,7 @@ Connections are `{fromId,toId}` and remain directed; reciprocal relationships an
 `reader.list({query,cursor,signal?})` returns `{profiles:[{id,name,headline?,location?}],nextCursor?}`.
 `reader.profile({id,cursor,signal?})` returns `{profile:{...summary,about?,positions,education,skills,connections,nextConnectionsCursor?}}`, or null for an unknown/unpublished profile in an otherwise valid published snapshot.
 The controller maps null to HTTP404; `PublicPeopleReaderError.status===503` maps to unavailable.
-Invalid query/ID/cursor returns a data-free status400 error.
+Requests must be plain data objects. Invalid request shapes, signals, queries, IDs and cursor structures/scopes return a data-free status400 error before backend access or unknown-profile handling.
 No HTTP route is implemented by this module.
 
 Search is plain normalized name/company term matching; AI search remains in the owner-scoped controller.

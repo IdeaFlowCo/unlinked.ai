@@ -9,13 +9,39 @@ const normalized = value => value.normalize('NFKC').toLowerCase().replace(/\s+/g
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
 const idValid = value => typeof value === 'string' && value.length > 0 && value.length <= 160 && value !== '.' && value !== '..'
 const bounded = (value, max) => Number.isSafeInteger(value) && value > 0 && value <= max
-const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+const plain = value => value !== null && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 const hash = value => createHash('sha256').update(value).digest('hex')
+
+const dense = value => {
+  if (!Array.isArray(value)) return false
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index)
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return false
+  }
+  return true
+}
+const immutableIdentity = (value, ancestors = new Set()) => {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if ((!plain(value) && !dense(value)) || !Object.isFrozen(value) || ancestors.has(value)) return false
+  ancestors.add(value)
+  const valid = Reflect.ownKeys(value).every(key => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return typeof key === 'string' && Object.hasOwn(descriptor, 'value') && immutableIdentity(descriptor.value, ancestors)
+  })
+  ancestors.delete(value)
+  return valid
+}
+const requestValue = value => {
+  if (!plain(value) || Reflect.ownKeys(value).some(key => !Object.hasOwn(Object.getOwnPropertyDescriptor(value, key), 'value'))) invalid()
+  if (value.signal !== undefined && !(value.signal instanceof AbortSignal)) invalid()
+  return value
+}
 
 // The injected provider owns public projection and both-endpoint visibility.
 // No reader exists by default; private records and fixtures are never fallback sources.
 export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000 } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !Object.isFrozen(viewer)))) throw new TypeError('public_people_configuration_invalid')
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer)))) throw new TypeError('public_people_configuration_invalid')
 
   async function snapshot(signal) {
     if (!readPublishedSnapshot) unavailable()
@@ -30,7 +56,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (combined.aborted) abortHandler()
       })
       const value = await Promise.race([Promise.resolve().then(() => readPublishedSnapshot({ maxProfiles, maxConnections, maxTextBytes, signal: combined, viewer })), interruption])
-      if (!plain(value) || value.state !== 'published' || value.complete !== true || typeof value.revision !== 'string' || !value.revision.length || value.revision.length > 512 || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !Array.isArray(value.connections) || value.connections.length > maxConnections) unavailable()
+      if (!plain(value) || value.state !== 'published' || value.complete !== true || typeof value.revision !== 'string' || !value.revision.length || value.revision.length > 512 || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !dense(value.profiles) || !Array.isArray(value.connections) || value.connections.length > maxConnections || !dense(value.connections)) unavailable()
       let textBytes = 0
       const text = (input, required = false, nonempty = false) => {
         if (input === undefined && !required) return undefined
@@ -40,7 +66,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         return input
       }
       const optional = (output, key, input) => { const result = text(input); if (result !== undefined) output[key] = result }
-      const array = (input, max) => { if (!Array.isArray(input) || input.length > max) unavailable(); return input }
+      const array = (input, max) => { if (!Array.isArray(input) || input.length > max || !dense(input)) unavailable(); return input }
       const summaries = new Map(), details = new Map(), search = new Map()
       for (const input of value.profiles) {
         if (!plain(input) || !idValid(input.id) || summaries.has(input.id)) unavailable()
@@ -72,8 +98,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       const ordered = [...summaries.values()].sort((a, b) => compare(normalized(a.name), normalized(b.name)) || compare(a.id, b.id))
       return { revision: value.revision, ordered, summaries, details, outgoing, search }
-    } catch (error) {
-      if (error instanceof PublicPeopleReaderError) throw error
+    } catch {
       unavailable()
     } finally {
       clearTimeout(timer)
@@ -83,31 +108,41 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   }
 
   const queryValue = value => { if (value === undefined) return ''; if (typeof value !== 'string' || value.length > 200) invalid(); return normalized(value) }
+  function cursorValue(cursor, scope) {
+    if (cursor === undefined) return undefined
+    if (typeof cursor !== 'string' || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)) invalid()
+    let decoded
+    try { decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) } catch { invalid() }
+    if (!plain(decoded) || decoded.v !== 1 || decoded.scope !== hash(scope) || typeof decoded.revision !== 'string' || !decoded.revision.length || decoded.revision.length > 512 || !Number.isSafeInteger(decoded.offset) || decoded.offset < 0) invalid()
+    return decoded
+  }
   function page(rows, cursor, scope, revision) {
     let offset = 0
     if (cursor !== undefined) {
-      if (typeof cursor !== 'string' || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)) invalid()
-      let decoded
-      try { decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) } catch { invalid() }
-      if (!plain(decoded) || decoded.v !== 1 || decoded.scope !== hash(scope) || !Number.isSafeInteger(decoded.offset) || decoded.offset < 0 || decoded.offset > rows.length) invalid()
-      if (decoded.revision !== revision) unavailable()
-      offset = decoded.offset
+      if (cursor.revision !== revision) unavailable()
+      if (cursor.offset > rows.length) invalid()
+      offset = cursor.offset
     }
     const profiles = rows.slice(offset, offset + pageSize)
     const nextCursor = offset + pageSize < rows.length ? Buffer.from(JSON.stringify({ v: 1, scope: hash(scope), revision, offset: offset + pageSize })).toString('base64url') : undefined
     return { profiles, ...(nextCursor ? { nextCursor } : {}) }
   }
   return {
-    async list({ query = '', cursor, signal } = {}) {
-      const normalizedQuery = queryValue(query), data = await snapshot(signal)
+    async list(request = {}) {
+      const { query = '', cursor, signal } = requestValue(request)
+      const normalizedQuery = queryValue(query), scope = `list:${normalizedQuery}`
+      const decodedCursor = cursorValue(cursor, scope), data = await snapshot(signal)
       const terms = normalizedQuery ? normalizedQuery.split(' ') : []
-      return page(data.ordered.filter(person => terms.every(term => data.search.get(person.id).includes(term))), cursor, `list:${normalizedQuery}`, data.revision)
+      return page(data.ordered.filter(person => terms.every(term => data.search.get(person.id).includes(term))), decodedCursor, scope, data.revision)
     },
-    async profile({ id, cursor, signal } = {}) {
+    async profile(request = {}) {
+      const { id, cursor, signal } = requestValue(request)
       if (!idValid(id)) invalid()
+      const scope = `connections:${id}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
+      if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
       if (!data.details.has(id)) return null
-      const connections = page(data.ordered.filter(person => data.outgoing.get(id).has(person.id)), cursor, `connections:${id}`, data.revision)
+      const connections = page(data.ordered.filter(person => data.outgoing.get(id).has(person.id)), decodedCursor, scope, data.revision)
       return { profile: { ...data.details.get(id), connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
   }
