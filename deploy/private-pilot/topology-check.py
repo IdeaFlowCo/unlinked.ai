@@ -20,6 +20,8 @@ config = json.loads(result.stdout)
 services = config['services']
 assert set(services) == {'graph', 'runtime', 'ingress'}
 assert set(services['graph']['networks']) == {'backend'}
+assert services['graph']['entrypoint'] == ['tini', '-g', '--', '/bin/bash', '-c', 'umask 077; exec /startup/docker-entrypoint.sh neo4j']
+assert services['graph']['command'] == []
 assert set(services['ingress']['networks']) == {'frontend'}
 assert set(services['runtime']['networks']) == {'frontend', 'backend'}
 assert config['networks']['backend']['internal'] is True
