@@ -53,9 +53,21 @@ def digest(path):
     return result.hexdigest()
 
 
+COMPOSE_VARIABLES = ('PILOT_UID', 'PILOT_GID', 'PILOT_NEO4J_IMAGE', 'PILOT_RUNTIME_IMAGE', 'PILOT_NGINX_IMAGE')
+
+
+def docker_command(args):
+    # Existing release operator may use sudo Docker, without root file access.
+    prefix = ['sudo', '-n']
+    if args and args[0] == 'compose':
+        prefix.append('--preserve-env=' + ','.join(COMPOSE_VARIABLES))
+    return [*prefix, 'docker', *args]
+
+
 def run(args):
     # Never relay subprocess stderr/stdout: Docker errors may include env data.
-    result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+    command = docker_command(args[1:]) if args[0] == 'docker' else args
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
     require(result.returncode == 0, 'command_failed:' + args[0])
     return result.stdout.strip()
 
@@ -286,7 +298,7 @@ def compose_env(manifest):
 
 def stop(manifest):
     owned_services()
-    result = subprocess.run(['docker', 'compose', '-p', PROJECT, '-f', str(HERE / 'compose.yaml'), 'stop', 'ingress', 'runtime', 'graph'], env=compose_env(manifest), capture_output=True, timeout=120)
+    result = subprocess.run(docker_command(['compose', '-p', PROJECT, '-f', str(HERE / 'compose.yaml'), 'stop', 'ingress', 'runtime', 'graph']), env=compose_env(manifest), capture_output=True, timeout=120)
     require(result.returncode == 0, 'owned_stop_failed')
     owned_services(stopped=True)
 
@@ -322,9 +334,10 @@ def main():
     require(args.command not in ('plan', 'preflight'), 'read_only_command')
     require(sys.platform == 'linux', 'existing_gcp_linux_host_required')
     require(socket.gethostname().split('.')[0] == 'noos', 'existing_noos_host_required')
+    run(['docker', 'info', '--format', '{{.ServerVersion}}'])
     if args.command == 'start':
         check_ports_available(manifest['ports'])
-        result = subprocess.run(['docker', 'compose', '-p', PROJECT, '-f', str(HERE / 'compose.yaml'), 'up', '-d', 'graph', 'runtime', 'ingress'], env=compose_env(manifest), capture_output=True, timeout=120)
+        result = subprocess.run(docker_command(['compose', '-p', PROJECT, '-f', str(HERE / 'compose.yaml'), 'up', '-d', 'graph', 'runtime', 'ingress']), env=compose_env(manifest), capture_output=True, timeout=120)
         require(result.returncode == 0, 'owned_start_failed')
         owned_services(running=True)
         print(json.dumps({'status': 'started_not_live_accepted', 'real_guest_acceptance': 'unlinked-9a9'}))

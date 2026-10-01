@@ -55,6 +55,10 @@ Read-only source mounts must contain locked dependencies supplied in the approve
 
 Create the proposed root and each private state, runtime and backup directory with mode 700 only after target approval.
 All private env, operator config, invitation bundle, audit receipts and snapshot files must use mode 600 under the operator UID/GID.
+Run the helper as the private file-owning release operator, not as root.
+The existing Noos operator's read-only `sudo -n docker info` route was verified; direct socket access is denied.
+The helper uses noninteractive sudo only for Docker commands and preserves exactly `PILOT_UID`, `PILOT_GID`, `PILOT_NEO4J_IMAGE`, `PILOT_RUNTIME_IMAGE` and `PILOT_NGINX_IMAGE` for Compose.
+It verifies daemon access before launching or stopping owned services; secret values remain in explicit private env files and never enter command arguments or the preserved environment allowlist.
 Container user IDs are set explicitly from the local operator and no bind source can be automatically created by Compose.
 Neo4j graph files must satisfy the private recovery permission checks; verify the approved image's file ownership/modes before enabling guest data.
 `runtime.env`, `graph.env` and `operator.json` are proposed destinations, not files to populate automatically.
