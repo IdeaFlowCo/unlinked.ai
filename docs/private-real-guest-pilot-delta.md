@@ -5,8 +5,8 @@ No guest archive may enter either fixture and no guest upload URL is verified.
 
 ## Dedicated stable target
 
-Proposed origin: https://private.unlinked.ai (HTTPS443).
-Exact callback: https://private.unlinked.ai/auth/callback/ideaflow.
+Proposed rollback origin: https://private.unlinked.ai (HTTPS443).
+Exact rollback callback: https://private.unlinked.ai/auth/callback/ideaflow. A separate canonical cutover packet may use `https://www.unlinked.ai` with callback `https://www.unlinked.ai/auth/callback/ideaflow` after provider, TLS and readiness gates.
 Issuer: https://id.ideaflow.app/api/auth; a staged subject is never promoted/relabelled.
 Read-only preflight found no DNS answer for private.unlinked.ai; unlinked.ai uses Name.com nameservers.
 The proposed A record points only this new subdomain to the existing Noos GCP VM34.10.134.247, project lightsail-migration, us-central1-a, e2-standard-2.
@@ -25,7 +25,7 @@ A dedicated1GiB Neo4j container uses only the internal backend bridge at `graph:
 The runtime container overlays only the root parent as an operator-owned mode700 tmpfs so Docker cannot synthesize a root-owned 755 parent; durable state remains in the explicit child binds for runtime, assets and audit, with graph, backups and invitations excluded from app mounts.
 The graph entrypoint preserves `tini` and the pinned image startup script while applying `umask 077`, so newly created graph state uses private 700/600 modes; it does not chmod existing graph data.
 No generic graph-query route, raw asset route or operational token is public.
-The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, restores only to new canonical `backups/rehearsal-*` targets under the operator-owned mode-700 backup root, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only UID/GID plus the three approved image variables for Compose.
+The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, restores only to new canonical `backups/rehearsal-*` targets under the operator-owned mode-700 backup root, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only the validated origin, UID/GID plus the three approved image variables for Compose.
 `runtime.mjs` refuses to launch without reviewed mode600 wiring.
 Open account signup is the proposed initial cohort path. The exact verified production issuer/subject resolves an existing active private owner or atomically creates one through the reviewed private signup capability before upload is enabled.
 Every import/index/source/receipt/grant is keyed to that immutable owner UUID in the dedicated graph.

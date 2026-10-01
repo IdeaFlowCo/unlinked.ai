@@ -43,7 +43,7 @@ The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, 
 `mcp-server/private-composition.mjs` provides the process-only `createPrivatePilotDependencies(options)` implementation.
 Install this packet's `wiring.mjs` as mode 600 at `/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs`; its relative export resolves the exact private Unlinked checkout.
 The factory loads only compiled Noos operational modules from the private Noos checkout, never its legacy auth or generic query application.
-It validates the dedicated root and exact live origin/ports, initializes callback-only invitation provisioning plus open-account signup, and mints internal ephemeral operations credentials only after active owner/principal authorization.
+It validates the dedicated root, exact approved live origin and ports, initializes callback-only invitation provisioning plus open-account signup, and mints internal ephemeral operations credentials only after active owner/principal authorization. The approved live origin is either the rollback private host or the canonical `https://www.unlinked.ai` cutover host.
 Before provisioning or exposing HTTP readiness, it waits for the dedicated Bolt driver to report graph connectivity with the same bounded driver timeouts.
 The server-side operations key never leaves the runtime; hosted MCP uses its separate search-only grants and live publication fences.
 The private env, production client, TLS/DNS, dependency-complete source artifacts and built deployment images remain activation inputs.
@@ -64,7 +64,7 @@ Create the proposed root and each private state, runtime and backup directory wi
 All private env, operator config, invitation bundle, audit receipts and snapshot files must use mode 600 under the operator UID/GID.
 Run the helper as the private file-owning release operator, not as root.
 The existing Noos operator's read-only `sudo -n docker info` route was verified; direct socket access is denied.
-The helper uses noninteractive sudo only for Docker commands and preserves exactly `PILOT_UID`, `PILOT_GID`, `PILOT_NEO4J_IMAGE`, `PILOT_RUNTIME_IMAGE` and `PILOT_NGINX_IMAGE` for Compose.
+The helper uses noninteractive sudo only for Docker commands and preserves exactly `PILOT_ORIGIN`, `PILOT_UID`, `PILOT_GID`, `PILOT_NEO4J_IMAGE`, `PILOT_RUNTIME_IMAGE` and `PILOT_NGINX_IMAGE` for Compose, with `PILOT_ORIGIN` derived from the validated manifest rather than the ambient shell.
 It verifies daemon access before launching or stopping owned services; secret values remain in explicit private env files and never enter command arguments or the preserved environment allowlist.
 Container user IDs are set explicitly from the local operator and no bind source can be automatically created by Compose.
 Neo4j graph files must satisfy the private recovery permission checks; verify the approved image's file ownership/modes before enabling guest data.
@@ -81,7 +81,7 @@ The proposed persistent OpenAI destination is `runtime/runtime.env` and requires
 Synthetic testing can continue reading the existing M5 key in place; no model key belongs on a CI VM.
 The runtime reads `IDEAFLOW_ISSUER`, `IDEAFLOW_CLIENT_ID`, `IDEAFLOW_CLIENT_SECRET`, `NOOS_PRIVATE_PASSWORD` and `OPENAI_API_KEY` from its explicit `runtime.env` only.
 The proposed production issuer is `https://id.ideaflow.app/api/auth`; client registration and confidential secret delivery belong to the identity owner.
-The callback is exactly `https://private.unlinked.ai/auth/callback/ideaflow`; the isolated container recipe uses browser 9367, operations on its own loopback 9022, and the dedicated internal graph at graph:7687.
+The callback is exactly the manifest origin plus `/auth/callback/ideaflow`: `https://private.unlinked.ai/auth/callback/ideaflow` for the rollback private packet, or `https://www.unlinked.ai/auth/callback/ideaflow` for the canonical cutover packet. The isolated container recipe uses browser 9367, operations on its own loopback 9022, and the dedicated internal graph at graph:7687.
 Run it as the explicitly provisioned private host operator UID/GID recorded in the release manifest; no root database or operator invitation capability is passed through HTTP.
 The Noos operator CLI owns invitation creation/replay/revocation and accepts a private config plus `NOOS_PROVISIONING_PASSWORD` without printing its secret.
 Its `create --config PRIVATE.json --out NEW-PRIVATE.json` writes the mode-600, fsynced recovery bundle before the graph operation.
