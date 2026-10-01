@@ -47,6 +47,7 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
   const adapter = { withImport: async (caller, id, work) => {
     assert.equal(caller, owner.ownerId)
     return work({ getJob: async () => resources.get(id)?.payload, putAsset: async (id, bytes) => { assets.set(id, Buffer.from(bytes)) },
+      publicationStatus: 'indexed',
       saveJob: async job => { resources.set(id, { sourceOwnerId: caller, sourceRevision: job.revision, payload: structuredClone(job) }) },
       publish: async (job, assertions) => {
         job.assertionIds = assertions.map(row => row.id)
@@ -54,7 +55,7 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
         for (const row of assertions) resources.set(row.id, { sourceOwnerId: caller, payload: row })
       } })
   } }
-  let currentHandler, finishes = 0
+  let currentHandler, finishes = 0, providerCalls = 0
   const server = createServer((req, res) => currentHandler(req, res))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
   const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
@@ -62,7 +63,7 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
     login: { begin: async () => ({ location: 'https://synthetic.invalid/account-choice', transaction: { state: 'synthetic-state' } }), finish: async () => { finishes++; return { issuer: 'https://synthetic.invalid', subject: 'synthetic-sub' } } },
     resolveOwner: async identity => identity.subject === 'synthetic-sub' ? owner : null,
     getBackend: async verified => { assert.deepEqual(verified, owner); return { adapter, readResource: async (_type, id) => resources.get(id) } },
-    complete: async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Observed engineer' }] }),
+    complete: async ({ candidateIds }) => { providerCalls++; return { matches: [{ id: candidateIds[0], reason: 'Observed engineer' }] } },
     issueGrant: async (verified, scope) => { issued.push({ verified, scope }); return 'synthetic-scoped-grant' }, mcpEndpoint: `${baseUrl}/mcp`,
   })
   const loginResponse = await fetch(`${endpoint}/login`, { redirect: 'manual' })
@@ -84,13 +85,22 @@ test('private browser sign-in, consent upload, durable replay receipt, search an
   assert.equal(assets.has(digest(Buffer.from(csv))), true)
   assert.equal((await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(true), redirect: 'manual' })).headers.get('location'), receiptPath)
   assert.equal((await fetch(`${endpoint}${receiptPath}`, { headers: { Cookie: sessionCookie } })).status, 200)
-  const search = await fetch(`${endpoint}/search`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId, query: 'engineer', aiConsent: 'yes' }) })
+  const search = await fetch(`${endpoint}/search`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId, query: 'engineer' }) })
   assert.match(await search.text(), /Observed engineer/)
   assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers: { ...headers, Origin: 'https://wrong.invalid' }, body: new URLSearchParams({ csrf, importId }) })).status, 403)
   const setup = await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })
   assert.equal(setup.status, 200)
   assert.deepEqual(issued[0].scope, { importIds: [importId], tools: ['unlinked_search_import'] })
   assert.equal((await setup.json()).mcpServers['unlinked-private'].url, `${baseUrl}/mcp`)
+  const storedConsent = resources.get(importId).payload.consent
+  assert.equal(storedConsent.version, 'private-archive-openai-v1')
+  delete resources.get(importId).payload.consent
+  const beforeCalls = providerCalls
+  assert.equal((await fetch(`${endpoint}/search`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId, query: 'engineer' }) })).status, 400)
+  assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })).status, 400)
+  assert.equal(providerCalls, beforeCalls); assert.equal(issued.length, 1)
+  await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: form(true), redirect: 'manual' })
+  assert.equal(resources.get(importId).payload.consent, undefined)
   resources.get(importId).deleted = true
   assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })).status, 400)
   assert.equal(issued.length, 1)

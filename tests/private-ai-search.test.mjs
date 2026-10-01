@@ -1,9 +1,10 @@
+import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPrivateSearch, responsesRequest, parseResponsesResult } from '../src/utils/private-import/ai-search.mjs'
 
 const id = 'a'.repeat(64), rowId = 'b'.repeat(64)
-const publication = { importId: id, assertions: [{ id: rowId, sourceId: 'c'.repeat(64), rowId: 'Connections.csv#record=2', category: 'connections', subject: 'https://www.linkedin.com/in/synthetic-ada', fields: { 'first name': 'Ada', position: 'Engineer', 'email address': 'private@example.invalid' } }] }
+const publication = { consent: COMBINED_UPLOAD_CONSENT, importId: id, assertions: [{ id: rowId, sourceId: 'c'.repeat(64), rowId: 'Connections.csv#record=2', category: 'connections', subject: 'https://www.linkedin.com/in/synthetic-ada', fields: { 'first name': 'Ada', position: 'Engineer', 'email address': 'private@example.invalid' } }] }
 test('private AI search limits provider context and returns persisted provenance', async () => {
   let calls = 0
   const search = createPrivateSearch({ readImport: async requested => { assert.equal(requested, id); return publication }, complete: async ({ input, candidateIds }) => {

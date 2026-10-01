@@ -1,3 +1,4 @@
+import { hasCombinedUploadConsent } from './consent.mjs'
 import { digest, parseArchive, PARSER_VERSION, LIMITS } from './archive.mjs'
 
 export function privateId(ownerId, ...parts) {
@@ -8,7 +9,7 @@ const emptyCounts = () => ({ accepted: 0, rejected: 0, skippedFiles: 0, failedFi
 
 // The adapter is bound to a verified owner by its caller; imported URLs/emails
 // never resolve that principal. No browser route mounts this foundation yet.
-export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
+export async function ingestArchive({ ownerId, filename, bytes, adapter, consent }) {
   if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > LIMITS.archiveBytes) throw new Error('archive_size_limit')
   const archiveSha256 = digest(bytes)
   const id = privateId(ownerId, 'import', archiveSha256, filename, PARSER_VERSION)
@@ -19,6 +20,7 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
       id, ownerId, filename, archiveSha256, parserVersion: PARSER_VERSION,
       status: 'uploaded', phase: 'uploaded', revision: 1,
       counts: emptyCounts(), sources: [],
+      ...(hasCombinedUploadConsent(consent) ? { consent: structuredClone(consent) } : {}),
     }
     if (!existing) {
       await store.putAsset(archiveSha256, bytes)
@@ -49,7 +51,7 @@ export async function ingestArchive({ ownerId, filename, bytes, adapter }) {
         receipt.rejectedCount = receipt.rejected.length; delete receipt.rejected
       }
       const status = source.error ? 'failed' : source.skipped ? 'skipped' : accepted.length ? 'partial' : 'failed'
-      job.sources.push({ ...receipt, id: sourceId, acceptedCount: accepted.length, indexedCount: 0,
+      job.sources.push({ ...receipt, id: sourceId, ...(job.consent ? { consent: structuredClone(job.consent) } : {}), acceptedCount: accepted.length, indexedCount: 0,
         status,
       })
       for (const row of accepted) assertions.push({

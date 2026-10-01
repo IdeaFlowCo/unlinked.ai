@@ -4,8 +4,8 @@ import { createScopedImportReader, createNoosImportAdapter } from '../src/utils/
 import { scopedSetupConfiguration } from '../src/utils/private-import/scoped-setup.mjs'
 
 const ownerId = 'retained-owner', importId = 'a'.repeat(64), assertionId = 'b'.repeat(64)
-const publication = { sourceOwnerId: ownerId, sourceRevision: 3, deleted: false, payload: { id: importId, status: 'partial', assertionIds: [assertionId], indexGate: 'ai_search_not_connected' } }
-const assertion = { sourceOwnerId: ownerId, deleted: false, payload: { importId, sourceId: 'original-source', subject: 'connection_observation' } }
+const publication = { sourceOwnerId: ownerId, sourceRevision: 3, deleted: false, payload: { id: importId, status: 'partial', assertionIds: [assertionId], counts: { accepted: 1, indexed: 1, rejected: 0, skippedFiles: 0, failedFiles: 0 }, indexGate: 'ai_search_not_connected' } }
+const assertion = { sourceOwnerId: ownerId, deleted: false, payload: { id: assertionId, ownerId, importId, sourceId: 'original-source', subject: 'connection_observation' } }
 const grant = { ownerId, importIds: [importId] }
 test('scope rejects ungranted imports without querying resource IDs', async () => {
   let calls = 0

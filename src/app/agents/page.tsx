@@ -162,7 +162,7 @@ export default function ForAgentsPage() {
         </Box>
 
         <Text as="p" size="2" color="gray">
-          Private archive import and scoped hosted setup remain unavailable. This guide describes the legacy agent API.
+          Private archive import and scoped hosted setup remain unavailable. This guide describes the legacy agent API. Staging upload records one combined consent for private retention and bounded OpenAI browser/search-only agent processing; older imports without it cannot authorize search or grants.
         </Text>
 
         <Card size="3" style={{ borderColor: 'var(--accent-6)' }}>

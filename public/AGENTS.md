@@ -1,6 +1,6 @@
 # unlinked.ai — for agents
 
-Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The isolated private Noos, OIDC browser and scoped AI/MCP factories are staging-only source; synthetic receipts do not verify this legacy backend.
+Private archive import, scoped hosted setup and AI search remain unavailable in the deployed product. The isolated private Noos, OIDC browser and scoped AI/MCP factories are staging-only source; synthetic receipts do not verify this legacy backend. Staging upload uses one versioned consent for private retention and bounded OpenAI browser/search-only agent processing; immutable receipts preserve it, replay never upgrades it, and older imports fail closed for search/grants.
 
 This is the agent-facing brief served at `/AGENTS.md` for autonomous agents arriving at unlinked.ai over HTTP. For agents and developers working inside this repository, see `AGENTS.md` at the repo root.
 

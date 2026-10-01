@@ -1,3 +1,4 @@
+import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -71,7 +72,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   zip.file('Connections.csv', 'Notes:\nSynthetic archive\n\nFirst Name,Last Name,URL,Company,Position\nAda,Example,https://www.linkedin.com/in/synthetic-ada,Synthetic,Engineer\n')
   zip.file('Skills.csv', 'Name\nSynthetic systems\n')
   const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
-  const input = { ownerId: owner, filename: 'synthetic.zip', bytes, adapter }
+  const input = { consent: COMBINED_UPLOAD_CONSENT, ownerId: owner, filename: 'synthetic.zip', bytes, adapter }
   const result = await ingestArchive(input)
   assert.equal(result.status, 'indexed'); assert.equal(result.indexGate, null)
   assert.equal(result.counts.accepted, 2); assert.equal(result.counts.indexed, 2)
@@ -123,7 +124,7 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   scaledZip.file('Connections.csv', 'First Name,Last Name,URL,Company,Position\n' + Array.from({ length: 1001 }, (_, i) =>
     `Synthetic${i},Example,https://www.linkedin.com/in/synthetic-scale-${i},Synthetic company ${i},${i === 1000 ? 'Quantum compiler engineer' : 'Bakery manager'}\n`).join(''))
   const scaledBytes = await scaledZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
-  const scaledInput = { ownerId: owner, filename: 'synthetic-1001-connections.zip', bytes: scaledBytes }
+  const scaledInput = { consent: COMBINED_UPLOAD_CONSENT, ownerId: owner, filename: 'synthetic-1001-connections.zip', bytes: scaledBytes }
   let chunkCommits = 0
   const interruptedJournal = createNoosImportAdapter({ baseUrl, ownerId: owner, accessToken: alice, fetchImpl: async (url, init) => {
     const response = await fetch(url, init)

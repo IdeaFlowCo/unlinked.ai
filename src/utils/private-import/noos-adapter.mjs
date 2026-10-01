@@ -13,7 +13,8 @@ export function isLiveImport(resource, id, ownerId) {
 
 // Explicit server-only staging configuration. No default URL, token or owner;
 // issuer/subject mapping and Noos binding must already have been verified.
-export function createNoosImportAdapter({ baseUrl, accessToken, ownerId, fetchImpl = fetch }) {
+export function createNoosImportAdapter({ baseUrl, accessToken, ownerId, fetchImpl = fetch, requestTimeoutMs = 30000 }) {
+  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 30000) throw new Error('private_noos_timeout_invalid')
   const endpoint = new URL(baseUrl)
   if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash ||
       (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && endpoint.hostname === '127.0.0.1'))) throw new Error('private_noos_endpoint_required')
@@ -21,12 +22,21 @@ export function createNoosImportAdapter({ baseUrl, accessToken, ownerId, fetchIm
   const root = baseUrl.replace(/\/$/, '')
   const queues = new Map()
   async function request(path, { method = 'GET', body, bytes } = {}) {
-    const response = await fetchImpl(`${root}/unlinked/${path}`, { method, redirect: 'error',
-      headers: { Authorization: `Bearer ${accessToken}`, ...(bytes ? { 'Content-Type': 'application/octet-stream' } : body ? { 'Content-Type': 'application/json' } : {}) },
-      ...(bytes ? { body: bytes } : body ? { body: JSON.stringify(body) } : {}) })
-    if (response.status === 404) return null
-    if (!response.ok) throw new Error(`private_noos_${response.status}`)
-    return response.json()
+    const controller = new AbortController()
+    let timer
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error('private_noos_timeout')) }, requestTimeoutMs)
+    })
+    try {
+      return await Promise.race([timeout, (async () => {
+        const response = await fetchImpl(`${root}/unlinked/${path}`, { method, redirect: 'error', signal: controller.signal,
+          headers: { Authorization: `Bearer ${accessToken}`, ...(bytes ? { 'Content-Type': 'application/octet-stream' } : body ? { 'Content-Type': 'application/json' } : {}) },
+          ...(bytes ? { body: bytes } : body ? { body: JSON.stringify(body) } : {}) })
+        if (response.status === 404) return null
+        if (!response.ok) throw new Error(`private_noos_${response.status}`)
+        return await response.json()
+      })()])
+    } finally { clearTimeout(timer) }
   }
   const mutation = (type, sourceId, revision, payload, expectedRevision = null) => ({
     namespace: 'unlinked', type, sourceId, sourceOwnerId: ownerId, sourceRevision: revision,
@@ -156,31 +166,33 @@ export function createScopedImportReader({ readResource, readAsset, grant }) {
     const rows = []
     let ids = resource.payload.assertionIds
     if (Array.isArray(resource.payload.assertionChunks)) {
-      if (resource.payload.assertionChunks.length > Math.ceil(PRIVATE_PUBLICATION_ASSERTION_LIMIT / CHUNK_ROWS)) throw new Error('private_publication_support_limit')
+      if (new Set(resource.payload.assertionChunks).size !== resource.payload.assertionChunks.length || resource.payload.assertionChunks.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || resource.payload.assertionChunks.length > Math.ceil(PRIVATE_PUBLICATION_ASSERTION_LIMIT / CHUNK_ROWS)) throw new Error('private_publication_support_limit')
       ids = []
       for (const [ordinal, chunkId] of resource.payload.assertionChunks.entries()) {
         signal?.throwIfAborted()
         const chunk = await readResource('import', chunkId)
-        if (!chunk || chunk.deleted || chunk.sourceOwnerId !== ownerId || chunk.payload?.kind !== 'private_observation_chunk' || chunk.payload.importId !== id || chunk.payload.ordinal !== ordinal || !Array.isArray(chunk.payload.assertionIds) || chunk.payload.assertionIds.length > CHUNK_ROWS || chunk.payload.indexedCount !== chunk.payload.assertionIds.length) throw new Error('private_publication_incomplete')
+        if (!chunk || chunk.deleted || chunk.sourceOwnerId !== ownerId || chunk.payload?.kind !== 'private_observation_chunk' || chunk.payload.ownerId !== ownerId || chunk.payload.importId !== id || chunk.payload.ordinal !== ordinal || !Array.isArray(chunk.payload.assertionIds) || chunk.payload.assertionIds.length > CHUNK_ROWS || chunk.payload.indexedCount !== chunk.payload.assertionIds.length) throw new Error('private_publication_incomplete')
         ids.push(...chunk.payload.assertionIds)
       }
     }
-    if (!Array.isArray(ids) || ids.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || new Set(ids).size !== ids.length || (resource.payload.indexVersion && ids.length !== resource.payload.counts?.indexed)) throw new Error('private_publication_incomplete')
+    const counts = resource.payload.counts
+    if (!counts || !['accepted', 'indexed', 'rejected', 'skippedFiles', 'failedFiles'].every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0) ||
+        !Array.isArray(ids) || ids.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || new Set(ids).size !== ids.length || counts.accepted !== ids.length || counts.indexed !== ids.length) throw new Error('private_publication_incomplete')
     for (const assertionId of ids) {
       signal?.throwIfAborted()
       const assertion = await readResource('assertion', assertionId)
-      if (!assertion || assertion.deleted || assertion.sourceOwnerId !== ownerId || assertion.payload?.importId !== id) throw new Error('private_publication_incomplete')
+      if (!assertion || assertion.deleted || assertion.sourceOwnerId !== ownerId || assertion.payload?.id !== assertionId || assertion.payload.ownerId !== ownerId || assertion.payload.importId !== id) throw new Error('private_publication_incomplete')
       let row = assertion.payload
       if (row.fullObservationAsset) {
         if (typeof readAsset !== 'function') throw new Error('private_observation_recovery_unavailable')
         row = JSON.parse((await readAsset(row.fullObservationAsset)).toString('utf8'))
-        if (row.id !== assertionId || row.ownerId !== ownerId || row.importId !== id || row.sourceId !== assertion.payload.sourceId) throw new Error('private_publication_incomplete')
+        if (!row || row.id !== assertionId || row.ownerId !== ownerId || row.importId !== id || row.sourceId !== assertion.payload.sourceId) throw new Error('private_publication_incomplete')
       }
       rows.push(row)
     }
     // Recheck after row retrieval so a tombstone racing a delayed call wins.
     const latest = await readResource('import', id)
     if (!isLiveImport(latest, id, ownerId) || latest.sourceRevision !== resource.sourceRevision) throw new Error('private_import_not_found')
-    return { importId: id, status: resource.payload.status, indexGate: resource.payload.indexGate, indexed: resource.payload.counts?.indexed ?? 0, indexVersion: resource.payload.indexVersion, assertions: rows }
+    return { importId: id, status: resource.payload.status, indexGate: resource.payload.indexGate, indexed: resource.payload.counts?.indexed ?? 0, indexVersion: resource.payload.indexVersion, consent: resource.payload.consent, assertions: rows }
   }
 }

@@ -1,3 +1,4 @@
+import { requireCombinedUploadConsent } from './consent.mjs'
 import { digest } from './archive.mjs'
 
 const MAX_INPUT_BYTES = 256 * 1024
@@ -11,6 +12,7 @@ export function createPrivateSearch({ readImport, complete }) {
     if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
     signal?.throwIfAborted()
     const publication = await readImport(importId, { signal })
+    requireCombinedUploadConsent(publication.consent)
     const candidates = publication.assertions.filter(row => row.category === 'connections').map(row => ({
       id: row.id,
       fields: Object.fromEntries(allowedFields.filter(key => typeof row.fields?.[key] === 'string').map(key => [key, row.fields[key].slice(0, 256)])),

@@ -1,3 +1,4 @@
+import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { randomBytes } from 'node:crypto'
 import * as oidc from 'openid-client'
 import { ingestArchive } from '../src/utils/private-import/job.mjs'
@@ -103,7 +104,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
         return
       }
       if (request.method === 'GET' && url.pathname === '/') {
-        render(response, 'Import your LinkedIn archive', `<p>Your archive and observations stay scoped to your verified account. Re-uploading the same named archive returns its durable receipt.</p><form method="post" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>LinkedIn export ZIP or CSV <input required type="file" name="archive" accept=".zip,.csv"></label><small>Maximum 20 MiB and 100,000 parser records. Larger imports fail explicitly and do not publish observations.</small><label><input required type="checkbox" name="consent" value="yes"> I consent to privately storing my archive and its observations for this pilot.</label>${dataMode === 'synthetic' ? '<label><input required type="checkbox" name="syntheticConsent" value="yes"> This file contains synthetic test data only.</label>' : ''}<button>Import archive</button></form>`)
+        render(response, 'Import your LinkedIn archive', `<p>Your archive and observations stay scoped to your verified account. Re-uploading the same named archive returns its durable receipt.</p><form method="post" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>LinkedIn export ZIP or CSV <input required type="file" name="archive" accept=".zip,.csv"></label><small>Maximum 20 MiB and 100,000 parser records. Larger imports fail explicitly and do not publish observations.</small><label><input required type="checkbox" name="consent" value="yes"> I consent to private retention of my archive and observations, and to sending search queries and bounded connection name/company/position/date observations to OpenAI for browser and search-only scoped agent searches.</label>${dataMode === 'synthetic' ? '<label><input required type="checkbox" name="syntheticConsent" value="yes"> This file contains synthetic test data only.</label>' : ''}<button>Import archive</button></form>`)
         return
       }
       const backend = await getBackend(session.owner)
@@ -115,7 +116,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
         if (dataMode === 'synthetic' && (form.getAll('syntheticConsent').length !== 1 || form.get('syntheticConsent') !== 'yes')) throw new Error('synthetic_archive_only')
         const file = form.get('archive')
         if (!file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name)) throw new Error('private_archive_filename_invalid')
-        const receipt = await ingestArchive({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter })
+        const receipt = await ingestArchive({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
         redirect(response, `/imports/${receipt.id}`); return
       }
       const importMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})$/)
@@ -123,7 +124,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
         const id = importMatch[1], resource = await backend.readResource('import', id)
         if (!resource || resource.deleted || resource.sourceOwnerId !== session.owner.ownerId || resource.payload?.id !== id || resource.payload.receiptOf || resource.payload.kind) { response.writeHead(404).end(); return }
         const job = resource.payload
-        render(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><label><input required type="checkbox" name="aiConsent" value="yes"> I consent to sending this query and bounded connection name/company/position observations to OpenAI for this search.</label><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Query-time search; no shared people index.</small>'}</form>${typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a read-only agent to search this import. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
+        render(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><p>Search uses the bounded OpenAI processing authorized at upload.</p><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Query-time search; no shared people index.</small>'}</form>${typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a search-only agent to search this import using the bounded OpenAI processing authorized at upload. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
         return
       }
       if (request.method === 'POST' && ['/search', '/setup', '/logout'].includes(url.pathname)) {
@@ -134,7 +135,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
         if (input.getAll('importId').length !== 1 || !/^[a-f0-9]{64}$/.test(id)) throw new Error('private_import_not_found')
         const reader = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: session.owner.ownerId, importIds: [id] } })
         if (url.pathname === '/search') {
-          if (input.getAll('aiConsent').length !== 1 || input.get('aiConsent') !== 'yes' || input.getAll('query').length !== 1 || typeof complete !== 'function') throw new Error('private_search_consent_required')
+          if (input.getAll('query').length !== 1 || typeof complete !== 'function') throw new Error('private_search_consent_required')
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
           const result = await createPrivateSearch({ readImport: reader, complete })({ importId: id, query: input.get('query'), signal: controller.signal })
@@ -142,9 +143,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
           return
         }
         if (typeof issueGrant !== 'function' || typeof complete !== 'function') throw new Error('private_agent_setup_unavailable')
-        await reader(id)
+        requireCombinedUploadConsent((await reader(id)).consent)
         const accessToken = await issueGrant(session.owner, { importIds: [id], tools: ['unlinked_search_import'] })
-        await reader(id)
+        requireCombinedUploadConsent((await reader(id)).consent)
         const config = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
         response.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="unlinked-private-mcp.json"' })
         response.end(JSON.stringify(config)); return

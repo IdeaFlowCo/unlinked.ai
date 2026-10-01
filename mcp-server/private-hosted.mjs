@@ -1,3 +1,4 @@
+import { requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
@@ -83,6 +84,7 @@ export function createScopedSetupHandler({ authenticateOwner, issueGrant, readRe
       if (!input || Object.keys(input).length !== 1 || !/^[a-f0-9]{64}$/.test(input.importId)) { res.writeHead(400).end(); return }
       const publication = await readResource(owner, 'import', input.importId)
       if (!isLiveImport(publication, input.importId, owner.ownerId)) { res.writeHead(404).end(); return }
+      if (grantedTools.includes('unlinked_search_import')) requireCombinedUploadConsent(publication.payload.consent)
       const accessToken = await issueGrant(owner, { importIds: [input.importId], tools: grantedTools })
       const config = scopedSetupConfiguration({ endpoint, accessToken, allowLoopbackStaging })
       res.setHeader('Content-Type', 'application/json')
