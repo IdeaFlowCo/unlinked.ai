@@ -111,3 +111,17 @@
 .meet-handoff p:last-child { font:15px/1.6 'Trebuchet MS',sans-serif; color:#435c55; max-width:600px; }
 @media(max-width:850px) { .public-header { align-items:flex-start; gap:20px; }.public-header nav { max-width:500px; }.network-art { min-height:420px; margin-bottom:35px; } }
 @media(max-width:600px) { .public-header { flex-direction:column; }.public-header nav { justify-content:flex-start; gap:14px 20px; }.network-art { padding:24px; }.network-question { font-size:34px; }.meet-handoff { align-items:flex-start; flex-direction:column; }.public-site .hero-actions { gap:10px; } }
+
+.landing-example { padding:36px; margin:30px 0; background:#fffdf7; border:1px solid var(--line); box-shadow:10px 12px 0 #e2e8dc; }
+.landing-example h2 { font:400 32px/1.25 Georgia,serif; letter-spacing:-.035em; }
+.landing-example article { display:flex; gap:18px; padding:25px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+.landing-example h3 { margin:0; font-size:22px; }
+.landing-example p,.landing-example small,.export-instructions { font:16px/1.65 'Avenir Next',Avenir,sans-serif; color:#435c55; }
+.landing-example small { font-size:13px; }
+.landing-example .feature-caption { font-size:13px; }
+.landing-initials { width:46px; height:46px; flex:none; display:grid; place-items:center; background:#e6ebdf; border-radius:50%; }
+.landing-text-link { display:inline-block; padding:12px 0; color:var(--forest); font:14px/1.5 'Avenir Next',Avenir,sans-serif; text-underline-offset:4px; }
+.export-instructions { padding-left:24px; }
+.export-instructions li { padding:8px 0; }
+.public-header nav a { min-height:44px; display:inline-flex; align-items:center; }
+@media(max-width:600px) { .landing-example { padding:24px; margin-bottom:40px; box-shadow:5px 6px 0 #e2e8dc; }.landing-example h2 { font-size:28px; } }
