@@ -11,7 +11,9 @@ function dump(changes = {}) {
 }
 
 test('normalizes all source IDs, directed endpoints, related entities and provenance without secrets or ownership inference', () => {
-  const source = dump(), plan = createLegacyPlan(source)
+  const source = dump(), containerHash = createHash('sha256').update('synthetic-container').digest('hex'), plan = createLegacyPlan(source, { sourceContainerSha256: containerHash })
+  assert.equal(plan.sourceContainerSha256, containerHash)
+  assert.throws(() => createLegacyPlan(source, { sourceContainerSha256: 'bad-hash' }), /container_hash_invalid/)
   assert.equal(plan.sourceSha256, createHash('sha256').update(source).digest('hex'))
   assert.deepEqual(plan.counts, { companies: 1, institutions: 1, connections: 1, education: 1, positions: 1, profiles: 2, skills: 1, uploads: 1 })
   assert.equal(plan.profiles[0].legacyUserId, 'unresolved-auth-id')

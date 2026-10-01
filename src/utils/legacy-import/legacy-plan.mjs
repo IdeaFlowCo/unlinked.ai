@@ -4,7 +4,8 @@ const fail = code => { throw new Error(code) }
 const requiredId = value => { if (typeof value !== 'string' || !value.trim()) fail('legacy_plan_id_invalid'); return value }
 const nullableId = value => value === null ? null : requiredId(value)
 const provenance = row => ({ ...row.provenance })
-export function createLegacyPlan(source, limits) {
+export function createLegacyPlan(source, { sourceContainerSha256 = null, ...limits } = {}) {
+  if (sourceContainerSha256 !== null && (typeof sourceContainerSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sourceContainerSha256))) fail('legacy_plan_container_hash_invalid')
   const { sourceSha256, tables } = parseLegacyCopy(source, limits)
   const indexes = Object.fromEntries(Object.entries(tables).map(([table, rows]) => {
     const ids = new Map()
@@ -50,5 +51,5 @@ export function createLegacyPlan(source, limits) {
     return { legacyId: row.id, legacyProfileId: row.profile_id, filePath: row.file_path, filename: row.file_name, createdAt: row.created_at, provenance: provenance(row) }
   })
   const organizations = table => tables[table].map(row => ({ legacyId: row.id, name: row.name, createdAt: row.created_at, provenance: provenance(row) }))
-  return { sourceSha256, counts: Object.fromEntries(Object.entries(tables).map(([table, rows]) => [table, rows.length])), profiles, connections, uploads, companies: organizations('companies'), institutions: organizations('institutions'), issues: [] }
+  return { sourceSha256, sourceContainerSha256, counts: Object.fromEntries(Object.entries(tables).map(([table, rows]) => [table, rows.length])), profiles, connections, uploads, companies: organizations('companies'), institutions: organizations('institutions'), issues: [] }
 }
