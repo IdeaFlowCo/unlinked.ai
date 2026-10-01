@@ -7,6 +7,7 @@ import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import JSZip from 'jszip'
 import { stageArchive, runArchiveJob, createArchiveWorker, importJobStatus } from '../src/utils/private-import/background-job.mjs'
+import { ingestArchive } from '../src/utils/private-import/job.mjs'
 import { createNoosOwnerBackend, createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
@@ -303,6 +304,54 @@ test('profile page selects newest successful profile from reverse job discovery 
   assert.match(profile, /Current profile/)
   assert.doesNotMatch(profile, /Older Owner/)
   assert.doesNotMatch(profile, /Legacy profile/)
+})
+
+test('profile page accepts legacy receipts without createdAt before newer profile-first jobs', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  let jobOrder = []
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => jobOrder,
+      listImportIds: async () => jobOrder,
+      listAccountGrantIds: async () => [] }
+  }
+  const legacyBackend = await getBackend(owner)
+  const legacy = await ingestArchive({ ownerId: owner.ownerId, filename: 'legacy.zip', bytes: await namedProfileArchive('Legacy', 'Owner', 'Old runtime profile'), adapter: legacyBackend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  assert.equal(legacy.createdAt, undefined)
+  jobOrder = [legacy.id]
+
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  let profile = await (await fetch(endpoint + '/profile', { headers: { Cookie: cookie } })).text()
+  assert.match(profile, /Legacy Owner/)
+  assert.match(profile, /Old runtime profile/)
+
+  const currentBackend = await getBackend(owner)
+  const current = await stageArchive({ ownerId: owner.ownerId, filename: 'current.zip', bytes: await namedProfileArchive('Current', 'Owner', 'New profile'), adapter: currentBackend.adapter, consent: COMBINED_UPLOAD_CONSENT, now: () => 2000 })
+  await runArchiveJob({ ownerId: owner.ownerId, id: current.id, adapter: currentBackend.adapter, readAsset: currentBackend.readAsset, now: () => 2000 })
+  const failedBackend = await getBackend(owner)
+  const failed = await stageArchive({ ownerId: owner.ownerId, filename: 'newer-broken.zip', bytes: Buffer.from('not a zip'), adapter: failedBackend.adapter, consent: COMBINED_UPLOAD_CONSENT, now: () => 3000 })
+  await runArchiveJob({ ownerId: owner.ownerId, id: failed.id, adapter: failedBackend.adapter, readAsset: failedBackend.readAsset, now: () => 3000 })
+  jobOrder = [legacy.id, failed.id, current.id]
+
+  profile = await (await fetch(endpoint + '/profile', { headers: { Cookie: cookie } })).text()
+  assert.match(profile, /Current Owner/)
+  assert.match(profile, /New profile/)
+  assert.match(profile, /Import could not finish/)
+  assert.doesNotMatch(profile, /Legacy Owner/)
+  assert.doesNotMatch(profile, /Reading your profile and connections/)
 })
 
 test('owner profile reads only bounded profile chunks and preserves full fields', async t => {
