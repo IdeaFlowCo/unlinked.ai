@@ -118,6 +118,25 @@ with tempfile.TemporaryDirectory(prefix='private-pilot-release-check-') as tempo
         pilot.listening_tcp_ports = original_listeners
         pilot.socket.socket = original_socket
 
+# Canonical origin preflight retains all other fail-closed manifest gates.
+with tempfile.TemporaryDirectory(prefix='canonical-origin-check-') as temporary:
+    location = Path(temporary).resolve() / 'canonical.json'
+    canonical = json.loads((HERE / 'manifest.example.json').read_text())
+    canonical['origin'] = 'https://www.unlinked.ai'
+    canonical['callback'] = canonical['origin'] + '/auth/callback/ideaflow'
+    location.write_text(json.dumps(canonical))
+    _, blockers = pilot.validate_manifest(location)
+    assert 'provider_client_registered' in blockers
+    with patch.dict(os.environ, {'PILOT_ORIGIN': 'https://untrusted.invalid'}):
+        assert pilot.compose_env(canonical)['PILOT_ORIGIN'] == canonical['origin']
+    canonical['callback'] = 'https://private.unlinked.ai/auth/callback/ideaflow'
+    location.write_text(json.dumps(canonical))
+    refused(lambda: pilot.validate_manifest(location))
+    canonical['origin'] = 'https://untrusted.invalid'
+    canonical['callback'] = canonical['origin'] + '/auth/callback/ideaflow'
+    location.write_text(json.dumps(canonical))
+    refused(lambda: pilot.validate_manifest(location))
+
 # Exercise the consumer invocation, including sudo's environment allowlist.
 manifest = json.loads((HERE / 'manifest.example.json').read_text())
 calls = []
@@ -129,9 +148,10 @@ def docker_result(command, **options):
     operation = command[docker_at + 1]
     if operation == 'compose':
         preserved = command[2].removeprefix('--preserve-env=').split(',')
-        assert set(preserved) == {'PILOT_UID', 'PILOT_GID', 'PILOT_NEO4J_IMAGE', 'PILOT_RUNTIME_IMAGE', 'PILOT_NGINX_IMAGE'}
+        assert set(preserved) == {'PILOT_ORIGIN', 'PILOT_UID', 'PILOT_GID', 'PILOT_NEO4J_IMAGE', 'PILOT_RUNTIME_IMAGE', 'PILOT_NGINX_IMAGE'}
         # Model sudo's cleared environment: interpolation still has exact IDs/images.
         effective = {key: options['env'][key] for key in preserved}
+        assert effective['PILOT_ORIGIN'] == manifest['origin']
         assert effective['PILOT_UID'] == str(os.getuid())
         assert effective['PILOT_GID'] == str(os.getgid())
         assert effective['PILOT_RUNTIME_IMAGE'] == manifest['images']['runtime']

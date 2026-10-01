@@ -10,7 +10,7 @@ const networkMode = process.env.PILOT_NETWORK_MODE ?? 'loopback'
 const browserHost = networkMode === 'isolated-container' ? '0.0.0.0' : '127.0.0.1'
 const boltUrl = networkMode === 'isolated-container' ? 'bolt://graph:7687' : 'bolt://127.0.0.1:9289'
 try {
-  if (!['loopback', 'isolated-container'].includes(networkMode) || process.env.PILOT_ROOT !== root || process.env.PILOT_ORIGIN !== 'https://private.unlinked.ai' || process.env.PILOT_DATA_MODE !== 'private_live' || process.env.PILOT_HOST !== browserHost || process.env.PILOT_PORT !== '9367' || process.env.PILOT_OPERATIONS_URL !== 'http://127.0.0.1:9022' || process.env.PILOT_BOLT_URL !== boltUrl) throw new Error()
+  if (!['loopback', 'isolated-container'].includes(networkMode) || process.env.PILOT_ROOT !== root || !['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(process.env.PILOT_ORIGIN) || process.env.PILOT_DATA_MODE !== 'private_live' || process.env.PILOT_HOST !== browserHost || process.env.PILOT_PORT !== '9367' || process.env.PILOT_OPERATIONS_URL !== 'http://127.0.0.1:9022' || process.env.PILOT_BOLT_URL !== boltUrl) throw new Error()
   const wiring = root + '/runtime/wiring.mjs'
   const info = await lstat(wiring)
   if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600) throw new Error()
