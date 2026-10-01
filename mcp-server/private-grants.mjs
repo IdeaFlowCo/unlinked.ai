@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { SignJWT, jwtVerify } from 'jose'
 import { privateId } from '../src/utils/private-import/job.mjs'
+import { isLiveImport } from '../src/utils/private-import/noos-adapter.mjs'
 
 const audience = 'unlinked-private-tools-staging'
 const toolsAllowed = ['unlinked_search_import']
@@ -14,7 +15,7 @@ export function createPrivateGrantService({ issuer, privateKey, publicKey, getBa
     async issueGrant(owner, scope) {
       if (!owner?.ownerId || !owner.userId || !Array.isArray(scope?.importIds) || scope.importIds.length !== 1 || !/^[a-f0-9]{64}$/.test(scope.importIds[0]) || !Array.isArray(scope.tools) || scope.tools.length !== 1 || scope.tools.some(tool => !toolsAllowed.includes(tool))) throw new Error('explicit_private_grant_scope_required')
       const backend = await getBackend(owner), publication = await backend.readResource('import', scope.importIds[0])
-      if (!publication || publication.deleted || publication.sourceOwnerId !== owner.ownerId || !['indexed', 'partial'].includes(publication.payload?.status)) throw new Error('private_import_not_found')
+      if (!isLiveImport(publication, scope.importIds[0], owner.ownerId)) throw new Error('private_import_not_found')
       const jti = randomBytes(32).toString('hex'), id = privateId(owner.ownerId, 'agent-grant', jti), now = Math.floor(Date.now() / 1000)
       await backend.writeResource({ namespace: 'unlinked', type: 'import', sourceId: id, sourceOwnerId: owner.ownerId,
         sourceRevision: 1, expectedRevision: null, audience: 'owner', deleted: false,
@@ -34,7 +35,7 @@ export function createPrivateGrantService({ issuer, privateKey, publicKey, getBa
         const record = await backend.readResource('import', payload.grantId), grant = record?.payload
         if (!record || record.deleted || record.sourceOwnerId !== payload.ownerId || grant?.kind !== 'private_tool_grant' || grant.ownerId !== payload.ownerId || grant.userId !== payload.sub || grant.jti !== payload.jti || grant.issuer !== issuer || grant.audience !== audience || grant.expiresAt !== payload.exp * 1000 || !Array.isArray(grant.importIds) || grant.importIds.length !== 1 || !/^[a-f0-9]{64}$/.test(grant.importIds[0]) || !Array.isArray(grant.tools) || grant.tools.length !== 1 || !toolsAllowed.includes(grant.tools[0])) return null
         const publication = await backend.readResource('import', grant.importIds[0])
-        if (!publication || publication.deleted || publication.sourceOwnerId !== payload.ownerId || !['partial', 'indexed'].includes(publication.payload?.status)) return null
+        if (!isLiveImport(publication, grant.importIds[0], payload.ownerId)) return null
         return { ownerId: grant.ownerId, userId: grant.userId, importIds: [...grant.importIds], tools: [...grant.tools], expiresAt: grant.expiresAt }
       } catch { return null }
     },

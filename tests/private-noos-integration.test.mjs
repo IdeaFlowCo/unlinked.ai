@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { generateKeyPairSync, createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, cp, readdir, readFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import JSZip from 'jszip'
 import { ingestArchive } from '../src/utils/private-import/job.mjs'
@@ -247,9 +247,9 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
     assert.equal(considered.size, 1001)
     assert.equal((await fetch(archivePath, { headers: { Authorization: `Bearer ${scopedSearchToken}` } })).status, 401)
     assert.equal((await searchClient.callTool({ name: 'unlinked_search_import', arguments: { importId: result.id, query: 'engineer' } })).isError, true)
-    await privateGrants.revoke({ ownerId: owner, userId: 'synthetic-noos-a' }, scopedGrantId)
-    await assert.rejects(searchClient.listTools())
   }
+  await privateGrants.revoke({ ownerId: owner, userId: 'synthetic-noos-a' }, scopedGrantId)
+  if (searchClient) await assert.rejects(searchClient.listTools())
   assert.equal((await client.callTool({ name: 'unlinked_read_import', arguments: { importId: recovered.id } })).isError, true)
   assert.equal((await fetch(archivePath, { headers: { Authorization: `Bearer ${grantToken}` } })).status, 401)
   // Publication tombstone blocks retained source/assertions through the actual SDK client.
@@ -264,10 +264,60 @@ test('real archive -> signed private Noos/assets -> per-import hosted MCP receip
   assert.equal(config.mcpServers['unlinked-private'].url, 'https://staging.invalid/mcp')
   const reader = createScopedImportReader({ grant, readResource: (type, id) => readResource(grant, type, id) })
   await assert.rejects(reader(result.id), /private_import_not_found/)
+  // Quiesced synthetic rehearsal: snapshot graph and blobs as one private
+  // pair, remove ONLY this harness's owner data, restore journal rows before
+  // final manifests, and prove full dataset/provenance/recovery parity.
+  const backupRoot = join(root, 'paired-backup')
+  await mkdir(backupRoot, { mode: 0o700 })
+  const snapshotSession = driver.session({ database: 'neo4j' })
+  const ids = ['synthetic-noos-a', 'synthetic-noos-b']
+  let snapshot
+  try {
+    snapshot = await snapshotSession.executeRead(async tx => ({
+      resources: (await tx.run('MATCH (r:OperationalResource) WHERE r.userId IN $ids RETURN properties(r) AS item', { ids })).records.map(record => record.get('item')),
+      bindings: (await tx.run('MATCH (b:OperationalOwner) WHERE b.userId IN $ids RETURN properties(b) AS item', { ids })).records.map(record => record.get('item')),
+    }))
+    await cp(join(root, 'assets'), join(backupRoot, 'assets'), { recursive: true, errorOnExist: true, force: false })
+    const blobs = []
+    for (const bucket of await readdir(join(backupRoot, 'assets'))) {
+      assert.match(bucket, /^[a-f0-9]{64}$/)
+      for (const hash of await readdir(join(backupRoot, 'assets', bucket))) {
+        const blob = await readFile(join(backupRoot, 'assets', bucket, hash))
+        assert.equal(createHash('sha256').update(blob).digest('hex'), hash)
+        blobs.push({ bucket, sha256: hash, bytes: blob.length })
+      }
+    }
+    await writeFile(join(backupRoot, 'graph-and-assets.json'), JSON.stringify({ ...snapshot, blobs }), { mode: 0o600 })
+    await snapshotSession.executeWrite(async tx => {
+      await tx.run('MATCH (r:OperationalResource) WHERE r.userId IN $ids DELETE r', { ids })
+      await tx.run('MATCH (b:OperationalOwner) WHERE b.userId IN $ids DELETE b', { ids })
+    })
+    await rm(join(root, 'assets'), { recursive: true, force: true })
+    await cp(join(backupRoot, 'assets'), join(root, 'assets'), { recursive: true, errorOnExist: true, force: false })
+    await snapshotSession.executeWrite(tx => tx.run('UNWIND $rows AS item CREATE (b:OperationalOwner) SET b = item', { rows: snapshot.bindings }))
+    const final = [], staged = []
+    for (const resource of snapshot.resources) {
+      const document = JSON.parse(resource.document)
+      ;(document.payload?.assertionChunks ? final : staged).push(resource)
+    }
+    for (const group of [staged, final]) for (let start = 0; start < group.length; start += 200) {
+      await snapshotSession.executeWrite(tx => tx.run('UNWIND $rows AS item CREATE (r:OperationalResource) SET r = item', { rows: group.slice(start, start + 200) }))
+    }
+    const restored = await provisionalReader(scaled.id)
+    assert.equal(restored.indexed, 1001); assert.deepEqual(restored.assertions, indexedRows.assertions)
+    const recoveredBytes = await fetch(archivePath, { headers: { Authorization: `Bearer ${alice}` } })
+    assert.deepEqual(Buffer.from(await recoveredBytes.arrayBuffer()), bytes)
+    assert.equal((await fetch(archivePath, { headers: { Authorization: `Bearer ${bob}` } })).status, 404)
+    await assert.rejects(reader(result.id), /private_import_not_found/)
+    assert.equal(await privateGrants.authenticateGrant({ headers: { authorization: `Bearer ${scopedSearchToken}` } }), null)
+    snapshot = { restored: true, graphResources: snapshot.resources.length, assetBlobs: blobs.length,
+      accepted: 1001, indexed: restored.indexed, preservedPublicationTombstone: result.id, preservedGrantTombstone: scopedGrantId,
+      boundary: 'Quiesced owned synthetic graph/blob pair only; no production power-loss/fsync/retention or historical-data cutover claim.' }
+  } finally { await snapshotSession.close() }
   if (process.env.UNLINKED_NOOS_RECEIPT) await writeFile(process.env.UNLINKED_NOOS_RECEIPT, JSON.stringify({
     boundary: 'Real synthetic ZIP, RS256 access verification, offline disposable issuer/subject mapping, dedicated temporary Neo4j, private asset bytes and actual MCP SDK client. No real provider login/consent, production mount, production deployment or live personal data. Optional explicitly configured existing-key synthetic AI receipt is recorded separately.',
     archiveSha256: createHash('sha256').update(bytes).digest('hex'), import: result,
-    observed, toolReceipt: receipt, lostResponseRecovery: recovered.id, assetInterruptionRecovery: assetRecovered.id, publicationInterruptionRecovery: publicationRecovered.id, simultaneousReplay: parallel[0].id, scaledImport: scaled, scaledToolReceipt: { indexed: indexedRows.indexed, assertionCount: indexedRows.assertions.length }, searchReceipt, modelReceipts, consideredConnections: considered.size, midJournalLostResponseCommits: chunkCommits, durableSearchGrant: scopedGrantId,
+    observed, toolReceipt: receipt, lostResponseRecovery: recovered.id, assetInterruptionRecovery: assetRecovered.id, publicationInterruptionRecovery: publicationRecovered.id, simultaneousReplay: parallel[0].id, scaledImport: scaled, scaledToolReceipt: { indexed: indexedRows.indexed, assertionCount: indexedRows.assertions.length }, searchReceipt, modelReceipts, consideredConnections: considered.size, midJournalLostResponseCommits: chunkCommits, durableSearchGrant: scopedGrantId, pairedRestore: snapshot,
     verified: ['other owner cannot read import/raw asset', 'different tool audience cannot read raw asset', 'ungranted import denied', 'tombstone denies retained assertions', 'revoked token denies next SDK request', 'single authenticated setup action returns download configuration for only the approved import', 'deleted publication denies new setup', '1001 connections indexed and scoped SDK-readable'], indexed: scaled.counts.indexed,
     cleanup: 'owned server connections, private filesystem root and disposable container removed by finally hooks',
   }, null, 2))
