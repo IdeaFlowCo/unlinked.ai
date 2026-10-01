@@ -28,7 +28,7 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
       const now = Math.floor(Date.now() / 1000)
       if (!claims || !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp) || claims.iat > now + 30 || claims.exp <= claims.iat || claims.exp <= now || claims.iss !== issuer || typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 512 || /[\x00-\x1f\x7f]/.test(claims.sub)) throw new Error('verified_ideaflow_identity_required')
       // No access/ID token reaches an agent, cookie or imported source record.
-      return { issuer: claims.iss, subject: claims.sub, verifiedEmail: claims.email_verified === true && typeof claims.email === 'string' ? claims.email : null }
+      return { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), verifiedEmail: claims.email_verified === true && typeof claims.email === 'string' ? claims.email : null }
     },
   }
 }
@@ -51,11 +51,12 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getBackend, complete, issueGrant, mcpEndpoint, dataMode = 'synthetic' }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, getBackend, complete, issueGrant, mcpEndpoint, dataMode = 'synthetic' }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
-  const pending = new Map(), sessions = new Map()
+  if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
+  const pending = new Map(), invitations = new Map(), sessions = new Map()
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
@@ -73,6 +74,29 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      const inviteMatch = url.pathname.match(/^\/invite\/([A-Za-z0-9_-]{43})$/)
+      if (request.method === 'GET' && inviteMatch && typeof claimInvitation === 'function') {
+        purge(invitations)
+        if (invitations.size >= 100) throw new Error('private_login_capacity')
+        const id = token(), csrf = token()
+        invitations.set(id, { token: inviteMatch[1], csrf, expiresAt: Date.now() + 5 * 60000 })
+        response.setHeader('Set-Cookie', cookie('__Host-ul-invite', id, 300))
+        render(response, 'Start your private Unlinked profile', `<p>Choose the Ideaflow account you want to use for this separate, private Unlinked profile. We verify that account before creating your owner. Your existing OpenChat account stays separate.</p><form method="post" action="/invite"><input type="hidden" name="csrf" value="${html(csrf)}"><p>You can review the archive retention and AI search disclosure when you upload.</p><button>Create my private profile with Ideaflow</button></form>`)
+        return
+      }
+      if (request.method === 'POST' && url.pathname === '/invite' && typeof claimInvitation === 'function') {
+        purge(invitations); purge(pending)
+        const id = cookies(request)['__Host-ul-invite'], invitation = invitations.get(id)
+        invitations.delete(id)
+        response.setHeader('Set-Cookie', cookie('__Host-ul-invite', '', 0))
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (!invitation || input.getAll('csrf').length !== 1 || input.get('csrf') !== invitation.csrf || [...input.keys()].some(key => key !== 'csrf')) throw new Error('private_invitation_intent_invalid')
+        if (pending.size >= 100) throw new Error('private_login_capacity')
+        const result = await login.begin(), transactionId = token()
+        pending.set(transactionId, { ...result.transaction, invitationToken: invitation.token, newProfileIntent: true, expiresAt: Date.now() + 5 * 60000 })
+        response.setHeader('Set-Cookie', [cookie('__Host-ul-invite', '', 0), cookie('__Host-ul-login', transactionId, 300)])
+        redirect(response, result.location); return
+      }
       if (request.method === 'GET' && url.pathname === '/login') {
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
@@ -88,8 +112,18 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, getB
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', '', 0))
         if (!transaction || url.searchParams.getAll('state').length !== 1 || url.searchParams.get('state') !== transaction.state || url.searchParams.getAll('code').length !== 1) throw new Error('private_login_transaction_invalid')
         const identity = await login.finish(url, transaction)
+        let claimed
+        if (transaction.invitationToken) {
+          if (typeof claimInvitation !== 'function' || transaction.newProfileIntent !== true) throw new Error('private_invitation_intent_invalid')
+          claimed = await claimInvitation(transaction.invitationToken, {
+            issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
+            verifiedAt: identity.verifiedAt, provenanceReceiptId: identity.provenanceReceiptId, newProfileIntent: true,
+          })
+          if (!claimed || typeof claimed.ownerId !== 'string' || !claimed.ownerId || typeof claimed.userId !== 'string' || !claimed.userId) throw new Error('private_owner_recovery_required')
+        }
         const owner = await resolveOwner(identity)
         if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new Error('private_owner_recovery_required')
+        if (claimed && (claimed.ownerId !== owner.ownerId || claimed.userId !== owner.userId)) throw new Error('private_owner_recovery_required')
         purge(sessions)
         if (sessions.size >= 100) throw new Error('private_login_capacity')
         const sessionId = token()
