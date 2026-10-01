@@ -53,18 +53,21 @@ test('public beta bridge is honest, navigable and responsive', { skip: !base }, 
   assert.equal(page.primary[0].href, 'https://private.unlinked.ai/login');
   assert.match(page.text, /No invitation or separate Unlinked password is required/);
   assert.doesNotMatch(page.text, /not available yet|coming soon|invitation is ready/);
-  // Exercise the alternate path for people who already downloaded their file.
   axi('open', base);
   clickLink('Need your export? Get it from LinkedIn →');
-  page = await eventually(surface, p => new URL(p.url).hash === '#next');
-  assert.equal(new URL(page.url).hash, '#next');
+  page = await eventually(surface, p => new URL(p.url).pathname === '/import-linkedin');
+  assert.equal(new URL(page.url).hash, '');
+  assert.match(page.text, /Choose the larger archive, or select Connections for a smaller export/);
   assert.match(page.text, /Open beta at private.unlinked.ai/);
-  assert.equal(evaluate(`(()=>{const r=document.querySelector('#next').getBoundingClientRect();return r.top<innerHeight&&r.bottom>0})()`), true);
+  assert.equal(evaluate(`(()=>{const r=document.querySelector('.export-instructions').getBoundingClientRect();return r.top<innerHeight&&r.bottom>0})()`), true);
   axi('resize', '390', '844');
   axi('open', base);
   assert.equal(surface().overflow, false);
   clickLink('Need your export? Get it from LinkedIn →');
-  await eventually(surface, p => new URL(p.url).hash === '#next');
+  page = await eventually(surface, p => new URL(p.url).pathname === '/import-linkedin');
+  assert.equal(new URL(page.url).hash, '');
+  assert.match(page.text, /Choose the larger archive, or select Connections for a smaller export/);
+  assert.equal(evaluate(`(()=>{const r=document.querySelector('.export-instructions').getBoundingClientRect();return r.top<innerHeight&&r.bottom>0})()`), true);
   assert.equal(surface().overflow, false);
   axi('closepage', String(originalTab));
 });
