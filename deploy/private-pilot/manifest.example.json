@@ -19,14 +19,14 @@
     "unlinked": {
       "checkout": "/srv/unlinked-private-guest-pilot-20261001/runtime/unlinked",
       "sha": "55114ae338bb2c0c7527de8b14b45699a74760b6",
-      "approved": false,
+      "ready": false,
       "final_receipt": "/srv/unlinked-private-guest-pilot-20261001/audit/unlinked-source-ready.json",
       "final_receipt_sha256": ""
     },
     "noos": {
       "checkout": "/srv/unlinked-private-guest-pilot-20261001/runtime/noos",
-      "sha": "5d91686ade1f39112a4dfe5b5985f997635f1017",
-      "approved": false,
+      "sha": "a161abd096bbd2d2753c6e11506e1ad9b7c31762",
+      "ready": false,
       "final_receipt": "/srv/unlinked-private-guest-pilot-20261001/audit/noos-source-ready.json",
       "final_receipt_sha256": ""
     }
@@ -36,12 +36,12 @@
     "runtime": "runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "nginx": "nginx@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   },
-  "images_approved": false,
-  "target_security_approved": false,
+  "images_verified": false,
+  "target_isolation_verified": false,
   "provider_client_registered": false,
   "dns_tls_ready": false,
-  "persistent_secret_destinations_approved": false,
-  "invitation_activation_approved": false,
+  "persistent_private_inputs_ready": false,
+  "invitation_ready": false,
   "openai_persistent_destination_confirmed": false,
   "wiring_sha256": "",
   "destinations": {
@@ -61,7 +61,7 @@
     "status": "PROPOSED_ONLY"
   },
   "provider_request": {
-    "issuer": "REQUIRES_IDENTITY_OWNER_VERIFIED_ISSUER",
+    "issuer": "https://id.ideaflow.app/api/auth",
     "client_id": "REQUIRES_IDENTITY_OWNER_REGISTRATION",
     "redirect_uri": "https://private.unlinked.ai/auth/callback/ideaflow",
     "method": "client_secret_basic",

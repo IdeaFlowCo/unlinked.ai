@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix='private-pilot-release-check-') as tempo
     invalid.write_text(json.dumps(manifest))
     refused(lambda: pilot.validate_manifest(invalid))
     manifest['root'] = str(original_root)
-    manifest['images_approved'] = True
+    manifest['images_verified'] = True
     invalid.write_text(json.dumps(manifest))
     refused(lambda: pilot.validate_manifest(invalid))
 
