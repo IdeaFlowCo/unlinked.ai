@@ -4,7 +4,7 @@
 Commands: plan, preflight, start, stop, backup, verify-backup, restore, rollback.
 No DNS, certificate, identity-provider or credential registration command exists.
 Cold recovery pairs graph (including identities), assets, invitation bundles and
-audit state. Restore creates a new isolated rehearsal directory, never the pilot.
+audit state. Restore creates a new backups/rehearsal-* directory, never the pilot.
 """
 import argparse
 import hashlib
@@ -181,17 +181,27 @@ def verify_snapshot(root, checksum):
     return manifest
 
 
+def validate_rehearsal_target(target):
+    # The existing private backup root is operator-writable; /srv is not.
+    parent = ROOT / 'backups'
+    no_links(ROOT)
+    private(ROOT, True)
+    no_links(parent)
+    private(parent, True)
+    no_links(target)
+    require(target.is_absolute() and target == target.resolve(), 'canonical_rehearsal_target_required')
+    require(target.parent == parent and re.fullmatch(r'rehearsal-[A-Za-z0-9_-]+', target.name), 'isolated_rehearsal_target_required')
+    require(not target.exists() and not target.is_symlink(), 'new_rehearsal_target_required')
+
+
 def restore_snapshot(backup, checksum, target):
     manifest = verify_snapshot(backup, checksum)
-    no_links(target)
-    # Strict sibling namespace and NEW path prevent production or legacy restore.
-    require(target.parent == ROOT.parent and target.name.startswith(ROOT.name + '-rehearsal-'), 'isolated_rehearsal_target_required')
-    require(not target.exists(), 'new_rehearsal_target_required')
-    require(re.fullmatch(re.escape(ROOT.name) + r'-rehearsal-[A-Za-z0-9_-]+', target.name), 'rehearsal_name_invalid')
+    validate_rehearsal_target(target)
+    # Atomic mkdir refuses a competing creator; no overwrite or privilege change.
     target.mkdir(mode=0o700)
+    private(target, True)
     for part in PARTS:
         shutil.copytree(backup / part, target / part)
-    private(target, True)
     actual = inventory(target)
     require(actual['files'] == manifest['files'] and actual['directories'] == manifest['directories'], 'restore_digest_mismatch')
     fsync_tree(target)
@@ -322,7 +332,7 @@ def main():
     if args.command == 'restore':
         require(args.backup and args.checksum and args.rehearsal, 'new_rehearsal_arguments_required')
         verify_snapshot(args.backup, args.checksum)
-        require(args.rehearsal.parent == ROOT.parent and re.fullmatch(re.escape(ROOT.name) + r'-rehearsal-[A-Za-z0-9_-]+', args.rehearsal.name) and not args.rehearsal.exists(), 'new_isolated_rehearsal_required')
+        validate_rehearsal_target(args.rehearsal)
         if args.execute:
             restore_snapshot(args.backup, args.checksum, args.rehearsal)
         print(json.dumps({'status': 'restored_isolated_rehearsal' if args.execute else 'restore_dry_run'}))

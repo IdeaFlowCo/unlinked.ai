@@ -27,7 +27,7 @@ Its helper runs as the private file-owning release operator and uses only the ex
 The graph service keeps the pinned Neo4j image startup path and `tini`, but sets `umask 077` before launch so newly created graph directories/files satisfy the private 700/600 recovery policy.
 The operational service must use the dedicated driver/database and must never mount the legacy generic query API.
 Private archive/source/oversized-observation bytes use `assets/`, with owner-hashed paths, immutable SHA-256 names and modes 700/600.
-Paired quiesced backups use `backups/` and include graph resources, owner/identity bindings, every referenced blob, integrity manifest and tombstones.
+Paired quiesced backups use `backups/` and include graph resources, owner/identity bindings, every referenced blob, integrity manifest and tombstones; restore rehearsals must use a new canonical `backups/rehearsal-*` target under that operator-owned mode-700 backup root.
 Existing storage backends remain replaceable; binary ZIP bytes are not graph properties.
 The model bridge reads the existing M5 credential in place over SSH for the synthetic rehearsal, or a final test may opt into an explicit mode-600 key file outside all checkouts through `UNLINKED_PRIVATE_AI_TEST_KEY_FILE`.
 Any new persistent credential copy or actual pilot resource creation must use its reviewed exact target/approval, not this proposal alone; the real guest packet proposes `runtime/runtime.env` as the OpenAI destination and keeps it blocked until explicitly confirmed.
@@ -54,7 +54,7 @@ Revocation/deletion is checked live, and ephemeral stage signing keys revoke all
 
 1. Complete Noos then Unlinked no-mistakes, preserve draft state, actual GCP CI checks and exact final head receipts.
 2. Verify the approved isolated provider/client and callback against the reviewed synthetic identity; bind its new synthetic owner offline and test a second subject's denial.
-3. Start the distinct reviewed synthetic operational/runtime/assets target; take a paired backup, restore to the isolated target and revalidate all published rows, original bytes and tombstones.
+3. Start the distinct reviewed synthetic operational/runtime/assets target; take a paired backup, restore to a new canonical `backups/rehearsal-*` target and revalidate all published rows, original bytes and tombstones.
 4. Through the actual browser, verify sign-in/account choice, consent-gated 1,001-contact archive upload, durable replay receipt, accepted=indexed parity, all-contact AI search and one-action search-only MCP setup.
 5. Verify HTTPS from the M5 before sharing a URL. Report it explicitly as synthetic rehearsal unless a distinct isolated real-data target/live-bind decision has passed.
 6. Only a separately reviewed real-data pilot may accept the guest's archive, with the guest's combined upload consent to private retention and bounded OpenAI processing. Do not switch the synthetic fixture into a real-data cohort implicitly.
