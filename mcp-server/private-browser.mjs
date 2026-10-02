@@ -15,8 +15,9 @@ import { LIMITS } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus } from '../src/utils/private-import/background-job.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderPerson, renderPeople, renderCompany, renderSettings, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderCard, renderPerson, renderPeople, renderCompany, renderSettings, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { companyFacts } from './company-metadata.mjs'
+import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
@@ -67,12 +68,13 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
+  if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
   if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
   const invitationMode = typeof claimInvitation === 'function' && typeof signup !== 'function'
   const authorizationOrigin = login.authorizationOrigin ?? null
@@ -85,7 +87,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
   // Pages a sign-in may return to. Everything else lands on the home route.
-  const returnPath = value => typeof value === 'string' && /^\/(?:profile|settings|import|network|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) ? value : null
+  const returnPath = value => typeof value === 'string' && /^\/(?:profile|card|settings|import|network|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
@@ -104,10 +106,13 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never changes identity authority. */ } }
   const journey = (response, view, job = null, script = '', status = 200) => {
     const nonce = token()
-    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
+    // manifest-src/worker-src cover exactly the same-origin PWA manifest and the
+    // static-only service worker; everything else stays locked to 'none'.
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'nonce-${nonce}'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
+    script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${html(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${view.content}${script ? `<script nonce="${nonce}">${script}</script>` : ''}</html>`)
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${view.content}<script nonce="${nonce}">${script}</script></html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   async function establishSession(response, identity, invitationToken = null, next = null) {
@@ -388,6 +393,30 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         } catch { /* The profile stands on its own while the network is still being read. */ }
         journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs) }), props.importJob); return
       }
+      if (signup && request.method === 'GET' && url.pathname === '/card') {
+        const jobs = await jobResources(), props = jobProps(jobs)
+        const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs: profileJobs(jobs), backend }))
+        let legacy = null
+        if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
+        if (!profile.name && legacy) Object.assign(profile, legacy.profile)
+        if (!profile.name) profile.name = session.displayName
+        // The QR target is the owner's already-public profile URL: the linked
+        // legacy profile id when one is confirmed, else the newest published
+        // public import. It is verified against today's published snapshot, so
+        // the code never encodes a private or dead target, and scanning it
+        // grants nothing beyond what any visitor can already read.
+        let publicId = legacy?.profileId ?? null
+        if (!publicId) {
+          const published = jobs.filter(job => ['indexed', 'partial'].includes(job.payload.status) && job.payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && job.payload.consent.publicProfessionalSearch === true)
+            .sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0) || b.sourceId.localeCompare(a.sourceId))
+          if (published[0]) publicId = 'member-import-' + published[0].sourceId
+        }
+        let cardUrl = null
+        if (publicId && typeof readPublishedSnapshot === 'function') {
+          try { if (await publicReader.profile({ id: publicId })) cardUrl = new URL(`/people/${encodeURIComponent(publicId)}`, base).href } catch { /* The card still renders while the index is unavailable. */ }
+        }
+        journey(response, renderCard({ ...props, profile, cardUrl, qr: cardUrl ? qrSvg(cardUrl, { label: `QR code opening ${cardUrl}` }) : null }), props.importJob); return
+      }
       if (signup && request.method === 'GET' && url.pathname === '/network') {
         const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
         const connections = network.assertions.filter(row => row.category === 'connections')
@@ -417,12 +446,17 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
+        // The agent setup is prepared automatically: reuse the owner's live
+        // grant or mint the one idempotent automatic grant. A revoked automatic
+        // setup stays revoked (ensure returns null) until the owner regenerates.
+        const ensured = typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner) : null
+        const configuration = ensured ? scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const ids = await backend.listAccountGrantIds()
         const jobs = await jobResources(), props = jobProps(jobs)
-        const view=renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs) })
+        const view=renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs), agentConfiguration: configuration, agentSetupAutomatic: typeof ensureAccountGrant === 'function' })
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
-        journey(response,view,props.importJob)
+        journey(response,view,props.importJob,configuration?agentSetupCopyScript():'')
         return
       }
       if (signup && request.method === 'GET' && url.pathname === '/export') {
@@ -484,11 +518,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return
         }
+        // Regenerate: revoke every live grant, then mint one fresh grant, so the
+        // old bearer credential stops working the moment the new one exists.
+        for (const grantId of await backend.listAccountGrantIds()) await revokeAccountGrant(session.owner, grantId)
         const { accessToken } = await issueAccountGrant(session.owner)
         const configuration = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
         const jobs = await jobResources(), props = jobProps(jobs)
         const grants = await backend.listAccountGrantIds()
-        journey(response, renderSettings({ ...props, imports: summaries(jobs), grants: grants.map(id => ({ id })), agentConfiguration: configuration }), props.importJob, agentSetupCopyScript()); return
+        journey(response, renderSettings({ ...props, imports: summaries(jobs), grants: grants.map(id => ({ id })), agentConfiguration: configuration, agentSetupAutomatic: typeof ensureAccountGrant === 'function' }), props.importJob, agentSetupCopyScript()); return
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         if (uploadBusy) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }

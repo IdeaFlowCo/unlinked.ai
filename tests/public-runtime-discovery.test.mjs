@@ -10,7 +10,7 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
   t.after(()=>new Promise(resolve=>server.close(resolve)))
   const endpoint=`http://127.0.0.1:${server.address().port}`
   handler=createPrivateBrowserHandler({baseUrl:`https://127.0.0.1:${server.address().port}`,login:{begin:async()=>{},finish:async()=>{}},resolveOwner:async()=>null,getBackend:async()=>{ownerReads++;throw Error('unexpected_owner_read')}})
-  for(const path of ['/agents','/llms.txt','/AGENTS.md','/openapi.json','/.well-known/agent.json','/.well-known/unlinked.json','/.well-known/mcp/server-card.json','/meet','/import-linkedin','/public-assets/openchat-card.js','/public-assets/browser-card-scanner.js','/public-assets/jsqr.js','/public-assets/jsqr-module.mjs']) {
+  for(const path of ['/agents','/llms.txt','/AGENTS.md','/openapi.json','/.well-known/agent.json','/.well-known/unlinked.json','/.well-known/mcp/server-card.json','/meet','/import-linkedin','/public-assets/openchat-card.js','/public-assets/unlinked-card.js','/public-assets/meet-scan.js','/public-assets/browser-card-scanner.js','/public-assets/jsqr.js','/public-assets/jsqr-module.mjs','/manifest.webmanifest','/sw.js','/offline.html','/app-icon-192.png','/app-icon-512.png','/app-icon-maskable-512.png']) {
     const get=await fetch(endpoint+path);assert.equal(get.status,200,path);assert.ok((await get.text()).length)
     const head=await fetch(endpoint+path,{method:'HEAD'});assert.equal(head.status,200,path);assert.equal(await head.text(),'')
   }
@@ -22,6 +22,12 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
   assert.equal((await fetch(endpoint+'/network',{method:'HEAD'})).status,405)
   assert.equal(await new Promise((resolve,reject)=>{const req=httpRequest(endpoint+'/meet',{headers:{Host:'wrong.invalid'}},res=>{res.resume();resolve(res.statusCode)});req.on('error',reject);req.end()}),403)
   const card=await(await fetch(endpoint+'/.well-known/mcp/server-card.json')).json();assert.equal(card.transports['streamable-http'].url,'https://www.unlinked.ai/mcp');assert.deepEqual(card.tools.map(t=>t.name),['unlinked_search_network','unlinked_search_everyone'])
-  const meet=await fetch(endpoint+'/meet');assert.match(meet.headers.get('content-security-policy'),/script-src 'self' 'nonce-/);assert.match(await meet.text(),/parseOpenChatCard/)
+  const meet=await fetch(endpoint+'/meet');assert.match(meet.headers.get('content-security-policy'),/script-src 'self' 'nonce-/)
+  const meetHtml=await meet.text()
+  // Scans classify through one validator and always stop at a visible confirm step.
+  assert.match(meetHtml,/classifyMeetCode/)
+  assert.match(meetHtml,/id="confirm-open"/)
+  assert.match(meetHtml,/id="confirm-cancel"/)
+  assert.doesNotMatch(meetHtml,/location\.assign/)
   const scanner=await(await fetch(endpoint+'/public-assets/browser-card-scanner.js')).text();assert.match(scanner,/from '\/public-assets\/jsqr-module.mjs'/)
 })

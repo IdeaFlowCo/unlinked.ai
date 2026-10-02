@@ -8,8 +8,18 @@ const root = new URL('../', import.meta.url)
 const requireFromRoot = createRequire(new URL('package.json', root))
 const assets = new Map([
   ['/public-assets/openchat-card.js', ['src/utils/openchat-card.js', 'text/javascript']],
+  ['/public-assets/unlinked-card.js', ['src/utils/unlinked-card.js', 'text/javascript']],
+  ['/public-assets/meet-scan.js', ['src/utils/meet-scan.js', 'text/javascript']],
   ['/public-assets/browser-card-scanner.js', ['src/utils/browser-card-scanner.js', 'text/javascript']],
   ['/public-assets/jsqr.js', [() => requireFromRoot.resolve('jsqr/dist/jsQR.js'), 'text/javascript']],
+  // Installable-app surface: exact source-controlled static files only. The
+  // service worker never caches member or session content (see public/sw.js).
+  ['/manifest.webmanifest', ['public/manifest.webmanifest', 'application/manifest+json']],
+  ['/sw.js', ['public/sw.js', 'text/javascript']],
+  ['/offline.html', ['public/offline.html', 'text/html; charset=utf-8']],
+  ['/app-icon-192.png', ['public/app-icon-192.png', 'image/png']],
+  ['/app-icon-512.png', ['public/app-icon-512.png', 'image/png']],
+  ['/app-icon-maskable-512.png', ['public/app-icon-maskable-512.png', 'image/png']],
   ['/llms.txt', ['public/llms.txt', 'text/plain']],
   ['/AGENTS.md', ['public/AGENTS.md', 'text/plain']],
   ['/openapi.json', ['public/openapi.json', 'application/json']],
@@ -19,7 +29,9 @@ const assets = new Map([
 ])
 const pages = new Set(['/agents', '/meet', '/import-linkedin'])
 export const isPublicDiscoveryPath = pathname => pages.has(pathname) || assets.has(pathname) || pathname === '/public-assets/jsqr-module.mjs'
-const meetScript = `import { BrowserCardScanner } from '/public-assets/browser-card-scanner.js';import { parseOpenChatCard,openChatCardUrl } from '/public-assets/openchat-card.js';const status=document.getElementById('status');let scanner;const stop=()=>{scanner?.stop();scanner=null};const go=card=>{stop();location.assign(openChatCardUrl(card))};document.getElementById('paste').addEventListener('submit',event=>{event.preventDefault();const card=parseOpenChatCard(document.getElementById('card-url').value);if(card)go(card);else status.textContent='Use an OpenChat card link from chat.ideaflow.app or chat.globalbr.ai.'});document.getElementById('start').addEventListener('click',async()=>{stop();scanner=new BrowserCardScanner(document.getElementById('camera'),{onCard:go,onUnsupportedCode:()=>{status.textContent='This QR code is not an OpenChat card.'}});try{await scanner.start();status.textContent='Point your camera at an OpenChat card.'}catch{stop();status.textContent='Camera unavailable. Paste the card link instead.'}});document.getElementById('stop').addEventListener('click',stop);addEventListener('pagehide',stop);`
+// Every scanned or pasted value goes through classifyMeetCode and then a visible
+// confirm step; nothing navigates, adds a contact or grants access on scan alone.
+const meetScript = `import { BrowserCardScanner } from '/public-assets/browser-card-scanner.js';import { classifyMeetCode } from '/public-assets/meet-scan.js';const status=document.getElementById('status'),confirmBox=document.getElementById('confirm'),confirmLabel=document.getElementById('confirm-label'),confirmOpen=document.getElementById('confirm-open');let scanner=null;const stop=()=>{scanner?.stop();scanner=null};const clear=()=>{confirmBox.hidden=true;confirmOpen.setAttribute('href','/meet');confirmLabel.textContent=''};const offer=code=>{stop();confirmLabel.textContent=code.label;confirmOpen.setAttribute('href',code.href);confirmBox.hidden=false;status.textContent='Nothing opens until you choose Open.'};document.getElementById('confirm-cancel').addEventListener('click',()=>{clear();status.textContent=''});document.getElementById('paste').addEventListener('submit',event=>{event.preventDefault();const code=classifyMeetCode(document.getElementById('card-url').value);if(code)offer(code);else{clear();status.textContent='Use an Unlinked profile link or an OpenChat card link.'}});document.getElementById('start').addEventListener('click',async()=>{stop();clear();scanner=new BrowserCardScanner(document.getElementById('camera'),{parse:classifyMeetCode,onCard:offer,onUnsupportedCode:()=>{status.textContent='This QR code is not an Unlinked profile or an OpenChat card.'}});try{await scanner.start();status.textContent='Point your camera at a card.'}catch{stop();status.textContent='Camera unavailable or permission declined. Paste the link printed with the card instead.'}});document.getElementById('stop').addEventListener('click',stop);addEventListener('pagehide',stop);`
 const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 const document = view => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${view.content}</html>`
 const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
