@@ -46,6 +46,12 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     const [file, mime] = assets.get(pathname)
     const assetPath = typeof file === 'function' ? file() : new URL(file, root)
     type = mime; content = await readFile(assetPath)
+    // The service worker runs under ITS OWN response's CSP, not the page's.
+    // The caller's default (default-src 'none', no connect-src) would block
+    // every fetch inside the worker — precaching the shell and the network
+    // pass-through — so /sw.js carries the narrowest policy that lets a
+    // same-origin-only worker work.
+    if (pathname === '/sw.js') response.setHeader('Content-Security-Policy', "default-src 'none'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
     if (pathname === '/public-assets/browser-card-scanner.js') content = content.toString().replace("from 'jsqr'", "from '/public-assets/jsqr-module.mjs'")
   } else if (pathname === '/public-assets/jsqr-module.mjs') { type = 'text/javascript'; content = 'export default globalThis.jsQR;' }
   else {

@@ -96,11 +96,25 @@ test('journey pages carry the manifest, worker registration and the extended-but
   const worker = await fetch(`${endpoint}/sw.js`)
   assert.equal(worker.status, 200)
   assert.equal(worker.headers.get('cache-control'), 'no-store')
+  // The worker executes under /sw.js's OWN CSP. It must allow the worker's
+  // same-origin fetches (precache addAll + network pass-through) and nothing
+  // else; the page default (no connect-src) would block every fetch inside
+  // the worker and break installability.
+  const workerCsp = worker.headers.get('content-security-policy')
+  assert.match(workerCsp, /default-src 'none'/)
+  assert.match(workerCsp, /connect-src 'self'/)
+  assert.doesNotMatch(workerCsp, /unsafe-inline|data:|https:/)
+  // Everything the worker fetches is same-origin, which connect-src 'self' covers.
+  const swSource = read('public/sw.js').toString()
+  for (const match of swSource.matchAll(/'(\/[a-z0-9.\-]+)'/gi)) assert.ok(!match[1].includes('//'), 'precache paths are same-origin')
   const page = await fetch(endpoint)
   const csp = page.headers.get('content-security-policy')
   assert.match(csp, /default-src 'none'/)
   assert.match(csp, /manifest-src 'self'/)
   assert.match(csp, /worker-src 'self'/)
+  // Icons (rel=icon, apple-touch-icon and the manifest's PNGs) are governed by
+  // img-src on the installing page; without it the install prompt has no icon.
+  assert.match(csp, /img-src 'self'/)
   assert.doesNotMatch(csp, /data:|unsafe-eval/)
   const html = await page.text()
   assert.match(html, /<link rel="manifest" href="\/manifest.webmanifest">/)
