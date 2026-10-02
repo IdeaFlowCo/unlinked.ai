@@ -29,7 +29,7 @@ grant is only valid on the origin that issued it.
 
 Every call requires `Authorization: Bearer <account grant token>` — the
 per-user, revocable, read-only grant issued in **Settings → Connect my agent**
-on the runtime. There is no anonymous access to any `/api/agent/v1/` route and
+on the runtime, or through the OAuth connector flow below. There is no anonymous access to any `/api/agent/v1/` route and
 no email-based linkage anywhere: the grant token *is* the account linkage, and
 `unlinked_whoami` returns the stable Unlinked `ownerId` so a consumer can
 verify linkage explicitly. Callers without a usable grant get typed
@@ -42,6 +42,89 @@ verifying an otherwise valid token returns `upstream_unavailable` instead:
 retry with the same token.
 Deleting the account tombstones all owner data and revokes grants
 (`account_data_deleted` flow); a deleted account's tokens fail `grant_revoked`.
+
+## OAuth connector (MCP authorization)
+
+`/mcp` is also an OAuth 2.1 protected resource, so MCP clients that sign in —
+Claude custom connectors (claude.ai, Desktop, mobile), Claude Code, ChatGPT
+developer-mode connectors, MCP Inspector — need only the URL
+`https://www.unlinked.ai/mcp`. Unlinked is its own authorization server
+(`mcp-server/oauth-server.mjs`); Ideaflow ID is used only to sign the person in.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /.well-known/oauth-protected-resource/mcp` (and `/.well-known/oauth-protected-resource`) | RFC 9728 metadata: `resource` = `https://www.unlinked.ai/mcp`, `authorization_servers` = `["https://www.unlinked.ai"]`, `scopes_supported` |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 metadata (`/.well-known/openid-configuration` is a JSON 404: this is not an OpenID provider) |
+| `GET/POST /oauth/authorize` | Sign-in (Ideaflow ID) if needed, then a consent page; POST carries the session CSRF token |
+| `POST /oauth/token` | `authorization_code` exchange (form-encoded) |
+| `POST /oauth/register` | RFC 7591 dynamic client registration (JSON) |
+| `POST /oauth/revoke` | RFC 7009 revocation |
+
+Any request to `/mcp` without a usable grant answers `401` with
+`WWW-Authenticate: Bearer resource_metadata="https://www.unlinked.ai/.well-known/oauth-protected-resource/mcp", scope="network people"`
+(plus `error="invalid_token"` when a token was presented). Metadata, token,
+registration and revocation endpoints send `Access-Control-Allow-Origin: *`
+(they use no cookies) and accept requests without an `Origin` header.
+
+Security decisions:
+
+- **Public clients only.** `token_endpoint_auth_methods_supported` is
+  `["none"]`; registration always answers `token_endpoint_auth_method: "none"`
+  and issues no secret. PKCE `S256` is mandatory; `plain` is refused.
+- **Clients.** Client ID Metadata Documents are fetched only for three exact
+  client ids — `https://claude.ai/oauth/mcp-oauth-client-metadata` (Claude
+  connectors), `https://claude.ai/oauth/claude-code-client-metadata` (Claude
+  Code) and `https://chatgpt.com/oauth/client.json` (ChatGPT) — with no
+  redirects, 5 s, 32 KiB, cached 1 h, and the document's `client_id` must
+  equal its URL. Any other URL-form client id is refused without a fetch;
+  other clients use dynamic registration.
+  Registration, token and revocation endpoints have no global rate budget an
+  anonymous caller could exhaust; codes gate every durable write.
+  Dynamic registration is stateless: the `client_id` (`ulc1.…`) is an
+  HMAC-signed record of the redirect URIs and name, under a key derived (HKDF)
+  from the account grant key, so registration stores nothing and a restart
+  forgets no client.
+- **Redirect URIs** are limited to `https://claude.ai/api/mcp/auth_callback`,
+  `https://claude.com/api/mcp/auth_callback`,
+  `https://chatgpt.com/connector_platform_oauth_redirect` (ChatGPT's stable
+  callback, used because every response carries `iss`; its per-connector
+  callbacks are not accepted) and RFC 8252 loopback (`http://localhost`,
+  `http://127.0.0.1`; any port at request time). A
+  look-alike client can therefore never receive a code off-device. Unknown
+  clients and unregistered redirect URIs are shown an error and never
+  redirected; every other error, and every success, redirects with RFC 9207 `iss`.
+- **Consent** names the app by its verified redirect target ("Claude",
+  "ChatGPT", or "An app on this computer" plus its self-reported name), lists
+  the scopes, and its CSP `form-action` allows `https:` redirect hops (the
+  app's callback may redirect again) or the exact loopback origin.
+  Sign-in returns to the same authorization request, ahead of the find-me and
+  recovered-account steps.
+- **Codes** are 256-bit, single-use (consumed even by a failed exchange),
+  expire after 60 s and are bound to client, redirect URI, PKCE challenge and
+  owner. `redirect_uri` at the token endpoint is required, and must match,
+  whenever the authorization request carried one.
+- **Resource indicators**: `resource`, when sent, must be this server
+  (`https://www.unlinked.ai/mcp`; the bare origin is accepted) or the request
+  fails `invalid_target`.
+- **Scopes**: `network` → grant scope `owner_network`; `people` (implies
+  `network`) → `owner_network_and_public`. Unknown scopes (`openid`,
+  `offline_access`, `claudeai`, …) are ignored; none known means everything
+  offered. The token response states the granted `scope`.
+- **Tokens are account grants.** The access token is an ordinary account grant
+  (same JWT, same per-call revocation check, same tool catalog) whose durable
+  record carries `connection: { kind: 'oauth', app, clientName, redirectHost,
+  clientKey (SHA-256 of client_id), resource }`. It does not expire and no
+  refresh token is issued (`grant_types_supported: ["authorization_code"]`);
+  disconnecting in **Settings → Connected apps** or `POST /oauth/revoke` (by
+  the same client) stops it on the next call. Connection grants are never
+  reused as the copyable Settings credential, survive **Regenerate**, and
+  disconnecting one never turns off the copyable credential. Tokens never
+  enter audit events (`oauth_connection_approved` / `_denied` / `_granted`
+  record only app, owner hash, grant id and scope).
+
+The copyable bearer credential in Settings keeps working unchanged for clients
+that cannot sign in (header-based connectors, `claude_desktop_config.json` via
+`mcp-remote`, Cursor).
 
 ## Grant-scope versioning (how old grants keep working)
 

@@ -11,7 +11,27 @@
   "authentication": {
     "type": "bearer",
     "setupUrl": "https://www.unlinked.ai/settings",
-    "provisioning": "Prepared automatically at the setup URL; owner can revoke or regenerate there. Repeated provisioning never mints duplicate grants."
+    "provisioning": "Prepared automatically at the setup URL; owner can revoke or regenerate there. Repeated provisioning never mints duplicate grants.",
+    "oauth": {
+      "protectedResourceMetadata": "https://www.unlinked.ai/.well-known/oauth-protected-resource/mcp",
+      "authorizationServerMetadata": "https://www.unlinked.ai/.well-known/oauth-authorization-server",
+      "grantTypes": [
+        "authorization_code"
+      ],
+      "pkce": "S256",
+      "tokenEndpointAuthMethods": [
+        "none"
+      ],
+      "clientRegistration": [
+        "client_id_metadata_document",
+        "dynamic_client_registration"
+      ],
+      "scopes": [
+        "network",
+        "people"
+      ],
+      "revocation": "Settings → Connected apps, or RFC 7009 at /oauth/revoke"
+    }
   },
   "tools": [
     {
