@@ -20,6 +20,8 @@ import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, re
 import { companyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
+import { renderScan, fillMeHeadline, TOP_BAR_SCRIPT, SCAN_TABS_SCRIPT } from './private-onboarding-views.mjs'
+import { MEET_SCRIPT } from './public-discovery.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -127,15 +129,22 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
   const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never changes identity authority. */ } }
+  // The signed-in reader of each in-flight response, so every page's Me menu can
+  // show the headline once this session has read the member's profile.
+  const readers = new WeakMap()
   const journey = (response, view, job = null, script = '', status = 200) => {
     const nonce = token()
     // manifest-src/worker-src cover exactly the same-origin PWA manifest and the
-    // static-only service worker; everything else stays locked to 'none'.
-    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
+    // static-only service worker; everything else stays locked to 'none'. The
+    // scan sheet (view.camera) adds exactly what /meet's camera scanner needs.
+    const camera = view.camera === true
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}'; connect-src 'self'; img-src 'self'${camera ? ' blob:; media-src \'self\' blob:' : ''}; manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
+    if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=()')
+    script = `${TOP_BAR_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${view.content}<script nonce="${nonce}">${script}</script></html>`)
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}</html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   async function establishSession(response, identity, invitationToken = null, next = null) {
@@ -187,7 +196,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
       const viewer = sessionFor(request)
-      const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf } : {}
+      if (viewer) readers.set(response, viewer)
+      const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline } : {}
       if (await servePublicDiscovery(request, response, url.pathname, chrome)) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
@@ -337,6 +347,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (!session) {
         if (request.method === 'GET' && url.pathname === '/') journey(response, renderLanding())
         else if (request.method === 'GET' && url.pathname === '/join') journey(response, renderJoin())
+        else if (request.method === 'GET' && url.pathname === '/scan') journey(response, renderScan({ tab: url.searchParams.get('tab') }))
         else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(url.pathname) }), null, '', 401)
         else render(response, 'Sign in required', '<a class="action" href="/login">Sign in</a>', 401)
         return
@@ -486,6 +497,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           const legacy = await backend.readLegacyProfile()
           if (legacy) Object.assign(profile, legacy.profile)
         }
+        session.headline = profile.headline
         const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
@@ -499,7 +511,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         await warming
         journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
-      if (signup && request.method === 'GET' && url.pathname === '/card') {
+      if (signup && request.method === 'GET' && (url.pathname === '/card' || url.pathname === '/scan')) {
         const jobs = await jobResources(), props = jobProps(jobs)
         const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs: profileJobs(jobs), backend }))
         let legacy = null
@@ -526,7 +538,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             catch { break /* The card still renders while the index is unavailable. */ }
           }
         }
-        journey(response, renderCard({ ...props, profile, cardUrl, qr: cardUrl ? qrSvg(cardUrl, { label: `QR code opening ${cardUrl}` }) : null }), props.importJob); return
+        session.headline = profile.headline
+        const card = { ...props, profile, cardUrl, qr: cardUrl ? qrSvg(cardUrl, { label: `QR code opening ${cardUrl}` }) : null }
+        journey(response, url.pathname === '/scan' ? renderScan({ ...card, tab: url.searchParams.get('tab') }) : renderCard(card), props.importJob); return
       }
       // Off-platform people: add someone to your own people, or invite them.
       if (signup && request.method === 'GET' && url.pathname === '/people/add') {
