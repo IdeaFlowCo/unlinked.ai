@@ -41,6 +41,15 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       const current = await backend.readLegacyProfile()
       if (!current || current.receiptId !== legacy.receiptId || current.revision !== legacy.revision) throw Error('legacy_network_changed')
     }
+    // Accepted invites connect two accounts; the row names the other person and,
+    // when they have one, their public profile.
+    if (typeof backend.readInviteConnections === 'function') {
+      for (const value of await backend.readInviteConnections()) {
+        if (assertions.length >= observationLimit) throw Error('account_observation_limit')
+        assertions.push({ id: privateId(owner.ownerId, 'invite-connection', value.invitationId), ownerId: owner.ownerId, importId: networkId, sourceId: 'unlinked-invites', rowId: `invite:${value.invitationId}`, category: 'connections',
+          fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-invite', invitationId: value.invitationId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
+      }
+    }
     if(typeof backend.readLegacyObservations==='function'){
       const recovered=await backend.readLegacyObservations({signal,limit:observationLimit-assertions.length})
       if(recovered){assertions.push(...recovered.assertions);indexed+=recovered.assertions.length}

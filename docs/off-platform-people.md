@@ -5,13 +5,16 @@ signed-in runtime (`mcp-server/private-browser.mjs`); neither publishes anything
 
 ## Add a person (`GET`/`POST /people/add`)
 
-- Fields: first name, last name and LinkedIn profile address (required), company
+- Fields: first name (required); last name, LinkedIn profile address, company
   and role (optional). Each text field is at most 120 characters, without control
-  characters. The address must be a LinkedIn `/in/` profile; it is canonicalized
-  by the import parser's own `linkedinUrl()` (a bare `linkedin.com/in/x` is
-  accepted and becomes `https://www.linkedin.com/in/x`).
-- The person is staged as the one-row `Connections.csv` a LinkedIn export would
-  contain, through `stageArchive` with **private consent**
+  characters. A given address must be a LinkedIn `/in/` profile; it is
+  canonicalized by the import parser's own `linkedinUrl()` (a bare
+  `linkedin.com/in/x` becomes `https://www.linkedin.com/in/x`).
+- The person is staged as a one-row `Added people.csv` in the shape of LinkedIn's
+  export. The parser accepts that file with only a first name; a row without an
+  address gets the private subject `unlinked:added-person:<sha256 of the typed
+  fields>`. LinkedIn's own `Connections.csv` still requires the address. Staging
+  goes through `stageArchive` with **private consent**
   (`COMBINED_UPLOAD_CONSENT`). Member public projection only takes
   public-consent imports, so an added person is never published, whatever the
   site's upload default is.
@@ -22,9 +25,7 @@ signed-in runtime (`mcp-server/private-browser.mjs`); neither publishes anything
   after the background import (`/network?added=1` says so), your agent can
   search it, and account export and deletion cover it. Adding the same row twice
   replays the same import.
-- Not yet: removing a single added person (account deletion removes all of
-  them), and adding someone without a LinkedIn address (the import format needs
-  one; see the open questions).
+- Not yet: removing a single added person (account deletion removes all of them).
 
 ## Invites (`/invites`, `/invites/revoke`, `/i/<token>`)
 
@@ -36,10 +37,12 @@ store.
 - **Create** (`POST /invites`, signed in, CSRF): the member types the invitee's
   name. The server mints 32 random bytes as a 43-character base64url token and
   stores only its SHA-256, the inviter's owner id and display name, the invitee
-  name, `status: pending` and an expiry 14 days out. The link
+  name and `status: pending`. Links do not expire (Jacob, 2026-10-02). The link
   `<origin>/i/<token>` is shown once, with an optional `mailto:` draft. Unlinked
   never sends anything.
-- **Limits:** 50 created per inviter per rolling day, 100 pending at once.
+- **No caps.** Every 50th invite an account creates within a day writes a
+  `member_invites_heavy_use` event (owner hash and count) to the runtime audit
+  log, so heavy use is visible without blocking anyone.
 - **Open** (`GET /i/<token>`, signed in or not): shows "<inviter> invited <name>
   to Unlinked" and nothing else about either account. The response sets
   `Referrer-Policy: no-referrer` and is rate limited (60 per minute). Unknown
@@ -49,18 +52,18 @@ store.
   compare-and-set from `pending`, so a token works once. The inviter cannot
   answer their own invite. Signing in from the link returns to it before the
   old-account and find-me steps, and the page then continues to them.
-- **What accepting does:** it records which account accepted and when, and the
-  inviter sees "Accepted". It does **not** link the invitee to any profile, shadow
-  or added person, and the inviter's private notes never transfer. Identity still
-  binds only through the existing old-account or find-me confirmation.
+- **What accepting does:** it connects the two accounts (Jacob, 2026-10-02). Each
+  sees the other in People you know (an `unlinked-invite` row that links to the
+  other's public profile when they have one), and when both have a public
+  profile (a confirmed legacy profile, else their newest public-consent import)
+  the shared public graph carries an edge between them. The inviter sees
+  "Accepted" with the name the invitee signed in with. Accepting never claims a
+  profile, and the inviter's private notes never transfer.
 - **Revoke** (`POST /invites/revoke`): only the inviter, only while pending.
-- **Account deletion** removes every invite the account created.
+- **Account deletion** removes every invite the account created and revokes the
+  invites it accepted, which ends those connections.
 
-## Open questions for Jacob
+## Decided by Jacob, 2026-10-02
 
-1. Should accepting an invite also connect inviter and invitee (an edge both
-   can see), or link the inviter's added person to the new member? v1 records
-   acceptance only.
-2. Should a person be addable without a LinkedIn address? That needs a manual
-   person record outside the LinkedIn import format.
-3. Is 14 days the right expiry, and are 50 a day / 100 pending the right limits?
+Accepting connects both people; a name alone is enough to add someone; links do
+not expire and there are no caps, with heavy use logged.

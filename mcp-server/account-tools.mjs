@@ -163,9 +163,13 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     async unlinked_get_profile(grant, { id, connectionsCursor }, signal) {
       const { reader, captured } = publicReader(50)
       let result
-      try { result = await reader.profile({ id, cursor: connectionsCursor, signal }) } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured) }
-      if (!result) throw new AccountToolError('not_found', 'No published public profile has that id.')
-      return { kind: 'unlinked_get_profile', revision: captured.revision, profile: result.profile, visibility: 'public' }
+      try {
+        result = await reader.profile({ id, cursor: connectionsCursor, signal })
+        // A merged profile answers with the profile it was merged into.
+        if (result?.moved) result = { ...(await reader.profile({ id: result.moved, signal })), movedFrom: id }
+      } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured) }
+      if (!result?.profile) throw new AccountToolError('not_found', 'No published public profile has that id.')
+      return { kind: 'unlinked_get_profile', revision: captured.revision, profile: result.profile, ...(result.movedFrom ? { movedFrom: result.movedFrom } : {}), visibility: 'public' }
     },
     async unlinked_list_connections(grant, { degree = 1, q = '', cursor, limit = 50 }, signal) {
       const owner = { ownerId: grant.ownerId, userId: grant.userId }
