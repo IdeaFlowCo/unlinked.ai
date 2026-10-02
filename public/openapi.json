@@ -99,6 +99,60 @@
           }
         }
       }
+    },
+    "/api/my-connections": {
+      "get": {
+        "summary": "Read recorded directed1/2-hop public paths from the signed member\u2019s explicitly confirmed legacy profile",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "degree",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                1,
+                2
+              ],
+              "default": 1
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-anchored bounded profiles/paths,total,nextCursor,source revision"
+          },
+          "401": {
+            "description": "Sign-in required"
+          },
+          "409": {
+            "description": "No verified legacy graph anchor"
+          },
+          "503": {
+            "description": "Graph unavailable or changed"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -106,6 +160,11 @@
       "accountGrant": {
         "type": "http",
         "scheme": "bearer"
+      },
+      "browserSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-ul-session"
       }
     }
   }

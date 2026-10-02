@@ -39,6 +39,15 @@ export function createKnownConnectionsReader({ owner, getBackend, readPublishedS
     }
     const selected=matches.slice(offset,offset+100), current=await backend.readLegacyProfile(), finalSnapshot=await readPublishedSnapshot({signal})
     if(!current || current.receiptId!==anchor.receiptId || current.profileId!==anchor.profileId || current.revision!==anchor.revision || finalSnapshot?.revision!==snapshot.revision || finalSnapshot?.state!=='published' || finalSnapshot?.complete!==true) throw Error('known_connections_changed')
+    signal?.throwIfAborted()
     return {scope:'owner_connections',degree,revision:snapshot.revision,sourceRevision:anchor.revision,anchorId:anchor.profileId,total:matches.length,profiles:selected.map(summary),paths:selected.map(profile=>paths.get(profile.id)),...(offset+selected.length<matches.length?{nextCursor:Buffer.from(JSON.stringify({binding,offset:offset+selected.length})).toString('base64url')}:{})}
   }
+}
+
+export function knownConnectionQuery(query, degree) {
+  if (typeof query !== 'string' || query.length > 1024) throw Error('known_connections_input_invalid')
+  const second = /\b(?:second[- ]degree|2nd[- ]degree|two[- ]hop)\b/i.test(query)
+  if (degree === undefined && !second) return { query }
+  if (degree !== undefined && ![1,2].includes(degree)) throw Error('known_connections_input_invalid')
+  return { degree: degree ?? 2, query: query.replace(/\b(?:second[- ]degree|2nd[- ]degree|two[- ]hop|first[- ]degree|my|connections?|show|find|me|people|who|are)\b/gi, '').trim().replace(/\s+/g,' ') }
 }

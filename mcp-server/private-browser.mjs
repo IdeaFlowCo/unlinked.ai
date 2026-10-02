@@ -1,3 +1,4 @@
+import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { isPublicDiscoveryPath, servePublicDiscovery } from './public-discovery.mjs'
@@ -252,6 +253,17 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         } else if (input.get('action') !== 'skip') throw new Error('legacy_confirmation_required')
         session.legacyCandidate = null
         redirect(response, '/profile'); return
+      }
+      if (request.method === 'GET' && url.pathname === '/api/my-connections') {
+        try {
+          if ([...url.searchParams.keys()].some(key => !['degree','q','cursor'].includes(key)) || ['degree','q','cursor'].some(key => url.searchParams.getAll(key).length > 1)) throw Error('known_connections_input_invalid')
+          const result = await createKnownConnectionsReader({ owner: session.owner, getBackend, readPublishedSnapshot })({ degree: Number(url.searchParams.get('degree') ?? '1'), query: url.searchParams.get('q') ?? '', cursor: url.searchParams.get('cursor') ?? undefined, signal: AbortSignal.timeout(30000) })
+          response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
+        } catch (error) {
+          const status = /input_invalid|cursor_invalid/.test(error.message) ? 400 : error.message === 'known_connections_anchor_unavailable' ? 409 : 503
+          response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: status === 400 ? 'known_connections_input_invalid' : status === 409 ? 'known_connections_anchor_unavailable' : 'known_connections_unavailable' }))
+        }
+        return
       }
       const accountNav = `<nav><a href="/">Import</a> · <a href="/network">My network</a> · <a href="/settings">Agent setup & settings</a></nav><small>Signed in as ${html(session.accountLabel)}</small><form method="post" action="/logout"><input type="hidden" name="csrf" value="${html(session.csrf)}"><button>Sign out</button></form>`
       const backend = await getBackend(session.owner)
