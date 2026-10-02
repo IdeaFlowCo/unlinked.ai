@@ -30,6 +30,9 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
     readAsset: async (grant, sha256) => (await getBackend(grant)).readAsset(sha256),
   })
   if (!Array.isArray(provisionAgentClients) || provisionAgentClients.length > 16) throw new Error('account_agent_provisioning_configuration_required')
+  // A configured allow list on a runtime without account grants is operator
+  // error; refuse loudly at startup instead of silently answering 404.
+  if (provisionAgentClients.length && !accountGrants) throw new Error('account_agent_provisioning_configuration_required')
   // Server-to-server grant provisioning stays off unless the operator supplied
   // a non-empty allow list (see docs/agent-api.md, "Grant provisioning").
   const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit } : undefined

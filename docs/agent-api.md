@@ -247,7 +247,8 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
   `not_found` (404, endpoint disabled on this runtime).
 - **Audit:** every issuance/reuse appends `account_grant_provisioned` /
   `account_grant_reused` with client id, owner hash and grant id — never the
-  token.
+  token. Provisioning **fails closed** if the audit sink is unavailable
+  (`upstream_unavailable`; no credential is returned unaudited).
 - **Consumer guidance:** store the token mode-600 server-side keyed by
   `ownerId`; re-calling the endpoint is cheap and idempotent (same `grantId`,
   re-derived token), so prefer re-provisioning over long-lived caches when in
