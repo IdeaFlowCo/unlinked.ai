@@ -155,5 +155,28 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const connections = page(data.ordered.filter(person => data.connected.get(id).has(person.id)), decodedCursor, scope, data.revision)
       return { profile: { ...data.details.get(id), connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
+    // Everyone whose public profile ties them to a company, by the company name
+    // as it appears on profiles: a position at it, or a headline naming it.
+    async company(request = {}) {
+      const { name, cursor, signal } = requestValue(request)
+      if (typeof name !== 'string' || !name.trim() || name.length > 200) invalid()
+      const phrase = words(name)
+      if (!phrase.length || phrase.length > 12) invalid()
+      const contains = tokens => {
+        outer: for (let start = 0; start + phrase.length <= tokens.length; start++) {
+          for (let offset = 0; offset < phrase.length; offset++) if (tokens[start + offset] !== phrase[offset]) continue outer
+          return true
+        }
+        return false
+      }
+      const scope = `company:${phrase.join(' ')}`, decodedCursor = cursorValue(cursor, scope)
+      const data = await snapshot(signal)
+      const rows = data.ordered.filter(person => {
+        const detail = data.details.get(person.id)
+        return detail.positions.some(position => contains(words(position.company))) || contains(words(person.headline ?? ''))
+      })
+      const people = page(rows, decodedCursor, scope, data.revision)
+      return { name: name.trim(), total: rows.length, people: people.profiles, ...(people.nextCursor ? { nextCursor: people.nextCursor } : {}) }
+    },
   }
 }

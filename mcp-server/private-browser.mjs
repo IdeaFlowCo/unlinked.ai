@@ -15,7 +15,8 @@ import { LIMITS } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus } from '../src/utils/private-import/background-job.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderPerson, renderPeople, renderCompany, renderSettings, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { companyFacts } from './company-metadata.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
@@ -154,13 +155,25 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (await servePublicDiscovery(request, response, url.pathname, chrome)) return
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
       const publicProfile = url.pathname.match(/^\/people\/([^/]+)$/)
+      const publicCompanyApi = url.pathname.match(/^\/api\/companies\/([^/]+)$/)
+      const publicCompany = url.pathname.match(/^\/companies\/([^/]+)$/)
       if (request.method === 'GET' && url.pathname === '/people' && viewer) { redirect(response, `/network${url.search}`); return }
-      if (request.method === 'GET' && (url.pathname === '/api/people' || publicDetail || publicProfile || url.pathname === '/people' || (url.pathname === '/network' && !viewer))) {
+      if (request.method === 'GET' && (url.pathname === '/api/people' || publicDetail || publicProfile || publicCompanyApi || publicCompany || url.pathname === '/people' || (url.pathname === '/network' && !viewer))) {
         if (Date.now() - publicWindow >= 60000) { publicWindow = Date.now(); publicRequests = 0 }
         if (++publicRequests > 120 || publicBusy >= 2) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         publicBusy++
         try {
           if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          if (publicCompanyApi || publicCompany) {
+            let name
+            try { name = decodeURIComponent((publicCompanyApi ?? publicCompany)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
+            const result = await publicReader.company({ name, cursor: url.searchParams.get('cursor') ?? undefined })
+            const facts = companyFacts(name)
+            // A name nobody lists and we know nothing about is not a page.
+            if (!result.total && !facts) { response.writeHead(404).end(); return }
+            if (publicCompanyApi) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ company: { ...result, ...(facts ? { facts } : {}) } })); return }
+            journey(response, renderCompany({ ...chrome, ...result, name, facts })); return
+          }
           if (publicDetail || publicProfile) {
             let id
             try { id = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
