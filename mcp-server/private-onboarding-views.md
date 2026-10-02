@@ -118,8 +118,11 @@ Route destinations and post-upload profile navigation are wired by the default-o
 
 `renderOwnProfile` also accepts optional `linkedinLookup: {action: '/find-me'}` and
 `lookupResult: {status: 'none' | 'found', profileName, headline, listedBy, claimAction}`.
-These controls remain unwired until the runtime supplies the routes and props; no
-lookup or claim UI appears when both props are absent. A valid lookup action adds
+The private browser wires these through `GET/POST /find-me` and `POST /claim-me`
+when a `selfClaims` capability is composed in: new accounts are offered the
+`renderFindMe` step right after signup, and `renderOwnProfile` shows the lookup
+form while a session has no profile of its own. No lookup or claim UI appears
+when both props are absent. A valid lookup action adds
 a separate optional form below the profile panel, posting `csrf` and one
 `linkedinUrl` field. A `found` result with a valid claim action adds the “Is this
 you?” card, escaped name/headline, integer member count, and a separate native
@@ -129,7 +132,14 @@ URLs, backslashes, whitespace/control characters and fragments are rejected, and
 valid actions are HTML escaped. No extra JavaScript or auto-claim behavior is added.
 The runtime must authorize the lookup result and validate CSRF/confirmation and
 ownership before any claim. A supplied LinkedIn address is a lookup hint, never
-proof of ownership or a LinkedIn import. No runtime/auth/job handlers change here.
+proof of ownership or a LinkedIn import: a confirmed claim writes a
+self-asserted `UnlinkedLegacyAccount` row (evidence
+`self-asserted-linkedin-url-v1` or `self-asserted-display-name-v1`, the latter
+matched from the identity provider's display name, never a typed field, and only
+when it matches exactly one profile). Claims apply only to profiles with no
+existing account row — first claim wins, one claim per account, both
+database-enforced — and operators revoke with
+`legacy-account-operator.mjs revoke <profileId> <receiptId>`.
 
 Generate fictional, static preview pages with
 `node mcp-server/private-onboarding-preview.mjs /tmp/unlinked-ui-previews`.
