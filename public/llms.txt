@@ -7,7 +7,7 @@ If signed Ideaflow email evidence matches a recovered legacy account, the browse
 A full ZIP is preferred; Connections-only ZIP or CSV is supported up to 64 MiB.
 Import processing continues server-side after navigation. Profile and People show real progress.
 Everyone People browsing reads only the published professional index and does not require sign-in or an import.
-Own-network AI search reads only the signed-in owner's published imports; Everyone AI ranks bounded matching candidates from the public index.
+Own-network AI search reads only the signed-in owner's published imports plus same-owner sanitized recovered Connections observations; Everyone AI ranks bounded matching candidates from the public index.
 Settings creates a revocable account-scoped MCP grant; keep its bearer credential private.
 Contact emails, phone numbers and original archive bytes are excluded from agent search.
 
@@ -23,7 +23,7 @@ Contact emails, phone numbers and original archive bytes are excluded from agent
 
 ## Current authenticated MCP
 Streamable HTTP endpoint: https://www.unlinked.ai/mcp.
-Tools: unlinked_search_network(query, degree?=1|2, cursor?) and unlinked_search_everyone(query). Old single-tool grants retain their original scope. Its durable account grant covers current and future owner imports until revoked in Settings.
+Tools: unlinked_search_network(query, degree?=1|2, cursor?) and unlinked_search_everyone(query). Old single-tool grants retain their original scope. Its durable account grant covers current/future owner imports, same-owner sanitized recovered Connections observations and the published professional index until revoked in Settings.
 Grant tokens are distinct from Ideaflow tokens and Noos operational credentials.
 Legacy Supabase routes and stdio tools are historical source references, not live bootstrap instructions.
 
