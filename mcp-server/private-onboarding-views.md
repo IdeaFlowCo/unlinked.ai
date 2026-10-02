@@ -51,12 +51,18 @@ public guides in the same shell; Meet keeps the element ids its scanner script b
 The People contract is: `everyone: [{id, name, headline?, company?, location?}]`, optional `own`
 containing the existing own-contact DTOs (including reason), optional string `nextCursor`, and
 `state: 'ready' | 'unavailable'` plus existing welcome/error. With a query the title becomes
-“Results for …” with a Clear search link. Defined `own` renders People you know before Everyone
+“Results for …” with Best match / Exact words links (`mode`, default `best`) and a Clear search link;
+`mode: 'exact'` adds a hidden `mode` field to the header search and to Show more, and `match: 'some'`
+shows a line saying nobody has every word. Defined `own` renders People you know before Everyone
 on Unlinked. AI ranking is not a second search box: when a signed-in member has a query, the
 results show a small POST `/search-account` form carrying `csrf` and the hidden `query`, with one
 submit button per available scope (`everyone` when public search is on, `own` when `own` is
 defined). Defined empty `own` with a query is a no-match result; without a query it shows the
 import prompt, which links to `/import`.
+`anonymousAi: true` with a query and no session shows one Ask AI button posting the hidden `query`
+to `/ask`. `aiMatches` renders an AI picks group above the lists, each row with its escaped `reason`,
+followed by `aiNote` and a sentence saying what OpenAI received; `aiError` replaces the picks with an alert.
+Plain list rows never show a reason.
 
 For the current controller, legacy `contacts` and `searchResults` remain supported.
 When `own` is undefined and either legacy prop is supplied, own rows come from

@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
-const normalize = value => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}+#]+/gu, ' ').trim()
-const stop = new Set(['a','an','the','is','are','who','what','where','does','do','can','find','me','people','someone','with','on','at','for','of','in','and','or','to'])
+import { createQueryMatcher, rankMatches, words } from './text-match.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
 
 // Retrieval evaluates every public profile; model ranking receives the bounded
@@ -13,16 +12,12 @@ export function createSharedPeopleSearch({ readPublishedSnapshot, complete }) {
     signal?.throwIfAborted()
     const data = await readPublishedSnapshot({ signal })
     if (!data || data.state !== 'published' || data.complete !== true || typeof data.revision !== 'string' || !Array.isArray(data.profiles) || data.profiles.length > 20000) throw new Error('shared_people_unavailable')
-    const terms = [...new Set(normalize(query).split(' ').filter(word => word && !stop.has(word)))].slice(0, 32)
-    const eligible = []
-    for (const profile of data.profiles) {
-      const professional = [profile.name, profile.headline, profile.company, profile.about, ...(profile.positions ?? []).flatMap(value => [value.title, value.company, value.description]), ...(profile.education ?? []).flatMap(value => [value.institution, value.degree]), ...(profile.skills ?? [])].filter(value => typeof value === 'string')
-      const full = normalize(professional.join(' ')), name = normalize(profile.name)
-      const score = terms.reduce((sum, term) => sum + (full.includes(term) ? 1 : 0) + (name.includes(term) ? 2 : 0), 0)
-      if (score) eligible.push({ profile, score })
-    }
-    eligible.sort((a, b) => b.score - a.score || (a.profile.id < b.profile.id ? -1 : a.profile.id > b.profile.id ? 1 : 0))
-    const shortlisted = eligible.slice(0, 200), ids = new Map(), observations = shortlisted.map(({ profile }) => {
+    const matcher = createQueryMatcher(query, 'best')
+    // Word forms count (“investors” reaches “investor”). Profiles with every word lead the
+    // shortlist; the rest follow with rarer words first, so each part of the query is represented.
+    const professional = profile => [profile.name, profile.headline, profile.company, profile.about, ...(profile.positions ?? []).flatMap(value => [value.title, value.company, value.description]), ...(profile.education ?? []).flatMap(value => [value.institution, value.degree]), ...(profile.skills ?? [])].filter(value => typeof value === 'string')
+    const ranked = matcher ? rankMatches(data.profiles, matcher, profile => ({ text: words(professional(profile).join(' ')), name: words(profile.name) }), { keepPartial: true, tie: (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0 }) : { rows: [], matched: 0 }
+    const shortlisted = ranked.rows.slice(0, 200), ids = new Map(), observations = shortlisted.map(profile => {
       const id = hash(`unlinked-public-profile:${profile.id}`); ids.set(id, profile)
       const fields = { name: profile.name.slice(0, 256), headline: (profile.headline ?? '').slice(0, 256), company: (profile.company ?? '').slice(0, 256), roles: (profile.positions ?? []).slice(0, 5).map(value => `${value.title} at ${value.company}`).join('; ').slice(0, 512), skills: (profile.skills ?? []).join(', ').slice(0, 512) }
       return { id, fields }
@@ -43,6 +38,6 @@ export function createSharedPeopleSearch({ readPublishedSnapshot, complete }) {
     // A cached candidate set/model response never bypasses a revoked publication.
     const current = await readPublishedSnapshot({ signal })
     if (!current || current.state !== 'published' || current.complete !== true || current.revision !== data.revision) throw new Error('shared_people_changed')
-    return { scope: 'everyone', mode: 'public_index_retrieval_ai_rank', revision: data.revision, considered: data.profiles.length, lexicalMatches: eligible.length, modelCandidates: observations.length, matches }
+    return { scope: 'everyone', mode: 'public_index_retrieval_ai_rank', revision: data.revision, considered: data.profiles.length, lexicalMatches: ranked.matched, modelCandidates: observations.length, matches }
   }
 }

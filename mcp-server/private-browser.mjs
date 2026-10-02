@@ -1,6 +1,7 @@
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
+import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from '../src/utils/public-people/text-match.mjs'
 import { isPublicDiscoveryPath, servePublicDiscovery } from './public-discovery.mjs'
 import { COMBINED_UPLOAD_CONSENT, PUBLIC_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { createHash, randomBytes } from 'node:crypto'
@@ -87,6 +88,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
   let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
+  // Visitors can ask the AI about the public list. Each ask is a paid model call, so it is
+  // bounded per minute, per day and in flight, for the whole site rather than per visitor.
+  const ASK_PER_MINUTE = 12, ASK_PER_DAY = 1500, ASK_IN_FLIGHT = 2
+  let askMinute = Date.now(), askMinuteCount = 0, askDay = Math.floor(Date.now() / 86400000), askDayCount = 0, askBusy = 0
+  const publicAi = typeof complete === 'function' && typeof readPublishedSnapshot === 'function'
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
@@ -153,7 +159,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (++publicRequests > 120 || publicBusy >= 2) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         publicBusy++
         try {
-          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
           if (publicDetail || publicProfile) {
             let id
             try { id = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
@@ -162,14 +168,41 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
             journey(response, renderPerson({ ...chrome, profile: result.profile })); return
           }
-          const query = url.searchParams.get('q') ?? '', result = await publicReader.list({ query, cursor: url.searchParams.get('cursor') ?? undefined })
+          const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', result = await publicReader.list({ query, mode, cursor: url.searchParams.get('cursor') ?? undefined })
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
-          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, query, nextCursor: result.nextCursor, state: 'ready' })
+          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
           response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' })); return
         } finally { publicBusy-- }
+      }
+      if (request.method === 'POST' && url.pathname === '/ask' && !viewer) {
+        if (!publicAi) { response.writeHead(404).end(); return }
+        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        const query = input.get('query') ?? ''
+        if (input.getAll('query').length !== 1 || !query.trim() || query.length > 200 || [...input.keys()].some(key => key !== 'query')) throw new Error('public_ask_input_invalid')
+        // The ordinary list for the same words stays on the page beside the AI picks.
+        let listed = {}
+        try { const result = await publicReader.list({ query }); listed = { everyone: result.profiles, match: result.match, nextCursor: result.nextCursor } } catch { /* The AI picks stand alone when the list cannot be read. */ }
+        const page = extra => renderPeople({ query, state: 'ready', anonymousAi: true, ...listed, ...extra })
+        const now = Date.now(), day = Math.floor(now / 86400000)
+        if (now - askMinute >= 60000) { askMinute = now; askMinuteCount = 0 }
+        if (day !== askDay) { askDay = day; askDayCount = 0 }
+        if (askMinuteCount >= ASK_PER_MINUTE || askDayCount >= ASK_PER_DAY || askBusy >= ASK_IN_FLIGHT) {
+          response.setHeader('Retry-After', '60')
+          journey(response, page({ aiError: 'AI search is busy right now. Try again in a minute; the regular results are below.' }), null, '', 429); return
+        }
+        askMinuteCount++; askDayCount++; askBusy++
+        try {
+          const controller = new AbortController()
+          response.once('close', () => { if (!response.writableFinished) controller.abort() })
+          const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
+          journey(response, page({ aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }))
+        } catch {
+          journey(response, page({ aiError: 'AI search could not finish. Try again; the regular results are below.' }), null, '', 503)
+        } finally { askBusy-- }
+        return
       }
       const inviteMatch = url.pathname.match(/^\/invite\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && inviteMatch && invitationMode) {
@@ -346,21 +379,26 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const connections = network.assertions.filter(row => row.category === 'connections')
         const typed = (url.searchParams.get('q') ?? '').trim(), filter = typed.toLowerCase()
         if (filter.length > 256) throw new Error('network_filter_limit')
-        const rows = connections.filter(row => !filter || [row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].some(value => value?.toLowerCase().includes(filter)))
+        const mode = url.searchParams.get('mode') ?? 'best'
+        if (!SEARCH_MODES.includes(mode) || url.searchParams.getAll('mode').length > 1) throw new Error('network_search_mode_invalid')
+        // The same matching as the public list: every word in any form, else the closest people.
+        const matcher = typed ? createQueryMatcher(typed, mode) : null
+        const ownMatches = matcher ? rankMatches(connections, matcher, row => ({ name: words([row.fields['first name'], row.fields['last name']].filter(Boolean).join(' ')), text: words([row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].filter(Boolean).join(' ')) })) : { rows: connections, match: 'none' }
+        const rows = ownMatches.rows
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
         const props = jobProps(await jobResources()), contacts = rows.slice(index * 100, (index + 1) * 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url }))
         const publicProfessionalSearch = typeof readPublishedSnapshot === 'function'
-        let everyone, nextCursor, state = 'ready'
+        let everyone, nextCursor, state = 'ready', match = ownMatches.match
         if (publicProfessionalSearch) {
           everyone = []
-          try { const result = await publicReader.list({ query: filter, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor }
+          try { const result = await publicReader.list({ query: filter, mode, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
           catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed })
-        if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a></p>`)
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, match })
+        if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}">Next contacts</a></p>`)
         journey(response, view, props.importJob)
         return
       }
@@ -392,8 +430,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
             const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
             const own = network.imports.length || network.legacyProfileId ? network.assertions.filter(row => row.category === 'connections').slice(0, 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })) : undefined
-            const view = renderPeople({ ...props, scope, everyone: result.matches, own, query: input.get('query'), state: 'ready', searchResults: result.matches })
-            extend(view, `<p class="dir small">${result.considered} public profiles considered; ${result.modelCandidates} matching candidates ranked with AI.</p>`)
+            const view = renderPeople({ ...props, scope, aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.`, own, query: input.get('query'), state: 'ready' })
             journey(response, view, props.importJob); return
           }
           const result = await createAccountNetwork({ owner: session.owner, getBackend, complete }).search({ query: input.get('query'), signal: controller.signal })

@@ -13,7 +13,7 @@ Never derive owner authority from typed email, archive fields, profile IDs or a 
 The backend binds signed Ideaflow issuer/subject to the owner; recovered-profile confirmation uses only server-held signed email evidence plus CSRF and can be revoked.
 It enforces owner/publication/grant state on each call.
 Raw archives, recovered original files, contact emails and phone numbers are excluded. OpenAI receives bounded relevant professional details.
-Everyone browsing is public at GET /api/people?q=&cursor= and GET /api/people/:id.
+Everyone browsing is public at GET /api/people?q=&mode=&cursor= and GET /api/people/:id. The default mode `best` matches every word in any form and order ("investors" finds "investor"), and returns people who match some of the words when nobody has them all; the response's `match` is `all`, `some` or `none`. `mode=exact` matches the typed phrase as written.
 Everyone AI retrieval considers all public profiles, then ranks at most200 matching professional candidates. No archive is required.
 Old single-tool grants retain their original narrower scope.
 A downloaded/copied configuration is setup; a successful authenticated MCP call proves connection.

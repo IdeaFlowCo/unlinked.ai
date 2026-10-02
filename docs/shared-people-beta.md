@@ -1,7 +1,7 @@
 # Shared People beta
 
 Everyone browsing uses only the published professional Noos projection, never private owner resources or synthetic fallbacks.
-Anonymous GET `/network`, `/people`, `/people/:id`, `/api/people?q=&cursor=`, and `/api/people/:id` expose only safe profile DTOs and provenanced directed connection edges.
+Anonymous GET `/network`, `/people`, `/people/:id`, `/api/people?q=&mode=&cursor=`, and `/api/people/:id` expose only safe profile DTOs and provenanced directed connection edges.
 Public reads are bounded to two concurrent requests and 120 requests per process per 60 seconds; invalid input is 400, unavailable/incomplete publication is 503, and a missing profile in a complete publication is 404.
 
 The offline publisher accepts only the checksummed recovered DB backup (16,296 profiles and 16,603 directed edges), retains a private provenance manifest, and never creates an account binding.
@@ -34,3 +34,7 @@ A scalable paged public projection is a follow-up before larger shared unions ca
 
 Source proof uses HTTP anonymous/no-import sessions, exact-owner CSRF and MCP clients, private-field exclusion, tombstone/owner revocation, and the Noos51 real graph CI publication fence.
 Live migration/search readiness requires guarded app+Noos source rollout, the actual recovered backup publication/readback and real API/model/MCP receipts.
+
+List search reads name, headline, company, About, positions, education and skills, all of which are already public on the profile page. `mode=best` (default) needs every meaningful word in any common form and any order; if nobody has them all it returns the people who have some, with `match: "some"`. `mode=exact` is the typed phrase as written. Short words match whole words only; a name may be typed part-way. A cursor is bound to its query and mode. The same matcher ranks a member's own contacts on `/network` and builds the AI search shortlist, so profiles with every word reach the model first.
+
+A visitor can also ask the AI: results show an Ask AI button that POSTs the same words to `/ask` (no session, same-origin only). It ranks the public list exactly as the member Everyone search does and shows each pick with the model's reason, above the ordinary results. Because each ask is a paid model call, `/ask` is limited for the whole site to twelve a minute, 1,500 a day and two in flight; beyond that it answers 429 with the ordinary results still shown. Members keep the CSRF-protected `/search-account`.
