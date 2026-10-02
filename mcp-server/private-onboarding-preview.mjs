@@ -29,6 +29,11 @@ const contacts = [
   ['Lena Kimura', 'Director of Climate Programs', 'Lakeport'],
 ].map(([name, headline, company]) => ({ name, headline, company }))
 const imports = [{ id: 'fictional-import', filename: 'Complete_LinkedInDataExport_Fictional.zip', status: 'indexed', accepted: 1005, indexed: 1005, sha256: '0123456789abcdef'.repeat(4) }]
+const everyone = [
+  { id: '00000000-0000-4000-8000-000000000001', name: 'Maya Chen', headline: 'Climate partnerships lead', company: 'Harbor Energy', location: 'Portland, Oregon' },
+  { id: '00000000-0000-4000-8000-000000000002', name: 'Theo Brooks', headline: 'Founder', company: 'Cedar Labs', location: 'Denver, Colorado' },
+  { id: '00000000-0000-4000-8000-000000000003', name: 'Elena Ruiz', headline: 'Program designer', company: 'Community Solar Works' },
+]
 const agentConfiguration = {
   mcpServers: { unlinked: { command: 'unlinked-mcp-server', env: { UNLINKED_API_KEY: 'fictional_fixture_not_a_credential' } } },
 }
@@ -46,9 +51,13 @@ export async function buildPreviews(outDir) {
     ['importing-indexed', renderImporting({ ...account, importJob: indexed })],
     ['own-profile-importing', renderOwnProfile({ ...account, profile, contacts, imports, importJob: importing })],
     ['own-profile-lookup-found', renderOwnProfile({ ...account, profile, linkedinLookup: { action: '/find-me' }, lookupResult: { status: 'found', profileName: 'Sam Rivera', headline: 'Partnerships lead · climate and energy', listedBy: 3, claimAction: '/claim-me?match=fictional-sam' } })],
-    ['people-welcome', renderPeople({ ...account, state: 'welcome', contacts })],
-    ['people-empty', renderPeople({ ...account, query: 'climate', contacts: [], searchResults: [] })],
-    ['people-no-match', renderPeople({ ...account, query: 'ocean logistics', contacts, searchResults: [] })],
+    ['people-welcome', renderPeople({ ...account, state: 'welcome', own: contacts, everyone })],
+    ['people-empty', renderPeople({ ...account, own: [], everyone: [] })],
+    ['people-no-match', renderPeople({ ...account, query: 'ocean logistics', own: [], everyone: [] })],
+    ['everyone-default', renderPeople({ ...account, scope: 'everyone', everyone, nextCursor: 'fictional-page-2' })],
+    ['people-both-groups', renderPeople({ ...account, scope: 'own', own: contacts.map((contact, index) => ({ ...contact, ...(index === 0 ? { reason: 'Worked together on community energy.' } : {}) })), everyone })],
+    ['everyone-unavailable', renderPeople({ ...account, scope: 'everyone', everyone: [], state: 'unavailable' })],
+    ['everyone-no-match', renderPeople({ ...account, scope: 'everyone', everyone: [], query: 'ocean logistics' })],
     ['settings', renderSettings({ ...account, agentConfiguration, imports, grants: [{ id: 'fictional-grant' }] })],
   ]
   await mkdir(directory, { recursive: true })

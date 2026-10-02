@@ -9,9 +9,11 @@ body:has(.unlinked-onboarding)>main>a:first-child{display:none}
 .unlinked-onboarding header{order:0;display:flex;align-items:center;flex-wrap:wrap;gap:16px;padding-bottom:20px;border-bottom:1px solid var(--line)}
 .unlinked-onboarding .logo{text-decoration:none;letter-spacing:-.04em}
 .unlinked-onboarding header strong{font-size:21px;color:var(--brand)}
-.unlinked-onboarding .header-search{display:flex;align-items:center;gap:8px;flex:1;min-width:240px;max-width:380px;margin-right:auto}
-.unlinked-onboarding .header-search input{margin:0;min-width:0;border-radius:24px;font-size:14px}
+.unlinked-onboarding .header-search{display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1;min-width:240px;max-width:380px;margin-right:auto}
+.unlinked-onboarding .header-search input[type=search]{flex:1;width:auto;margin:0;min-width:0;border-radius:24px;font-size:14px}
 .unlinked-onboarding .header-search button{padding:10px 14px}
+.unlinked-onboarding .scope-controls{display:flex;flex-basis:100%;gap:8px}
+.unlinked-onboarding .scope-controls button{font-size:13px;padding:8px 12px}
 .unlinked-onboarding nav{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
 .unlinked-onboarding a{color:var(--brand);text-underline-offset:3px}
 .unlinked-onboarding nav a{text-decoration:none;font-size:14px;min-height:44px;display:inline-flex;align-items:center}
