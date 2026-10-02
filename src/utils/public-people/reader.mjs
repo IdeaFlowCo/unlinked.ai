@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 
 export class PublicPeopleReaderError extends Error {
   constructor(status, code) { super(code); this.name = 'PublicPeopleReaderError'; this.status = status; this.code = code }
@@ -68,7 +69,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       const optional = (output, key, input) => { const result = text(input); if (result !== undefined) output[key] = result }
       const array = (input, max) => { if (!Array.isArray(input) || input.length > max || !dense(input)) unavailable(); return input }
-      const summaries = new Map(), details = new Map(), search = new Map()
+      const summaries = new Map(), details = new Map(), tokens = new Map()
       for (const input of value.profiles) {
         if (!plain(input) || !idValid(input.id) || summaries.has(input.id)) unavailable()
         const summary = { id: input.id, name: text(input.name, true, true) }
@@ -90,7 +91,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         detail.skills = array(input.skills, 500).map(skill => text(skill, true))
         const company = text(input.company)
         summaries.set(input.id, summary); details.set(input.id, detail)
-        search.set(input.id, normalized([summary.name, summary.headline, company, ...detail.positions.map(position => position.company)].filter(Boolean).join(' ')))
+        // Everything searchable is already public on the profile page.
+        tokens.set(input.id, { name: words(summary.name), text: words([summary.name, summary.headline, company, detail.about, ...detail.positions.flatMap(position => [position.title, position.company, position.description]), ...detail.education.flatMap(school => [school.institution, school.degree]), ...detail.skills].filter(Boolean).join(' ')) })
       }
       const outgoing = new Map([...summaries.keys()].map(id => [id, new Set()]))
       for (const edge of value.connections) {
@@ -98,7 +100,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         outgoing.get(edge.fromId).add(edge.toId)
       }
       const ordered = [...summaries.values()].sort((a, b) => compare(normalized(a.name), normalized(b.name)) || compare(a.id, b.id))
-      return { revision: value.revision, ordered, summaries, details, outgoing, search }
+      return { revision: value.revision, ordered, summaries, details, outgoing, tokens }
     } catch {
       unavailable()
     } finally {
@@ -130,11 +132,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   }
   return {
     async list(request = {}) {
-      const { query = '', cursor, signal } = requestValue(request)
-      const normalizedQuery = queryValue(query), scope = `list:${normalizedQuery}`
+      const { query = '', cursor, signal, mode = 'best' } = requestValue(request)
+      if (!SEARCH_MODES.includes(mode)) invalid()
+      const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
+      const scope = matcher ? `list:${mode}:${normalizedQuery}` : 'list:'
       const decodedCursor = cursorValue(cursor, scope), data = await snapshot(signal)
-      const terms = normalizedQuery ? normalizedQuery.split(' ') : []
-      return page(data.ordered.filter(person => terms.every(term => data.search.get(person.id).includes(term))), decodedCursor, scope, data.revision)
+      if (!matcher) return page(data.ordered, decodedCursor, scope, data.revision)
+      // `match` says whether the rows have every word ('all') or only some of them.
+      const ranked = rankMatches(data.ordered, matcher, person => data.tokens.get(person.id))
+      return { ...page(ranked.rows, decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
     },
     async profile(request = {}) {
       const { id, cursor, signal } = requestValue(request)
