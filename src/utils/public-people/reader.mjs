@@ -42,10 +42,19 @@ const requestValue = value => {
 
 // The injected provider owns public projection and both-endpoint visibility.
 // No reader exists by default; private records and fixtures are never fallback sources.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000 } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer)))) throw new TypeError('public_people_configuration_invalid')
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000, reuseMs = 0 } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || !(reuseMs === 0 || bounded(reuseMs, 60000)) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer)))) throw new TypeError('public_people_configuration_invalid')
 
+  // A built index may serve later requests for a few seconds: one page view
+  // often reads the same snapshot more than once, and building it is slow.
+  let reused = null
   async function snapshot(signal) {
+    if (reuseMs && reused && Date.now() - reused.at < reuseMs) { signal?.throwIfAborted(); return reused.data }
+    const data = await build(signal)
+    if (reuseMs) reused = { at: Date.now(), data }
+    return data
+  }
+  async function build(signal) {
     if (!readPublishedSnapshot) unavailable()
     const controller = new AbortController()
     const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
@@ -102,6 +111,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         outgoing.get(edge.fromId).add(edge.toId)
         connected.get(edge.fromId).add(edge.toId); connected.get(edge.toId).add(edge.fromId)
       }
+      // A snapshot that names its members marks everyone else as a shadow
+      // (imported, not on Unlinked yet) and says how far each person reaches.
+      if (value.members !== undefined) {
+        const members = new Set(array(value.members, maxProfiles).map(id => { if (!summaries.has(id)) unavailable(); return id }))
+        for (const [id, summary] of summaries) {
+          const marks = { presence: members.has(id) ? 'member' : 'shadow', connectionCount: connected.get(id).size }
+          Object.assign(summary, marks); Object.assign(details.get(id), marks)
+        }
+      }
       const ordered = [...summaries.values()].sort((a, b) => compare(normalized(a.name), normalized(b.name)) || compare(a.id, b.id))
       return { revision: value.revision, ordered, summaries, details, connected, tokens }
     } catch {
@@ -154,6 +172,14 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       if (!data.details.has(id)) return null
       const connections = page(data.ordered.filter(person => data.connected.get(id).has(person.id)), decodedCursor, scope, data.revision)
       return { profile: { ...data.details.get(id), connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
+    },
+    // The public summaries for known IDs, so a private row can link to the
+    // matching public profile only when one is published.
+    async lookup(request = {}) {
+      const { ids, signal } = requestValue(request)
+      if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(idValid)) invalid()
+      const data = await snapshot(signal)
+      return new Map(ids.filter(id => data.summaries.has(id)).map(id => [id, data.summaries.get(id)]))
     },
     // Everyone whose public profile ties them to a company, by the company name
     // as it appears on profiles: a position at it, or a headline naming it.

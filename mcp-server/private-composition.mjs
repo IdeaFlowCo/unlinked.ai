@@ -150,6 +150,16 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     worker.start()
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend,
       readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
+      // A legacy profile is a member's once its account claim is confirmed and the owner is active.
+      readMembers: async () => {
+        const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+        try {
+          const result = await session.executeRead(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount) WHERE a.ownerId IS NOT NULL AND a.revoked = false
+            MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: a.ownerId, userId: a.userId}) WHERE coalesce(b.active, true) = true
+            RETURN DISTINCT a.profileId AS id ORDER BY id LIMIT 20001`))
+          return result.records.map(record => record.get('id'))
+        } finally { await session.close() }
+      },
       discover: async () => {
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
         try {

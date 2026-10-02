@@ -37,7 +37,7 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // is read again through the existing owner-authorized immutable publication.
 // Old/private/synthetic consent is excluded; tombstones/owner revocation remove
 // a source from every live snapshot even if its public chunks are retained.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy }) {
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers }) {
   let work = null
   const build = async () => {
     const legacy = await readLegacy()
@@ -45,7 +45,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const items = await discover()
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
     if (!Array.isArray(items) || items.length > 1000) throw Error('public_member_import_limit')
-    const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision], linkedChecks = [], overlays = new Map()
+    const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision], linkedChecks = [], overlays = new Map(), members = new Set()
     const enrichment = await publicPeople.read(ENRICHMENT_DATASET)
     if (enrichment) {
       if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(ENRICHMENT_DATASET + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length) throw Error('public_enrichment_invalid')
@@ -74,9 +74,10 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         connections.push(...snapshot.connections.map(edge => ({ fromId: edge.fromId === ownId ? linked.profileId : edge.fromId, toId: edge.toId })))
         const winner = overlays.get(linked.profileId), key = [resource.payload.createdAt ?? 0, item.id]
         if (own.name !== 'Unlinked member' && (!winner || key[0] > winner.key[0] || (key[0] === winner.key[0] && key[1] > winner.key[1]))) overlays.set(linked.profileId, { key, profile: { ...own, id: linked.profileId } })
+        members.add(linked.profileId)
         revisions.push('legacy-link:' + linked.receiptId)
         linkedChecks.push(async () => { const current = await backend.readLegacyProfile(); if (!current || current.receiptId !== linked.receiptId || current.revision !== linked.revision) throw Error('public_member_source_changed') })
-      } else { profiles.push(...snapshot.profiles); connections.push(...snapshot.connections) }
+      } else { profiles.push(...snapshot.profiles); connections.push(...snapshot.connections); members.add('member-import-' + item.id) }
       revisions.push(snapshot.revision)
       if (profiles.length > 20000 || connections.length > 100000) throw Error('shared_public_capacity_limit')
     }
@@ -85,7 +86,15 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     for (const [id, value] of overlays) profiles[profiles.findIndex(profile => profile.id === id)] = value.profile
     // Replayed source edges are canonicalized without changing their receipts.
     const uniqueConnections = [...new Map(connections.map(edge => [JSON.stringify([edge.fromId, edge.toId]), edge])).values()]
-    return {state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections}
+    if (typeof readMembers !== 'function') return {state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections}
+    // Claimed profiles are members; everyone else in the index is a shadow.
+    const claimed = await readMembers()
+    if (!Array.isArray(claimed) || claimed.length > 20000) throw Error('public_member_presence_invalid')
+    const known = new Set(profiles.map(value => value.id))
+    for (const id of claimed) if (known.has(id)) members.add(id)
+    const memberIds = [...members].sort()
+    revisions.push('members:' + hash(JSON.stringify(memberIds)))
+    return {state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds}
   }
   return async ({signal} = {}) => {
     signal?.throwIfAborted()
