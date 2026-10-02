@@ -14,9 +14,10 @@ import { createAccountNetwork } from '../src/utils/private-import/account-networ
 import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
+import { ConnectionError } from './member-connections.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { companyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
@@ -71,12 +72,14 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
   if (memberInvitations !== undefined && ['create', 'list', 'open', 'respond', 'revoke', 'removeOwner'].some(key => typeof memberInvitations[key] !== 'function')) throw new Error('member_invitation_configuration_required')
+  if (memberConnections !== undefined && (['send', 'respond', 'withdraw', 'received', 'sent', 'pendingCount', 'between', 'removeOwner'].some(key => typeof memberConnections[key] !== 'function') || typeof accountForProfile !== 'function')) throw new Error('member_connection_configuration_required')
+  if (notifications !== undefined && ['list', 'counts', 'markSeen', 'open', 'markAllRead', 'removeOwner'].some(key => typeof notifications[key] !== 'function')) throw new Error('notification_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
   if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
@@ -93,7 +96,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
   // Pages a sign-in may return to. Everything else lands on the home route.
-  const returnPath = value => typeof value === 'string' && /^\/(?:profile|card|settings|import|network|invites|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) ? value : null
+  const returnPath = value => typeof value === 'string' && /^\/(?:profile|card|settings|import|network|invites|invitations|notifications|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
@@ -101,7 +104,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
   const contactRow = row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
-  const publicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
+  const publicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite', 'unlinked-connection'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
   async function contactRows(rows) {
     const plainRows = rows.map(contactRow)
     if (typeof readPublishedSnapshot !== 'function' || !rows.length) return plainRows
@@ -132,7 +135,19 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // The signed-in reader of each in-flight response, so every page's Me menu can
   // show the headline once this session has read the member's profile.
   const readers = new WeakMap()
+  // Live header counts (My Network, the bell) for this response, when the
+  // request is a signed-in page view; read once per request.
+  const responseAlerts = new WeakMap()
+  const readAlerts = async owner => {
+    const alerts = {}
+    if (memberConnections) alerts.network = await memberConnections.pendingCount(owner).catch(() => 0)
+    if (notifications) alerts.notifications = await notifications.counts(owner).then(value => value.unseen, () => 0)
+    return memberConnections || notifications ? alerts : null
+  }
+  const pageView = pathname => !pathname.startsWith('/api/') && !pathname.startsWith('/public-assets/') && !pathname.startsWith('/legacy-files/') && !/^\/notifications\/[^/]+$/.test(pathname) &&
+    !/^\/imports\/[a-f0-9]{64}\/status$/.test(pathname) && !/\.[a-z]+$/i.test(pathname) && !['/login', '/logout', '/export', '/auth/callback/ideaflow'].includes(pathname)
   const journey = (response, view, job = null, script = '', status = 200) => {
+    view = { ...view, content: fillNavAlerts(view.content, responseAlerts.get(response)) }
     const nonce = token()
     // manifest-src/worker-src cover exactly the same-origin PWA manifest and the
     // static-only service worker; everything else stays locked to 'none'. The
@@ -184,6 +199,31 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const invitation = returnPath(next)?.startsWith('/i/') ? returnPath(next) : null
     redirect(response, invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
   }
+  const sameAccount = (a, b) => a.ownerId === b.ownerId && a.userId === b.userId
+  // Connected some other way: an accepted invite, or the public graph already
+  // links the two profiles (one of them listed the other in an export).
+  const alreadyConnected = async (owner, account, profileId) => {
+    if (memberInvitations && (await memberInvitations.connections(owner)).some(value => sameAccount(value.other, account))) return true
+    const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner).catch(() => null) : null
+    return Boolean(mine && await publicReader.linked({ fromId: mine, toId: profileId }).catch(() => false))
+  }
+  // Where the viewer stands with the member behind a public profile.
+  const relationTo = async (owner, profileId) => {
+    const account = await accountForProfile(profileId)
+    if (!account) return undefined
+    if (sameAccount(owner, account)) return { state: 'self' }
+    const between = await memberConnections.between(owner, account)
+    if (between.state !== 'none') return between
+    return await alreadyConnected(owner, account, profileId) ? { state: 'connected' } : { state: 'none' }
+  }
+  // Where a Connect/answer/withdraw form returns, with a whitelisted notice code.
+  const afterConnection = (next, code) => {
+    if (typeof next === 'string' && /^\/people\/[A-Za-z0-9._~%-]{1,480}$/.test(next)) return `${next}?connect=${encodeURIComponent(code)}`
+    if (next === '/notifications') return '/notifications'
+    return `/invitations?${next === '/invitations?tab=sent' ? 'tab=sent&' : ''}notice=${encodeURIComponent(code)}`
+  }
+  const notificationTarget = item => item.kind === 'connection_request_received' ? '/invitations'
+    : item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : item.kind === 'invite_accepted' ? '/invites' : '/network'
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
     response.setHeader('Referrer-Policy', 'strict-origin')
@@ -197,7 +237,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
-      const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline } : {}
+      if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer.owner); if (alerts) responseAlerts.set(response, alerts) }
+      const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline, ...(responseAlerts.has(response) ? { alerts: responseAlerts.get(response) } : {}) } : {}
       if (await servePublicDiscovery(request, response, url.pathname, chrome)) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
@@ -236,7 +277,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             // A merged profile's old address moves to the profile it was merged into.
             if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? '/api/people/' : '/people/'}${encodeURIComponent(result.moved)}`, 'Cache-Control': 'no-store' }).end(); return }
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
-            journey(response, renderPerson({ ...chrome, profile: result.profile })); return
+            // Connect: only members (an account stands behind the profile) can be asked.
+            let connect
+            if (memberConnections && signup) {
+              if (result.profile.presence === 'member') connect = viewer ? await relationTo(viewer.owner, result.profile.id).catch(() => undefined) : { state: 'signed-out' }
+              else if (viewer && result.profile.presence === 'shadow' && memberInvitations) connect = { state: 'invite' }
+            }
+            const notice = url.searchParams.get('connect')
+            journey(response, renderPerson({ ...chrome, profile: result.profile, connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined })); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const result = await publicReader.list({ query, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined })
@@ -366,6 +414,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (input.get('action') === 'confirm') {
           await legacyAccount.confirm(session.legacyProof, session.legacyCandidate.profileId, true)
           await recordAudit({ event: 'legacy_profile_confirmed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
+          if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(session.legacyCandidate.profileId, session.owner).catch(() => {})
         } else if (input.get('action') !== 'skip') throw new Error('legacy_confirmation_required')
         session.legacyCandidate = null
         redirect(response, '/profile'); return
@@ -425,6 +474,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         try {
           const claimed = await selfClaims.claim({ owner: session.owner, issuer: session.selfClaim.identity.issuer, subject: session.selfClaim.identity.subject, emailHash: session.selfClaim.emailHash, profileId, evidence })
           await recordAudit({ event: 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId, evidence, receiptId: claimed.receiptId })
+          if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(profileId, session.owner).catch(() => {})
           session.selfClaim = null
           redirect(response, '/profile'); return
         } catch (error) {
@@ -589,6 +639,67 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         response.setHeader('Cache-Control', 'no-store')
         journey(response, renderInvites({ ...props, origin: base.origin, created, error, invitations: await memberInvitations.list(session.owner) }), props.importJob, '', error ? 400 : 200); return
       }
+      // Member-to-member connection requests.
+      if (signup && memberConnections && request.method === 'POST' && ['/connections/request', '/connections/respond', '/connections/withdraw'].includes(url.pathname)) {
+        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        const fields = { '/connections/request': ['profileId', 'note'], '/connections/respond': ['id', 'action', 'next'], '/connections/withdraw': ['id', 'next'] }[url.pathname]
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || fields.some(key => input.getAll(key).length > 1) || [...input.keys()].some(key => key !== 'csrf' && !fields.includes(key))) throw new Error('private_browser_csrf')
+        if (url.pathname === '/connections/request') {
+          if (input.getAll('profileId').length !== 1) throw new Error('private_browser_csrf')
+          let id = input.get('profileId'), detail = await publicReader.profile({ id })
+          if (detail?.moved) { id = detail.moved; detail = await publicReader.profile({ id }) }
+          if (!detail?.profile) { response.writeHead(404).end(); return }
+          const back = code => redirect(response, afterConnection(`/people/${encodeURIComponent(id)}`, code))
+          if (detail.profile.presence !== 'member') { back('connection_not_member'); return }
+          const account = await accountForProfile(id)
+          if (!account) { back('connection_not_member'); return }
+          if (sameAccount(session.owner, account)) { back('connection_self'); return }
+          if ((await memberConnections.between(session.owner, account)).state === 'none' && await alreadyConnected(session.owner, account, id)) { back('connection_exists'); return }
+          // The sender is named by their public profile when they have one, never by an email address.
+          const senderProfileId = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
+          let senderName = session.displayName
+          if (senderProfileId) { try { senderName = (await publicReader.lookup({ ids: [senderProfileId] })).get(senderProfileId)?.name ?? senderName } catch { /* keep the sign-in name */ } }
+          try {
+            const sent = await memberConnections.send({ sender: session.owner, senderName, senderProfileId, recipient: account, recipientName: detail.profile.name, recipientProfileId: id, note: input.get('note') ?? undefined })
+            back(sent.status === 'accepted' ? 'accepted' : 'sent')
+          } catch (failure) { if (!(failure instanceof ConnectionError)) throw failure; back(failure.code) }
+          return
+        }
+        if (input.getAll('id').length !== 1) throw new Error('private_browser_csrf')
+        let code
+        try {
+          if (url.pathname === '/connections/respond') { const action = input.get('action'); await memberConnections.respond(session.owner, input.get('id'), action); code = action === 'accept' ? 'accepted' : 'ignored' }
+          else { await memberConnections.withdraw(session.owner, input.get('id')); code = 'withdrawn' }
+        } catch (failure) { if (!(failure instanceof ConnectionError)) throw failure; code = failure.code === 'connection_action_invalid' ? 'connection_unavailable' : failure.code }
+        redirect(response, afterConnection(input.get('next'), code)); return
+      }
+      if (signup && memberConnections && request.method === 'GET' && url.pathname === '/invitations') {
+        if ([...url.searchParams.keys()].some(key => !['tab', 'notice'].includes(key))) { redirect(response, '/invitations'); return }
+        const props = jobProps(await jobResources())
+        const [received, sent] = await Promise.all([memberConnections.received(session.owner), memberConnections.sent(session.owner)])
+        journey(response, renderInvitations({ ...props, tab: url.searchParams.get('tab') === 'sent' ? 'sent' : 'received', received, sent, notice: url.searchParams.get('notice') ?? undefined }), props.importJob); return
+      }
+      if (signup && notifications && request.method === 'GET' && url.pathname === '/notifications') {
+        const props = jobProps(await jobResources())
+        const items = await notifications.list(session.owner)
+        const received = memberConnections ? await memberConnections.received(session.owner) : []
+        // Opening the feed clears the bell; each item stays highlighted until opened.
+        await notifications.markSeen(session.owner)
+        const alerts = responseAlerts.get(response)
+        if (alerts) responseAlerts.set(response, { ...alerts, notifications: 0 })
+        journey(response, renderNotifications({ ...props, items, pending: new Map(received.map(value => [value.id, value])), pendingCount: received.length }), props.importJob); return
+      }
+      const notificationItem = url.pathname.match(/^\/notifications\/([0-9a-f-]{36})$/)
+      if (signup && notifications && request.method === 'GET' && notificationItem) {
+        const item = await notifications.open(session.owner, notificationItem[1])
+        redirect(response, item ? notificationTarget(item) : '/notifications'); return
+      }
+      if (signup && notifications && request.method === 'POST' && url.pathname === '/notifications/read-all') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => key !== 'csrf')) throw new Error('private_browser_csrf')
+        await notifications.markAllRead(session.owner)
+        redirect(response, '/notifications'); return
+      }
       const invitationAnswer = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (signup && memberInvitations && request.method === 'POST' && invitationAnswer && INVITATION_TOKEN.test(invitationAnswer[1])) {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
@@ -676,6 +787,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const grantIds = await backend.listAccountGrantIds()
         // Invitations hold names the owner typed: they go with the account.
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
+        // Connection requests either way, and notifications to or about this account.
+        if (memberConnections) await memberConnections.removeOwner(session.owner)
+        if (notifications) await notifications.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds })
         // Best effort beyond the graph: the legacy claim and the stored archive bytes.
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})

@@ -50,6 +50,14 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
           fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-invite', invitationId: value.invitationId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
       }
     }
+    // Accepted connection requests ("Connect") connect two accounts the same way.
+    if (typeof backend.readMemberConnections === 'function') {
+      for (const value of await backend.readMemberConnections()) {
+        if (assertions.length >= observationLimit) throw Error('account_observation_limit')
+        assertions.push({ id: privateId(owner.ownerId, 'member-connection', value.requestId), ownerId: owner.ownerId, importId: networkId, sourceId: 'unlinked-connections', rowId: `connection:${value.requestId}`, category: 'connections',
+          fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-connection', requestId: value.requestId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
+      }
+    }
     if(typeof backend.readLegacyObservations==='function'){
       const recovered=await backend.readLegacyObservations({signal,limit:observationLimit-assertions.length})
       if(recovered){assertions.push(...recovered.assertions);indexed+=recovered.assertions.length}
