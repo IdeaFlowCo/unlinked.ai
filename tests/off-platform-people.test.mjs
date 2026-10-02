@@ -60,8 +60,11 @@ test('an accepted invite connects both accounts, and deleting either account end
   assert.equal((await invites.list(inviter))[0].responderName, 'Ada Lovelace')
   await invites.removeOwner(invitee)
   assert.deepEqual(await invites.connections(inviter), []); assert.deepEqual(await invites.accepted(), [])
+  assert.ok(![...store.records.values()].some(value => JSON.stringify(value).includes('invitee-owner') || JSON.stringify(value).includes('Ada Lovelace')))
   const again = await invites.create({ inviter, inviterName: 'Jacob Cole', inviteeName: 'Ada' })
-  await invites.respond(again.token, invitee, 'accept', 'Ada Lovelace')
+  // A display name that is not a plain name never blocks accepting.
+  await invites.respond(again.token, invitee, 'accept', 'Ada <Lovelace>')
+  assert.equal((await invites.connections(inviter))[0].name, 'Ada')
   await invites.removeOwner(inviter)
   assert.deepEqual(await invites.connections(invitee), [])
 })

@@ -29,8 +29,23 @@ export function validateProfileDecisions(decisions) {
   return decisions
 }
 
-export function applyProfileDecisions(snapshot, decisions) {
-  validateProfileDecisions(decisions)
+// The usable subset of stored decisions: the first valid decision per profile,
+// minus any merge whose survivor is itself merged. A stray or racing operator
+// write can only make a decision inert, never break the published index.
+export function usableProfileDecisions(decisions) {
+  const usable = [], seen = new Set()
+  for (const decision of Array.isArray(decisions) ? decisions.slice(0, 5000) : []) {
+    try { validateProfileDecisions([decision]) } catch { continue }
+    const key = `${decision.kind}:${decision.profileId}`
+    if (seen.has(key) || seen.has(`id:${decision.id}`)) continue
+    seen.add(key); seen.add(`id:${decision.id}`); usable.push(decision)
+  }
+  const merged = new Set(usable.filter(value => value.kind === 'merge').map(value => value.profileId))
+  return usable.filter(value => value.kind !== 'merge' || !merged.has(value.survivorId))
+}
+
+export function applyProfileDecisions(snapshot, stored) {
+  const decisions = usableProfileDecisions(stored)
   if (!decisions.length) return snapshot
   const known = new Map(snapshot.profiles.map(profile => [profile.id, profile]))
   const members = new Set(snapshot.members ?? [])

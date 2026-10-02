@@ -103,6 +103,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         return live.length ? 'member-import-' + live[0].id : null
       } finally { await session.close() }
     }
+    const publicProfileResolver = () => {
+      const known = new Map()
+      return async owner => {
+        const key = `${owner.ownerId}\u0000${owner.userId}`
+        if (!known.has(key)) known.set(key, await publicProfileIdFor(owner))
+        return known.get(key)
+      }
+    }
     const legacyStorage=typeof dependencies.UnlinkedLegacyStorageStore==='function'?new dependencies.UnlinkedLegacyStorageStore(driver,'neo4j','callback'):null
     await legacyStorage?.initialize()
     const login = await loginFactory({ issuer: config.issuer, clientId: config.clientId, clientSecret: config.clientSecret,
@@ -148,7 +156,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       }
       const recovery=legacyStorage?createLegacyStorageReader({owner,readOwner:legacyStorage.readOwner.bind(legacyStorage),assets:files,readLegacyProfile}):null
       // People this account is connected to through accepted invites.
-      const readInviteConnections = memberInvitations ? async () => Promise.all((await memberInvitations.connections(owner)).map(async value => ({ ...value, publicProfileId: await publicProfileIdFor(value.other) }))) : undefined
+      const readInviteConnections = memberInvitations ? async () => {
+        const resolve = publicProfileResolver(), rows = []
+        for (const value of await memberInvitations.connections(owner)) rows.push({ ...value, publicProfileId: await resolve(value.other) })
+        return rows
+      } : undefined
       return { ...backend,readLegacyProfile,...(readInviteConnections ? { readInviteConnections } : {}),
         ...(recovery?{readLegacyFiles:recovery.list,readLegacyOriginal:recovery.readOriginal,readLegacyObservations:recovery.observations}:{}),
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
@@ -178,10 +190,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
       // An accepted invite is a connection both people agreed to: it joins the
       // public graph when both accounts have a public profile.
-      readInviteEdges: memberInvitations ? async () => (await Promise.all((await memberInvitations.accepted()).map(async value => {
-        const [fromId, toId] = await Promise.all([publicProfileIdFor(value.inviter), publicProfileIdFor(value.invitee)])
-        return fromId && toId && fromId !== toId ? { fromId, toId } : null
-      }))).filter(Boolean) : undefined,
+      readInviteEdges: memberInvitations ? async () => {
+        // Each account is resolved once per build, one at a time, and each pair counts once.
+        const resolve = publicProfileResolver(), edges = new Map()
+        for (const value of await memberInvitations.accepted()) {
+          const fromId = await resolve(value.inviter), toId = await resolve(value.invitee)
+          if (fromId && toId && fromId !== toId) edges.set(JSON.stringify([fromId, toId]), { fromId, toId })
+        }
+        return [...edges.values()]
+      } : undefined,
       // Operator merges and renames (mcp-server/profile-decisions-operator.mjs); revoked ones are ignored.
       readDecisions: async () => {
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
