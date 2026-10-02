@@ -46,6 +46,7 @@ const initials = name => raw(name).trim().split(/\s+/).slice(0, 2).map(word => [
 const firstName = name => { const first = raw(name).trim().split(/\s+/)[0] ?? ''; return [...first].length > 2 && !first.endsWith('.') ? first : '' }
 const avatar = (name, seed = name) => `<span class="initials avatar" style="background:${hue(seed)}" aria-hidden="true">${html(initials(name))}</span>`
 const externalProfile = value => { try { const url = new URL(value); return url.protocol === 'https:' && ['linkedin.com', 'www.linkedin.com'].includes(url.hostname) && !url.username && !url.password ? url.href : null } catch { return null } }
+const PRESENCE_FILTERS = [[undefined, 'All'], ['member', 'On Unlinked'], ['shadow', 'Not yet on Unlinked']]
 const subline = value => [raw(value.headline), raw(value.company)].filter(Boolean).join(' · ')
 // Imported people who have not joined. A network icon marks those connected to
 // more than one person here, so their page leads somewhere; a dot marks a stub.
@@ -154,17 +155,23 @@ export function renderCompany({ accountLabel, displayName, csrf, importJob, name
 }
 const externalCompany = value => { try { const url = new URL(raw(value)); return url.protocol === 'https:' && ['linkedin.com', 'www.linkedin.com'].includes(url.hostname) && !url.username && !url.password ? url.href : null } catch { return null } }
 
-export function renderPeople({ accountLabel, displayName, csrf, query = '', mode = 'best', match, everyone, own, contacts, searchResults, aiMatches, aiNote, aiError, anonymousAi = false, nextCursor, state = 'ready', importJob, publicProfessionalSearch }) {
-  const exact = mode === 'exact', searched = `q=${encodeURIComponent(raw(query))}`
+export function renderPeople({ accountLabel, displayName, csrf, query = '', mode = 'best', presence, match, everyone, own, contacts, searchResults, aiMatches, aiNote, aiError, anonymousAi = false, nextCursor, state = 'ready', importJob, publicProfessionalSearch }) {
+  const exact = mode === 'exact', kept = presence === 'member' || presence === 'shadow' ? presence : undefined
+  const searched = `q=${encodeURIComponent(raw(query))}${kept ? `&presence=${kept}` : ''}`
   // Two ways to read the same words: forgiving by default, literal on request.
-  const modes = raw(query) ? `<p class="small modes">${exact ? `<a href="${html(`/network?${searched}`)}">Best match</a> · <b aria-current="true">Exact words</b>` : `<b aria-current="true">Best match</b> · <a href="${html(`/network?${searched}&mode=exact`)}">Exact words</a>`} · <a href="/network">Clear search</a></p>${!exact && match === 'some' ? '<p class="notice">No one has every word. Showing people who match some of them.</p>' : ''}` : ''
+  const modes = raw(query) ? `<p class="small modes">${exact ? `<a href="${html(`/network?${searched}`)}">Best match</a> · <b aria-current="true">Exact words</b>` : `<b aria-current="true">Best match</b> · <a href="${html(`/network?${searched}&mode=exact`)}">Exact words</a>`} · <a href="${kept ? `/network?presence=${kept}` : '/network'}">Clear search</a></p>${!exact && match === 'some' ? '<p class="notice">No one has every word. Showing people who match some of them.</p>' : ''}` : ''
   const legacy = own === undefined && (contacts !== undefined || searchResults !== undefined)
   const canSearchEveryone = publicProfessionalSearch ?? (everyone !== undefined || legacy)
   if (legacy) own = list(searchResults !== undefined ? searchResults : contacts)
   const noMatch = query && (!legacy || list(contacts).length > 0)
   const ownGroup = own === undefined ? '' : `<section class="own-group" aria-label="People you know"><h2>People you know</h2>${list(own).length ? `<div class="panel list">${list(own).map(value => `${person(value)}${value.reason ? `<p class="reason">${html(value.reason)}</p>` : ''}`).join('')}</div>` : `<div class="notice">${noMatch ? 'No people matched. Try another name or company.' : 'Bring your LinkedIn export to see your people.'} <a href="/import">Add a file →</a></div>`}</section>`
-  const everyoneGroup = everyone === undefined ? '' : `<section class="everyone-group" aria-label="Everyone on Unlinked"><h2>Everyone on Unlinked</h2>${state === 'unavailable' ? '<p class="notice">Member search is on its way.</p>' : list(everyone).length ? `<div class="panel list">${list(everyone).map(member).join('')}</div>` : `<p class="notice">${query ? 'No one on Unlinked matched that yet.' : 'No members to show yet.'}</p>`}</section>`
-  const more = typeof nextCursor === 'string' && nextCursor ? `<p><a class="button sec sm" href="${html(`/network?${raw(query) ? `${searched}&` : ''}${exact ? 'mode=exact&' : ''}cursor=${encodeURIComponent(nextCursor)}`)}">Show more</a></p>` : ''
+  // Who to show: everyone, people who joined, or imported profiles not on Unlinked yet.
+  const filterHref = value => `/network${[raw(query) ? `q=${encodeURIComponent(raw(query))}` : '', exact ? 'mode=exact' : '', value ? `presence=${value}` : ''].filter(Boolean).reduce((path, part, index) => `${path}${index ? '&' : '?'}${part}`, '')}`
+  const presenceFilter = `<p class="small modes presence" role="navigation" aria-label="Who to show">${PRESENCE_FILTERS.map(([value, label]) => value === kept ? `<b aria-current="true">${label}</b>` : `<a href="${html(filterHref(value))}">${label}</a>`).join(' · ')}</p>`
+  const everyoneTitle = kept === 'member' ? 'On Unlinked' : kept === 'shadow' ? 'Not yet on Unlinked' : 'Everyone on Unlinked'
+  const emptyEveryone = kept === 'member' ? `${query ? 'No one who joined matches that yet.' : 'No one has joined yet.'} Most profiles here were imported from LinkedIn connections.` : query ? 'No one on Unlinked matched that yet.' : 'No members to show yet.'
+  const everyoneGroup = everyone === undefined ? '' : `<section class="everyone-group" aria-label="${everyoneTitle}"><h2>${everyoneTitle}</h2>${presenceFilter}${state === 'unavailable' ? '<p class="notice">Member search is on its way.</p>' : list(everyone).length ? `<div class="panel list">${list(everyone).map(member).join('')}</div>` : `<p class="notice">${emptyEveryone}</p>`}</section>`
+  const more = typeof nextCursor === 'string' && nextCursor ? `<p><a class="button sec sm" href="${html(`/network?${raw(query) ? `${searched}&` : kept ? `presence=${kept}&` : ''}${exact ? 'mode=exact&' : ''}cursor=${encodeURIComponent(nextCursor)}`)}">Show more</a></p>` : ''
   // The same words, ranked by AI. A button on the results, not a second search box.
   const scopes = csrf && raw(query) ? [canSearchEveryone ? ['everyone', 'everyone'] : null, own !== undefined ? ['own', 'my people'] : null].filter(Boolean) : []
   // A visitor gets the same AI ranking over the public list; it carries no session authority.

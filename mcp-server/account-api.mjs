@@ -5,7 +5,7 @@ import { AccountToolError } from './account-tools.mjs'
 // MCP tools are thin wrappers over these semantics; names map 1:1.
 const ROUTES = Object.freeze({
   'GET /api/agent/v1/whoami': { tool: 'unlinked_whoami', query: [] },
-  'GET /api/agent/v1/people': { tool: 'unlinked_list_people', query: ['q', 'mode', 'cursor', 'limit'], numbers: ['limit'] },
+  'GET /api/agent/v1/people': { tool: 'unlinked_list_people', query: ['q', 'mode', 'presence', 'cursor', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/connections': { tool: 'unlinked_list_connections', query: ['degree', 'q', 'cursor', 'limit'], numbers: ['degree', 'limit'] },
   'POST /api/agent/v1/ai-search': { tool: 'unlinked_ai_search', body: ['query', 'scope', 'timeoutMs'] },
   'POST /api/agent/v1/search-network': { tool: 'unlinked_search_network', body: ['query', 'degree', 'cursor'] },
