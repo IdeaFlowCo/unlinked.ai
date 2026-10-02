@@ -11,6 +11,7 @@
   "data": {
     "ownNetwork": true,
     "globalSearch": true,
+    "recoveredLegacyProfileConfirmation": true,
     "rawArchiveAgentAccess": false,
     "anonymousPublicPeople": true
   },
