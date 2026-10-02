@@ -5,6 +5,7 @@ import { createMemberInvitations, createNeo4jInvitationStore } from './member-in
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
 import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
 import { createContactCards, createNeo4jContactCardStore } from './contact-card.mjs'
+import { createNeo4jSessionStore } from './session-store.mjs'
 import { createSelfClaims } from './self-claims.mjs'
 import { isTestProfileId, testProfile, CLAIMED_PROFILE_FOR_OWNER, OWNER_FOR_CLAIMED_PROFILE, CLAIMED_MEMBER_PROFILES } from './test-profiles.mjs'
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
@@ -32,7 +33,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createSessionStore: createNeo4jSessionStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -100,6 +101,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const contactCardStore = typeof dependencies.createContactCardStore === 'function' ? dependencies.createContactCardStore(driver, 'neo4j') : null
     await contactCardStore?.initialize()
     const contactCards = contactCardStore ? createContactCards({ store: contactCardStore }) : undefined
+    const sessionStore = typeof dependencies.createSessionStore === 'function' ? dependencies.createSessionStore(driver, 'neo4j') : null
+    await sessionStore?.initialize()
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
     await connectionStore?.initialize()
     const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null }) : undefined
@@ -338,6 +341,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       memberConnections,
       notifications,
       contactCards,
+      sessionStore,
       accountForProfile,
       ownProfileId: publicProfileIdFor,
       // Someone just claimed `profileId`: tell members whose own exports listed

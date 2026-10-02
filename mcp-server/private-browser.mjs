@@ -75,7 +75,7 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -225,7 +225,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     // A lookup-hint claim identity: the hash mirrors the manifest's email
     // formula so a later seeded row for the same address collides cleanly.
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
-    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + SESSION_SECONDS * 1000 })
+    const accountLabel = identity.verifiedEmail ?? identity.subject
+    const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
+    const csrf = token()
+    const expiresAt = Date.now() + SESSION_SECONDS * 1000
+    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel, displayName, csrf, expiresAt })
+    if (sessionStore) {
+      try { await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() }) } catch { }
+    }
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     // An invitation link someone signed in to answer comes first; its page then
@@ -311,6 +318,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // Settings grant listing: labels for OAuth-connected apps when available.
   const grantList = async (owner, backend) => typeof listAccountGrants === 'function' ? await listAccountGrants(owner) : (await backend.listAccountGrantIds()).map(id => ({ id }))
   const connector = oauth && mcpEndpoint ? { url: mcpEndpoint } : undefined
+  let lastPrune = Date.now()
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
     response.setHeader('Referrer-Policy', 'strict-origin')
@@ -322,6 +330,36 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+
+      if (sessionStore) {
+        const sid = cookies(request)['__Host-ul-session']
+        if (sid) {
+          purge(sessions)
+          if (!sessions.has(sid)) {
+            try {
+              const hash = createHash('sha256').update(sid).digest('hex')
+              const record = await sessionStore.get(hash, Date.now())
+              if (record) {
+                sessions.set(sid, {
+                  legacyProof: null,
+                  legacyCandidate: null,
+                  selfClaim: null,
+                  owner: Object.freeze({ ownerId: record.ownerId, userId: record.userId }),
+                  accountLabel: record.accountLabel,
+                  displayName: record.displayName,
+                  csrf: record.csrf,
+                  expiresAt: record.expiresAt
+                })
+              }
+            } catch { }
+          }
+        }
+        if (Date.now() - lastPrune > 3600000) {
+          lastPrune = Date.now()
+          sessionStore.prune(Date.now()).catch(() => {})
+        }
+      }
+
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
       if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer.owner); if (alerts) responseAlerts.set(response, alerts) }
@@ -960,6 +998,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})
         for (const [id, value] of sessions) if (value.owner.ownerId === session.owner.ownerId) sessions.delete(id)
+        if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId).catch(() => {})
         response.setHeader('Set-Cookie', cookie('__Host-ul-session', '', 0))
         await recordAudit({ event: 'account_data_deleted', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), deletedResources: result.deletedResources })
         journey(response, renderDataDeleted())
@@ -1044,7 +1083,17 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (request.method === 'POST' && ['/search', '/setup', '/logout'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf) throw new Error('private_browser_csrf')
-        if (url.pathname === '/logout') { sessions.delete(cookies(request)['__Host-ul-session']); response.setHeader('Set-Cookie', cookie('__Host-ul-session', '', 0)); redirect(response, '/'); return }
+        if (url.pathname === '/logout') {
+          const sid = cookies(request)['__Host-ul-session']
+          sessions.delete(sid)
+          if (sessionStore && sid) {
+            // Awaited: a restart right after sign-out must not restore it.
+            await sessionStore.delete(createHash('sha256').update(sid).digest('hex')).catch(() => {})
+          }
+          response.setHeader('Set-Cookie', cookie('__Host-ul-session', '', 0))
+          redirect(response, '/')
+          return
+        }
         const id = input.get('importId')
         if (input.getAll('importId').length !== 1 || !/^[a-f0-9]{64}$/.test(id)) throw new Error('private_import_not_found')
         const reader = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: session.owner.ownerId, importIds: [id] } })
