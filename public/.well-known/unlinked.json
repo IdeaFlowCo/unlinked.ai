@@ -26,7 +26,31 @@
     "transport": "streamable-http",
     "tools": [
       "unlinked_search_network",
-      "unlinked_search_everyone"
+      "unlinked_search_everyone",
+      "unlinked_whoami",
+      "unlinked_list_people",
+      "unlinked_list_connections",
+      "unlinked_get_profile",
+      "unlinked_ask"
+    ],
+    "grantVersioning": "old grants keep exactly their issued tool list; new grants receive the current catalog version"
+  },
+  "agentHttpApi": {
+    "base": "https://www.unlinked.ai/api/agent/v1/",
+    "authentication": "same revocable account-scoped bearer grant",
+    "contract": "docs/agent-api.md (repository)",
+    "maxPageSize": 50,
+    "errors": [
+      "not_linked",
+      "grant_revoked",
+      "invalid_input",
+      "cursor_invalid",
+      "scope_not_granted",
+      "not_found",
+      "degree_unproven",
+      "result_too_large",
+      "rate_limited",
+      "upstream_unavailable"
     ]
   }
 }

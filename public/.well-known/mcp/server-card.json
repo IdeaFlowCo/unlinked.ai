@@ -1,7 +1,7 @@
 {
   "name": "unlinked",
   "version": "1.0.0",
-  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants.",
+  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants. Current grants add whoami, deterministic paginated listings and an explicit AI ask tool; old grants keep exactly their issued tool list. The same tools are served as a grant-authenticated HTTP JSON API under /api/agent/v1/ (contract: docs/agent-api.md).",
   "homepage": "https://www.unlinked.ai",
   "transports": {
     "streamable-http": {
@@ -57,6 +57,127 @@
           "query"
         ],
         "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_whoami",
+      "description": "Return the authenticated grant owner: stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy anchor if any. Linkage is the grant itself, never email matching.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_list_people",
+      "description": "Deterministically list or lexically filter the published public People index. Opaque cursor, max 50 per page, total and snapshot revision. Public fields only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "best",
+              "exact"
+            ]
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_list_connections",
+      "description": "Deterministically list the owner's connections. Degree 1 includes owner-imported contacts (no anchor required) plus recorded public paths when anchored; degree 2 returns only recorded public paths with the proving path, or typed degree_unproven.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "degree": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "q": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_get_profile",
+      "description": "Read one published public profile by id with its public connections page; typed not_found otherwise.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "connectionsCursor": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "unlinked_ask",
+      "description": "Explicit AI tool. scope 'mine' ranks only your own imported network; scope 'everyone' ranks the published public index and requires a public-scope grant. Set timeoutMs to bound latency.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "everyone",
+              "mine"
+            ]
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 40000
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ]
       }
     }
   ]
