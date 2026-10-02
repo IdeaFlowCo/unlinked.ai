@@ -65,6 +65,19 @@
             "description": "best: every word in any form and order, falling back to people who match some words (see match). exact: the typed phrase as written."
           },
           {
+            "name": "presence",
+            "in": "query",
+            "required": false,
+            "description": "member: people who joined Unlinked; shadow: imported profiles not on Unlinked yet. Omit for everyone. Bound into the cursor.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "member",
+                "shadow"
+              ]
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -275,6 +288,19 @@
               "enum": [
                 "best",
                 "exact"
+              ]
+            }
+          },
+          {
+            "name": "presence",
+            "in": "query",
+            "required": false,
+            "description": "member: people who joined Unlinked; shadow: imported profiles not on Unlinked yet. Omit for everyone. Bound into the cursor.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "member",
+                "shadow"
               ]
             }
           },

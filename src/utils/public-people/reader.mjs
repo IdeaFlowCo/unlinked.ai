@@ -34,6 +34,8 @@ const immutableIdentity = (value, ancestors = new Set()) => {
   ancestors.delete(value)
   return valid
 }
+// member: a confirmed account owns the profile; shadow: imported, not on Unlinked yet.
+export const PRESENCE = Object.freeze(['member', 'shadow'])
 const requestValue = value => {
   if (!plain(value) || Reflect.ownKeys(value).some(key => !Object.hasOwn(Object.getOwnPropertyDescriptor(value, key), 'value'))) invalid()
   if (value.signal !== undefined && !(value.signal instanceof AbortSignal)) invalid()
@@ -153,14 +155,18 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   }
   return {
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best' } = requestValue(request)
-      if (!SEARCH_MODES.includes(mode)) invalid()
+      const { query = '', cursor, signal, mode = 'best', presence } = requestValue(request)
+      if (!SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
-      const scope = matcher ? `list:${mode}:${normalizedQuery}` : 'list:'
+      // The presence filter is part of the cursor scope, so a page never mixes filters.
+      const filter = presence ? `${presence}:` : ''
+      const scope = matcher ? `list:${filter}${mode}:${normalizedQuery}` : `list:${filter}`
       const decodedCursor = cursorValue(cursor, scope), data = await snapshot(signal)
-      if (!matcher) return page(data.ordered, decodedCursor, scope, data.revision)
+      // A snapshot that does not name its members has no presence, so it matches no filter.
+      const people = presence ? data.ordered.filter(person => person.presence === presence) : data.ordered
+      if (!matcher) return { ...page(people, decodedCursor, scope, data.revision), ...(presence ? { total: people.length } : {}) }
       // `match` says whether the rows have every word ('all') or only some of them.
-      const ranked = rankMatches(data.ordered, matcher, person => data.tokens.get(person.id))
+      const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id))
       return { ...page(ranked.rows, decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
     },
     async profile(request = {}) {
