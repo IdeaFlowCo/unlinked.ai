@@ -12,7 +12,7 @@ import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/private-import/scoped-setup.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
-import { stageArchive, importJobStatus, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
+import { stageArchive, importJobStatus, importErrorMessage, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
@@ -637,7 +637,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
         return { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
-      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed, visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
+      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
       const statusMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/status$/)
       if (request.method === 'GET' && statusMatch) {
         const resource = await backend.readResource('import', statusMatch[1])
