@@ -253,7 +253,7 @@ test('profile page keeps prior indexed profile when newer malformed upload fails
   const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
   const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
   const upload = async (bytes, name) => {
-    const page = await (await fetch(endpoint, { headers: { Cookie: cookie } })).text()
+    const page = await (await fetch(endpoint + '/import', { headers: { Cookie: cookie } })).text()
     const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
     const form = new FormData(); form.set('csrf', csrf); form.set('archive', new Blob([bytes]), name)
     const response = await fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })
@@ -339,7 +339,7 @@ test('profile page renders own sections from same corrected successful import', 
   const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
   const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
   const upload = async (bytes, name) => {
-    const page = await (await fetch(endpoint, { headers: { Cookie: cookie } })).text()
+    const page = await (await fetch(endpoint + '/import', { headers: { Cookie: cookie } })).text()
     const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
     const form = new FormData(); form.set('csrf', csrf); form.set('archive', new Blob([bytes]), name)
     const response = await fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })

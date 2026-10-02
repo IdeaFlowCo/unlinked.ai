@@ -4,9 +4,12 @@
 Its indigo styling and journey follow the accepted onboarding and app storyboards.
 The runtime owner must integrate it without changing authorization boundaries.
 
-Each renderer returns `{title, content}` for the server page wrapper.
-The wrapper may keep `<main><h1>{title}</h1>{content}</main>`; scoped styles visually
-place its single title after the shared header. There is no duplicate renderer title.
+Each renderer returns `{title, content}`. `content` is the whole page body: the shared
+header (logo, search, navigation), the page's own `<h1>` inside `<main class="journey">`,
+and the shared footer. The wrapper adds only the document head; it must not add a second title.
+The stylesheet requests the Public Sans webfont, so the wrapper links `ONBOARDING_FONT_HREF`
+and its CSP allows `https://fonts.googleapis.com` styles and `https://fonts.gstatic.com` fonts;
+without them the pages fall back to the system font.
 Content contains scoped styles; the wrapper must apply its actual style CSP policy.
 All raw DTO values are HTML escaped, and contact links allow only HTTPS LinkedIn URLs.
 Contacts and profiles must already be authorized by the caller.
@@ -23,32 +26,42 @@ the upload finishes, before the durable import can continue away from the page.
 actual CSP nonce on Settings. It copies the configuration, selects it when clipboard
 access fails, and leaves a readonly, selectable textarea and instructions without JS.
 
-`renderJoin` forwards session props only when `signedIn` is true; every signed renderer accepts `accountLabel` and `csrf` for header search and sign-out.
-Signed-out Join shows only the logo and outbound Meet link in its header. Member
-navigation uses the same session CSRF presence as header search and sign-out.
-People has one search input, in the shared header: POST `/search-account` with
-`csrf`, `query` and hidden `scope`. It retains the escaped current query; there is
-no separate in-page search or GET filter form. The People contract is:
-`scope: 'everyone' | 'own'`, `everyone: [{id, name, headline?, company?, location?}]`,
-optional `own` containing the existing own-contact DTOs (including reason), optional
-string `nextCursor`, and `state: 'ready' | 'unavailable'` plus existing welcome/error.
-No other member fields are inferred or read. The runtime supplies original profile
-UUIDs and authorized member DTOs, not contacts relabeled as public members.
+`renderJoin` forwards session props only when `signedIn` is true; every signed renderer accepts
+`accountLabel`, optional `displayName` and `csrf`. A `csrf` value is what marks a page as signed in.
 
-Undefined `own` with neither legacy prop means no imports: no own group or scope
-toggles, and scope is forced to everyone. Defined `own` renders People you know
-before Everyone on Unlinked,
-with native Everyone/My people submit buttons and the selected hidden scope. Toggle
-buttons bypass required-query validation to support browsing without a query. A
-clicked toggle adds a second scope value after the hidden one; the controller must
-use the last submitted scope value. With the exact contract, defined empty `own`
-with a query is a no-match result; without a query it shows the import prompt.
-This uses the supplied import-presence signal, not mixed import record totals.
+Every page has one search input, in the shared header: a native GET to `/network` with `q`.
+It carries no CSRF token and works without a session; the controller serves the public list to
+visitors and the member view to members on the same path. The escaped current query is kept.
+Signed-out navigation is Explore (`/people`), For agents, Sign in (`/login`) and Join (`/join`).
+Signed-in navigation is People, My profile, For agents and an account chip that leads to
+Settings; the chip shows `displayName`, a mailbox name for an address, or "Settings" for an
+opaque identifier. An active import adds a header pill linking to `/profile`. The footer holds
+Meet, For agents, `llms.txt` and, for members, the account label and the sign-out form.
+
+`renderLanding()` is the signed-out home: headline, Create my profile (`/join`), explore link
+(`/people`), LinkedIn export panel, a labelled fictional sample profile and the agent band.
+`renderSignInRequired({next})` is shown for a member page opened without a session; a valid
+root-relative `next` becomes `/login?next=…`, anything else is dropped.
+`renderPerson({profile, ...session})` renders any published profile for visitors and members:
+banner, headline, location, About, Experience, Education, Skills and that person's connections,
+each linking to `/people/{id}`, with a Show more link when `nextConnectionsCursor` is present.
+It renders only those DTO fields. `renderAgents`, `renderImportGuide` and `renderMeet` are the
+public guides in the same shell; Meet keeps the element ids its scanner script binds to.
+
+The People contract is: `everyone: [{id, name, headline?, company?, location?}]`, optional `own`
+containing the existing own-contact DTOs (including reason), optional string `nextCursor`, and
+`state: 'ready' | 'unavailable'` plus existing welcome/error. With a query the title becomes
+“Results for …” with a Clear search link. Defined `own` renders People you know before Everyone
+on Unlinked. AI ranking is not a second search box: when a signed-in member has a query, the
+results show a small POST `/search-account` form carrying `csrf` and the hidden `query`, with one
+submit button per available scope (`everyone` when public search is on, `own` when `own` is
+defined). Defined empty `own` with a query is a no-match result; without a query it shows the
+import prompt, which links to `/import`.
 
 For the current controller, legacy `contacts` and `searchResults` remain supported.
 When `own` is undefined and either legacy prop is supplied, own rows come from
 `searchResults` when defined, otherwise `contacts`; even an empty array enables
-the own group and scope toggles. An explicit `own` takes precedence over both.
+the own group. An explicit `own` takes precedence over both.
 Legacy empty-result copy preserves PR35: a nonempty `contacts` array with a query
 shows no match, while no contacts shows the import prompt regardless of query.
 The new explicit `own: []` with a query keeps its no-match rule. Omitted `everyone`
@@ -90,6 +103,8 @@ Each optional import `sha256` value is escaped and shown only inside its `<detai
 alongside the existing `accepted`, `indexed`, `filename`, `status` and `id` fields.
 Join offers Google and email buttons, both forwarding to `/login`. Skip goes to
 `/profile`; Looks good goes to `/network`. My profile navigation also uses `/profile`.
+The own profile uses the same layout as `renderPerson`, with optional `contacts` and
+`connectionCount` filling the My connections card and links to `/import` and `/settings`.
 Signed-out Join and Bring-export show a quiet LinkedIn export request link under
 their buttons, with the Connections/complete-archive wait-time line. Bring-export
 retains its expandable instructions and includes that outbound link only once.
@@ -112,8 +127,8 @@ proof of ownership or a LinkedIn import. No runtime/auth/job handlers change her
 
 Generate fictional, static preview pages with
 `node mcp-server/private-onboarding-preview.mjs /tmp/unlinked-ui-previews`.
-`buildPreviews(outDir)` writes the same minimal title/content wrapper as the server,
+`buildPreviews(outDir)` writes the same document as the server (head plus the view as body),
 without a network connection or server. Preview generation does not install scripts;
 both optional enhancements remain separate for controller CSP integration.
 
-Global runtime integration supplies `anonymousPublic` to People for a native GET `/network?q=` search without session controls; `publicProfessionalSearch` controls the NEW upload action notice and Settings public/private explanation. Individual import summaries carry `visibility: public|private`; older private imports retain private wording. No renderer prop itself grants authority or publishes data.
+Global runtime integration renders People without session props for visitors; `publicProfessionalSearch` controls the NEW upload action notice and Settings public/private explanation. Individual import summaries carry `visibility: public|private`; older private imports retain private wording. No renderer prop itself grants authority or publishes data.
