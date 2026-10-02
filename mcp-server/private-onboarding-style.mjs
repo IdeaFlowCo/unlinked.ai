@@ -197,6 +197,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .cc-reset form{margin:10px 0 0}
 .unlinked-onboarding .cc-kicker{margin:0 0 4px}
 .unlinked-onboarding .cc-foot{margin-top:22px}
+/* The install hint on the card page, phones only. */
+.unlinked-onboarding .pwa-hint{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 18px}
 /* Settings: who is signed in and Sign out, on one line. */
 .unlinked-onboarding .acct{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;margin:-6px 0 0;font-size:15px;color:var(--muted)}
 .unlinked-onboarding .acct b{color:var(--fg)}
