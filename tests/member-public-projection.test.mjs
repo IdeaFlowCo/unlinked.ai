@@ -32,3 +32,12 @@ test('delayed source removal fails the final shared publication read fence',asyn
  getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job})}),publicPeople:{read:async()=>projectPublicMemberImport({job,assertions})}})
  await assert.rejects(read(),/public_member_source_changed/)
 })
+
+test('confirmed legacy member reuses existing profile; latest uploaded profile overlays only live read, revoke removes overlay',async()=>{
+ const sourceSha='e'.repeat(64), recovered={...legacy,revision:'legacy-public-v1:'+sourceSha}, link={profileId:'legacy',sourceSha256:sourceSha,receiptId:'link-receipt',revision:'legacy-public-v1:'+sourceSha}
+ let active=true
+ const cached=projectPublicMemberImport({job,assertions})
+ const read=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[{id,owner:{ownerId:'bound-owner',userId:'bound-user'},revision:4}],getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job}),readLegacyProfile:async()=>active?link:null}),publicPeople:{read:async()=>cached}})
+ const before=await read();assert.equal(before.profiles.length,2);assert.equal(before.profiles.find(p=>p.id==='legacy').name,'Test Member');assert.equal(before.connections[0].fromId,'legacy');assert.equal(cached.profiles[0].id,'member-import-'+id);assert.equal(recovered.profiles[0].name,'Legacy Person')
+ active=false;const after=await read();assert.equal(after.profiles.find(p=>p.id==='legacy').name,'Legacy Person');assert.notEqual(before.revision,after.revision)
+})
