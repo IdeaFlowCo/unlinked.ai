@@ -338,9 +338,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         const listers = [...new Set(snapshot.connections.filter(edge => edge.toId === profileId && edge.fromId !== profileId).map(edge => edge.fromId))].slice(0, 200)
         let sent = 0
         for (const fromId of listers) {
-          const recipient = await accountForProfile(fromId)
-          if (!recipient || (recipient.ownerId === claimer?.ownerId && recipient.userId === claimer?.userId)) continue
-          if (await notifications.notify({ recipient, kind: 'profile_claimed', actor: claimer, actorName: name, actorProfileId: profileId, subjectId: profileId, dedupeKey: `profile-claimed:${profileId}:${recipient.ownerId}:${recipient.userId}` })) sent++
+          // One recipient's failure never stops the rest.
+          try {
+            const recipient = await accountForProfile(fromId)
+            if (!recipient || (recipient.ownerId === claimer?.ownerId && recipient.userId === claimer?.userId)) continue
+            if (await notifications.notify({ recipient, kind: 'profile_claimed', actor: claimer, actorName: name, actorProfileId: profileId, subjectId: profileId, dedupeKey: `profile-claimed:${profileId}:${recipient.ownerId}:${recipient.userId}` })) sent++
+          } catch { /* best effort */ }
         }
         return sent
       } : undefined,

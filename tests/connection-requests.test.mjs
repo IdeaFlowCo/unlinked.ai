@@ -396,3 +396,14 @@ test('agent tools (grant v3) read pending requests and notifications without cha
   assert.ok(ACCOUNT_GRANT_TOOL_VERSIONS[3].owner_network.includes('unlinked_list_notifications'))
   assert.ok(!ACCOUNT_GRANT_TOOL_VERSIONS[2].owner_network_and_public.includes('unlinked_list_notifications'))
 })
+
+test('review hardening: inherited keys are not notices, opaque ids are not names, the sender never learns when an ignore happened', async () => {
+  assert.doesNotMatch(renderInvitations({ csrf: 'tok', notice: 'constructor' }).content, /class="notice" role="status"/)
+  assert.doesNotMatch(renderPerson({ csrf: 'tok', profile: { id: 'a', name: 'A', positions: [], connections: [] }, connectNotice: '__proto__' }).content, /class="notice" role="status"/)
+  const { requests } = setup()
+  const sent = await requests.send({ sender: jacob, senderName: '3f1e8c2a-9b7d-4c1e-a2f0-6d5b4c3a2e1f', recipient: ada, recipientName: 'Ada' })
+  assert.equal((await requests.received(ada))[0].name, 'An Unlinked member')
+  await requests.respond(ada, sent.request.id, 'ignore')
+  const [mine] = await requests.sent(jacob)
+  assert.deepEqual([mine.status, mine.respondedAt], ['pending', undefined])
+})
