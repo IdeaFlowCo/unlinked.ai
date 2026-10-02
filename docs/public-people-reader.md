@@ -29,9 +29,9 @@ Connections are `{fromId,toId}` and remain directed; reciprocal relationships an
 `reader.profile({id,cursor,signal?})` returns `{profile:{...summary,about?,positions,education,skills,connections,nextConnectionsCursor?}}`, or null for an unknown/unpublished profile in an otherwise valid published snapshot.
 The controller maps null to HTTP404; `PublicPeopleReaderError.status===503` maps to unavailable.
 Requests must be plain data objects. Invalid request shapes, signals, queries, IDs and cursor structures/scopes return a data-free status400 error before backend access or unknown-profile handling.
-No HTTP route is implemented by this module.
+No HTTP route is implemented by this module; the standalone runtime maps it to anonymous `/network`, `/people`, `/people/:id`, `/api/people` and `/api/people/:id`.
 
-Search is plain normalized name/company term matching; AI search remains in the owner-scoped controller.
+Reader search is plain normalized name/headline/company term matching. Member Everyone AI search uses `createSharedPeopleSearch()` on top of the same published snapshot, while owner-private AI search remains in the owner-scoped controller.
 Profiles and connection pages sort by Unicode NFKC/lowercase name and binary ID as tie-breaker, independent of provider order and machine locale.
 Pages contain at most100rows, default50.
 Cursors bind offset to normalized query/profile scope and publication revision, and contain no profile names or emails.
@@ -40,4 +40,4 @@ The backend must supply one coherent complete snapshot for that revision; this m
 
 Synthetic tests exercise unavailable/default behavior, whitelist output, deterministic pagination/search, directed connection pages, malformed/oversized snapshots, immutable viewer propagation, aborts/timeouts and invalid client input.
 These fixtures are confined to tests and are never production fallback data.
-Real Noos publication/readback and route integration remain the runtime owner's work.
+Real Noos publication/readback and standalone route integration are covered by the shared People beta work; Next.js route injection remains separate.

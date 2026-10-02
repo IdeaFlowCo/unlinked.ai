@@ -2,13 +2,13 @@
 
 Everyone browsing uses only the published professional Noos projection, never private owner resources or synthetic fallbacks.
 Anonymous GET `/network`, `/people`, `/people/:id`, `/api/people?q=&cursor=`, and `/api/people/:id` expose only safe profile DTOs and provenanced directed connection edges.
-Public reads are bounded to two concurrent requests and120 requests per process per60 seconds; invalid input is400, unavailable/incomplete publication is503, and a missing profile in a complete publication is404.
+Public reads are bounded to two concurrent requests and 120 requests per process per 60 seconds; invalid input is 400, unavailable/incomplete publication is 503, and a missing profile in a complete publication is 404.
 
-The offline publisher accepts only the checksummed recovered DB backup (16,296 profiles and16,603 directed edges), retains a private provenance manifest, and never creates an account binding.
-Original auth/storage backup and81-account email evidence remain separate; verified provider email linking requires a later explicit guarded identity operation.
+The offline publisher accepts only the checksummed recovered DB backup (16,296 profiles and 16,603 directed edges), retains a private provenance manifest, and never creates an account binding.
+Original auth/storage backup and 81-account email evidence remain separate; verified provider email linking requires a later explicit guarded identity operation.
 
 A member with no imports can POST `/search-account` with query, CSRF and `scope=everyone`; owner-private search remains `scope=own`.
-Everyone retrieval evaluates all public profiles lexically and passes at most200 matching professional candidates to OpenAI for ranking.
+Everyone retrieval evaluates all public profiles lexically and passes at most 200 matching professional candidates to OpenAI for ranking.
 The response reports total considered/candidate counts; it is retrieval plus AI ranking, with no claim that all profiles were sent to the model.
 Model input excludes emails, phones, raw source archives and private notes.
 A changed/revoked public publication is rechecked after model processing and denies the result.
@@ -23,8 +23,8 @@ New account grants include `unlinked_search_everyone` and `unlinked_search_netwo
 Stored grant and owner binding are checked before and after model work; revocation remains durable.
 No grant exposes raw archives or identity/provider credentials.
 
-The first complete shared-snapshot bound is20,000 profiles/100,000 edges; the recovered seed uses16,296 profiles.
-Exceeding the bound fails explicitly rather than truncating; this is a real scaling limit for subsequent member additions, separate from the owner-private parser/import limit of100,000 records.
+The first complete shared-snapshot bound is 20,000 profiles/100,000 edges; the recovered seed uses 16,296 profiles.
+Exceeding the bound fails explicitly rather than truncating; this is a real scaling limit for subsequent member additions, separate from the owner-private parser/import limit of 100,000 records.
 The private source ZIP and all accepted owner observations remain intact.
 A scalable paged public projection is a follow-up before larger shared unions can be claimed complete.
 

@@ -6,9 +6,9 @@ A [Model Context Protocol](https://modelcontextprotocol.io) adapter for the hist
 
 ## Current availability
 
-Current sign-in, archive upload, own-network search, and hosted Agent setup run in the canonical beta at https://www.unlinked.ai. `/agents` and the machine discovery files describe that Streamable HTTP account MCP setup. The setup examples below are preserved as historical implementation notes for the legacy stdio server, recovery and local development.
+Current sign-in, archive upload, owner-network search, Everyone search, public People browsing and hosted Agent setup run in the canonical beta at https://www.unlinked.ai. `/agents` and the machine discovery files describe that Streamable HTTP account MCP setup. The setup examples below are preserved as historical implementation notes for the legacy stdio server, recovery and local development.
 
-The standalone runtime's hosted account MCP handler uses a separate bearer audience, exposes only `unlinked_search_network`, searches all current owner imports plus future imports until revoked, and is documented in `../deploy/private-pilot/ACCOUNT-LAUNCH.md`; it is not the legacy stdio server below.
+The standalone runtime's hosted account MCP handler uses a separate bearer audience, exposes `unlinked_search_network` plus `unlinked_search_everyone` for new grants, searches all current owner imports plus future imports and the published professional People index until revoked, and is documented in `../deploy/private-pilot/ACCOUNT-LAUNCH.md`; it is not the legacy stdio server below. Older single-tool grants remain owner-network only.
 
 ## Historical setup reference
 
@@ -68,7 +68,7 @@ For the historical API, set the API key one of two ways (checked in this order):
    { "apiKey": "ul_your_key_here", "baseUrl": "https://www.unlinked.ai" }
    ```
 
-The server will fail tool calls with a clear error message if neither is set. A configured legacy client is not proof of access; current setup is confirmed by a successful scoped `unlinked_search_network` call against `https://www.unlinked.ai/mcp` using the standalone runtime's account grant.
+The server will fail tool calls with a clear error message if neither is set. A configured legacy client is not proof of access; current setup is confirmed by a successful scoped `unlinked_search_network` or `unlinked_search_everyone` call against `https://www.unlinked.ai/mcp` using the standalone runtime's account grant.
 
 ## Environment Variables
 
