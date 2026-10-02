@@ -112,3 +112,5 @@ MCP clients connect with OAuth ("paste the URL and sign in"): `mcp-server/oauth-
 The immutable private legacy Storage recovery, owner confirmation/download boundary and offline operator are documented in `docs/legacy-storage-recovery.md`; originals are excluded from agent grants and public projections.
 
 Shared browser/agent connection authorization is in `mcp-server/connection-actions.mjs`; opt-in writes and grant update hints are documented in `docs/agent-api.md`.
+
+Invite and notification emails (Resend over `fetch`, `mcp-server/member-email.mjs`) are documented in `docs/email.md`: env `RESEND_API_KEY`, `UNLINKED_EMAIL_FROM`, `UNLINKED_EMAIL_ENABLED` (off with `false`/`0`). Never log or render an email address other than the signed-in member's own, a token or the key; `POST /email/unsubscribe` is the only POST exempt from the same-origin check.

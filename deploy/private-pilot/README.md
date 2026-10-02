@@ -107,6 +107,7 @@ The default process mode remains host loopback; an arbitrary public browser/grap
 The proposed persistent OpenAI destination is `runtime/runtime.env` and requires explicit destination confirmation before any key copy.
 Synthetic testing can continue reading the existing M5 key in place; no model key belongs on a CI VM.
 The runtime reads `IDEAFLOW_ISSUER`, `IDEAFLOW_CLIENT_ID`, `IDEAFLOW_CLIENT_SECRET`, `NOOS_PRIVATE_PASSWORD` and `OPENAI_API_KEY` from its explicit `runtime.env` only.
+Email delivery reads `RESEND_API_KEY`, optional `UNLINKED_EMAIL_FROM` and optional `UNLINKED_EMAIL_ENABLED` from the same `runtime.env` (Compose's `env_file`, so no compose change is needed); without the key nothing is sent, and `UNLINKED_EMAIL_ENABLED=false` turns sending off. See `docs/email.md`.
 The proposed production issuer is `https://id.ideaflow.app/api/auth`; client registration and confidential secret delivery belong to the identity owner.
 The callback is exactly the manifest origin plus `/auth/callback/ideaflow`: `https://private.unlinked.ai/auth/callback/ideaflow` for the rollback private packet, or `https://www.unlinked.ai/auth/callback/ideaflow` for the canonical cutover packet. The isolated container recipe uses browser 9367, operations on its own loopback 9022, and the dedicated internal graph at graph:7687.
 Run it as the explicitly provisioned private host operator UID/GID recorded in the release manifest; no root database or operator invitation capability is passed through HTTP.
