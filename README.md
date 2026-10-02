@@ -9,6 +9,7 @@ Meet is anonymous and does not resolve an Unlinked owner, read an archive, or im
 ## Import LinkedIn archive
 
 The canonical app sign-in is https://www.unlinked.ai/login.
+The home page, People search (`/people`, `/network?q=`) and profile pages (`/people/{id}`) need no sign-in; a member page opened without a session offers sign-in and returns there afterwards.
 Anyone can sign in or create an account through Ideaflow ID; no invitation is needed.
 If the signed Ideaflow email matches one of the privately seeded recovered legacy accounts, the standalone runtime may ask once whether to continue with that old Unlinked profile before showing `/profile`.
 After that explicit recovered-account confirmation, Settings may also list preserved original LinkedIn files for browser-only download; those originals are not exposed through agent grants or public People.
