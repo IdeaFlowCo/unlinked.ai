@@ -26,6 +26,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
         const before = await authenticateGrant(request)
         if (!before || before.grantId !== grant.grantId || before.ownerId !== grant.ownerId || before.userId !== grant.userId) throw new Error('account_grant_revoked')
         const connectionQuery = knownConnectionQuery(query, degree)
+        if (cursor !== undefined && !connectionQuery.degree) throw new Error('account_cursor_requires_connection_mode')
         const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).search({ query, signal })
         const after = await authenticateGrant(request)
         if (!after || after.grantId !== grant.grantId || after.ownerId !== grant.ownerId || after.userId !== grant.userId) throw new Error('account_grant_revoked')
