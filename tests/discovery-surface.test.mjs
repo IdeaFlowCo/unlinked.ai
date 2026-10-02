@@ -97,7 +97,7 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.servers[0].url, 'https://www.unlinked.ai');
 
   const paths = Object.keys(spec.paths);
-  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone'];
+  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone', '/api/agent/v1/provision-grant'];
 
   for (const p of expectedPaths) {
     assert.ok(paths.includes(p), `Expected openapi.json to include path ${p}`);

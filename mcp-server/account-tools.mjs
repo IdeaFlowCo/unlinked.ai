@@ -13,8 +13,8 @@ const LINKEDIN_PROFILE = /^https:\/\/www\.linkedin\.com\/in\/[\w%-]+$/
 // Codes are a stable contract (docs/agent-api.md): extend, never rename.
 export const ACCOUNT_TOOL_ERROR_STATUS = Object.freeze({
   invalid_input: 400, cursor_invalid: 400, not_linked: 401, grant_revoked: 401,
-  scope_not_granted: 403, not_found: 404, degree_unproven: 409, result_too_large: 413,
-  rate_limited: 429, upstream_unavailable: 503,
+  client_unauthorized: 403, scope_not_granted: 403, not_found: 404, degree_unproven: 409,
+  result_too_large: 413, rate_limited: 429, upstream_unavailable: 503,
 })
 
 export class AccountToolError extends Error {
