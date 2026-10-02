@@ -105,6 +105,12 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .crow{display:grid;grid-template-columns:36px 1fr;gap:10px;padding:8px 0;align-items:center;text-decoration:none;font-size:15px;line-height:1.3;color:var(--fg)}
 .unlinked-onboarding .crow .avatar{width:36px;height:36px;font-size:12px}
 .unlinked-onboarding a.crow:hover strong{text-decoration:underline}
+/* Shadow profiles: imported, not on Unlinked yet. Members carry no mark. */
+.unlinked-onboarding .shadow{display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:1px 7px;border:1px dashed var(--line2);border-radius:99px;font-size:12px;font-weight:500;line-height:1.5;color:var(--muted);white-space:nowrap;vertical-align:middle}
+.unlinked-onboarding .shadow.net{border-style:solid;border-color:var(--brand);color:var(--brand-d);background:var(--tint)}
+.unlinked-onboarding .shadow svg{flex:none}
+.unlinked-onboarding .shadow-note{margin:10px 0 0;color:var(--muted)}
+.unlinked-onboarding .shadow-note .shadow{margin-left:0}
 .unlinked-onboarding .land{display:grid;grid-template-columns:1.05fr .95fr;gap:76px;padding:60px 0 20px;align-items:start}
 .unlinked-onboarding .land h1{font:600 clamp(32px,4vw,50px)/1.08 "Public Sans",system-ui,sans-serif;letter-spacing:-.02em;margin:0 0 20px}
 .unlinked-onboarding .land .lead{font-size:19px;line-height:1.6;max-width:30em;margin:0 0 30px}
