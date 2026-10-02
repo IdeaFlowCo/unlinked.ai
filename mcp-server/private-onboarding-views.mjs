@@ -46,6 +46,7 @@ const initials = name => raw(name).trim().split(/\s+/).slice(0, 2).map(word => [
 const firstName = name => { const first = raw(name).trim().split(/\s+/)[0] ?? ''; return [...first].length > 2 && !first.endsWith('.') ? first : '' }
 const avatar = (name, seed = name) => `<span class="initials avatar" style="background:${hue(seed)}" aria-hidden="true">${html(initials(name))}</span>`
 const externalProfile = value => { try { const url = new URL(value); return url.protocol === 'https:' && ['linkedin.com', 'www.linkedin.com'].includes(url.hostname) && !url.username && !url.password ? url.href : null } catch { return null } }
+const PRESENCE_FILTERS = [[undefined, 'All'], ['member', 'On Unlinked'], ['shadow', 'Not yet on Unlinked']]
 const subline = value => [raw(value.headline), raw(value.company)].filter(Boolean).join(' · ')
 // Imported people who have not joined. A network icon marks those connected to
 // more than one person here, so their page leads somewhere; a dot marks a stub.
@@ -126,6 +127,36 @@ export function renderCard({ accountLabel, displayName, csrf, importJob, profile
 // The early, optional find-yourself step: a LinkedIn address is a lookup hint,
 // never proof of ownership or an import. Nothing is claimed without the
 // explicit "Yes, that's me" confirmation, and skipping costs nothing.
+// Someone you know who is not on Unlinked: kept with your own people, never
+// published. LinkedIn's own export format needs both names and the profile URL.
+export function renderAddPerson({ accountLabel, displayName, csrf, importJob, error, values = {} } = {}) {
+  const field = (name, label, hint, required = false, type = 'text') => `<label>${label}${required ? '' : ' <span class="small">(optional)</span>'}<input name="${name}" type="${type}" maxlength="${type === 'url' ? 2048 : 120}"${required ? ' required' : ''} value="${html(values[name])}">${hint ? `<span class="small">${hint}</span>` : ''}</label>`
+  return base('Add a person', `<section class="narrow"><h1 class="hq">Add a person</h1><p class="lead">Someone you know who is not on Unlinked. They join your own people, searchable by you and your agent. They are not published, and they are not told.</p>${error ? `<p class="notice error" role="alert">${html(error)}</p>` : ''}<form method="post" action="/people/add">${csrfInput(csrf)}${field('firstName', 'First name', '', true)}${field('lastName', 'Last name', '', true)}${field('linkedinUrl', 'LinkedIn profile', 'For example https://www.linkedin.com/in/their-name', true, 'url')}${field('company', 'Company')}${field('position', 'Role')}<button type="submit">Add to my people</button></form><p class="small"><a href="/invites">Invite someone to join instead →</a></p></section>`, { accountLabel, displayName, csrf, importJob })
+}
+
+const INVITATION_STATUS = { pending: 'Waiting', accepted: 'Accepted', declined: 'Declined', revoked: 'Revoked', expired: 'Expired' }
+// Invites you send yourself: Unlinked never emails anyone.
+export function renderInvites({ accountLabel, displayName, csrf, importJob, invitations = [], created, error, origin = 'https://www.unlinked.ai' } = {}) {
+  const link = created ? `${raw(origin)}/i/${raw(created.token)}` : ''
+  const fresh = created ? `<div class="card" role="status"><p><strong>Invite link for ${html(created.invitation.inviteeName)} is ready.</strong> Send this link yourself. It works once and expires in 14 days. It is shown only now.</p><label for="invite-link">Invite link</label><input id="invite-link" readonly value="${html(link)}"><p class="actions"><a class="button sec sm" href="${html(`mailto:?subject=${encodeURIComponent('Join me on Unlinked')}&body=${encodeURIComponent(`I'd like to connect on Unlinked: ${link}`)}`)}">Write an email</a></p></div>` : ''
+  const rows = list(invitations).map(value => `<div class="row"><span>${html(value.inviteeName)}</span><b>${html(INVITATION_STATUS[value.status] ?? value.status)}</b>${value.status === 'pending' ? `<form method="post" action="/invites/revoke">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(value.id)}"><button class="quiet sm">Revoke</button></form>` : ''}</div>`).join('')
+  return base('Invite someone', `<section class="narrow wide"><h1 class="hq">Invite someone</h1><p class="lead">Invite someone who is not on Unlinked yet. You get a link to send them yourself.</p>${error ? `<p class="notice error" role="alert">${html(error)}</p>` : ''}${fresh}<form method="post" action="/invites">${csrfInput(csrf)}<label>Their name<input name="inviteeName" required maxlength="120"></label><button type="submit">Create invite link</button></form><h2>Your invites</h2><div class="card">${rows || '<p class="small">No invites yet.</p>'}</div><p class="small">Accepting an invite only tells you they joined. It never links them to a profile on its own. <a href="/people/add">Add someone to your people instead →</a></p></section>`, { accountLabel, displayName, csrf, importJob })
+}
+
+// The page an invite link opens, signed in or not.
+export function renderInviteLanding({ accountLabel, displayName, csrf, token, invitation, outcome } = {}) {
+  const valid = invitation?.status === 'pending'
+  const path = `/i/${raw(token)}`
+  const body = outcome === 'accepted' ? `<p class="lead">You accepted ${html(invitation.inviterName)}'s invite.</p><p><a class="button" href="/profile">Continue to your profile</a></p>`
+    : outcome === 'declined' ? '<p class="lead">You declined the invite. Nothing was linked to your account.</p>'
+    : invitation?.status === 'own' ? '<p class="lead">This is your own invite. Send the link to the person you invited.</p><p><a href="/invites">Your invitations</a></p>'
+    : !valid ? `<p class="lead">This invite ${invitation?.status === 'expired' ? 'has expired' : 'is no longer available'}.</p><p><a href="/">Learn about Unlinked</a></p>`
+    : `<p class="lead">${html(invitation.inviterName)} invited ${html(invitation.inviteeName)} to Unlinked, an open professional network.</p>${csrf
+      ? `<form method="post" action="${html(path)}">${csrfInput(csrf)}<p class="small">Signed in as ${html(accountLabel)}. Accepting tells ${html(invitation.inviterName)} you joined; it does not link you to any profile.</p><div class="actions"><button name="action" value="accept">Accept</button><button class="quiet" name="action" value="decline">Decline</button></div></form>`
+      : `<div class="actions"><a class="button" href="${html(`/login?next=${encodeURIComponent(path)}`)}">Sign in or join to accept</a></div><p class="small">Unlinked asks you to confirm after you sign in.</p>`}`
+  return base('Invite', `<section class="narrow"><h1 class="hq">You're invited</h1>${body}</section>`, { accountLabel, displayName, csrf })
+}
+
 export function renderFindMe({ accountLabel, displayName, csrf, importJob, lookupResult, notice } = {}) {
   return base('Were you already on Unlinked?', `<section class="narrow"><h1 class="hq">Were you already on Unlinked?</h1><p class="lead">Thousands of profiles carried over from the original Unlinked. If yours is here, you can claim it — or skip and build a fresh one from your export.</p>${notice ? `<p class="notice">${html(notice)}</p>` : ''}${profileLookup({ linkedinLookup: { action: '/find-me' }, lookupResult, csrf })}${lookupResult?.status === 'none' ? '<p class="notice">Nothing unclaimed matched. You can continue — your LinkedIn export builds your profile either way.</p>' : ''}<p class="small"><a href="/">Skip for now →</a></p></section>`, { accountLabel, displayName, csrf, importJob })
 }
@@ -154,17 +185,23 @@ export function renderCompany({ accountLabel, displayName, csrf, importJob, name
 }
 const externalCompany = value => { try { const url = new URL(raw(value)); return url.protocol === 'https:' && ['linkedin.com', 'www.linkedin.com'].includes(url.hostname) && !url.username && !url.password ? url.href : null } catch { return null } }
 
-export function renderPeople({ accountLabel, displayName, csrf, query = '', mode = 'best', match, everyone, own, contacts, searchResults, aiMatches, aiNote, aiError, anonymousAi = false, nextCursor, state = 'ready', importJob, publicProfessionalSearch }) {
-  const exact = mode === 'exact', searched = `q=${encodeURIComponent(raw(query))}`
+export function renderPeople({ accountLabel, displayName, csrf, query = '', mode = 'best', presence, added = false, match, everyone, own, contacts, searchResults, aiMatches, aiNote, aiError, anonymousAi = false, nextCursor, state = 'ready', importJob, publicProfessionalSearch }) {
+  const exact = mode === 'exact', kept = presence === 'member' || presence === 'shadow' ? presence : undefined
+  const searched = `q=${encodeURIComponent(raw(query))}${kept ? `&presence=${kept}` : ''}`
   // Two ways to read the same words: forgiving by default, literal on request.
-  const modes = raw(query) ? `<p class="small modes">${exact ? `<a href="${html(`/network?${searched}`)}">Best match</a> · <b aria-current="true">Exact words</b>` : `<b aria-current="true">Best match</b> · <a href="${html(`/network?${searched}&mode=exact`)}">Exact words</a>`} · <a href="/network">Clear search</a></p>${!exact && match === 'some' ? '<p class="notice">No one has every word. Showing people who match some of them.</p>' : ''}` : ''
+  const modes = raw(query) ? `<p class="small modes">${exact ? `<a href="${html(`/network?${searched}`)}">Best match</a> · <b aria-current="true">Exact words</b>` : `<b aria-current="true">Best match</b> · <a href="${html(`/network?${searched}&mode=exact`)}">Exact words</a>`} · <a href="${kept ? `/network?presence=${kept}` : '/network'}">Clear search</a></p>${!exact && match === 'some' ? '<p class="notice">No one has every word. Showing people who match some of them.</p>' : ''}` : ''
   const legacy = own === undefined && (contacts !== undefined || searchResults !== undefined)
   const canSearchEveryone = publicProfessionalSearch ?? (everyone !== undefined || legacy)
   if (legacy) own = list(searchResults !== undefined ? searchResults : contacts)
   const noMatch = query && (!legacy || list(contacts).length > 0)
   const ownGroup = own === undefined ? '' : `<section class="own-group" aria-label="People you know"><h2>People you know</h2>${list(own).length ? `<div class="panel list">${list(own).map(value => `${person(value)}${value.reason ? `<p class="reason">${html(value.reason)}</p>` : ''}`).join('')}</div>` : `<div class="notice">${noMatch ? 'No people matched. Try another name or company.' : 'Bring your LinkedIn export to see your people.'} <a href="/import">Add a file →</a></div>`}</section>`
-  const everyoneGroup = everyone === undefined ? '' : `<section class="everyone-group" aria-label="Everyone on Unlinked"><h2>Everyone on Unlinked</h2>${state === 'unavailable' ? '<p class="notice">Member search is on its way.</p>' : list(everyone).length ? `<div class="panel list">${list(everyone).map(member).join('')}</div>` : `<p class="notice">${query ? 'No one on Unlinked matched that yet.' : 'No members to show yet.'}</p>`}</section>`
-  const more = typeof nextCursor === 'string' && nextCursor ? `<p><a class="button sec sm" href="${html(`/network?${raw(query) ? `${searched}&` : ''}${exact ? 'mode=exact&' : ''}cursor=${encodeURIComponent(nextCursor)}`)}">Show more</a></p>` : ''
+  // Who to show: everyone, people who joined, or imported profiles not on Unlinked yet.
+  const filterHref = value => `/network${[raw(query) ? `q=${encodeURIComponent(raw(query))}` : '', exact ? 'mode=exact' : '', value ? `presence=${value}` : ''].filter(Boolean).reduce((path, part, index) => `${path}${index ? '&' : '?'}${part}`, '')}`
+  const presenceFilter = `<p class="small modes presence" role="navigation" aria-label="Who to show">${PRESENCE_FILTERS.map(([value, label]) => value === kept ? `<b aria-current="true">${label}</b>` : `<a href="${html(filterHref(value))}">${label}</a>`).join(' · ')}</p>`
+  const everyoneTitle = kept === 'member' ? 'On Unlinked' : kept === 'shadow' ? 'Not yet on Unlinked' : 'Everyone on Unlinked'
+  const emptyEveryone = kept === 'member' ? `${query ? 'No one who joined matches that yet.' : 'No one has joined yet.'} Most profiles here were imported from LinkedIn connections.` : query ? 'No one on Unlinked matched that yet.' : 'No members to show yet.'
+  const everyoneGroup = everyone === undefined ? '' : `<section class="everyone-group" aria-label="${everyoneTitle}"><h2>${everyoneTitle}</h2>${presenceFilter}${state === 'unavailable' ? '<p class="notice">Member search is on its way.</p>' : list(everyone).length ? `<div class="panel list">${list(everyone).map(member).join('')}</div>` : `<p class="notice">${emptyEveryone}</p>`}</section>`
+  const more = typeof nextCursor === 'string' && nextCursor ? `<p><a class="button sec sm" href="${html(`/network?${raw(query) ? `${searched}&` : kept ? `presence=${kept}&` : ''}${exact ? 'mode=exact&' : ''}cursor=${encodeURIComponent(nextCursor)}`)}">Show more</a></p>` : ''
   // The same words, ranked by AI. A button on the results, not a second search box.
   const scopes = csrf && raw(query) ? [canSearchEveryone ? ['everyone', 'everyone'] : null, own !== undefined ? ['own', 'my people'] : null].filter(Boolean) : []
   // A visitor gets the same AI ranking over the public list; it carries no session authority.
@@ -172,7 +209,7 @@ export function renderPeople({ accountLabel, displayName, csrf, query = '', mode
     : !csrf && anonymousAi && raw(query) ? `<form class="ask-ai actions" method="post" action="/ask"><input type="hidden" name="query" value="${html(query)}"><span class="small">Looking for something less literal?</span><button class="quiet sm" type="submit">Ask AI</button></form>` : ''
   // AI picks carry the model's reason; plain list rows never do.
   const aiGroup = aiMatches === undefined && !aiError ? '' : aiError ? `<section class="ai-group" aria-label="AI picks"><h2>AI picks</h2><p class="notice error" role="alert">${html(aiError)}</p></section>` : `<section class="ai-group" aria-label="AI picks"><h2>AI picks</h2>${list(aiMatches).length ? `<div class="panel list">${list(aiMatches).map(value => `${member(value)}${value.reason ? `<p class="reason">${html(value.reason)}</p>` : ''}`).join('')}</div>` : '<p class="notice">The AI found no one who fits. Try other words.</p>'}<p class="small">${aiNote ? `${html(aiNote)} ` : ''}OpenAI received your words and a limited set of public names, headlines and roles.</p></section>`
-  return base('People', `<section class="dir"><h1 class="hq">${raw(query) ? `Results for “${html(query)}”` : 'People'}</h1>${modes}${raw(query) ? '' : `<p class="lead">${state === 'welcome' ? "You're in. " : ''}${own === undefined ? 'People on Unlinked, ready to search.' : 'The people you know, ready to search.'}</p>`}${askAi}${state === 'error' ? '<p class="notice error" role="alert">We could not read your people right now. Try again; this does not mean your network is empty.</p>' : `${aiGroup}${ownGroup}${everyoneGroup}${more}`}<p class="small">Friends come soon.</p></section>`, { accountLabel, displayName, csrf, importJob, query, mode })
+  return base('People', `<section class="dir"><h1 class="hq">${raw(query) ? `Results for “${html(query)}”` : 'People'}</h1>${modes}${raw(query) ? '' : `<p class="lead">${state === 'welcome' ? "You're in. " : ''}${own === undefined ? 'People on Unlinked, ready to search.' : 'The people you know, ready to search.'}</p>`}${added ? '<p class="notice" role="status">Added to your people. They appear here once processed, usually within a minute.</p>' : ''}${askAi}${state === 'error' ? '<p class="notice error" role="alert">We could not read your people right now. Try again; this does not mean your network is empty.</p>' : `${aiGroup}${ownGroup}${everyoneGroup}${more}`}<p class="small">${csrf ? '<a href="/people/add">Add a person</a> · <a href="/invites">Invite someone</a> · ' : ''}Friends come soon.</p></section>`, { accountLabel, displayName, csrf, importJob, query, mode })
 }
 
 export function renderSettings({ accountLabel, displayName, csrf, publicProfessionalSearch = false, imports = [], grants = [], agentConfiguration, agentSetupAutomatic = false, importJob, deleteError }) {

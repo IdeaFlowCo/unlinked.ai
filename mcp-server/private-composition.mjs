@@ -1,5 +1,6 @@
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
+import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { lstat, mkdir, open, readFile, readdir, rm } from 'node:fs/promises'
@@ -23,7 +24,8 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/legacy-storage.js')),
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
-    ...require(join(directory, 'dist/operational/access-token.js')) }
+    ...require(join(directory, 'dist/operational/access-token.js')),
+    createMemberInvitationStore: createNeo4jInvitationStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -79,6 +81,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await publicPeople?.initialize()
     const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
     await legacyLinks?.initialize()
+    // Member-delivered invites, when the runtime supplies their graph store.
+    const invitationStore = typeof dependencies.createMemberInvitationStore === 'function' ? dependencies.createMemberInvitationStore(driver, 'neo4j') : null
+    await invitationStore?.initialize()
+    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore }) : undefined
     const legacyStorage=typeof dependencies.UnlinkedLegacyStorageStore==='function'?new dependencies.UnlinkedLegacyStorageStore(driver,'neo4j','callback'):null
     await legacyStorage?.initialize()
     const login = await loginFactory({ issuer: config.issuer, clientId: config.clientId, clientSecret: config.clientSecret,
@@ -179,6 +185,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     }) : undefined
     return { login, getBackend, close, audit, backgroundImports: true,
       readPublishedSnapshot,
+      memberInvitations,
       legacyAccount: legacyLinks ? { candidate: legacyLinks.candidate.bind(legacyLinks), confirm: legacyLinks.confirm.bind(legacyLinks) } : undefined,
       // Owner-scoped parts of account deletion that live outside the resource
       // API: the legacy claim row and the owner's own staged asset directory.

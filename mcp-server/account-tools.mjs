@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
-import { createPublicPeopleReader, PublicPeopleReaderError } from '../src/utils/public-people/reader.mjs'
+import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { SEARCH_MODES } from '../src/utils/public-people/text-match.mjs'
 
@@ -30,7 +30,7 @@ export class AccountToolError extends Error {
 export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   unlinked_whoami: {},
   unlinked_list_people: {
-    q: z.string().max(200).optional(), mode: z.enum(SEARCH_MODES).optional(),
+    q: z.string().max(200).optional(), mode: z.enum(SEARCH_MODES).optional(), presence: z.enum(PRESENCE).optional(),
     cursor: z.string().max(2048).optional(), limit: z.number().int().min(1).max(50).optional(),
   },
   unlinked_list_connections: {
@@ -51,7 +51,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_whoami: 'Return the authenticated grant owner: the stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy-profile anchor if any. Linkage is the grant itself — never email matching. No contact email/phone is returned.',
-  unlinked_list_people: 'Deterministically list or lexically filter the published public People index. Paginated with an opaque cursor, at most 50 per page, with total and snapshot revision. Public fields only.',
+  unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=shadow keeps imported profiles not on Unlinked yet. Paginated with an opaque cursor, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Paginated, at most 50 per page, typed provenance per entry.',
   unlinked_get_profile: 'Read one published public profile by id with its public connections page. Returns typed not_found when no published profile has that id.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
@@ -152,10 +152,10 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         legacyProfile: legacy ? { profileId: legacy.profileId, name: legacy.profile?.name ?? null, revision: legacy.revision } : null,
         publicIndexAvailable: typeof readPublishedSnapshot === 'function' }
     },
-    async unlinked_list_people(grant, { q = '', mode = 'best', cursor, limit = 50 }, signal) {
+    async unlinked_list_people(grant, { q = '', mode = 'best', presence, cursor, limit = 50 }, signal) {
       const { reader, captured } = publicReader(limit)
       let result
-      try { result = await reader.list({ query: q, mode, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
+      try { result = await reader.list({ query: q, mode, presence, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
       return { kind: 'unlinked_list_people', revision: captured.revision, total: result.total ?? captured.total ?? result.profiles.length,
         ...(result.match ? { match: result.match } : {}), profiles: result.profiles,
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), visibility: 'public' }

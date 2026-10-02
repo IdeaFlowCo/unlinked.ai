@@ -154,11 +154,15 @@ Response: `{ kind, ownerId, grant: { scope, version, tools }, importCount,
 legacyProfile: { profileId, name, revision } | null, publicIndexAvailable }`.
 `ownerId` is the stable identifier for fail-closed linkage verification.
 
-### `GET /api/agent/v1/people?q&mode&cursor&limit` ⇄ `unlinked_list_people`
+### `GET /api/agent/v1/people?q&mode&presence&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
-`q` ≤ 200 chars; `mode` `best` (default) or `exact`.
+`q` ≤ 200 chars; `mode` `best` (default) or `exact`; `presence` `member` (people
+who joined: confirmed claims and members' own imports) or `shadow` (imported,
+not on Unlinked yet), omitted for everyone. The filter is bound into the cursor.
 Response: `{ kind, revision, total, match?, profiles: [{ id, name, headline?,
-location? }], nextCursor?, visibility: "public" }`.
+location?, presence?, connectionCount? }], nextCursor?, visibility: "public" }`.
+`presence` and `connectionCount` (connections counted from both ends) are present
+whenever the published snapshot names its members.
 
 ### `GET /api/agent/v1/people/{id}?connectionsCursor` ⇄ `unlinked_get_profile`
 One published profile with its public connections page (50 per page).
