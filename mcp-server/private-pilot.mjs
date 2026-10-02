@@ -11,7 +11,7 @@ import { createAccountToolService } from './account-tools.mjs'
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
 // invocation; no operational credential or provider token is sent to clients.
-export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, legacyAccount, selfClaims, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic' }) {
+export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, legacyAccount, selfClaims, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic' }) {
   const base = new URL(baseUrl)
   const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : networkMode === 'isolated-container' && host === '0.0.0.0' && ['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) && port === 9367
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !Number.isSafeInteger(port) || port < 7000 || port > 9999 || !privateHost || typeof complete !== 'function') throw new Error('explicit_isolated_pilot_configuration_required')
@@ -29,7 +29,11 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
     readResource: async (grant, type, id) => (await getBackend(grant)).readResource(type, id),
     readAsset: async (grant, sha256) => (await getBackend(grant)).readAsset(sha256),
   })
-  const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin }) : null
+  if (!Array.isArray(provisionAgentClients) || provisionAgentClients.length > 16) throw new Error('account_agent_provisioning_configuration_required')
+  // Server-to-server grant provisioning stays off unless the operator supplied
+  // a non-empty allow list (see docs/agent-api.md, "Grant provisioning").
+  const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit } : undefined
+  const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin, provisioning }) : null
   const server = createServer((request, response) => {
     let pathname
     try { pathname = new URL(request.url, base).pathname } catch { response.writeHead(400).end(); return }

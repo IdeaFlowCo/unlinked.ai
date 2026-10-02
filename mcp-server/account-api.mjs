@@ -1,4 +1,26 @@
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { AccountToolError } from './account-tools.mjs'
+
+const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]{4,64}$/
+const sha256 = value => createHash('sha256').update(value).digest()
+
+// Confidential-client Basic credentials (client_secret_basic). Unknown client
+// ids still perform one hash comparison so lookups are not timing-observable.
+const DUMMY_SECRET_HASH = sha256('unlinked-provisioning-dummy-secret')
+function authenticateClient(request, clients) {
+  const header = request.headers.authorization
+  if (typeof header !== 'string' || !header.startsWith('Basic ') || header.length > 1024) return null
+  let decoded
+  try { decoded = Buffer.from(header.slice(6), 'base64').toString('utf8') } catch { return null }
+  const split = decoded.indexOf(':')
+  if (split < 1) return null
+  const clientId = decoded.slice(0, split), secret = decoded.slice(split + 1)
+  const client = clients.find(value => value.clientId === clientId) ?? null
+  const presented = sha256(secret)
+  const expected = client ? client.secretSha256 : DUMMY_SECRET_HASH
+  const matched = timingSafeEqual(presented, expected)
+  return client && matched ? client : null
+}
 
 // Grant-authenticated HTTP JSON surface for the same account tool service the
 // hosted MCP endpoint uses. Versioned contract: docs/agent-api.md (v1). The
@@ -29,9 +51,58 @@ async function readJsonBody(request, limit = 8192) {
   return value
 }
 
-export function createAccountAgentApiHandler({ authenticateGrantDetailed, authenticateGrant, service, origin }) {
+export function createAccountAgentApiHandler({ authenticateGrantDetailed, authenticateGrant, service, origin, provisioning }) {
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || typeof authenticateGrantDetailed !== 'function' || typeof authenticateGrant !== 'function' || typeof service?.call !== 'function') throw new Error('account_agent_api_configuration_required')
+  // Server-to-server grant provisioning is default-off: it exists only when an
+  // operator supplies a non-empty confidential-client allow list plus the
+  // verified-identity resolver and ensureGrant capability.
+  if (provisioning !== undefined && (!Array.isArray(provisioning.clients) || !provisioning.clients.length ||
+      provisioning.clients.some(client => !CLIENT_ID_PATTERN.test(client?.clientId ?? '') || !(client.secretSha256 instanceof Uint8Array) || client.secretSha256.length !== 32) ||
+      new Set(provisioning.clients.map(client => client.clientId)).size !== provisioning.clients.length ||
+      typeof provisioning.resolveOwner !== 'function' || typeof provisioning.ensureGrant !== 'function' ||
+      (provisioning.audit !== undefined && typeof provisioning.audit !== 'function') ||
+      (provisioning.perClientPerMinute !== undefined && !(Number.isSafeInteger(provisioning.perClientPerMinute) && provisioning.perClientPerMinute >= 1 && provisioning.perClientPerMinute <= 600)))) throw new Error('account_agent_provisioning_configuration_required')
+  const provisionBudgets = new Map()
+  const admitClient = clientId => {
+    const limit = provisioning.perClientPerMinute ?? 30
+    const now = Date.now()
+    let value = provisionBudgets.get(clientId)
+    if (!value || now - value.window >= 60000) { value = { window: now, count: 0 }; provisionBudgets.set(clientId, value) }
+    if (++value.count > limit) throw new AccountToolError('rate_limited', 'Provisioning budget for this client is exhausted; retry within a minute.')
+  }
+  async function provisionGrant(request, response) {
+    // Client authentication comes first and uses its own typed code so a
+    // credential problem is never confused with an unlinked person.
+    const client = authenticateClient(request, provisioning.clients)
+    if (!client) throw new AccountToolError('client_unauthorized', 'Unknown client or wrong client secret. Supply allow-listed confidential-client credentials via HTTP Basic.')
+    admitClient(client.clientId)
+    const body = await readJsonBody(request)
+    const unknown = Object.keys(body).find(key => !['issuer', 'subject'].includes(key))
+    if (unknown) throw new AccountToolError('invalid_input', `Unknown field: ${unknown}`)
+    const { issuer, subject } = body
+    let issuerUrl = null
+    try { issuerUrl = new URL(issuer) } catch { /* typed below */ }
+    if (typeof issuer !== 'string' || issuer.length > 256 || issuerUrl?.protocol !== 'https:' ||
+        typeof subject !== 'string' || !subject || subject.length > 512 || /[\x00-\x1f\x7f]/.test(subject)) throw new AccountToolError('invalid_input', 'Send { issuer, subject }: the verified https OIDC issuer and the exact opaque subject.')
+    // The caller must have verified this identity itself; this endpoint only
+    // maps an exact issuer+subject binding to its owner — never email.
+    let owner = null
+    try { owner = await provisioning.resolveOwner({ issuer, subject }) } catch { throw new AccountToolError('upstream_unavailable', 'The identity binding could not be read right now; retry.') }
+    if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new AccountToolError('not_linked', 'No Unlinked account is bound to that verified identity. The person must sign in at /login once; linkage is never established by email matching.')
+    let ensured = null
+    try { ensured = await provisioning.ensureGrant({ ownerId: owner.ownerId, userId: owner.userId }) } catch { throw new AccountToolError('upstream_unavailable', 'Grant provisioning could not finish; retry.') }
+    if (!ensured) throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
+    // Validate end to end before handing anything out: the returned token must
+    // authenticate against the live grant record.
+    const grant = await authenticateGrant({ headers: { authorization: `Bearer ${ensured.accessToken}` } })
+    if (!grant || grant.ownerId !== owner.ownerId) throw new AccountToolError('upstream_unavailable', 'The provisioned grant failed verification; retry.')
+    // Audit the event — never the token.
+    try { await provisioning.audit?.({ event: ensured.created ? 'account_grant_provisioned' : 'account_grant_reused', clientId: client.clientId, ownerHash: createHash('sha256').update(owner.ownerId).digest('hex'), grantId: ensured.grantId, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never blocks provisioning. */ }
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({ kind: 'unlinked_provision_grant', ownerId: owner.ownerId, grantId: ensured.grantId, created: ensured.created === true,
+      version: grant.version, scope: grant.scope, tools: grant.tools, accessToken: ensured.accessToken }))
+  }
   const send = (response, status, value, headers = {}) => {
     if (response.headersSent) { response.end(); return }
     response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers })
@@ -50,6 +121,11 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      if (url.pathname === '/api/agent/v1/provision-grant') {
+        if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
+        if (!provisioning) { failure(response, new AccountToolError('not_found', 'Grant provisioning is not enabled on this runtime.')); return }
+        await provisionGrant(request, response); return
+      }
       const detailMatch = url.pathname.match(/^\/api\/agent\/v1\/people\/([^/]+)$/)
       const profileMatch = request.method === 'GET' && detailMatch
       const suffix = url.pathname.slice('/api/agent/v1/'.length)

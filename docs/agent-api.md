@@ -1,6 +1,8 @@
 # Unlinked Agent API — versioned contract (v1)
 
-Status: **v1** (2026-10-02). This document is the integration contract for agent
+Status: **v1** (2026-10-02). **v1.1** (2026-10-02, additive): server-to-server
+grant provisioning for allow-listed confidential clients, and the
+`client_unauthorized` error code — see "Grant provisioning" below. This document is the integration contract for agent
 consumers (for example the Ideaflow MCP connector). The hosted MCP tools at
 `/mcp` are thin wrappers over the same tool service as the HTTP JSON endpoints
 below; names map 1:1 and both surfaces return the same shapes and typed errors.
@@ -83,6 +85,7 @@ an extra sanitized `cause` identifier).
 | `grant_revoked` | 401 | Token verified but the grant was revoked, superseded or its account deleted. |
 | `invalid_input` | 400 | Parameter failed validation (also unknown/repeated parameters). |
 | `cursor_invalid` | 400 | Cursor does not match the current listing (query/degree/revision changed). Restart from page one. |
+| `client_unauthorized` | 403 | (v1.1, provisioning only) Unknown confidential client id or wrong client secret. |
 | `scope_not_granted` | 403 | Tool or scope not included in this grant's catalog entry. |
 | `not_found` | 404 | No published profile/route/tool with that id. |
 | `degree_unproven` | 409 | Second-degree requested without recorded public paths (no confirmed anchor). Paths are never inferred. |
@@ -199,6 +202,57 @@ rows; on MCP it returns the same typed failure shape and keeps 100-row pages
 ### `POST /api/agent/v1/search-everyone` `{ query }` ⇄ `unlinked_search_everyone`
 Launch tool, unchanged semantics: AI search over the published public index.
 Requires the public scope.
+
+## Grant provisioning (v1.1) — `POST /api/agent/v1/provision-grant`
+
+Server-to-server only: lets an **allow-listed confidential client** (the
+Ideaflow develop/connector backend) obtain or re-derive a read-only Unlinked
+account grant for a person whose identity it has already verified through its
+own OIDC session. Keyed strictly on the verified **issuer + subject** binding
+(`OperationalIdentity`); **never email**, no token pasting by users.
+
+- **Client auth:** HTTP Basic (`client_secret_basic`) — `Authorization: Basic
+  base64(clientId:clientSecret)`. Client ids are exact-matched; secrets are
+  compared as SHA-256 digests with a timing-safe comparison, and unknown ids
+  cost the same as wrong secrets. Failure is typed `client_unauthorized`
+  (403) — distinct from `not_linked`, which is about the *person*.
+- **Enablement:** the allow list is server-side operator configuration
+  (`UNLINKED_AGENT_PROVISION_CLIENTS="clientId:secret,..."`, secrets ≥ 32
+  chars; only their hashes are retained in memory). An empty/absent list
+  disables the endpoint entirely: it answers `not_found` (404).
+- **Rate limit:** 30 requests/min per client id (`rate_limited`, 429,
+  `Retry-After`).
+- **Request:** `{"issuer": "<https OIDC issuer>", "subject": "<exact opaque
+  subject>"}` — the pair the caller verified itself. Unknown fields, non-https
+  issuers or malformed subjects are `invalid_input`.
+- **Semantics (= Settings auto-setup `ensureGrant`):** reuses the newest live
+  grant of **any** catalog version for that owner (multiple live grants per
+  owner are expected and never clobbered — tokens are deterministically
+  re-derived from the durable record, nothing is minted on reuse); mints the
+  one deterministic automatic grant (current catalog version, read-only
+  `owner_network_and_public` scope) only when the owner has no live grants and
+  never revoked the automatic one. **Revoked stays revoked**: after the owner
+  turns agent access off, provisioning answers `grant_revoked` until they
+  re-enable it in Settings.
+- **Response (200):** `{ kind: "unlinked_provision_grant", ownerId, grantId,
+  created, version, scope, tools, accessToken }`. The token is verified
+  against the live grant record before it is returned, appears **only** in
+  this TLS response body, and is never logged or audited. `ownerId` is the
+  stable identifier for fail-closed linkage verification; `created` is false
+  on reuse.
+- **Errors:** `client_unauthorized` (403), `not_linked` (401 — the person has
+  no Unlinked owner binding yet; they must sign in at `/login` once),
+  `grant_revoked` (401 — owner turned agent access off), `invalid_input`
+  (400), `rate_limited` (429), `upstream_unavailable` (503, retry),
+  `not_found` (404, endpoint disabled on this runtime).
+- **Audit:** every issuance/reuse appends `account_grant_provisioned` /
+  `account_grant_reused` with client id, owner hash and grant id — never the
+  token.
+- **Consumer guidance:** store the token mode-600 server-side keyed by
+  `ownerId`; re-calling the endpoint is cheap and idempotent (same `grantId`,
+  re-derived token), so prefer re-provisioning over long-lived caches when in
+  doubt; treat `grant_revoked` as the user's explicit choice — surface "re-enable
+  in Unlinked Settings", do not retry automatically.
 
 ## Future consumers (design-level notes, nothing here is built)
 
