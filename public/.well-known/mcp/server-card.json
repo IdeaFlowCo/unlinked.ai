@@ -180,6 +180,38 @@
           "query"
         ]
       }
+    },
+    {
+      "name": "unlinked_list_connection_requests",
+      "description": "Read-only: the owner's open member-to-member connection requests. direction 'received' (default) waits for the owner's answer; 'sent' is still pending with someone else. Agents cannot send or answer requests.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "received",
+              "sent"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_list_notifications",
+      "description": "Read-only: the owner's newest in-app notifications with unseen/unread counts. Reading does not mark anything seen or read.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      }
     }
   ]
 }

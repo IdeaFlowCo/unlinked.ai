@@ -29,6 +29,8 @@ const ROUTES = Object.freeze({
   'GET /api/agent/v1/whoami': { tool: 'unlinked_whoami', query: [] },
   'GET /api/agent/v1/people': { tool: 'unlinked_list_people', query: ['q', 'mode', 'presence', 'cursor', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/connections': { tool: 'unlinked_list_connections', query: ['degree', 'q', 'cursor', 'limit'], numbers: ['degree', 'limit'] },
+  'GET /api/agent/v1/connection-requests': { tool: 'unlinked_list_connection_requests', query: ['direction'] },
+  'GET /api/agent/v1/notifications': { tool: 'unlinked_list_notifications', query: ['limit'], numbers: ['limit'] },
   'POST /api/agent/v1/ai-search': { tool: 'unlinked_ai_search', body: ['query', 'scope', 'timeoutMs'] },
   'POST /api/agent/v1/search-network': { tool: 'unlinked_search_network', body: ['query', 'degree', 'cursor'] },
   'POST /api/agent/v1/search-everyone': { tool: 'unlinked_search_everyone', body: ['query'] },
