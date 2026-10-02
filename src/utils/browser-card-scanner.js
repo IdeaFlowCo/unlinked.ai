@@ -29,7 +29,7 @@ export class BrowserCardScanner {
     video.autoplay = true
     video.muted = true
     video.playsInline = true
-    video.setAttribute('aria-label', 'Camera preview for scanning an OpenChat card')
+    video.setAttribute('aria-label', 'Camera preview for scanning a card')
     video.srcObject = stream
     this.video = video
     this.host.appendChild(video)

@@ -2,7 +2,7 @@
  *
  * Unlinked is an auth-walled private product, so this worker caches ONLY the
  * fixed public shell assets listed below, all precached at install time.
- * It never calls cache.put at runtime, never touches POST or cross-origin
+ * It never writes to any cache at runtime, never touches POST or cross-origin
  * requests, and never stores a page, API response, cookie-authenticated or
  * member-specific byte. Signing out or deleting an account therefore leaves
  * nothing personal behind in any cache, and nothing can leak across users.

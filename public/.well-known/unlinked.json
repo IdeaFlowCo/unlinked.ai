@@ -28,5 +28,9 @@
       "unlinked_search_network",
       "unlinked_search_everyone"
     ]
-  }
+  },
+  "agentSetupAutomatic": true,
+  "meet": "https://www.unlinked.ai/meet",
+  "card": "https://www.unlinked.ai/card",
+  "webManifest": "https://www.unlinked.ai/manifest.webmanifest"
 }
