@@ -35,14 +35,26 @@ string `nextCursor`, and `state: 'ready' | 'unavailable'` plus existing welcome/
 No other member fields are inferred or read. The runtime supplies original profile
 UUIDs and authorized member DTOs, not contacts relabeled as public members.
 
-Undefined `own` means no imports: no own group or scope toggles, and scope is forced
-to everyone. Defined `own` renders People you know before Everyone on Unlinked,
+Undefined `own` with neither legacy prop means no imports: no own group or scope
+toggles, and scope is forced to everyone. Defined `own` renders People you know
+before Everyone on Unlinked,
 with native Everyone/My people submit buttons and the selected hidden scope. Toggle
 buttons bypass required-query validation to support browsing without a query. A
 clicked toggle adds a second scope value after the hidden one; the controller must
 use the last submitted scope value. With the exact contract, defined empty `own`
 with a query is a no-match result; without a query it shows the import prompt.
 This uses the supplied import-presence signal, not mixed import record totals.
+
+For the current controller, legacy `contacts` and `searchResults` remain supported.
+When `own` is undefined and either legacy prop is supplied, own rows come from
+`searchResults` when defined, otherwise `contacts`; even an empty array enables
+the own group and scope toggles. An explicit `own` takes precedence over both.
+Legacy empty-result copy preserves PR35: a nonempty `contacts` array with a query
+shows no match, while no contacts shows the import prompt regardless of query.
+The new explicit `own: []` with a query keeps its no-match rule. Omitted `everyone`
+renders no Everyone group; a supplied array, including an empty array, enables it
+and the existing availability/empty-result states. No membership is inferred from
+legacy contact rows.
 
 Everyone rows show only initials, linked name (`/people/{encodeURIComponent(id)}`),
 headline/company and optional location. No LinkedIn link, listed-by/member flags,
