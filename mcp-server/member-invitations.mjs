@@ -37,7 +37,7 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = null, o
   const status = record => record.status === 'pending' && expired(record) ? 'expired' : record.status
   const view = record => ({ id: record.id, inviteeName: record.inviteeName, status: status(record), createdAt: record.createdAt, ...(record.expiresAt != null ? { expiresAt: record.expiresAt } : {}), ...(record.respondedAt ? { respondedAt: record.respondedAt } : {}), ...(record.status === 'accepted' && record.responderName ? { responderName: record.responderName } : {}) })
   const byToken = async token => typeof token === 'string' && INVITATION_TOKEN.test(token) ? store.get(hash(token)) : null
-  return {
+  const service = {
     async create({ inviter, inviterName, inviteeName }) {
       owner(inviter)
       const record = { id: randomUUID(), inviterOwnerId: inviter.ownerId, inviterUserId: inviter.userId, inviterName: invitationName(inviterName), inviteeName: invitationName(inviteeName), status: 'pending', createdAt: now() }
@@ -81,11 +81,26 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = null, o
     },
     // Either participant may end an accepted invite connection. The original
     // token stays revoked; reconnecting uses a fresh member request.
-    async remove(member, id) {
+    async remove(member, id, operation) {
       owner(member)
       const record = (await store.listAccepted(member)).find(value => value.id === id)
       if (!record) throw new InvitationError('invitation_not_found')
-      if (!(await store.transition(record.tokenHash, 'accepted', { status: 'revoked', respondedAt: now() }, null))) throw new InvitationError('invitation_unavailable')
+      if (!(await store.transition(record.tokenHash, 'accepted', { status: 'revoked', respondedAt: now(), ...(operation ? { removalRequestIds: operation.requestIds, removalInvitationIds: operation.invitationIds, removalCompleted: false } : {}) }, null))) throw new InvitationError('invitation_unavailable')
+    },
+    async resumeRemoval(member, id) {
+      owner(member)
+      if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id)) return null
+      const record = await store.getById(id)
+      const inviter = record && record.inviterOwnerId === member.ownerId && record.inviterUserId === member.userId
+      const responder = record && record.responderOwnerId === member.ownerId && record.responderUserId === member.userId
+      if (!record || (!inviter && !responder) || record.status !== 'revoked' || record.removalCompleted !== false) return null
+      return { other: inviter ? { ownerId: record.responderOwnerId, userId: record.responderUserId } : { ownerId: record.inviterOwnerId, userId: record.inviterUserId },
+        requestIds: record.removalRequestIds, invitationIds: record.removalInvitationIds }
+    },
+    async completeRemoval(member, id) {
+      if (!(await service.resumeRemoval(member, id))) return
+      const record = await store.getById(id)
+      if (record) await store.transition(record.tokenHash, 'revoked', { removalCompleted: true }, null)
     },
     // The accounts an owner is connected to through accepted invitations, either way round.
     async connections(member) {
@@ -100,6 +115,7 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = null, o
     // invitations it accepted from connecting it to anyone.
     async removeOwner(member) { return store.deleteByInviter(owner(member)) },
   }
+  return service
 }
 
 // Test and preview storage with the same compare-and-set semantics as Neo4j.
@@ -110,6 +126,7 @@ export function createMemoryInvitationStore() {
     records,
     async insert(record) { if (records.has(record.tokenHash)) throw new Error('invitation_conflict'); records.set(record.tokenHash, structuredClone(record)) },
     async get(tokenHash) { const value = records.get(tokenHash); return value ? structuredClone(value) : null },
+    async getById(id) { const value = [...records.values()].find(value => value.id === id); return value ? structuredClone(value) : null },
     async listByInviter(inviter) { return mine(inviter).map(value => structuredClone(value)) },
     async listAccepted(member) { return [...records.values()].filter(value => value.status === 'accepted' && (!member || (value.inviterOwnerId === member.ownerId && value.inviterUserId === member.userId) || (value.responderOwnerId === member.ownerId && value.responderUserId === member.userId))).map(value => structuredClone(value)) },
     async transition(tokenHash, from, patch, unexpiredAt) {
@@ -131,7 +148,7 @@ export function createMemoryInvitationStore() {
   }
 }
 
-const RECORD_KEYS = ['id', 'tokenHash', 'inviterOwnerId', 'inviterUserId', 'inviterName', 'inviteeName', 'status', 'createdAt', 'expiresAt', 'respondedAt', 'responderOwnerId', 'responderUserId', 'responderName']
+const RECORD_KEYS = ['id', 'tokenHash', 'inviterOwnerId', 'inviterUserId', 'inviterName', 'inviteeName', 'status', 'createdAt', 'expiresAt', 'respondedAt', 'responderOwnerId', 'responderUserId', 'responderName', 'removalRequestIds', 'removalInvitationIds', 'removalCompleted']
 const fromNode = properties => {
   const value = {}
   for (const key of RECORD_KEYS) if (properties[key] !== undefined && properties[key] !== null) value[key] = typeof properties[key]?.toNumber === 'function' ? properties[key].toNumber() : properties[key]
@@ -150,6 +167,10 @@ export function createNeo4jInvitationStore(driver, database = 'neo4j') {
     async insert(record) { await write('CREATE (i:UnlinkedMemberInvitation) SET i = $record', { record }) },
     async get(tokenHash) {
       const result = await read('MATCH (i:UnlinkedMemberInvitation {tokenHash: $tokenHash}) RETURN properties(i) AS i', { tokenHash })
+      return result.records.length ? fromNode(result.records[0].get('i')) : null
+    },
+    async getById(id) {
+      const result = await read('MATCH (i:UnlinkedMemberInvitation {id: $id}) RETURN properties(i) AS i', { id })
       return result.records.length ? fromNode(result.records[0].get('i')) : null
     },
     async listByInviter(inviter) {

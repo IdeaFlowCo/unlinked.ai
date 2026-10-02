@@ -132,17 +132,27 @@ export function createConnectionRequests({ store, notifications = null, now = Da
       const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
       if (!record || !same(senderOf(record), sender)) throw new ConnectionError('connection_not_found')
       if (!(await store.transition(id, OPEN, { status: 'withdrawn', withdrawnAt: now() }, ['openKey']))) throw new ConnectionError('connection_unavailable')
-      if (notifications) await quietly(() => notifications.retract(requestKey(id)))
+      if (notifications) await quietly(() => notifications.retract(requestKey(id), recipientOf(record)))
     },
     // Either member removes an accepted connection, for both of them. The
     // record stays as `removed` (history, and the pair key is freed so either
     // side can ask again); nobody is notified. Only the two members can do it,
     // and anything else looks like an unknown id.
-    async remove(member, id) {
+    async remove(member, id, operation) {
       owner(member)
       const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
       if (!record || (!same(senderOf(record), member) && !same(recipientOf(record), member))) throw new ConnectionError('connection_not_found')
-      if (!(await store.transition(id, ['accepted'], { status: 'removed', removedAt: now(), removedBy: same(senderOf(record), member) ? 'sender' : 'recipient' }, ['connectedKey']))) throw new ConnectionError('connection_unavailable')
+      if (!(await store.transition(id, ['accepted'], { status: 'removed', removedAt: now(), removedBy: same(senderOf(record), member) ? 'sender' : 'recipient', ...(operation ? { removalRequestIds: operation.requestIds, removalInvitationIds: operation.invitationIds, removalCompleted: false } : {}) }, ['connectedKey']))) throw new ConnectionError('connection_unavailable')
+    },
+    async resumeRemoval(member, id) {
+      owner(member)
+      const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
+      if (!record || (!same(senderOf(record), member) && !same(recipientOf(record), member)) || record.status !== 'removed' || record.removalCompleted !== false) return null
+      return { other: same(senderOf(record), member) ? recipientOf(record) : senderOf(record), requestIds: record.removalRequestIds, invitationIds: record.removalInvitationIds }
+    },
+    async completeRemoval(member, id) {
+      if (!(await service.resumeRemoval(member, id))) return
+      await store.transition(id, ['removed'], { removalCompleted: true }, [])
     },
     async captureRemovalPair(member, other) {
       owner(member); owner(other)
@@ -155,10 +165,15 @@ export function createConnectionRequests({ store, notifications = null, now = Da
       const pair = pairKey(member, other)
       for (const id of requestIds) {
         const record = await store.get(id)
-        if (!record || record.pairKey !== pair || !['accepted', ...OPEN].includes(record.status)) continue
+        if (!record || record.pairKey !== pair) continue
+        if (record.status === 'removed') {
+          if (notifications) await notifications.retract(requestKey(record.id), recipientOf(record))
+          continue
+        }
+        if (!['accepted', ...OPEN].includes(record.status)) continue
         const changed = await store.transition(record.id, ['accepted', ...OPEN],
           { status: 'removed', removedAt: now(), removedBy: same(senderOf(record), member) ? 'sender' : 'recipient' }, ['openKey', 'connectedKey'])
-        if (changed && notifications) await quietly(() => notifications.retract(requestKey(record.id)))
+        if (changed && notifications) await notifications.retract(requestKey(record.id), recipientOf(record))
       }
     },
     // Requests waiting for this member's answer (ignored ones are set aside).
@@ -247,7 +262,7 @@ export function createMemoryConnectionStore() {
   }
 }
 
-const RECORD_KEYS = ['id', 'pairKey', 'openKey', 'connectedKey', 'senderOwnerId', 'senderUserId', 'senderName', 'senderProfileId', 'recipientOwnerId', 'recipientUserId', 'recipientName', 'recipientProfileId', 'note', 'status', 'createdAt', 'respondedAt', 'withdrawnAt', 'removedAt', 'removedBy']
+const RECORD_KEYS = ['id', 'pairKey', 'openKey', 'connectedKey', 'senderOwnerId', 'senderUserId', 'senderName', 'senderProfileId', 'recipientOwnerId', 'recipientUserId', 'recipientName', 'recipientProfileId', 'note', 'status', 'createdAt', 'respondedAt', 'withdrawnAt', 'removedAt', 'removedBy', 'removalRequestIds', 'removalInvitationIds', 'removalCompleted']
 const fromNode = properties => {
   const value = {}
   for (const name of RECORD_KEYS) if (properties[name] !== undefined && properties[name] !== null) value[name] = typeof properties[name]?.toNumber === 'function' ? properties[name].toNumber() : properties[name]
