@@ -1,0 +1,4 @@
+Contact: mailto:support@ideaflow.app
+Expires: 2027-10-01T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://www.unlinked.ai/.well-known/security.txt

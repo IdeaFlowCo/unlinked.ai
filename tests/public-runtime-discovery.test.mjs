@@ -10,7 +10,7 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
   t.after(()=>new Promise(resolve=>server.close(resolve)))
   const endpoint=`http://127.0.0.1:${server.address().port}`
   handler=createPrivateBrowserHandler({baseUrl:`https://127.0.0.1:${server.address().port}`,login:{begin:async()=>{},finish:async()=>{}},resolveOwner:async()=>null,getBackend:async()=>{ownerReads++;throw Error('unexpected_owner_read')}})
-  for(const path of ['/agents','/llms.txt','/AGENTS.md','/openapi.json','/.well-known/agent.json','/.well-known/unlinked.json','/.well-known/mcp/server-card.json','/meet','/import-linkedin','/public-assets/openchat-card.js','/public-assets/unlinked-card.js','/public-assets/meet-scan.js','/public-assets/browser-card-scanner.js','/public-assets/jsqr.js','/public-assets/jsqr-module.mjs','/manifest.webmanifest','/sw.js','/offline.html','/app-icon-192.png','/app-icon-512.png','/app-icon-maskable-512.png']) {
+  for(const path of ['/agents','/llms.txt','/robots.txt','/sitemap.xml','/.well-known/security.txt','/AGENTS.md','/openapi.json','/.well-known/agent.json','/.well-known/unlinked.json','/.well-known/mcp/server-card.json','/meet','/import-linkedin','/public-assets/openchat-card.js','/public-assets/unlinked-card.js','/public-assets/meet-scan.js','/public-assets/browser-card-scanner.js','/public-assets/jsqr.js','/public-assets/jsqr-module.mjs','/manifest.webmanifest','/sw.js','/offline.html','/app-icon-192.png','/app-icon-512.png','/app-icon-maskable-512.png']) {
     const get=await fetch(endpoint+path);assert.equal(get.status,200,path);assert.ok((await get.text()).length)
     const head=await fetch(endpoint+path,{method:'HEAD'});assert.equal(head.status,200,path);assert.equal(await head.text(),'')
   }

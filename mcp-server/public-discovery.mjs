@@ -21,6 +21,11 @@ const assets = new Map([
   ['/app-icon-512.png', ['public/app-icon-512.png', 'image/png']],
   ['/app-icon-maskable-512.png', ['public/app-icon-maskable-512.png', 'image/png']],
   ['/llms.txt', ['public/llms.txt', 'text/plain']],
+  // Crawler and security-contact files. Web-reputation scanners treat a site
+  // whose robots.txt and security.txt answer 401 like an abandoned or hostile host.
+  ['/robots.txt', ['public/robots.txt', 'text/plain']],
+  ['/sitemap.xml', ['public/sitemap.xml', 'application/xml']],
+  ['/.well-known/security.txt', ['public/.well-known/security.txt', 'text/plain']],
   ['/AGENTS.md', ['public/AGENTS.md', 'text/plain']],
   ['/openapi.json', ['public/openapi.json', 'application/json']],
   ['/.well-known/unlinked.json', ['public/.well-known/unlinked.json', 'application/json']],
