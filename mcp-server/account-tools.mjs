@@ -47,6 +47,8 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
     cursor: z.string().max(2048).optional(),
   },
   unlinked_search_everyone: { query: z.string().min(1).max(1024) },
+  unlinked_list_connection_requests: { direction: z.enum(['received', 'sent']).optional() },
+  unlinked_list_notifications: { limit: z.number().int().min(1).max(50).optional() },
 })
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
@@ -54,10 +56,13 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=shadow keeps imported profiles not on Unlinked yet. Paginated with an opaque cursor, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Paginated, at most 50 per page, typed provenance per entry.',
   unlinked_get_profile: 'Read one published public profile by id with its public connections page. Returns typed not_found when no published profile has that id.',
+  unlinked_list_connection_requests: 'Read-only: list the owner’s open member-to-member connection requests. direction "received" (default) lists requests waiting for the owner’s answer; "sent" lists requests the owner sent that are still pending. Names, public profile ids, optional notes and times only. Answering or sending requests is not available to agents.',
+  unlinked_list_notifications: 'Read-only: list the owner’s newest in-app notifications (connection requests received or accepted, invites accepted, people they know joining) with unseen/unread counts. Reading here does not mark anything seen or read.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
 })
 
-const DETERMINISTIC_TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile'])
+const DETERMINISTIC_TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+const iso = value => Number.isSafeInteger(value) ? new Date(value).toISOString() : null
 
 const opaqueCursor = (binding, offset) => Buffer.from(JSON.stringify({ binding, offset })).toString('base64url')
 const cursorOffset = (cursor, binding, length) => {
@@ -72,7 +77,7 @@ const cursorOffset = (cursor, binding, length) => {
 // One service instance backs both the hosted MCP tools and the HTTP agent API,
 // so rate budgets are shared. Every tool result is grant-scoped, public-or-own
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, limits = {} }) {
+export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8 } = limits
   // Budgets are per grant owner, so one agent cannot starve other accounts;
@@ -140,7 +145,20 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     }
   }
 
+  const owner = grant => ({ ownerId: grant.ownerId, userId: grant.userId })
   const tools = {
+    async unlinked_list_connection_requests(grant, { direction = 'received' }) {
+      if (!memberConnections) throw new AccountToolError('upstream_unavailable', 'Connection requests are not available on this runtime.')
+      const rows = direction === 'sent' ? await memberConnections.sent(owner(grant)) : await memberConnections.received(owner(grant))
+      return { kind: 'unlinked_connection_requests', direction, total: rows.length, visibility: 'owner_private',
+        requests: rows.slice(0, 200).map(value => ({ id: value.id, direction: value.direction, status: value.status, name: value.name, ...(value.profileId ? { profileId: value.profileId } : {}), ...(value.note ? { note: value.note } : {}), createdAt: iso(value.createdAt) })) }
+    },
+    async unlinked_list_notifications(grant, { limit = 20 }) {
+      if (!notifications) throw new AccountToolError('upstream_unavailable', 'Notifications are not available on this runtime.')
+      const [items, counts] = await Promise.all([notifications.list(owner(grant), { limit }), notifications.counts(owner(grant))])
+      return { kind: 'unlinked_notifications', unseen: counts.unseen, unread: counts.unread, visibility: 'owner_private',
+        notifications: items.map(value => ({ id: value.id, kind: value.kind, actorName: value.actorName, ...(value.actorProfileId ? { actorProfileId: value.actorProfileId } : {}), createdAt: iso(value.createdAt), read: value.read })) }
+    },
     async unlinked_whoami(grant, _input, _signal) {
       const backend = await getBackend({ ownerId: grant.ownerId, userId: grant.userId })
       const importIds = typeof backend.listImportIds === 'function' ? await backend.listImportIds() : []

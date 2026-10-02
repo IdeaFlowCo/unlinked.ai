@@ -34,7 +34,7 @@ export function typedToolFailure(error) {
 
 // Tools beyond the two launch tools are registered from the shared service so
 // the MCP surface and the HTTP agent API (docs/agent-api.md) stay one contract.
-const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search']
+const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']
 
 export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
   const base = new URL(origin)

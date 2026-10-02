@@ -28,9 +28,14 @@ export const OAUTH_SCOPE_DESCRIPTIONS = Object.freeze({
 })
 
 const CODE_SECONDS = 60, CODE_CAPACITY = 1000
-const CIMD_HOSTS = new Set(['claude.ai', 'claude.com', 'chatgpt.com'])
+// Exact Client ID Metadata Document URLs this server will fetch (Claude
+// connectors, Claude Code, ChatGPT). Any other URL-form client_id is refused
+// without a fetch; other clients use dynamic registration.
+export const CIMD_CLIENT_IDS = new Set(['https://claude.ai/oauth/mcp-oauth-client-metadata', 'https://claude.ai/oauth/claude-code-client-metadata', 'https://chatgpt.com/oauth/client.json'])
 const CIMD_TTL_MS = 60 * 60 * 1000, CIMD_FAILURE_TTL_MS = 60 * 1000, CIMD_CAPACITY = 64, CIMD_BYTES = 32 * 1024
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+// IPv6 [::1] is left out: a CSP source cannot name it, so the consent page
+// could not allow its redirect.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1'])
 const b64url = value => Buffer.from(value).toString('base64url')
 const sha256hex = value => createHash('sha256').update(value).digest('hex')
 const printable = (value, max) => typeof value === 'string' && value.length >= 1 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value)
@@ -41,7 +46,9 @@ const printable = (value, max) => typeof value === 'string' && value.length >= 1
 // client's self-asserted name.
 function hostedRedirectApp(uri) {
   if (uri === 'https://claude.ai/api/mcp/auth_callback' || uri === 'https://claude.com/api/mcp/auth_callback') return 'Claude'
-  if (uri === 'https://chatgpt.com/connector_platform_oauth_redirect' || /^https:\/\/chatgpt\.com\/connector\/oauth\/[A-Za-z0-9_-]{1,128}$/.test(uri)) return 'ChatGPT'
+  // ChatGPT uses this stable callback because every response carries RFC 9207
+  // `iss`; its per-connector callbacks are deliberately not accepted.
+  if (uri === 'https://chatgpt.com/connector_platform_oauth_redirect') return 'ChatGPT'
   return null
 }
 
@@ -87,7 +94,6 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
   const endpoint = path => new URL(path, base).href
   const issuedFor = new Map() // authorization code hash -> pending exchange
   const cimdCache = new Map()
-  const budgets = new Map()
 
   const protectedResourceMetadata = Object.freeze({ resource, authorization_servers: [base.origin], scopes_supported: scopesSupported,
     bearer_methods_supported: ['header'], resource_name: 'Unlinked', resource_documentation: endpoint('/agents') })
@@ -98,12 +104,7 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
     scopes_supported: scopesSupported, client_id_metadata_document_supported: true, authorization_response_iss_parameter_supported: true,
     service_documentation: endpoint('/agents') })
 
-  const withinBudget = (name, perMinute) => {
-    const at = now()
-    let value = budgets.get(name)
-    if (!value || at - value.window >= 60000) { value = { window: at, count: 0 }; budgets.set(name, value) }
-    return ++value.count <= perMinute
-  }
+
 
   // Stateless dynamic registration: the client_id carries its own redirect
   // URIs and display name under an HMAC, versioned by the "ulc1." prefix.
@@ -125,11 +126,9 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
   async function metadataDocumentClient(clientId) {
     let url
     try { url = new URL(clientId) } catch { return null }
-    if (url.protocol !== 'https:' || !CIMD_HOSTS.has(url.hostname) || url.port || url.username || url.password || url.search || url.hash || url.href !== clientId || url.pathname === '/') return null
+    if (!CIMD_CLIENT_IDS.has(clientId) || url.href !== clientId) return null
     const cached = cimdCache.get(clientId)
     if (cached && cached.expiresAt > now()) { if (cached.client) return cached.client; throw new OAuthError('invalid_client', 'The client metadata document could not be read; retry shortly.') }
-    // Bounds outbound fetches if someone cycles through many allow-listed URLs.
-    if (!withinBudget('cimd', 60)) throw new OAuthError('invalid_client', 'The client metadata document could not be read right now; retry in a minute.')
     let client = null
     try {
       const response = await fetchImpl(clientId, { redirect: 'error', signal: AbortSignal.timeout(5000), headers: { accept: 'application/json' } })
@@ -205,7 +204,7 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
       const app = policy.app ?? 'An app on this computer'
       const forward = new URLSearchParams()
       for (const [key, value] of [['client_id', clientId], ['redirect_uri', redirectUri], ['state', state], ['response_type', 'code'], ['code_challenge', challenge], ['code_challenge_method', 'S256'], ['resource', requestedResource], ['scope', scopeParam]]) if (value !== undefined) forward.set(key, value)
-      return { ok: true, request: Object.freeze({ clientId, clientName: client.clientName, app, loopback: policy.loopback, redirectUri, redirectHost: policy.host, state,
+      return { ok: true, request: Object.freeze({ clientId, clientName: client.clientName, app, loopback: policy.loopback, redirectUri, redirectProvided: redirectParam !== undefined, redirectHost: policy.host, state,
         codeChallenge: challenge, resource: requestedResource ?? null, scope, scopeText, scopes: scopeText.split(' ').map(name => ({ name, description: OAUTH_SCOPE_DESCRIPTIONS[name] })), params: forward }) }
     } catch (error) {
       if (!(error instanceof OAuthError)) throw error
@@ -219,7 +218,7 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
     for (const [key, value] of issuedFor) if (value.expiresAt <= at) issuedFor.delete(key)
     if (issuedFor.size >= CODE_CAPACITY) throw new Error('oauth_authorization_capacity')
     const code = randomBytes(32).toString('base64url')
-    issuedFor.set(sha256hex(code), { clientId: request.clientId, clientName: request.clientName, app: request.app, redirectUri: request.redirectUri, redirectHost: request.redirectHost,
+    issuedFor.set(sha256hex(code), { clientId: request.clientId, clientName: request.clientName, app: request.app, redirectUri: request.redirectUri, redirectProvided: request.redirectProvided, redirectHost: request.redirectHost,
       codeChallenge: request.codeChallenge, resource: request.resource, scope: request.scope, scopeText: request.scopeText,
       owner: { ownerId: owner.ownerId, userId: owner.userId }, expiresAt: at + CODE_SECONDS * 1000 })
     const target = new URL(request.redirectUri)
@@ -261,8 +260,8 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
   }
 
   async function register(request, response) {
-    // Registration is stateless and cheap; the budget only bounds abuse.
-    if (!withinBudget('register', 600)) throw new OAuthError('temporarily_unavailable', 'Too many registrations; retry in a minute.', 429)
+    // Registration is stateless and stores nothing, so it has no global budget
+    // (one would only let an anonymous caller block real connectors).
     if (!/^application\/json(?:\s*;.*)?$/i.test(request.headers['content-type'] ?? '')) throw new OAuthError('invalid_client_metadata', 'Send the client metadata as application/json.')
     let metadata
     try { metadata = JSON.parse(await readBody(request, 16384)) } catch (error) { if (error instanceof OAuthError) throw error; throw new OAuthError('invalid_client_metadata', 'The client metadata is not valid JSON.') }
@@ -297,7 +296,8 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
     issuedFor.delete(key) // single use, whatever the outcome
     if (!pending || pending.expiresAt <= now()) throw new OAuthError('invalid_grant', 'The authorization code is invalid, expired or already used.')
     if (pending.clientId !== clientId) throw new OAuthError('invalid_grant', 'The authorization code was issued to another client.')
-    if (redirectUri !== pending.redirectUri) throw new OAuthError('invalid_grant', 'redirect_uri does not match the authorization request.')
+    // OAuth 2.1 4.1.3: required and identical when the authorization request had one.
+    if ((pending.redirectProvided || redirectUri !== undefined) && redirectUri !== pending.redirectUri) throw new OAuthError('invalid_grant', 'redirect_uri does not match the authorization request.')
     if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) throw new OAuthError('invalid_grant', 'The code_verifier is malformed.')
     const computed = Buffer.from(createHash('sha256').update(verifier).digest('base64url')), expected = Buffer.from(pending.codeChallenge)
     if (computed.length !== expected.length || !timingSafeEqual(computed, expected)) throw new OAuthError('invalid_grant', 'PKCE verification failed.')
@@ -312,7 +312,6 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
   }
 
   async function revoke(request, response) {
-    if (!withinBudget('revoke', 600)) throw new OAuthError('temporarily_unavailable', 'Too many revocation requests; retry in a minute.', 429)
     const params = await formBody(request)
     const value = single(params, 'token'), clientId = clientIdFrom(request, params)
     if (!value) throw new OAuthError('invalid_request', 'token is required.')

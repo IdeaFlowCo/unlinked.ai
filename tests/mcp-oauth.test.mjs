@@ -176,7 +176,7 @@ test('sign-in, consent, PKCE code exchange, scoped tools, Settings listing and r
   assert.match(consent.text, /Read your own Unlinked account and network/)
   assert.match(consent.text, /published People index/)
   assert.match(consent.text, /member@example\.invalid/)
-  assert.match(consent.csp, /form-action 'self' https:\/\/claude\.ai;/)
+  assert.match(consent.csp, /form-action 'self' https:;/)
   assert.match(consent.csp, /frame-ancestors 'none'/)
   const decide = async (decision, params = hiddenParams(consent.text), extraHeaders = {}) => p.go('/oauth/authorize', { method: 'POST',
     headers: { Cookie: cookie, Origin: p.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded', ...extraHeaders }, body: new URLSearchParams([['csrf', csrfFrom(consent.text)], ['decision', decision], ...params]) })
@@ -297,6 +297,8 @@ test('the official MCP SDK client completes discovery, registration, PKCE and th
   assert.match(consent, /Connect An app on this computer to Unlinked/)
   assert.match(consent, /it calls itself “SDK interop”/)
   assert.match(consent, /Only allow this if you started/)
+  const loopbackCsp = (await p.go(authorizationUrl.pathname + authorizationUrl.search, { headers: { Cookie: cookie } })).headers.get('content-security-policy')
+  assert.match(loopbackCsp, /form-action 'self' http:\/\/127\.0\.0\.1:43123;/)
   const approved = await p.go('/oauth/authorize', { method: 'POST', headers: { Cookie: cookie, Origin: p.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams([['csrf', csrfFrom(consent)], ['decision', 'allow'], ...hiddenParams(consent)]) })
   const callback = new URL(approved.headers.get('location'))
@@ -337,29 +339,40 @@ test('client metadata documents are fetched only from allow-listed hosts and val
   assert.equal(code.request.loopback, true)
   assert.equal((await server.readAuthorization(params('https://chatgpt.com/oauth/mismatch.json', 'https://chatgpt.com/connector_platform_oauth_redirect'))).ok, false)
   const before = fetches.length
-  for (const id of ['https://evil.example/client.json', 'http://claude.ai/oauth/mcp-oauth-client-metadata', 'https://claude.ai:8443/x', 'https://169.254.169.254/latest', 'https://claude.ai/']) assert.equal((await server.readAuthorization(params(id, CLAUDE))).ok, false)
+  for (const id of ['https://evil.example/client.json', 'http://claude.ai/oauth/mcp-oauth-client-metadata', 'https://claude.ai:8443/x', 'https://169.254.169.254/latest', 'https://claude.ai/', 'https://claude.ai/attacker-hosted.json', 'https://chatgpt.com/oauth/client.json?x=1']) assert.equal((await server.readAuthorization(params(id, CLAUDE))).ok, false)
   assert.equal(fetches.length, before, 'non-allow-listed client ids are never fetched')
 
-  // Codes are single-use and expire after 60 seconds.
-  const location = new URL(server.approve(ok.request, { ownerId: 'o', userId: 'u' }))
-  clock += 61000
-  const handled = await new Promise(resolve => {
+  const tokenRequest = form => new Promise(resolve => {
     const chunks = []
-    const request = Object.assign((async function* () { yield Buffer.from(new URLSearchParams({ grant_type: 'authorization_code', code: location.searchParams.get('code'), code_verifier: 'x'.repeat(50), client_id: claudeDocument.client_id, redirect_uri: CLAUDE }).toString()) })(),
+    const request = Object.assign((async function* () { yield Buffer.from(new URLSearchParams(form).toString()) })(),
       { method: 'POST', url: '/oauth/token', headers: { host: 'www.unlinked.ai', 'content-type': 'application/x-www-form-urlencoded' } })
     const response = { setHeader() {}, writeHead(status) { this.status = status; return this }, end(value) { chunks.push(value); resolve({ status: this.status, body: JSON.parse(chunks.join('')) }) } }
     server.handle(request, response)
   })
+  // A request that omitted redirect_uri (one registered hosted callback) may omit it at the token endpoint too.
+  const implicit = new URLSearchParams(params(claudeDocument.client_id, CLAUDE)); implicit.delete('redirect_uri')
+  const implicitRequest = await server.readAuthorization(implicit)
+  assert.equal(implicitRequest.ok, true)
+  assert.equal(implicitRequest.request.redirectUri, CLAUDE)
+  const implicitCode = new URL(server.approve(implicitRequest.request, { ownerId: 'o', userId: 'u' })).searchParams.get('code')
+  assert.equal((await tokenRequest({ grant_type: 'authorization_code', code: implicitCode, code_verifier: 'x'.repeat(50), client_id: claudeDocument.client_id })).status, 200)
+  // One that sent it must send it again.
+  const explicitCode = new URL(server.approve(ok.request, { ownerId: 'o', userId: 'u' })).searchParams.get('code')
+  assert.equal((await tokenRequest({ grant_type: 'authorization_code', code: explicitCode, code_verifier: 'x'.repeat(50), client_id: claudeDocument.client_id })).body.error, 'invalid_grant')
+  assert.equal(issuedGrants.length, 1)
+
+  // Codes are single-use and expire after 60 seconds.
+  const location = new URL(server.approve(ok.request, { ownerId: 'o', userId: 'u' }))
+  clock += 61000
+  const handled = await tokenRequest({ grant_type: 'authorization_code', code: location.searchParams.get('code'), code_verifier: 'x'.repeat(50), client_id: claudeDocument.client_id, redirect_uri: CLAUDE })
   assert.equal(handled.status, 400)
   assert.equal(handled.body.error, 'invalid_grant')
-  assert.equal(issuedGrants.length, 0)
+  assert.equal(issuedGrants.length, 1)
 })
 
 test('redirect policy table', () => {
   assert.equal(redirectPolicy(CLAUDE).app, 'Claude')
   assert.equal(redirectPolicy('https://claude.com/api/mcp/auth_callback').app, 'Claude')
   assert.equal(redirectPolicy('https://chatgpt.com/connector_platform_oauth_redirect').app, 'ChatGPT')
-  assert.equal(redirectPolicy('https://chatgpt.com/connector/oauth/AbC_123-x').app, 'ChatGPT')
-  assert.equal(redirectPolicy('http://[::1]:9000/cb').loopback, true)
-  for (const uri of ['https://chatgpt.com/connector/oauth/../../x', 'https://chatgpt.com/other', 'http://localhost:6274/cb#frag', 'http://LOCALHOST/cb', 'https://localhost/cb', 'http://127.0.0.2/cb', 'http://localhost/a b']) assert.equal(redirectPolicy(uri), null, uri)
+  for (const uri of ['https://chatgpt.com/connector/oauth/AbC_123-x', 'http://[::1]:9000/cb', 'https://chatgpt.com/connector/oauth/../../x', 'https://chatgpt.com/other', 'http://localhost:6274/cb#frag', 'http://LOCALHOST/cb', 'https://localhost/cb', 'http://127.0.0.2/cb', 'http://localhost/a b']) assert.equal(redirectPolicy(uri), null, uri)
 })

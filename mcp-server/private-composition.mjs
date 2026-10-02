@@ -2,6 +2,8 @@ import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-read
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
+import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
+import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { lstat, mkdir, open, readFile, readdir, rm } from 'node:fs/promises'
@@ -27,7 +29,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -86,7 +88,18 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // Member-delivered invites, when the runtime supplies their graph store.
     const invitationStore = typeof dependencies.createMemberInvitationStore === 'function' ? dependencies.createMemberInvitationStore(driver, 'neo4j') : null
     await invitationStore?.initialize()
-    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }) }) : undefined
+    // The per-account notification feed and member-to-member connection
+    // requests, when the runtime supplies their graph stores.
+    const notificationStore = typeof dependencies.createNotificationStore === 'function' ? dependencies.createNotificationStore(driver, 'neo4j') : null
+    await notificationStore?.initialize()
+    const notifications = notificationStore ? createNotifications({ store: notificationStore }) : undefined
+    const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
+    await connectionStore?.initialize()
+    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null }) : undefined
+    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
+      // The inviter hears that their invite was accepted (and so that the invitee joined).
+      onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,
+        ...await publicProfileIdFor(value.invitee).then(id => id ? { actorProfileId: id } : {}, () => ({})), subjectId: value.invitationId, dedupeKey: `invite-accepted:${value.invitationId}` }) : undefined }) : undefined
     // The public profile that stands for an account: its confirmed legacy
     // profile, else the newest public-consent import it published.
     const publicProfileIdFor = async owner => {
@@ -103,6 +116,24 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           .filter(value => !value.document.deleted && value.document.payload?.consent?.publicProfessionalSearch === true)
           .sort((a, b) => (b.document.payload?.createdAt ?? 0) - (a.document.payload?.createdAt ?? 0))
         return live.length ? 'member-import-' + live[0].id : null
+      } finally { await session.close() }
+    }
+    // The account behind a public profile: the confirmed owner of a legacy
+    // profile, or the publisher of a member import. Null for shadows, revoked
+    // claims and inactive owners.
+    const accountForProfile = async profileId => {
+      if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return null
+      const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+      try {
+        const imported = profileId.match(/^member-import-([a-f0-9]{64})$/)
+        const result = imported
+          ? await session.executeRead(tx => tx.run(`MATCH (r:OperationalResource {namespace: 'unlinked', type: 'import', sourceId: $id}) WHERE r.publicationOwner IS NOT NULL
+              MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: r.publicationOwner}) WHERE b.userId = r.userId AND coalesce(b.active, true) = true
+              RETURN DISTINCT b.sourceOwnerId AS ownerId, b.userId AS userId LIMIT 2`, { id: imported[1] }))
+          : await session.executeRead(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount {profileId: $id}) WHERE a.revoked = false AND a.ownerId IS NOT NULL
+              MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: a.ownerId, userId: a.userId}) WHERE coalesce(b.active, true) = true
+              RETURN DISTINCT a.ownerId AS ownerId, a.userId AS userId LIMIT 2`, { id: profileId }))
+        return result.records.length === 1 ? { ownerId: result.records[0].get('ownerId'), userId: result.records[0].get('userId') } : null
       } finally { await session.close() }
     }
     const publicProfileResolver = () => {
@@ -163,7 +194,18 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         for (const value of await memberInvitations.connections(owner)) rows.push({ ...value, publicProfileId: await resolve(value.other) })
         return rows
       } : undefined
-      return { ...backend,readLegacyProfile,...(readInviteConnections ? { readInviteConnections } : {}),
+      // People this account is connected to through accepted connection
+      // requests; someone already connected through an invite is listed once.
+      const readMemberConnections = memberConnections ? async () => {
+        const resolve = publicProfileResolver(), rows = []
+        const invited = new Set(memberInvitations ? (await memberInvitations.connections(owner)).map(value => `${value.other.ownerId}\u0000${value.other.userId}`) : [])
+        for (const value of await memberConnections.connections(owner)) {
+          if (invited.has(`${value.other.ownerId}\u0000${value.other.userId}`)) continue
+          rows.push({ ...value, publicProfileId: await resolve(value.other) })
+        }
+        return rows
+      } : undefined
+      return { ...backend,readLegacyProfile,...(readInviteConnections ? { readInviteConnections } : {}),...(readMemberConnections ? { readMemberConnections } : {}),
         ...(recovery?{readLegacyFiles:recovery.list,readLegacyOriginal:recovery.readOriginal,readLegacyObservations:recovery.observations}:{}),
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
@@ -228,12 +270,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
       // An accepted invite is a connection both people agreed to: it joins the
       // public graph when both accounts have a public profile.
-      readInviteEdges: memberInvitations ? async () => {
+      // An accepted connection request is the same kind of agreed connection.
+      readInviteEdges: memberInvitations || memberConnections ? async () => {
         // Each account is resolved once per build, one at a time, and each pair counts once.
         const resolve = publicProfileResolver(), edges = new Map()
-        for (const value of await memberInvitations.accepted()) {
-          const fromId = await resolve(value.inviter), toId = await resolve(value.invitee)
-          if (fromId && toId && fromId !== toId) edges.set(JSON.stringify([fromId, toId]), { fromId, toId })
+        const pairs = [...(memberInvitations ? (await memberInvitations.accepted()).map(value => [value.inviter, value.invitee]) : []),
+          ...(memberConnections ? (await memberConnections.accepted()).map(value => [value.sender, value.recipient]) : [])]
+        for (const [from, to] of pairs) {
+          const fromId = await resolve(from), toId = await resolve(to)
+          if (fromId && toId && fromId !== toId && !edges.has(JSON.stringify([toId, fromId]))) edges.set(JSON.stringify([fromId, toId]), { fromId, toId })
         }
         return [...edges.values()]
       } : undefined,
@@ -280,6 +325,28 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     return { login, getBackend, close, audit, backgroundImports: true,
       readPublishedSnapshot,
       memberInvitations,
+      memberConnections,
+      notifications,
+      accountForProfile,
+      ownProfileId: publicProfileIdFor,
+      // Someone just claimed `profileId`: tell members whose own exports listed
+      // that profile. Best effort and bounded; never blocks the claim.
+      notifyProfileClaimed: notifications && publicPeople ? async (profileId, claimer) => {
+        const snapshot = await readPublishedSnapshot?.()
+        if (!snapshot || !Array.isArray(snapshot.connections)) return 0
+        const name = snapshot.profiles?.find(value => value.id === profileId)?.name
+        const listers = [...new Set(snapshot.connections.filter(edge => edge.toId === profileId && edge.fromId !== profileId).map(edge => edge.fromId))].slice(0, 200)
+        let sent = 0
+        for (const fromId of listers) {
+          // One recipient's failure never stops the rest.
+          try {
+            const recipient = await accountForProfile(fromId)
+            if (!recipient || (recipient.ownerId === claimer?.ownerId && recipient.userId === claimer?.userId)) continue
+            if (await notifications.notify({ recipient, kind: 'profile_claimed', actor: claimer, actorName: name, actorProfileId: profileId, subjectId: profileId, dedupeKey: `profile-claimed:${profileId}:${recipient.ownerId}:${recipient.userId}` })) sent++
+          } catch { /* best effort */ }
+        }
+        return sent
+      } : undefined,
       legacyAccount: legacyLinks ? { candidate: legacyLinks.candidate.bind(legacyLinks), confirm: legacyLinks.confirm.bind(legacyLinks) } : undefined,
       // Owner-scoped parts of account deletion that live outside the resource
       // API: the legacy claim row and the owner's own staged asset directory.

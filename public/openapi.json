@@ -464,6 +464,74 @@
         }
       }
     },
+    "/api/agent/v1/connection-requests": {
+      "get": {
+        "summary": "Read-only: the owner's open connection requests (direction=received|sent)",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "received",
+                "sent"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Requests with names, public profile ids, optional notes and ISO times; owner_private"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked (typed error body)"
+          },
+          "403": {
+            "description": "scope_not_granted for grants issued before catalog version 3"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/notifications": {
+      "get": {
+        "summary": "Read-only: the owner's newest in-app notifications with unseen/unread counts",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notifications (kind, actor name/profile id, ISO time, read); reading marks nothing"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked (typed error body)"
+          },
+          "403": {
+            "description": "scope_not_granted for grants issued before catalog version 3"
+          }
+        }
+      }
+    },
     "/api/agent/v1/ai-search": {
       "post": {
         "summary": "Explicit AI people search: scope mine (own network) or everyone (public index, public-scope grant)",
@@ -713,7 +781,7 @@
     },
     "/oauth/authorize": {
       "get": {
-        "summary": "Authorization endpoint: signs the person in with Ideaflow ID if needed and shows consent. Requires response_type=code, PKCE S256 and a registered connector-callback or loopback redirect_uri.",
+        "summary": "Authorization endpoint: signs the person in with Ideaflow ID if needed and shows consent. Requires response_type=code, PKCE S256 and a registered connector-callback or http://localhost / 127.0.0.1 loopback redirect_uri.",
         "responses": {
           "200": {
             "description": "Consent page"
@@ -740,8 +808,7 @@
                   "grant_type",
                   "code",
                   "code_verifier",
-                  "client_id",
-                  "redirect_uri"
+                  "client_id"
                 ],
                 "properties": {
                   "grant_type": {
@@ -760,7 +827,8 @@
                     "type": "string"
                   },
                   "redirect_uri": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Required when the authorization request included it"
                   },
                   "resource": {
                     "type": "string"

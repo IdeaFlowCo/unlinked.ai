@@ -71,28 +71,38 @@ Security decisions:
 - **Public clients only.** `token_endpoint_auth_methods_supported` is
   `["none"]`; registration always answers `token_endpoint_auth_method: "none"`
   and issues no secret. PKCE `S256` is mandatory; `plain` is refused.
-- **Clients.** Client ID Metadata Documents are fetched only for `https://`
-  client ids on `claude.ai`, `claude.com` or `chatgpt.com` (no redirects,
-  5 s, 32 KiB, cached 1 h), and the document's `client_id` must equal its URL.
+- **Clients.** Client ID Metadata Documents are fetched only for three exact
+  client ids — `https://claude.ai/oauth/mcp-oauth-client-metadata` (Claude
+  connectors), `https://claude.ai/oauth/claude-code-client-metadata` (Claude
+  Code) and `https://chatgpt.com/oauth/client.json` (ChatGPT) — with no
+  redirects, 5 s, 32 KiB, cached 1 h, and the document's `client_id` must
+  equal its URL. Any other URL-form client id is refused without a fetch;
+  other clients use dynamic registration.
+  Registration, token and revocation endpoints have no global rate budget an
+  anonymous caller could exhaust; codes gate every durable write.
   Dynamic registration is stateless: the `client_id` (`ulc1.…`) is an
   HMAC-signed record of the redirect URIs and name, under a key derived (HKDF)
   from the account grant key, so registration stores nothing and a restart
   forgets no client.
 - **Redirect URIs** are limited to `https://claude.ai/api/mcp/auth_callback`,
   `https://claude.com/api/mcp/auth_callback`,
-  `https://chatgpt.com/connector_platform_oauth_redirect`,
-  `https://chatgpt.com/connector/oauth/{id}` and RFC 8252 loopback
-  (`http://localhost`, `127.0.0.1`, `[::1]`; any port at request time). A
+  `https://chatgpt.com/connector_platform_oauth_redirect` (ChatGPT's stable
+  callback, used because every response carries `iss`; its per-connector
+  callbacks are not accepted) and RFC 8252 loopback (`http://localhost`,
+  `http://127.0.0.1`; any port at request time). A
   look-alike client can therefore never receive a code off-device. Unknown
   clients and unregistered redirect URIs are shown an error and never
   redirected; every other error, and every success, redirects with RFC 9207 `iss`.
 - **Consent** names the app by its verified redirect target ("Claude",
   "ChatGPT", or "An app on this computer" plus its self-reported name), lists
-  the scopes, and its CSP `form-action` allows exactly that redirect origin.
+  the scopes, and its CSP `form-action` allows `https:` redirect hops (the
+  app's callback may redirect again) or the exact loopback origin.
   Sign-in returns to the same authorization request, ahead of the find-me and
   recovered-account steps.
 - **Codes** are 256-bit, single-use (consumed even by a failed exchange),
-  expire after 60 s and are bound to client, redirect URI, PKCE challenge and owner.
+  expire after 60 s and are bound to client, redirect URI, PKCE challenge and
+  owner. `redirect_uri` at the token endpoint is required, and must match,
+  whenever the authorization request carried one.
 - **Resource indicators**: `resource`, when sent, must be this server
   (`https://www.unlinked.ai/mcp`; the bare origin is accepted) or the request
   fails `invalid_target`.
@@ -126,7 +136,8 @@ the catalog entry for `(version, scope)` in
 | Version | `owner_network` scope | `owner_network_and_public` scope |
 |---|---|---|
 | 1 (pre-existing grants) | `unlinked_search_network` | + `unlinked_search_everyone` |
-| 2 (current issuance) | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
+| 2 | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
+| 3 (current issuance) | version 2 + `unlinked_list_connection_requests`, `unlinked_list_notifications` (read-only) | version 2 + the same two tools |
 
 - Old grants keep exactly their issued tools on both surfaces — MCP
   `tools/list` for a v1 grant still shows only the launch tools, and the HTTP
@@ -251,6 +262,21 @@ Deterministic owner-connections listing; see **Degree semantics**.
 Response: `{ kind, degree, revision, total, anchorId? (degree 2),
 connections: [{ id, name, headline?, company?, linkedinUrl?, provenance,
 visibility }], nextCursor? }`.
+
+### `GET /api/agent/v1/connection-requests?direction` ⇄ `unlinked_list_connection_requests`
+Read-only, grant catalog version 3. `direction` `received` (default: requests
+waiting for the owner's answer) or `sent` (the owner's requests still pending;
+a request the recipient ignored still reads as pending, as it does in the app).
+Response: `{ kind, direction, total, requests: [{ id, direction, status, name,
+profileId?, note?, createdAt }], visibility: "owner_private" }`. Agents cannot
+send, answer or withdraw requests; that stays a signed-in browser action.
+
+### `GET /api/agent/v1/notifications?limit` ⇄ `unlinked_list_notifications`
+Read-only, grant catalog version 3. Newest first, `limit` 1–50 (default 20).
+Response: `{ kind, unseen, unread, notifications: [{ id, kind, actorName,
+actorProfileId?, createdAt, read }], visibility: "owner_private" }`. Kinds:
+`connection_request_received`, `connection_request_accepted`,
+`invite_accepted`, `profile_claimed`. Reading here marks nothing seen or read.
 
 ### `POST /api/agent/v1/ai-search` `{ query, scope?, timeoutMs? }` ⇄ `unlinked_ai_search`
 Explicit AI tool. `scope: "mine"` ranks only the owner's imported network
