@@ -172,7 +172,7 @@ test('signed in, the test profile is found by its address, shown as a test, clai
   assert.ok((await (await post('/find-me', { csrf, linkedinUrl: 'https://www.linkedin.com/in/ideaflow-test-profile/' })).text()).includes('Nothing unclaimed matched'))
   const card = await (await post('/find-me', { csrf, linkedinUrl: `https://www.linkedin.com/in/${TEST.linkedinSlug}/` })).text()
   assert.ok(card.includes('Is this you?')); assert.ok(card.includes('Ideaflow test profile')); assert.ok(card.includes('Test profile.')); assert.ok(card.includes('Not a real person'))
-  assert.ok(card.includes("Yes, that's me")); assert.ok(card.includes('Listed by 0 members'))
+  assert.ok(card.includes("Yes, that's me")); assert.ok(!card.includes('Listed by 0 members'))
   const candidate = card.match(/name="candidate" value="([^"]+)"/)[1]
   const claimed = await post('/claim-me', { csrf, candidate })
   assert.equal(claimed.status, 303); assert.equal(claimed.headers.get('location'), '/profile')

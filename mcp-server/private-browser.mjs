@@ -2,6 +2,7 @@ import { createKnownConnectionsReader } from '../src/utils/public-people/known-c
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from '../src/utils/public-people/text-match.mjs'
+import { linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
 import { isPublicDiscoveryPath, servePublicDiscovery } from './public-discovery.mjs'
 import { COMBINED_UPLOAD_CONSENT, PUBLIC_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { createHash, randomBytes } from 'node:crypto'
@@ -75,6 +76,21 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
+// The published person each own connection row should link to, or null.
+// A row tries its own published person first, then an existing public profile
+// with the same LinkedIn address (old shadow profiles, rows of private-consent
+// imports). Only people the reader finds are linked, so links never 404.
+export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, lookup }) {
+  const usable = id => typeof id === 'string' && id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
+  const bySlug = async row => {
+    const slug = lookupSlug && row.fields?.url ? linkedinSlug(row.fields.url) : null
+    return slug ? usable(await Promise.resolve(lookupSlug(slug)).catch(() => null)) : null
+  }
+  const candidates = await Promise.all(rows.map(async row => [usable(publicTarget(row)), await bySlug(row)]))
+  const found = await lookup([...new Set(candidates.flat().filter(Boolean))].slice(0, 1000))
+  return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
+}
+
 export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -119,10 +135,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (typeof readPublishedSnapshot !== 'function' || !rows.length) return plainRows
     try {
       // One malformed source ID must not stop the rest of the page from linking.
-      const targets = rows.map(publicTarget).map(usableTarget)
-      const found = await reader.lookup({ ids: [...new Set(targets.filter(Boolean))] })
+      const matches = await publishedPeopleFor(rows, { publicTarget: row => usableTarget(publicTarget(row)), lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : null, lookup: ids => reader.lookup({ ids }) })
       return plainRows.map((value, index) => {
-        const match = found.get(targets[index])
+        const match = matches[index]
         return match ? { ...value, id: match.id, ...(match.presence ? { presence: match.presence, connectionCount: match.connectionCount } : {}) } : value
       })
     } catch { return plainRows }
@@ -607,7 +622,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             // The confirmation is bound to this exact displayed candidate; a
             // newer lookup in another tab invalidates a stale card.
             session.selfClaim.candidate = { profileId, evidence, token: token() }
-            page({ status: 'found', profileName: detail.profile.name, headline: detail.profile.headline ?? '', listedBy: detail.profile.connections.length, claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token, ...(detail.test === true ? { test: true } : {}) }); return
+            page({ status: 'found', id: profileId, profileName: detail.profile.name, headline: detail.profile.headline ?? '', listedBy: detail.profile.connections.length, claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token, ...(detail.test === true ? { test: true } : {}) }); return
           }
         }
         page({ status: 'none' }); return
@@ -675,7 +690,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
         return { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
-      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
+      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts?.accepted ?? 0, indexed: payload.counts?.indexed ?? 0, rejected: payload.counts?.rejected ?? 0, failedFiles: payload.counts?.failedFiles ?? 0, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
       const statusMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/status$/)
       if (request.method === 'GET' && statusMatch) {
         const resource = await backend.readResource('import', statusMatch[1])

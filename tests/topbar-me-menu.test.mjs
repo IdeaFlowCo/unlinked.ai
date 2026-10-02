@@ -18,9 +18,11 @@ test('signed-in members get one Me menu: profile header, card, settings, and sig
   const nav = header(renderPeople({ ...account, state: 'ready' })).match(/<nav[^>]*>(.*?)<\/nav>/s)[1]
   // The bar itself carries no separate profile, name chip or sign-out.
   const outside = nav.replace(/<details class="me">.*<\/details>/s, '')
-  assert.doesNotMatch(outside, /href="\/profile"|class="chip"|logout|Sign out/)
+  // The avatar is the one-click way to your own profile; nothing else outside the menu.
+  assert.match(nav, /<a class="me-face" href="\/profile" aria-label="Your profile" title="Your profile"><span class="initials avatar" aria-hidden="true">SR<\/span><\/a><details class="me">/)
+  assert.doesNotMatch(outside.replace(/<a class="me-face"[^>]*>.*?<\/a>/s, ''), /href="\/profile"|class="chip"|logout|Sign out/)
   const menu = nav.match(/<details class="me">(.*)<\/details>/s)[1]
-  assert.match(menu, /^<summary aria-haspopup="menu" aria-label="Me: account menu for Sam Rivera"><span class="initials avatar" aria-hidden="true">SR<\/span><span class="me-l">Me/)
+  assert.match(menu, /^<summary aria-haspopup="menu" aria-label="Me: account menu for Sam Rivera"><span class="me-l">Me/)
   assert.match(menu, /<div class="me-panel" role="menu" aria-label="Account">/)
   assert.match(menu, /<div class="me-who"><b>Sam Rivera<\/b><!--me-headline--><\/div><a class="button sec sm me-view" role="menuitem" href="\/profile">View profile<\/a>/)
   const items = [...menu.matchAll(/role="menuitem"[^>]*?(?:href="([^"]+)")?>/g)].map(match => match[1] ?? 'sign-out')
