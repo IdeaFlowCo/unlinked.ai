@@ -9,6 +9,7 @@ import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
 import { createIdeaflowLogin } from './private-browser.mjs'
+import { CLIENT_ID_PATTERN } from './account-api.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
 import { createArchiveWorker } from '../src/utils/private-import/background-job.mjs'
@@ -367,6 +368,16 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // Separate domain/audience from operational credentials. Stable across
       // process restarts; private root credential replacement revokes all grants.
       accountGrantKey: createHmac('sha256', config.graphPassword).update(`unlinked-account-tools-v1:${base.origin}`).digest(),
+      // Optional server-to-server grant provisioning allow list. Format:
+      // UNLINKED_AGENT_PROVISION_CLIENTS="clientId:secret,clientId2:secret2".
+      // Absent/empty disables the endpoint. Only the secret's SHA-256 leaves
+      // this scope; raw secrets never reach handlers, logs or audit rows.
+      provisionAgentClients: (process.env.UNLINKED_AGENT_PROVISION_CLIENTS ?? '').split(',').map(entry => entry.trim()).filter(Boolean).map((entry, index) => {
+        const split = entry.indexOf(':')
+        const clientId = entry.slice(0, split), secret = entry.slice(split + 1)
+        if (split < 1 || !CLIENT_ID_PATTERN.test(clientId) || secret.length < 32 || secret.length > 512) throw new Error(`agent_provision_client_configuration_invalid_entry_${index}`)
+        return { clientId, secretSha256: createHash('sha256').update(secret).digest() }
+      }),
       complete: completionFactory({ apiKey: config.apiKey }),
     }
   } catch (error) { await close().catch(() => {}); throw error }
