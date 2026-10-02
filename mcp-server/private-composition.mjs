@@ -6,6 +6,7 @@ import { createConnectionRequests, createNeo4jConnectionStore } from './member-c
 import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
 import { createContactCards, createNeo4jContactCardStore } from './contact-card.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
+import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
 import { isTestProfileId, testProfile, CLAIMED_PROFILE_FOR_OWNER, OWNER_FOR_CLAIMED_PROFILE, CLAIMED_MEMBER_PROFILES } from './test-profiles.mjs'
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
@@ -33,7 +34,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createSessionStore: createNeo4jSessionStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -43,7 +44,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   config = { issuer: process.env.IDEAFLOW_ISSUER, clientId: process.env.IDEAFLOW_CLIENT_ID,
     clientSecret: process.env.IDEAFLOW_CLIENT_SECRET, graphPassword: process.env.NOOS_PRIVATE_PASSWORD,
     apiKey: process.env.OPENAI_API_KEY }, modules, loginFactory = createIdeaflowLogin,
-  completionFactory = createResponsesCompletion, graphReadyDeadlineMs = 90000, graphReadyRetryMs = 1000 }) {
+  completionFactory = createResponsesCompletion, graphReadyDeadlineMs = 90000, graphReadyRetryMs = 1000,
+  // Email delivery (docs/email.md): UNLINKED_EMAIL_ENABLED, RESEND_API_KEY, UNLINKED_EMAIL_SECRET,
+  // UNLINKED_EMAIL_FROM, UNLINKED_INVITE_EMAILS_PER_DAY.
+  emailEnv = process.env, emailTransportFactory = createResendTransport, emailLog = line => process.stderr.write(`${line}\n`) }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : networkMode === 'isolated-container' && bolt.hostname === 'graph' && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -59,11 +63,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, closed = false
+  let server, worker, memberEmail, closed = false
   const close = async () => {
     if (closed) return
     closed = true
     await worker?.stop()
+    await memberEmail?.stop()
     if (server?.listening) {
       server.closeIdleConnections?.(); server.closeAllConnections?.()
       await new Promise(resolve => server.close(resolve))
@@ -101,6 +106,23 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const contactCardStore = typeof dependencies.createContactCardStore === 'function' ? dependencies.createContactCardStore(driver, 'neo4j') : null
     await contactCardStore?.initialize()
     const contactCards = contactCardStore ? createContactCards({ store: contactCardStore }) : undefined
+    // Invite and notification emails, when the runtime supplies their store.
+    // Without RESEND_API_KEY (or with UNLINKED_EMAIL_ENABLED=false) nothing is
+    // sent and no address is recorded; unsubscribe links keep working. Without
+    // a usable UNLINKED_EMAIL_SECRET the feature is absent (no routes, no sending).
+    const emailStore = typeof dependencies.createEmailStore === 'function' ? dependencies.createEmailStore(driver, 'neo4j') : null
+    await emailStore?.initialize()
+    const emailSettings = emailStore ? emailConfig(emailEnv) : null
+    // One non-secret line when an operator configured a key but email cannot run.
+    if (emailSettings?.problem) emailLog(`unlinked_email_disabled: ${emailSettings.problem === 'email_secret_missing_or_short' ? 'UNLINKED_EMAIL_SECRET is missing or shorter than 32 bytes' : 'UNLINKED_EMAIL_FROM is invalid'}`)
+    if (emailStore && emailSettings.secret) {
+      const settings = emailSettings
+      let lastReport = 0
+      memberEmail = createMemberEmail({ config: settings, transport: settings.enabled ? emailTransportFactory({ apiKey: settings.apiKey }) : null, store: emailStore, notificationStore,
+        secret: settings.secret, origin: base.origin,
+        // Failures carry only a code; at most one audit row per ten minutes.
+        onError: event => { if (Date.now() - lastReport < 600000) return; lastReport = Date.now(); return audit({ ...event, at: new Date().toISOString() }) } })
+    }
     const sessionStore = typeof dependencies.createSessionStore === 'function' ? dependencies.createSessionStore(driver, 'neo4j') : null
     await sessionStore?.initialize()
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
@@ -245,6 +267,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend,
       onError: event => audit({ ...event, at: new Date().toISOString() }) })
     worker.start()
+    // The notification mailer runs on its own timer; startup never waits for it.
+    memberEmail?.start()
     // Private LinkedIn slug -> legacy profile index, from the recovered source
     // manifests. Shared by find-me and import identity. Memoizes the promise so
     // concurrent first lookups share one parse; a failed load retries later.
@@ -342,6 +366,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       notifications,
       contactCards,
       sessionStore,
+      memberEmail,
       accountForProfile,
       ownProfileId: publicProfileIdFor,
       // Someone just claimed `profileId`: tell members whose own exports listed

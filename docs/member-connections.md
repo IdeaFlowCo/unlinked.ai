@@ -73,9 +73,12 @@ There are two read states. `seenAt` is set when the member opens
 item (`/notifications/<id>` marks it read and redirects) or press "Mark all as
 read"; until then the item stays highlighted.
 
-**Email, later:** `NOTIFICATION_KINDS` marks which kinds should be emailed. A
-mailer can select records of those kinds without `emailedAt`, send them, and
-then set `emailedAt`. Nothing else needs to change.
+**Email:** `NOTIFICATION_KINDS[kind].email` is whether a kind is emailed by
+default; members choose per kind in Settings. The in-process mailer
+(`mcp-server/member-email.mjs`) claims records without `emailedAt`, sends one
+email or digest per member at most every 15 minutes, and sets `emailedAt`
+exactly once (`emailOutcome` is `sent` or `skipped`). It is off without
+`RESEND_API_KEY` or with `UNLINKED_EMAIL_ENABLED=false`. See [email.md](email.md).
 
 ## Routes
 
@@ -104,7 +107,7 @@ owns the read tools, explicit opt-in write scope and grant compatibility.
 
 ## Not yet
 
-- Email or push delivery (the model is ready; mail is not configured).
+- Push delivery. (Email is built: [email.md](email.md).)
 
 ## Connection controls and removal
 
