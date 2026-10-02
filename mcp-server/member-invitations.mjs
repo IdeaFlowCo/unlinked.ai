@@ -63,7 +63,10 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = null, o
       if (record.inviterOwnerId === invitee.ownerId) throw new InvitationError('invitation_own')
       if (status(record) !== 'pending') throw new InvitationError('invitation_unavailable')
       const next = action === 'accept' ? 'accepted' : 'declined'
-      const changed = await store.transition(record.tokenHash, 'pending', { status: next, respondedAt: now(), responderOwnerId: invitee.ownerId, responderUserId: invitee.userId, ...(next === 'accepted' && responderName ? { responderName: invitationName(responderName) } : {}) }, now())
+      // A display name that is not a plain name is simply not kept.
+      let shownName = null
+      try { if (next === 'accepted' && responderName) shownName = invitationName(responderName) } catch { shownName = null }
+      const changed = await store.transition(record.tokenHash, 'pending', { status: next, respondedAt: now(), responderOwnerId: invitee.ownerId, responderUserId: invitee.userId, ...(shownName ? { responderName: shownName } : {}) }, now())
       if (!changed) throw new InvitationError('invitation_unavailable')
       return { status: next, inviterName: record.inviterName }
     },
@@ -109,7 +112,9 @@ export function createMemoryInvitationStore() {
     },
     async deleteByInviter(member) {
       const values = mine(member); for (const value of values) records.delete(value.tokenHash)
-      for (const value of records.values()) if (value.responderOwnerId === member.ownerId && value.responderUserId === member.userId) value.status = 'revoked'
+      for (const value of records.values()) if (value.responderOwnerId === member.ownerId && value.responderUserId === member.userId) {
+        value.status = 'revoked'; delete value.responderOwnerId; delete value.responderUserId; delete value.responderName; delete value.respondedAt
+      }
       return values.length
     },
   }
@@ -160,7 +165,8 @@ export function createNeo4jInvitationStore(driver, database = 'neo4j') {
     },
     async deleteByInviter(member) {
       const inviter = { ownerId: member.ownerId, userId: member.userId }
-      await write(`MATCH (i:UnlinkedMemberInvitation {responderOwnerId: $ownerId, responderUserId: $userId}) SET i.status = 'revoked'`, inviter)
+      // Invitations this account accepted belong to their inviters: they end, and keep nothing about this account.
+      await write(`MATCH (i:UnlinkedMemberInvitation {responderOwnerId: $ownerId, responderUserId: $userId}) SET i.status = 'revoked' REMOVE i.responderOwnerId, i.responderUserId, i.responderName, i.respondedAt`, inviter)
       const result = await write('MATCH (i:UnlinkedMemberInvitation {inviterOwnerId: $ownerId, inviterUserId: $userId}) WITH i, i.id AS id DETACH DELETE i RETURN count(id) AS removed', inviter)
       const removed = result.records[0]?.get('removed')
       return typeof removed?.toNumber === 'function' ? removed.toNumber() : Number(removed ?? 0)

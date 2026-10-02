@@ -29,9 +29,14 @@ test('a merge keeps the survivor, takes over the merged edges and fills missing 
   assert.deepEqual(before, base()); assert.equal(applyProfileDecisions(before, []), before)
 })
 
-test('decisions never merge a claimed profile away, ignore unknown profiles, and refuse chains and repeats', () => {
+test('decisions never merge a claimed profile away, ignore unknown profiles, and refuse chains and repeats', async () => {
   const after = applyProfileDecisions(base(), [merge('d1', 'jacob', 'test'), merge('d2', 'ghost', 'new'), rename('d3', 'ghost', 'Nobody')])
   assert.deepEqual(after.profiles.map(value => value.id), base().profiles.map(value => value.id)); assert.deepEqual(after.aliases, {})
+  // Stored decisions that conflict (say, two racing operator writes) only become inert.
+  const racing = applyProfileDecisions(base(), [merge('a', 'old', 'new'), merge('b', 'new', 'eden'), rename('c', 'test', 'bad\u0000'), merge('d', 'old', 'eden')])
+  // The chained merge is dropped, so no alias points at another alias, and the reader accepts the result.
+  assert.deepEqual(racing.aliases, { new: 'eden' }); assert.ok(Object.values(racing.aliases).every(target => !(target in racing.aliases)))
+  await createPublicPeopleReader({ readPublishedSnapshot: async () => racing }).list()
   for (const decisions of [[merge('a', 'old', 'new'), merge('b', 'new', 'eden')], [merge('a', 'old', 'new'), merge('b', 'old', 'eden')], [rename('a', 'test', 'x'), rename('b', 'test', 'y')], [merge('a', 'old', 'old')], [rename('a', 'test', 'bad\u0000')], [{ id: 'a', kind: 'delete', profileId: 'old' }], [merge('a', 'old', 'new'), rename('a', 'test', 'x')]])
     assert.throws(() => validateProfileDecisions(decisions), /profile_decisions_invalid/)
 })

@@ -396,7 +396,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (profileId && await selfClaims.claimable(profileId)) {
           let detail = await publicReader.profile({ id: profileId })
           // A merged-away profile is claimed through the profile it was merged into.
-          if (detail?.moved) { profileId = detail.moved; detail = await selfClaims.claimable(profileId) ? await publicReader.profile({ id: profileId }) : null }
+          if (detail?.moved) { profileId = detail.moved; detail = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(profileId) && await selfClaims.claimable(profileId) ? await publicReader.profile({ id: profileId }) : null }
           if (detail?.profile) {
             // The confirmation is bound to this exact displayed candidate; a
             // newer lookup in another tab invalidates a stale card.
