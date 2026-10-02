@@ -99,7 +99,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
   const contactRow = row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
-  const publicTarget = row => row.provenance?.source === 'recovered-legacy-public-v1' && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
+  const publicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
   async function contactRows(rows) {
     const plainRows = rows.map(contactRow)
     if (typeof readPublishedSnapshot !== 'function' || !rows.length) return plainRows
@@ -223,6 +223,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             try { id = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
             const result = await publicReader.profile({ id, cursor: url.searchParams.get('cursor') ?? undefined })
             if (!result) { response.writeHead(404).end(); return }
+            // A merged profile's old address moves to the profile it was merged into.
+            if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? '/api/people/' : '/people/'}${encodeURIComponent(result.moved)}`, 'Cache-Control': 'no-store' }).end(); return }
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
             journey(response, renderPerson({ ...chrome, profile: result.profile })); return
           }
@@ -392,8 +394,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           }
         }
         if (profileId && await selfClaims.claimable(profileId)) {
-          const detail = await publicReader.profile({ id: profileId })
-          if (detail) {
+          let detail = await publicReader.profile({ id: profileId })
+          // A merged-away profile is claimed through the profile it was merged into.
+          if (detail?.moved) { profileId = detail.moved; detail = await selfClaims.claimable(profileId) ? await publicReader.profile({ id: profileId }) : null }
+          if (detail?.profile) {
             // The confirmation is bound to this exact displayed candidate; a
             // newer lookup in another tab invalidates a stale card.
             session.selfClaim.candidate = { profileId, evidence, token: token() }
@@ -522,7 +526,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         let cardUrl = null
         if (typeof readPublishedSnapshot === 'function') {
           for (const id of candidates.slice(0, 8)) {
-            try { if (await publicReader.profile({ id })) { cardUrl = new URL(profileHref(id), base).href; break } }
+            try { const found = await publicReader.profile({ id }); if (found) { cardUrl = new URL(profileHref(found.moved ?? id), base).href; break } }
             catch { break /* The card still renders while the index is unavailable. */ }
           }
         }
@@ -538,16 +542,17 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const keys = ['csrf', 'firstName', 'lastName', 'linkedinUrl', 'company', 'position']
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || keys.some(key => input.getAll(key).length > 1) || [...input.keys()].some(key => !keys.includes(key))) throw new Error('private_browser_csrf')
         const values = Object.fromEntries(keys.slice(1).map(key => [key, (input.get(key) ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim()]))
-        const address = linkedinUrl(/^https?:\/\//i.test(values.linkedinUrl) ? values.linkedinUrl.replace(/^http:/i, 'https:') : `https://${values.linkedinUrl}`)
-        const problem = !values.firstName || !values.lastName ? 'Add both a first and a last name.'
+        // A LinkedIn address is optional; when given it must be a LinkedIn profile.
+        const address = values.linkedinUrl ? linkedinUrl(/^https?:\/\//i.test(values.linkedinUrl) ? values.linkedinUrl.replace(/^http:/i, 'https:') : `https://${values.linkedinUrl}`) : ''
+        const problem = !values.firstName ? 'Add their name.'
           : ['firstName', 'lastName', 'company', 'position'].some(key => [...values[key]].length > 120 || /[\u0000-\u001f\u007f]/.test(values[key])) ? 'Keep each field under 120 characters.'
-          : !address ? 'Use a LinkedIn profile address, like https://www.linkedin.com/in/their-name.' : null
+          : address === null ? 'Use a LinkedIn profile address, like https://www.linkedin.com/in/their-name, or leave it empty.' : null
         const props = jobProps(await jobResources())
         if (problem) { journey(response, renderAddPerson({ ...props, error: problem, values }), props.importJob, '', 400); return }
-        // The same one-row file LinkedIn's export would give, kept private: never published.
+        // A one-row file in the shape of LinkedIn's export, kept private: never published.
         const cell = value => `"${value.replace(/"/g, '""')}"`
         const csv = `First Name,Last Name,URL,Email Address,Company,Position,Connected On\n${[values.firstName, values.lastName, address, '', values.company, values.position, ''].map(cell).join(',')}\n`
-        await stageArchive({ ownerId: session.owner.ownerId, filename: 'Connections.csv', bytes: Buffer.from(csv, 'utf8'), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT, origin: { kind: ADDED_PERSON, label: `${values.firstName} ${values.lastName}` } })
+        await stageArchive({ ownerId: session.owner.ownerId, filename: 'Added people.csv', bytes: Buffer.from(csv, 'utf8'), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT, origin: { kind: ADDED_PERSON, label: [values.firstName, values.lastName].filter(Boolean).join(' ') } })
         redirect(response, '/network?added=1'); return
       }
       if (signup && memberInvitations && request.method === 'GET' && url.pathname === '/invites') {
@@ -565,7 +570,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           else await memberInvitations.revoke(session.owner, input.get('id'))
         } catch (failure) {
           if (!(failure instanceof InvitationError)) throw failure
-          error = { invitation_name_invalid: 'Use a plain name of up to 120 characters.', invitation_limit: 'You have reached the invite limit for now. Try again tomorrow.', invitation_unavailable: 'That invite can no longer be revoked.', invitation_not_found: 'That invite can no longer be revoked.' }[failure.code] ?? 'That did not work. Try again.'
+          error = { invitation_name_invalid: 'Use a plain name of up to 120 characters.', invitation_unavailable: 'That invite can no longer be revoked.', invitation_not_found: 'That invite can no longer be revoked.' }[failure.code] ?? 'That did not work. Try again.'
         }
         response.setHeader('Cache-Control', 'no-store')
         journey(response, renderInvites({ ...props, origin: base.origin, created, error, invitations: await memberInvitations.list(session.owner) }), props.importJob, '', error ? 400 : 200); return
@@ -577,7 +582,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const invitation = await memberInvitations.open(invitationAnswer[1])
         const chromeProps = { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, token: invitationAnswer[1] }
         let outcome
-        try { outcome = (await memberInvitations.respond(invitationAnswer[1], session.owner, input.get('action'))).status }
+        try { outcome = (await memberInvitations.respond(invitationAnswer[1], session.owner, input.get('action'), session.displayName || undefined)).status }
         catch (failure) {
           if (!(failure instanceof InvitationError)) throw failure
           journey(response, renderInviteLanding({ ...chromeProps, invitation: invitation ? { ...invitation, status: failure.code === 'invitation_own' ? 'own' : 'unavailable' } : null }), null, '', 409); return

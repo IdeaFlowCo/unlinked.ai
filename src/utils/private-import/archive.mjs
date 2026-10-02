@@ -77,6 +77,8 @@ export function unpackArchive(input, filename, { selectedOnly = false } = {}) {
 
 const categories = {
   'connections.csv': { category: 'connections', required: ['first name', 'last name', 'url'] },
+  // People a member added by hand: a LinkedIn address is optional, and checked when given.
+  'added people.csv': { category: 'connections', required: ['first name'], optionalUrl: true },
   'profile.csv': { category: 'profile', required: ['first name', 'last name'] },
   'positions.csv': { category: 'positions', required: ['company name', 'title'] },
   'education.csv': { category: 'education', required: ['school name'] },
@@ -169,7 +171,10 @@ export function parseSource(source, budget = { remaining: LIMITS.rows }, limitEr
     if (row.length !== headers.length) { base.rejected.push({ rowId, reason: 'csv_column_count' }); continue }
     const fields = Object.fromEntries(headers.map((key, i) => [key, row[i].trim()]))
     if (spec.required.some(key => !fields[key])) { base.rejected.push({ rowId, reason: 'missing_required_field' }); continue }
-    const subject = spec.category === 'connections' ? linkedinUrl(fields.url) : 'archive_owner_observation'
+    // Without a LinkedIn address, a hand-added person is identified by what was typed.
+    const subject = spec.category !== 'connections' ? 'archive_owner_observation'
+      : spec.optionalUrl && !fields.url ? `unlinked:added-person:${digest(JSON.stringify([fields['first name'], fields['last name'] ?? '', fields.company ?? '', fields.position ?? '']))}`
+      : linkedinUrl(fields.url)
     if (!subject) { base.rejected.push({ rowId, reason: 'invalid_or_missing_linkedin_url' }); continue }
     base.accepted.push({ rowId, category: spec.category, subject, fields })
   }
