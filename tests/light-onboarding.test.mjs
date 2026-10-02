@@ -124,8 +124,10 @@ test('the accepted member journey uses light copy and the shared navigation', ()
     const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
     assert.match(header, /href="https:\/\/www\.unlinked\.ai\/"/)
     assert.match(header, /href="\/network">People/)
-    assert.match(header, /href="\/profile">My profile/)
-    assert.match(header, /href="\/settings">Settings/)
+    assert.match(header, /<details class="me">/)
+    assert.match(header, /role="menuitem" href="\/profile">View profile/)
+    assert.match(header, /role="menuitem" href="\/settings">/)
+    assert.match(header, /class="scan" href="\/scan"/)
     assert.match(header, /href="\/agents">For agents/)
     assert.match(view.content.match(/<footer>(.*?)<\/footer>/s)[1], /href="https:\/\/www\.unlinked\.ai\/meet" target="_blank" rel="noopener noreferrer"/)
   }
@@ -238,7 +240,7 @@ test('signed-out Join header keeps logo and Meet without member navigation or se
   for (const props of [{}, { ...account, signedIn: false }]) {
     const view = renderJoin(props)
     const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
-    assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/people', '/agents', '/login', '/join'])
+    assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents', '/login', '/join'])
     assert.doesNotMatch(header, /href="\/(?:network|profile|settings)"|name="csrf"/)
     assert.match(view.content.match(/<footer>(.*?)<\/footer>/s)[1], /href="https:\/\/www\.unlinked\.ai\/meet"/)
     assert.doesNotMatch(view.content, /action="\/logout"|Signed in as/)
@@ -466,7 +468,7 @@ test('fixture previews cover every requested screen and are reproducible without
     const own = first[files.findIndex(file => file.endsWith('/own-profile-importing.html'))]
     assert.equal((own.match(/<div class="xp">/g) || []).length, 4)
     assert.equal((own.match(/class="tag"/g) || []).length, 6)
-    assert.equal((own.match(/class="initials avatar"/g) || []).length, 8)
+    assert.equal((own.split('<main')[1].match(/class="initials avatar"/g) || []).length, 8)
     assert.match(own, /My connections · 1,005/)
     assert.match(own, /Westhaven University/)
     assert.match(own, /Importing · 41% · 412 of 1,005 records/)
@@ -523,7 +525,7 @@ test('controller-marked public uploads disclose member and visitor discovery; ol
 test('signed-out home shows the product: search, a way in, profiles to explore and agent setup, with no session authority', () => {
   const view = renderLanding()
   const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
-  assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/people', '/agents', '/login', '/join'])
+  assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents', '/login', '/join'])
   assert.match(header, /method="get" action="\/network" role="search"/)
   assert.match(view.content, /<h1>Your professional profile and network, in a place that’s yours\.<\/h1>/)
   assert.match(view.content, /class="button lg" href="\/join">Create my profile<\/a><a href="\/people">or explore profiles first →/)
@@ -559,7 +561,7 @@ test('a profile page shows who someone is and who they know, escaped, for visito
   assert.match(anonymous.content, /&lt;script&gt;alert\(&quot;bad&quot;\)&lt;\/script&gt;/)
   assert.doesNotMatch(anonymous.content, /<script>|onclick=|secret@example\.test|linkedin\.com\/in\/maya|name="csrf"|action="\/logout"/)
   const member = renderPerson({ ...account, profile })
-  assert.match(member.content, /href="\/profile">My profile/)
+  assert.match(member.content, /href="\/profile">View profile/)
   assert.match(member.content, /action="\/logout"/)
   assert.doesNotMatch(member.content, /href="\/join">Join Unlinked/)
   const bare = renderPerson({ profile: { id: 'solo', name: 'Solo Person', positions: [], education: [], skills: [], connections: [] } })
@@ -578,12 +580,12 @@ test('a member page opened without a session offers sign-in that returns there, 
   assert.match(renderSignInRequired().content, /Anyone can search and read profiles without signing in\./)
 })
 
-test('the account chip shows a name, falling back to the mailbox name or Settings, and always leads to Settings', () => {
-  const chip = props => renderPeople({ ...account, ...props }).content.match(/<a class="chip" href="\/settings"[^>]*>(.*?)<\/a>/)[1]
-  assert.equal(chip({ displayName: 'Sam <Rivera>' }), 'Sam &lt;Rivera&gt;')
-  assert.equal(chip({ displayName: 'sam@example.test' }), 'sam')
-  assert.equal(chip({ displayName: '2f0c9e1a-77aa-4c0e-9b1e-1234567890ab' }), 'Settings')
-  assert.equal(chip({}), 'Settings')
+test('the Me menu shows a name, falling back to the mailbox name, never an address or opaque identifier', () => {
+  const name = props => renderPeople({ ...account, ...props }).content.match(/<div class="me-who"><b>(.*?)<\/b>/)[1]
+  assert.equal(name({ displayName: 'Sam <Rivera>' }), 'Sam &lt;Rivera&gt;')
+  assert.equal(name({ displayName: 'sam@example.test' }), 'sam')
+  assert.equal(name({ displayName: '2f0c9e1a-77aa-4c0e-9b1e-1234567890ab' }), 'Your account')
+  assert.equal(name({}), 'Your account')
 })
 
 test('an active import shows a header pill that leads to the profile; a finished one does not', () => {
