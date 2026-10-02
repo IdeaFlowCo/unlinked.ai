@@ -45,6 +45,7 @@ export async function buildPreviews(outDir) {
     ['importing-profile-ready', renderImporting({ ...account, importJob: importing })],
     ['importing-indexed', renderImporting({ ...account, importJob: indexed })],
     ['own-profile-importing', renderOwnProfile({ ...account, profile, contacts, imports, importJob: importing })],
+    ['own-profile-lookup-found', renderOwnProfile({ ...account, profile, linkedinLookup: { action: '/find-me' }, lookupResult: { status: 'found', profileName: 'Sam Rivera', headline: 'Partnerships lead · climate and energy', listedBy: 3, claimAction: '/claim-me?match=fictional-sam' } })],
     ['people-welcome', renderPeople({ ...account, state: 'welcome', contacts })],
     ['people-empty', renderPeople({ ...account, query: 'climate', contacts: [], searchResults: [] })],
     ['people-no-match', renderPeople({ ...account, query: 'ocean logistics', contacts, searchResults: [] })],
