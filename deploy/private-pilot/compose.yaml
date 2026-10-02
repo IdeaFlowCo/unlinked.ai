@@ -9,9 +9,9 @@ services:
     command: []
     env_file: /srv/unlinked-private-guest-pilot-20261001/runtime/graph.env
     environment:
-      NEO4J_server_memory_heap_initial__size: 512m
-      NEO4J_server_memory_heap_max__size: 512m
-      NEO4J_server_memory_pagecache_size: 256m
+      NEO4J_server_memory_heap_initial__size: 768m
+      NEO4J_server_memory_heap_max__size: 768m
+      NEO4J_server_memory_pagecache_size: 384m
       NEO4J_server_http_enabled: 'false'
       NEO4J_server_https_enabled: 'false'
     networks: [backend]
@@ -20,7 +20,9 @@ services:
         source: /srv/unlinked-private-guest-pilot-20261001/neo4j-data
         target: /data
         bind: {create_host_path: false}
-    mem_limit: 1g
+    # Heap + page cache leave ~800 MiB for JVM overhead; at 1g an unindexed
+    # scan was OOM-killed (2026-10-02).
+    mem_limit: 2g
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     logging: {driver: none}
