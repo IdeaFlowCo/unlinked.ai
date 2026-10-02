@@ -126,7 +126,9 @@ when both props are absent. A valid lookup action adds
 a separate optional form below the profile panel, posting `csrf` and one
 `linkedinUrl` field. A `found` result with a valid claim action adds the “Is this
 you?” card, escaped name/headline, integer member count, and a separate native
-POST confirmation with `csrf`; Not me returns to `/profile`. `none` adds no card.
+POST confirmation with `csrf` (plus, when the runtime supplies a
+`claimToken`, one hidden `candidate` field binding the confirmation to the
+exact displayed result); Not me returns to `/profile`. `none` adds no card.
 Actions must be root-relative routes on the current host; external/protocol-relative
 URLs, backslashes, whitespace/control characters and fragments are rejected, and
 valid actions are HTML escaped. No extra JavaScript or auto-claim behavior is added.

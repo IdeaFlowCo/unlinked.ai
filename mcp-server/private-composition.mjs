@@ -191,20 +191,35 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // legacy-account-operator.mjs revoke <profileId> <receiptId>.
       selfClaims: legacyLinks && publicPeople ? (() => {
         let slugs = null
-        const slugIndex = async () => {
-          if (slugs) return slugs
-          const directory = join(root, 'audit')
-          const names = (await readdir(directory)).filter(name => /^legacy-public-source-manifest-[a-f0-9]{64}\.json$/.test(name)).sort()
-          const index = new Map()
-          for (const name of names) {
-            const manifest = JSON.parse(await readFile(join(directory, name), 'utf8'))
-            for (const row of manifest.profiles ?? []) if (row.linkedinSlug && row.legacyId) index.set(String(row.linkedinSlug).toLowerCase(), row.legacyId)
-          }
-          slugs = index
+        const slugIndex = () => {
+          // Memoizes the promise so concurrent first lookups share one parse;
+          // a failed load is not cached and a later lookup retries.
+          if (!slugs) slugs = (async () => {
+            const directory = join(root, 'audit')
+            const names = (await readdir(directory)).filter(name => /^legacy-public-source-manifest-[a-f0-9]{64}\.json$/.test(name)).sort()
+            const index = new Map()
+            for (const name of names) {
+              const manifest = JSON.parse(await readFile(join(directory, name), 'utf8'))
+              for (const row of manifest.profiles ?? []) if (row.linkedinSlug && row.legacyId) index.set(String(row.linkedinSlug).toLowerCase(), row.legacyId)
+            }
+            return index
+          })().catch(error => { slugs = null; throw error })
           return slugs
         }
+        const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
         return {
-          lookupSlug: async slug => (await slugIndex()).get(String(slug).toLowerCase()) ?? null,
+          lookupSlug: async slug => { try { return (await slugIndex()).get(String(slug).toLowerCase()) ?? null } catch { return null } },
+          // Names resolve only against the recovered legacy dataset, never the
+          // merged shared snapshot — a member-imported contact with the same
+          // name must not shadow or displace a claimable legacy profile.
+          lookupName: async name => {
+            const wanted = normalizedName(name)
+            if (!wanted) return null
+            const snapshot = await publicPeople.read('recovered-legacy-public-v1')
+            if (!snapshot) return null
+            const matches = snapshot.profiles.filter(profile => normalizedName(profile.name) === wanted)
+            return matches.length === 1 ? matches[0].id : null
+          },
           claimable: async profileId => {
             const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
             try { return !(await session.executeRead(tx => tx.run('MATCH (a:UnlinkedLegacyAccount {profileId:$profileId}) RETURN a LIMIT 1', { profileId }))).records.length }
@@ -233,6 +248,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
               { profileId, ownerId: owner.ownerId, userId: owner.userId, emailHash, legacyUserId, sourceSha256: snapshot.revision.slice('legacy-public-v1:'.length), evidence, receiptId, now: Date.now() }))
               if (!result.records.length) throw new Error('self_claim_conflict')
               return { profileId, receiptId: result.records[0].get('receiptId') }
+            } catch (error) {
+              // A race that slips past the guard reads lands on the uniqueness
+              // constraints; losing one is the same conflict, not an outage.
+              if (String(error.code ?? '').includes('ConstraintValidationFailed')) throw new Error('self_claim_conflict')
+              throw error
             } finally { await session.close() }
           },
         }

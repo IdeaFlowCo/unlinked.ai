@@ -74,7 +74,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
-  if (selfClaims !== undefined && (typeof selfClaims.lookupSlug !== 'function' || typeof selfClaims.claimable !== 'function' || typeof selfClaims.claim !== 'function')) throw new Error('self_claims_configuration_required')
+  if (selfClaims !== undefined && (typeof selfClaims.lookupSlug !== 'function' || typeof selfClaims.lookupName !== 'function' || typeof selfClaims.claimable !== 'function' || typeof selfClaims.claim !== 'function')) throw new Error('self_claims_configuration_required')
   const invitationMode = typeof claimInvitation === 'function' && typeof signup !== 'function'
   const authorizationOrigin = login.authorizationOrigin ?? null
   if (invitationMode && authorizationOrigin === null) throw new Error('explicit_private_authorization_origin_required')
@@ -329,6 +329,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('linkedinUrl').length > 1 || [...input.keys()].some(key => !['csrf', 'linkedinUrl'].includes(key))) throw new Error('private_browser_csrf')
         const address = (input.get('linkedinUrl') ?? '').trim()
         if (address.length > 2048) throw new Error('self_claim_input_invalid')
+        // One person finding themselves needs a handful of tries; a session
+        // enumerating the private slug index does not.
+        session.selfClaim.lookups = (session.selfClaim.lookups ?? 0) + 1
+        if (session.selfClaim.lookups > 20) { response.writeHead(429, { 'Retry-After': '3600' }).end(); return }
         session.selfClaim.candidate = null
         const page = lookupResult => journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, lookupResult }))
         let profileId = null, evidence = null
@@ -341,27 +345,29 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         }
         if (!profileId) {
           // The fallback name comes from the identity provider, never from a
-          // typed field, and must match exactly one legacy profile.
+          // typed field, and must match exactly one legacy profile; email and
+          // bare-subject fallbacks never qualify.
           const wanted = normalizedName(session.displayName)
           if (wanted.includes(' ') && !wanted.includes('@')) {
-            const snapshot = await readPublishedSnapshot()
-            const matches = snapshot.profiles.filter(profile => normalizedName(profile.name) === wanted)
-            if (matches.length === 1) { profileId = matches[0].id; evidence = 'self-asserted-display-name-v1' }
+            profileId = await selfClaims.lookupName(session.displayName)
+            if (profileId) evidence = 'self-asserted-display-name-v1'
           }
         }
         if (profileId && await selfClaims.claimable(profileId)) {
           const detail = await publicReader.profile({ id: profileId })
           if (detail) {
-            session.selfClaim.candidate = { profileId, evidence }
-            page({ status: 'found', profileName: detail.profile.name, headline: detail.profile.headline ?? '', listedBy: detail.profile.connections.length, claimAction: '/claim-me' }); return
+            // The confirmation is bound to this exact displayed candidate; a
+            // newer lookup in another tab invalidates a stale card.
+            session.selfClaim.candidate = { profileId, evidence, token: token() }
+            page({ status: 'found', profileName: detail.profile.name, headline: detail.profile.headline ?? '', listedBy: detail.profile.connections.length, claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token }); return
           }
         }
         page({ status: 'none' }); return
       }
       if (request.method === 'POST' && url.pathname === '/claim-me') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
-        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => key !== 'csrf')) throw new Error('private_browser_csrf')
-        if (!selfClaims || !session.selfClaim?.candidate) throw new Error('self_claim_unavailable')
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('candidate').length !== 1 || [...input.keys()].some(key => !['csrf', 'candidate'].includes(key))) throw new Error('private_browser_csrf')
+        if (!selfClaims || !session.selfClaim?.candidate || input.get('candidate') !== session.selfClaim.candidate.token) throw new Error('self_claim_unavailable')
         const { profileId, evidence } = session.selfClaim.candidate
         try {
           const claimed = await selfClaims.claim({ owner: session.owner, issuer: session.selfClaim.identity.issuer, subject: session.selfClaim.identity.subject, emailHash: session.selfClaim.emailHash, profileId, evidence })
@@ -370,8 +376,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           redirect(response, '/profile'); return
         } catch (error) {
           if (error.message !== 'self_claim_conflict') throw error
-          session.selfClaim.candidate = null
-          journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, notice: 'That profile was just claimed by someone else. If it is yours, contact us.' })); return
+          if (session.selfClaim) session.selfClaim.candidate = null
+          journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, notice: 'That profile can’t be claimed right now. If it’s yours, contact us.' })); return
         }
       }
       if (request.method === 'GET' && url.pathname === '/api/my-connections') {
