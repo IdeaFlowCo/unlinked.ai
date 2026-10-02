@@ -294,12 +294,13 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         journey(response, renderInviteLanding({ ...chrome, token: invitationLink[1], invitation }), null, '', invitation ? 200 : 404); return
       }
       // A member's contact card, opened by the link or QR code they handed over.
-      // Not indexed, never cached, and bounded for the whole site: the token is
-      // the only way in, and a reset or hidden card answers as not found.
+      // Not indexed and never cached. The token is the only way in, and a reset
+      // or hidden card answers as not found. The site-wide bound only protects
+      // the graph from load; an unguessable token needs no guessing limit.
       const contactLink = url.pathname.match(/^\/c\/([0-9A-Za-z]{24})(\/contact\.vcf)?$/)
       if (request.method === 'GET' && contactLink && contactCards && signup) {
         if (Date.now() - contactWindow >= 60000) { contactWindow = Date.now(); contactRequests = 0 }
-        if (++contactRequests > 240) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (++contactRequests > 1200) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         response.setHeader('Referrer-Policy', 'no-referrer')
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         const card = await contactCards.open(contactLink[1])
@@ -648,15 +649,15 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         // Full RFC 3986 escaping so the target always matches the card grammar
         // that /meet scanning accepts (encodeURIComponent leaves !'()* alone).
         const profileHref = id => `/people/${encodeURIComponent(id).replace(/[!'()*]/g, character => '%' + character.charCodeAt(0).toString(16).toUpperCase())}`
-        let cardUrl = null
+        let cardUrl = null, indexRead = true
         if (typeof readPublishedSnapshot === 'function') {
           for (const id of candidates.slice(0, 8)) {
             try { const found = await publicReader.profile({ id }); if (found) { cardUrl = new URL(profileHref(found.moved ?? id), base).href; break } }
-            catch { break /* The card still renders while the index is unavailable. */ }
+            catch { indexRead = false; break /* The card still renders while the index is unavailable. */ }
           }
         }
         session.headline = profile.headline
-        return { profile, cardUrl, identity: { name: profile.name, headline: profile.headline, location: profile.location, profilePath: cardUrl ? new URL(cardUrl).pathname : null } }
+        return { profile, cardUrl, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
       }
       // The contact version of the card, for its owner: the details, their show
       // switches, and the link and QR once something is shown.
@@ -889,12 +890,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const grantIds = await backend.listAccountGrantIds()
         // Invitations hold names the owner typed: they go with the account.
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
+        // The contact card goes first: its link must never outlive the account.
+        if (contactCards) await contactCards.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)
-        // The contact card and its link.
-        if (contactCards) await contactCards.removeOwner(session.owner)
         // Best effort beyond the graph: the legacy claim and the stored archive bytes.
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})
