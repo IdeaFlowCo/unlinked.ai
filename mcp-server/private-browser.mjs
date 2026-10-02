@@ -101,7 +101,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const plainRows = rows.map(contactRow)
     if (typeof readPublishedSnapshot !== 'function' || !rows.length) return plainRows
     try {
-      const targets = rows.map(publicTarget), found = await publicReader.lookup({ ids: [...new Set(targets.filter(Boolean))] })
+      // One malformed source ID must not stop the rest of the page from linking.
+      const targets = rows.map(publicTarget).map(id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null)
+      const found = await publicReader.lookup({ ids: [...new Set(targets.filter(Boolean))] })
       return plainRows.map((value, index) => {
         const match = found.get(targets[index])
         return match ? { ...value, id: match.id, ...(match.presence ? { presence: match.presence, connectionCount: match.connectionCount } : {}) } : value
