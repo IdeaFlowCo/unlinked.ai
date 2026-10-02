@@ -53,7 +53,7 @@ export const whatsappUrl = value => `https://wa.me/${value.slice(1)}`
 export function normalizeEmail(value) {
   const typed = text(value)
   if (!typed) return null
-  if (typed.length > 254 || !/^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\.[A-Za-z]{2,24}$/.test(typed) || typed.includes('..')) throw new ContactCardError('contact_email_invalid')
+  if (typed.length > 254 || !/^[A-Za-z0-9._+-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\.[A-Za-z]{2,24}$/.test(typed) || typed.includes('..')) throw new ContactCardError('contact_email_invalid')
   return typed
 }
 export function isSafeContactLink(value) {
@@ -71,8 +71,10 @@ export function normalizeLink(value) {
 // Who the card is for: the member's own public professional identity, kept
 // with the card so the link can be opened without the member's session.
 const plain = (value, max) => { const typed = text(value); return typed && [...typed].length <= max && !/[\u0000-\u001f\u007f]/.test(typed) ? typed : null }
-const identityOf = value => ({ name: plain(value?.name, 120), headline: plain(value?.headline, 220), location: plain(value?.location, 120),
-  profilePath: typeof value?.profilePath === 'string' && PROFILE_PATH.test(value.profilePath) ? value.profilePath : null })
+// A `profilePath` left undefined means "not known right now" (the public index
+// could not be read): the stored one is kept rather than cleared.
+const identityOf = (value, existing) => ({ name: plain(value?.name, 120), headline: plain(value?.headline, 220), location: plain(value?.location, 120),
+  profilePath: value?.profilePath === undefined && existing ? existing.profilePath ?? null : typeof value?.profilePath === 'string' && PROFILE_PATH.test(value.profilePath) ? value.profilePath : null })
 const IDENTITY_KEYS = ['name', 'headline', 'location', 'profilePath']
 
 const settingsOf = record => ({ phone: record?.phone ?? null, showPhone: record?.showPhone === true, whatsapp: record?.whatsapp ?? null, showWhatsapp: record?.showWhatsapp === true,
@@ -96,7 +98,7 @@ export function projectContactCard(record) {
 }
 
 export function createContactCards({ store, now = Date.now } = {}) {
-  if (!store || ['get', 'getByToken', 'put', 'delete'].some(name => typeof store[name] !== 'function')) throw new Error('contact_card_store_required')
+  if (!store || ['get', 'getByToken', 'put', 'setIdentity', 'delete'].some(name => typeof store[name] !== 'function')) throw new Error('contact_card_store_required')
   const view = record => ({ token: record.token, settings: settingsOf(record), card: projectContactCard(record) })
   return {
     // The owner's own view: their settings, and the link once a card exists.
@@ -113,7 +115,7 @@ export function createContactCards({ store, now = Date.now } = {}) {
         showEmail: input.showEmail === true && fields.email !== null, showLink: input.showLink === true && fields.link !== null }
       const existing = await store.get(member)
       const at = now()
-      const record = { ownerKey: ownerKey(member), ownerId: member.ownerId, userId: member.userId, token: existing?.token ?? generateContactCardToken(), ...fields, ...shows, ...identityOf(identity), createdAt: existing?.createdAt ?? at, updatedAt: at }
+      const record = { ownerKey: ownerKey(member), ownerId: member.ownerId, userId: member.userId, token: existing?.token ?? generateContactCardToken(), ...fields, ...shows, ...identityOf(identity, existing), createdAt: existing?.createdAt ?? at, updatedAt: at }
       await store.put(record)
       return view(record)
     },
@@ -129,9 +131,11 @@ export function createContactCards({ store, now = Date.now } = {}) {
     async syncIdentity(member, identity) {
       const existing = await store.get(owner(member))
       if (!existing) return false
-      const next = identityOf(identity)
+      const next = identityOf(identity, existing)
       if (IDENTITY_KEYS.every(key => (existing[key] ?? null) === next[key])) return false
-      await store.put({ ...existing, ...next })
+      // Only the identity is written: a reset or a hidden field saved at the
+      // same moment is never overwritten by this page view.
+      await store.setIdentity(member, next)
       return true
     },
     // What the link shows, or null: unknown, reset, or nothing shown.
@@ -155,6 +159,7 @@ export function createMemoryContactCardStore() {
     async get(member) { const value = records.get(ownerKey(member)); return value ? structuredClone(value) : null },
     async getByToken(token) { const value = [...records.values()].find(record => record.token === token); return value ? structuredClone(value) : null },
     async put(record) { records.set(record.ownerKey, structuredClone(record)) },
+    async setIdentity(member, identity) { const value = records.get(ownerKey(member)); if (value) for (const key of IDENTITY_KEYS) { if (identity[key] === null) delete value[key]; else value[key] = identity[key] } },
     async delete(member) { return records.delete(ownerKey(member)) ? 1 : 0 },
   }
 }
@@ -184,6 +189,10 @@ export function createNeo4jContactCardStore(driver, database = 'neo4j') {
     async put(record) {
       const stored = Object.fromEntries(RECORD_KEYS.filter(name => record[name] !== undefined && record[name] !== null).map(name => [name, record[name]]))
       await write('MERGE (c:UnlinkedContactCard {ownerKey: $ownerKey}) SET c = $stored', { ownerKey: record.ownerKey, stored })
+    },
+    // Setting a property to null removes it.
+    async setIdentity(member, identity) {
+      await write('MATCH (c:UnlinkedContactCard {ownerKey: $ownerKey}) SET c.name = $name, c.headline = $headline, c.location = $location, c.profilePath = $profilePath', { ownerKey: ownerKey(member), ...Object.fromEntries(IDENTITY_KEYS.map(key => [key, identity[key] ?? null])) })
     },
     async delete(member) {
       const result = await write('MATCH (c:UnlinkedContactCard {ownerKey: $ownerKey}) WITH c, c.ownerKey AS key DETACH DELETE c RETURN count(key) AS removed', { ownerKey: ownerKey(member) })

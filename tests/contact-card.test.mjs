@@ -17,7 +17,7 @@ test('contact details are normalized strictly: international phone numbers, plai
   assert.equal(displayPhone('+14155550123'), '+1 (415) 555-0123')
   assert.equal(displayPhone('+442079460958'), '+442079460958')
   assert.equal(normalizeEmail(' ada@example.test '), 'ada@example.test')
-  for (const value of ['ada', 'ada@', 'ada@example', 'a b@example.test', 'ada@example.test\nBCC:x@example.test', '<ada@example.test>', 'ada@exa..mple.test']) assert.equal(await code(() => normalizeEmail(value)), 'contact_email_invalid', value)
+  for (const value of ['ada', 'ada@', 'ada@example', 'a b@example.test', 'ada@example.test\nBCC:x@example.test', '<ada@example.test>', 'ada@exa..mple.test', 'ada%0D%0Ax@example.test']) assert.equal(await code(() => normalizeEmail(value)), 'contact_email_invalid', value)
   assert.equal(normalizeLink('example.test/me'), 'https://example.test/me')
   assert.equal(normalizeLink('http://example.test'), 'https://example.test/')
   for (const value of ['javascript:alert(1)', 'https://user:pass@example.test', 'https://example.test/"><script>', 'https://localhost', `https://example.test/${'a'.repeat(200)}`]) assert.equal(await code(() => normalizeLink(value)), 'contact_link_invalid', value)
@@ -66,6 +66,22 @@ test('one card per account: saved details, a stable link, reset and removal', as
   assert.equal(await cards.syncIdentity(member, { name: 'Ada E. Example', headline: 'CTO' }), true)
   assert.equal((await cards.open(saved.token)).name, 'Ada E. Example')
   assert.equal(await cards.syncIdentity({ ownerId: 'nobody', userId: 'nobody' }, { name: 'X' }), false)
+  // An unknown profile path (index unavailable) keeps the stored one; an explicit null clears it.
+  await cards.syncIdentity(member, { name: 'Ada E. Example', headline: 'CTO', profilePath: '/people/ada' })
+  await cards.syncIdentity(member, { name: 'Ada E. Example', headline: 'CTO' })
+  assert.equal((await cards.open(saved.token)).profilePath, '/people/ada')
+  await cards.syncIdentity(member, { name: 'Ada E. Example', headline: 'CTO', profilePath: null })
+  assert.equal((await cards.open(saved.token)).profilePath, null)
+  // A page view that refreshes the name never rewrites the link or the switches:
+  // a reset that lands between its read and its write still wins.
+  const racing = createMemoryContactCardStore()
+  const raced = createContactCards({ store: { ...racing, get: async value => { const read = await racing.get(value); if (read && racing.onRead) { const hook = racing.onRead; racing.onRead = null; await hook() } return read } } })
+  const before = await raced.save(member, { phone: '+14155550123', showPhone: true }, { name: 'Ada' })
+  let after
+  racing.onRead = async () => { after = await createContactCards({ store: racing }).rotate(member) }
+  assert.equal(await raced.syncIdentity(member, { name: 'Ada Renamed' }), true)
+  assert.equal(await raced.open(before.token), null)
+  assert.equal((await raced.open(after.token)).name, 'Ada Renamed')
 
   // Hiding everything: the link answers as not found, the details stay with the owner.
   await cards.save(member, { phone: '+1 415 555 0123', showPhone: false }, { name: 'Ada Example' })
