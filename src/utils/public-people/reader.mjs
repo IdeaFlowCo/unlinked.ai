@@ -95,12 +95,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         tokens.set(input.id, { name: words(summary.name), text: words([summary.name, summary.headline, company, detail.about, ...detail.positions.flatMap(position => [position.title, position.company, position.description]), ...detail.education.flatMap(school => [school.institution, school.degree]), ...detail.skills].filter(Boolean).join(' ')) })
       }
       const outgoing = new Map([...summaries.keys()].map(id => [id, new Set()]))
+      // A connection is mutual, but an edge is stored only from the person whose export listed it.
+      const connected = new Map([...summaries.keys()].map(id => [id, new Set()]))
       for (const edge of value.connections) {
         if (!plain(edge) || !summaries.has(edge.fromId) || !summaries.has(edge.toId) || outgoing.get(edge.fromId).has(edge.toId)) unavailable()
         outgoing.get(edge.fromId).add(edge.toId)
+        connected.get(edge.fromId).add(edge.toId); connected.get(edge.toId).add(edge.fromId)
       }
       const ordered = [...summaries.values()].sort((a, b) => compare(normalized(a.name), normalized(b.name)) || compare(a.id, b.id))
-      return { revision: value.revision, ordered, summaries, details, outgoing, tokens }
+      return { revision: value.revision, ordered, summaries, details, connected, tokens }
     } catch {
       unavailable()
     } finally {
@@ -149,7 +152,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const data = await snapshot(signal)
       if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
       if (!data.details.has(id)) return null
-      const connections = page(data.ordered.filter(person => data.outgoing.get(id).has(person.id)), decodedCursor, scope, data.revision)
+      const connections = page(data.ordered.filter(person => data.connected.get(id).has(person.id)), decodedCursor, scope, data.revision)
       return { profile: { ...data.details.get(id), connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
   }

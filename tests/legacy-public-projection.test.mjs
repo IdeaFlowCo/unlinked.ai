@@ -19,7 +19,7 @@ function fixture() {
   return createLegacyPlan(source, { sourceContainerSha256: 'a'.repeat(64) })
 }
 
-test('complete public snapshot preserves fields, source IDs and directed edges through the real reader', async () => {
+test('complete public snapshot preserves fields, source IDs and directed edges, and the real reader shows each edge from both ends', async () => {
   const plan = fixture(), { snapshot, manifest } = createLegacyPublicProjection(plan)
   assert.deepEqual(snapshot.profiles, [
     { id: 'a', name: 'Synthetic Alice', headline: 'Builder', about: 'Line one\nLine two', positions: [{ title: 'Researcher', company: 'Example Company', startDate: '2020-01-01', description: 'Works with data' }], education: [{ institution: 'Example College', degree: 'Design', startDate: '2015-01-01', endDate: '2019-01-01' }], skills: ['Research'] },
@@ -36,7 +36,7 @@ test('complete public snapshot preserves fields, source IDs and directed edges t
   const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => snapshot })
   assert.deepEqual((await reader.list({ query: 'Example Company' })).profiles.map(value => value.id), ['a'])
   assert.deepEqual((await reader.profile({ id: 'a' })).profile.connections.map(value => value.id), ['b'])
-  assert.deepEqual((await reader.profile({ id: 'b' })).profile.connections, [])
+  assert.deepEqual((await reader.profile({ id: 'b' })).profile.connections.map(value => value.id), ['a'])
 })
 
 test('replay is deterministic, compact and immutable without mutating the source plan', () => {
