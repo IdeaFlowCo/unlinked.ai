@@ -44,16 +44,20 @@ const requestValue = value => {
 
 // The injected provider owns public projection and both-endpoint visibility.
 // No reader exists by default; private records and fixtures are never fallback sources.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000 } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer)))) throw new TypeError('public_people_configuration_invalid')
+// `reuse: true` keeps the first successful snapshot for this reader's whole
+// life. Use it only for a reader made for one request, so a page that reads
+// the index several times builds it once and sees one consistent revision.
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000, reuse = false } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
   // once, and building it is slow. Nothing outlives the build, so every new
   // read still sees the current publication. A caller's own signal reads alone.
-  let inflight = null
+  let inflight = null, kept = null
   async function snapshot(signal) {
+    if (kept) return kept
     if (signal) return build(signal)
-    if (!inflight) inflight = build().finally(() => { inflight = null })
+    if (!inflight) inflight = build().then(value => { if (reuse) kept = value; return value }).finally(() => { inflight = null })
     return inflight
   }
   async function build(signal) {
@@ -204,6 +208,16 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const data = await snapshot(signal)
       const from = data.aliases.get(fromId) ?? fromId, to = data.aliases.get(toId) ?? toId
       return from !== to && Boolean(data.connected.get(from)?.has(to))
+    },
+    // Everyone the public graph connects to one profile (either direction,
+    // merged addresses resolved), as public summaries in name order.
+    async neighbors(request = {}) {
+      const { id, signal } = requestValue(request)
+      if (!idValid(id)) invalid()
+      const data = await snapshot(signal)
+      const from = data.aliases.get(id) ?? id
+      const connected = data.connected.get(from)
+      return connected ? data.ordered.filter(person => connected.has(person.id)) : []
     },
     // Everyone whose public profile ties them to a company, by the company name
     // as it appears on profiles: a position at it, or a headline naming it.

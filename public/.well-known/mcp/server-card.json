@@ -28,9 +28,10 @@
       ],
       "scopes": [
         "network",
-        "people"
+        "people",
+        "connections"
       ],
-      "revocation": "Settings → Connected apps, or RFC 7009 at /oauth/revoke"
+      "revocation": "Settings \u2192 Connected apps, or RFC 7009 at /oauth/revoke"
     }
   },
   "tools": [
@@ -203,7 +204,7 @@
     },
     {
       "name": "unlinked_list_connection_requests",
-      "description": "Read-only: the owner's open member-to-member connection requests. direction 'received' (default) waits for the owner's answer; 'sent' is still pending with someone else. Agents cannot send or answer requests.",
+      "description": "Read-only: list open requests; acting requires the separate explicit opt-in connection scope.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -230,6 +231,94 @@
             "maximum": 50
           }
         },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_send_connection_request",
+      "description": "Send a connection request. Only with explicit opt-in; off by default. Same browser authorization and limits.",
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "profileId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_accept_connection_request",
+      "description": "Accept a connection request. Only with explicit opt-in; off by default. Same browser authorization and limits.",
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_ignore_connection_request",
+      "description": "Ignore a connection request. Only with explicit opt-in; off by default. Same browser authorization and limits.",
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_withdraw_connection_request",
+      "description": "Withdraw a connection request. Only with explicit opt-in; off by default. Same browser authorization and limits.",
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ],
         "additionalProperties": false
       }
     }

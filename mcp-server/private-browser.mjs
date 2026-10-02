@@ -15,6 +15,8 @@ import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
+import { createConnectionActions } from './connection-actions.mjs'
+import { ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
 import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
@@ -111,18 +113,37 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // published as public-<row id>. Private-only rows stay plain text.
   const contactRow = row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
   const publicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite', 'unlinked-connection'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
-  async function contactRows(rows) {
+  const usableTarget = id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
+  async function contactRows(rows, reader = publicReader) {
     const plainRows = rows.map(contactRow)
     if (typeof readPublishedSnapshot !== 'function' || !rows.length) return plainRows
     try {
       // One malformed source ID must not stop the rest of the page from linking.
-      const targets = rows.map(publicTarget).map(id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null)
-      const found = await publicReader.lookup({ ids: [...new Set(targets.filter(Boolean))] })
+      const targets = rows.map(publicTarget).map(usableTarget)
+      const found = await reader.lookup({ ids: [...new Set(targets.filter(Boolean))] })
       return plainRows.map((value, index) => {
         const match = found.get(targets[index])
         return match ? { ...value, id: match.id, ...(match.presence ? { presence: match.presence, connectionCount: match.connectionCount } : {}) } : value
       })
     } catch { return plainRows }
+  }
+  // One reader per page view: every read of the index on that page shares one build.
+  const pageReader = () => createPublicPeopleReader({ readPublishedSnapshot, reuse: true })
+  // The published profiles an account is connected to, once each: its own
+  // network rows that link to a public profile (imported connections,
+  // accepted invites and connection requests) plus everyone the public graph
+  // connects to its own profile. Its own profile is never listed.
+  async function connectedProfiles(owner, network, reader) {
+    const targets = [...new Set(network.assertions.filter(row => row.category === 'connections').map(publicTarget).map(usableTarget).filter(Boolean))]
+    const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner).catch(() => null) : null
+    const found = new Map()
+    for (let start = 0; start < targets.length; start += 1000) for (const summary of (await reader.lookup({ ids: targets.slice(start, start + 1000) })).values()) found.set(summary.id, summary)
+    if (mine) {
+      for (const summary of await reader.neighbors({ id: mine })) found.set(summary.id, summary)
+      const self = (await reader.lookup({ ids: [mine] })).get(mine)
+      found.delete(mine); if (self) found.delete(self.id)
+    }
+    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
   let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
   // Visitors can ask the AI about the public list. Each ask is a paid model call, so it is
@@ -212,28 +233,37 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
     redirect(response, invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
   }
-  const sameAccount = (a, b) => a.ownerId === b.ownerId && a.userId === b.userId
-  // Connected some other way: an accepted invite, or the public graph already
-  // links the two profiles (one of them listed the other in an export).
-  const alreadyConnected = async (owner, account, profileId) => {
-    if (memberInvitations && (await memberInvitations.connections(owner)).some(value => sameAccount(value.other, account))) return true
-    const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner).catch(() => null) : null
-    return Boolean(mine && await publicReader.linked({ fromId: mine, toId: profileId }).catch(() => false))
+  // Connect rules shared with agent write tools (connection-actions.mjs).
+  const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
+  // A People listing a Connect/answer/withdraw/remove form may return to: the
+  // /network path with only its own filter parameters (a stale notice is dropped).
+  const NETWORK_RETURN_KEYS = ['q', 'mode', 'presence', 'connected', 'scope', 'cursor', 'page']
+  const networkReturn = value => {
+    if (typeof value !== 'string' || value.length > 1200 || !/^\/network(?:\?[\x21-\x7e]*)?$/.test(value) || value.includes('#')) return null
+    const url = new URL(value, base)
+    if ([...url.searchParams.keys()].some(key => !NETWORK_RETURN_KEYS.includes(key) && key !== 'notice')) return null
+    url.searchParams.delete('notice')
+    return url
   }
-  // Where the viewer stands with the member behind a public profile.
-  const relationTo = async (owner, profileId) => {
-    const account = await accountForProfile(profileId)
-    if (!account) return undefined
-    if (sameAccount(owner, account)) return { state: 'self' }
-    const between = await memberConnections.between(owner, account)
-    if (between.state !== 'none') return between
-    return await alreadyConnected(owner, account, profileId) ? { state: 'connected' } : { state: 'none' }
-  }
-  // Where a Connect/answer/withdraw form returns, with a whitelisted notice code.
+  // Where a Connect/answer/withdraw/remove form returns, with a whitelisted notice code.
   const afterConnection = (next, code) => {
     if (typeof next === 'string' && /^\/people\/[A-Za-z0-9._~%-]{1,480}$/.test(next)) return `${next}?connect=${encodeURIComponent(code)}`
+    const listing = networkReturn(next)
+    if (listing) { listing.searchParams.set('notice', code); return `${listing.pathname}${listing.search}` }
     if (next === '/notifications') return '/notifications'
     return `/invitations?${next === '/invitations?tab=sent' ? 'tab=sent&' : ''}notice=${encodeURIComponent(code)}`
+  }
+  // AI picks are a POST result; their row forms return to the plain listing for the same words.
+  const searchReturn = query => typeof query === 'string' && query.trim() && query.length <= 200 ? `/network?q=${encodeURIComponent(query.trim())}` : '/network'
+  // Connect controls for listing rows: members get their relation (one batched
+  // read), imported profiles not on Unlinked yet get an invite link.
+  const withConnect = async (owner, rows, reader) => {
+    if (!connectionActions || !Array.isArray(rows) || !rows.length) return rows
+    const members = rows.filter(row => row?.id && row.presence === 'member').map(row => row.id)
+    const relations = await connectionActions.relations(owner, members, { reader }).catch(() => new Map())
+    return rows.map(row => !row?.id ? row
+      : row.presence === 'member' && relations.has(row.id) ? { ...row, connect: relations.get(row.id) }
+        : row.presence === 'shadow' && memberInvitations ? { ...row, connect: { state: 'invite' } } : row)
   }
   const notificationTarget = item => item.kind === 'connection_request_received' ? '/invitations'
     : item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : item.kind === 'invite_accepted' ? '/invites' : '/network'
@@ -241,13 +271,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // request and shows consent (signing in first when needed); POST carries the
   // same parameters plus the session CSRF token and re-validates everything.
   async function authorizeConnector(request, response, url, session, chrome) {
-    let params = url.searchParams, decision = null
+    let params = url.searchParams, decision = null, access = 'read'
     if (request.method === 'POST') {
       const input = new URLSearchParams((await body(request, 16384)).toString('utf8'))
-      if (!session || input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('decision').length !== 1) throw new Error('private_browser_csrf')
+      if (!session || input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('decision').length !== 1 || input.getAll('access').length > 1) throw new Error('private_browser_csrf')
       decision = input.get('decision')
-      if (!['allow', 'deny'].includes(decision)) throw new Error('private_browser_csrf')
-      params = new URLSearchParams([...input].filter(([key]) => key !== 'csrf' && key !== 'decision'))
+      access = input.get('access') ?? 'read'
+      if (!['allow', 'deny'].includes(decision) || !['read', 'connections'].includes(access)) throw new Error('private_browser_csrf')
+      params = new URLSearchParams([...input].filter(([key]) => !['csrf', 'decision', 'access'].includes(key)))
     } else if (request.method !== 'GET') { response.writeHead(405).end(); return }
     const result = await oauth.readAuthorization(params)
     if (!result.ok) {
@@ -258,14 +289,25 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const next = `/oauth/authorize?${params}`
       redirect(response, returnPath(next) ? `/login?next=${encodeURIComponent(next)}` : '/login'); return
     }
-    if (decision === null) { journey(response, renderConnectorConsent({ ...chrome, request: result.request })); return }
+    // Connection actions are offered only where the runtime can carry them out,
+    // and only ever as an explicit choice that starts off.
+    const offerConnections = connectionActionsAvailable && result.request.connectionsAvailable === true
+    if (decision === null) { journey(response, renderConnectorConsent({ ...chrome, request: result.request, offerConnections })); return }
+    if (access === 'connections' && !offerConnections) throw new Error('private_browser_csrf')
     const ownerHash = createHash('sha256').update(session.owner.ownerId).digest('hex')
     if (decision === 'deny') { await recordAudit({ event: 'oauth_connection_denied', app: result.request.app, ownerHash }); redirect(response, oauth.deny(result.request)); return }
-    const location = oauth.approve(result.request, session.owner)
-    await recordAudit({ event: 'oauth_connection_approved', app: result.request.app, ownerHash })
+    const location = oauth.approve(result.request, session.owner, { connections: access === 'connections' })
+    await recordAudit({ event: 'oauth_connection_approved', app: result.request.app, ownerHash, access })
     response.setHeader('Referrer-Policy', 'no-referrer')
     redirect(response, location)
   }
+  // Agents may send and answer connection requests only where the runtime has
+  // both the People index and connection requests, and only by explicit opt-in.
+  const connectionActionsAvailable = Boolean(memberConnections) && typeof readPublishedSnapshot === 'function'
+  // What the copyable setup can do, and which current tools it lacks.
+  const setupAccess = grant => ({ scope: grant.scope, missingTools: missingAccountGrantTools(grant) })
+  // Connected apps carry whether they predate tools their scope now has.
+  const settingsGrants = grants => grants.map(grant => grant.connection ? { ...grant, outdated: missingAccountGrantTools(grant).length > 0 } : grant)
   // Settings grant listing: labels for OAuth-connected apps when available.
   const grantList = async (owner, backend) => typeof listAccountGrants === 'function' ? await listAccountGrants(owner) : (await backend.listAccountGrantIds()).map(id => ({ id }))
   const connector = oauth && mcpEndpoint ? { url: mcpEndpoint } : undefined
@@ -343,7 +385,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             // Connect: only members (an account stands behind the profile) can be asked.
             let connect
             if (memberConnections && signup) {
-              if (result.profile.presence === 'member') connect = viewer ? await relationTo(viewer.owner, result.profile.id).catch(() => undefined) : { state: 'signed-out' }
+              if (result.profile.presence === 'member') connect = viewer ? await connectionActions.relationTo(viewer.owner, result.profile.id).catch(() => undefined) : { state: 'signed-out' }
               else if (viewer && result.profile.presence === 'shadow' && memberInvitations) connect = { state: 'invite' }
             }
             const notice = url.searchParams.get('connect')
@@ -742,35 +784,25 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         journey(response, renderInvites({ ...props, origin: base.origin, created, error, invitations: await memberInvitations.list(session.owner) }), props.importJob, '', error ? 400 : 200); return
       }
       // Member-to-member connection requests.
-      if (signup && memberConnections && request.method === 'POST' && ['/connections/request', '/connections/respond', '/connections/withdraw'].includes(url.pathname)) {
+      if (signup && memberConnections && request.method === 'POST' && ['/connections/request', '/connections/respond', '/connections/withdraw', '/connections/remove'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
-        const fields = { '/connections/request': ['profileId', 'note'], '/connections/respond': ['id', 'action', 'next'], '/connections/withdraw': ['id', 'next'] }[url.pathname]
+        const fields = { '/connections/request': ['profileId', 'note', 'next'], '/connections/respond': ['id', 'action', 'next'], '/connections/withdraw': ['id', 'next'], '/connections/remove': ['id', 'next'] }[url.pathname]
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || fields.some(key => input.getAll(key).length > 1) || [...input.keys()].some(key => key !== 'csrf' && !fields.includes(key))) throw new Error('private_browser_csrf')
         if (url.pathname === '/connections/request') {
           if (input.getAll('profileId').length !== 1) throw new Error('private_browser_csrf')
-          let id = input.get('profileId'), detail = await publicReader.profile({ id })
-          if (detail?.moved) { id = detail.moved; detail = await publicReader.profile({ id }) }
-          if (!detail?.profile) { response.writeHead(404).end(); return }
-          const back = code => redirect(response, afterConnection(`/people/${encodeURIComponent(id)}`, code))
-          if (detail.profile.presence !== 'member') { back('connection_not_member'); return }
-          const account = await accountForProfile(id)
-          if (!account) { back('connection_not_member'); return }
-          if (sameAccount(session.owner, account)) { back('connection_self'); return }
-          if ((await memberConnections.between(session.owner, account)).state === 'none' && await alreadyConnected(session.owner, account, id)) { back('connection_exists'); return }
           // The sender is named by their public profile when they have one, never by an email address.
-          const senderProfileId = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
-          let senderName = session.displayName
-          if (senderProfileId) { try { senderName = (await publicReader.lookup({ ids: [senderProfileId] })).get(senderProfileId)?.name ?? senderName } catch { /* keep the sign-in name */ } }
-          try {
-            const sent = await memberConnections.send({ sender: session.owner, senderName, senderProfileId, recipient: account, recipientName: detail.profile.name, recipientProfileId: id, note: input.get('note') ?? undefined })
-            back(sent.status === 'accepted' ? 'accepted' : 'sent')
-          } catch (failure) { if (!(failure instanceof ConnectionError)) throw failure; back(failure.code) }
-          return
+          let outcome
+          try { outcome = await connectionActions.send(session.owner, { profileId: input.get('profileId'), note: input.get('note') ?? undefined, fallbackName: session.displayName }) }
+          catch (failure) { if (failure instanceof ConnectionError && failure.code === 'connection_profile_not_found') { response.writeHead(404).end(); return } throw failure }
+          // A Connect button on a People row returns to that listing; the profile's own button to the profile.
+          const listing = networkReturn(input.get('next'))
+          redirect(response, afterConnection(listing ? input.get('next') : `/people/${encodeURIComponent(outcome.profileId)}`, outcome.code)); return
         }
         if (input.getAll('id').length !== 1) throw new Error('private_browser_csrf')
         let code
         try {
           if (url.pathname === '/connections/respond') { const action = input.get('action'); await memberConnections.respond(session.owner, input.get('id'), action); code = action === 'accept' ? 'accepted' : 'ignored' }
+          else if (url.pathname === '/connections/remove') { await connectionActions.remove(session.owner, input.get('id')); code = 'removed' }
           else { await memberConnections.withdraw(session.owner, input.get('id')); code = 'withdrawn' }
         } catch (failure) { if (!(failure instanceof ConnectionError)) throw failure; code = failure.code === 'connection_action_invalid' ? 'connection_unavailable' : failure.code }
         redirect(response, afterConnection(input.get('next'), code)); return
@@ -828,25 +860,49 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (!SEARCH_MODES.includes(mode) || url.searchParams.getAll('mode').length > 1) throw new Error('network_search_mode_invalid')
         const presence = url.searchParams.get('presence') ?? undefined
         if (url.searchParams.getAll('presence').length > 1 || (presence !== undefined && !PRESENCE.includes(presence))) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+        // "My connections" is deep-linkable: /network?presence=member&connected=1
+        // lists the members (not imported shadows) this account is connected to.
+        const connectedValues = url.searchParams.getAll('connected')
+        if (connectedValues.length > 1 || (connectedValues.length && connectedValues[0] !== '1')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+        const connectedOnly = connectedValues[0] === '1'
         // The same matching as the public list: every word in any form, else the closest people.
         const matcher = typed ? createQueryMatcher(typed, mode) : null
-        const ownMatches = matcher ? rankMatches(connections, matcher, row => ({ name: words([row.fields['first name'], row.fields['last name']].filter(Boolean).join(' ')), text: words([row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].filter(Boolean).join(' ')) })) : { rows: connections, match: 'none' }
-        const rows = ownMatches.rows
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
-        const props = jobProps(await jobResources()), linking = contactRows(rows.slice(index * 100, (index + 1) * 100))
+        const props = jobProps(await jobResources()), reader = pageReader()
         const publicProfessionalSearch = typeof readPublishedSnapshot === 'function'
+        // Row forms come back to this exact listing, with a notice.
+        const listing = networkReturn(`${url.pathname}${url.search}`)
+        const returnTo = listing ? `${listing.pathname}${listing.search}` : '/network'
+        const notice = connectNoticeCodes.includes(url.searchParams.get('notice')) ? url.searchParams.get('notice') : undefined
+        // Who this account is connected to, for the filter and its counts. A
+        // failed read costs the filter, never the page.
+        let mine = null
+        if (publicProfessionalSearch) { try { mine = await connectedProfiles(session.owner, network, reader) } catch { mine = null } }
+        const connectedCounts = mine ? { all: mine.length, member: mine.filter(value => value.presence === 'member').length, shadow: mine.filter(value => value.presence === 'shadow').length } : undefined
+        if (connectedOnly) {
+          const kept = (mine ?? []).filter(value => !presence || value.presence === presence)
+          const ranked = matcher ? rankMatches(kept, matcher, value => ({ name: words(value.name), text: words([value.name, value.headline, value.location].filter(Boolean).join(' ')) })) : { rows: kept, match: 'none' }
+          const rows = await withConnect(session.owner, ranked.rows.slice(index * 100, (index + 1) * 100), reader)
+          const view = renderPeople({ ...props, query: typed, mode, presence, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
+            connectedView: { rows, total: ranked.rows.length, ...(ranked.rows.length > (index + 1) * 100 ? { nextPage: index + 1 } : {}) } })
+          journey(response, view, props.importJob); return
+        }
+        const ownMatches = matcher ? rankMatches(connections, matcher, row => ({ name: words([row.fields['first name'], row.fields['last name']].filter(Boolean).join(' ')), text: words([row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].filter(Boolean).join(' ')) })) : { rows: connections, match: 'none' }
+        const rows = ownMatches.rows
+        const linking = contactRows(rows.slice(index * 100, (index + 1) * 100), reader)
         let everyone, nextCursor, state = 'ready', match = ownMatches.match
         if (publicProfessionalSearch) {
           everyone = []
-          try { const result = await publicReader.list({ query: filter, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
+          try { const result = await reader.list({ query: filter, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
           catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
         // The contact lookup ran alongside the public list and shares its snapshot read.
-        const contacts = await linking
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match })
+        const contacts = await withConnect(session.owner, await linking, reader)
+        everyone = await withConnect(session.owner, everyone, reader)
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
         if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}">Next contacts</a></p>`)
         journey(response, view, props.importJob)
         return
@@ -860,7 +916,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const setups = ensured ? agentClientSetups({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const grants = await grantList(session.owner, backend)
         const jobs = await jobResources(), props = jobProps(jobs)
-        const view=renderSettings({ ...props, grants, imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector })
+        const view=renderSettings({ ...props, grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable })
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
@@ -923,8 +979,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           if (scope === 'everyone') {
             const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
             const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
-            const own = network.imports.length || network.legacyProfileId ? await contactRows(network.assertions.filter(row => row.category === 'connections').slice(0, 100)) : undefined
-            const view = renderPeople({ ...props, scope, aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.`, own, query: input.get('query'), state: 'ready' })
+            const reader = pageReader()
+            const own = network.imports.length || network.legacyProfileId ? await withConnect(session.owner, await contactRows(network.assertions.filter(row => row.category === 'connections').slice(0, 100), reader), reader) : undefined
+            const aiMatches = await withConnect(session.owner, result.matches, reader)
+            const view = renderPeople({ ...props, scope, aiMatches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.`, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
             journey(response, view, props.importJob); return
           }
           const account = createAccountNetwork({ owner: session.owner, getBackend, complete })
@@ -932,8 +990,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           const props = jobProps(await jobResources())
           // Picks carry only the assertion; its source row says where the public profile is.
           const sources = result.matches.length ? new Map((await account.readNetwork()).assertions.map(row => [row.id, row])) : new Map()
-          const picked = await contactRows(result.matches.map(match => sources.get(match.assertionId) ?? { fields: match.fields }))
-          const view = renderPeople({ ...props, scope: 'own', query: input.get('query'), searchResults: picked.map((value, index) => ({ ...value, reason: result.matches[index].reason })) })
+          const reader = pageReader()
+          const picked = await contactRows(result.matches.map(match => sources.get(match.assertionId) ?? { fields: match.fields }), reader)
+          const searchResults = await withConnect(session.owner, picked.map((value, index) => ({ ...value, reason: result.matches[index].reason })), reader)
+          const view = renderPeople({ ...props, scope: 'own', query: input.get('query'), searchResults, returnTo: searchReturn(input.get('query')) })
           extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return
         }
@@ -941,12 +1001,18 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         // existing setup intact — then revoke every other live grant so old
         // bearer credentials die as soon as the new one exists.
         // OAuth-connected apps are separate connections and stay connected.
-        const { accessToken, grantId: replacement } = await issueAccountGrant(session.owner)
+        // `access=connections` is the explicit opt-in to connection-request
+        // write tools; anything else (or nothing) issues the read-only setup.
+        const access = input.getAll('access')
+        if (access.length > 1 || (access.length && !['read', 'connections'].includes(access[0])) || (access[0] === 'connections' && !connectionActionsAvailable) || [...input.keys()].some(key => !['csrf', 'access'].includes(key))) throw new Error('private_browser_csrf')
+        const issued = await issueAccountGrant(session.owner, undefined, access[0] === 'connections' ? { scope: ACCOUNT_WRITE_SCOPE } : {})
+        const { accessToken, grantId: replacement } = issued
         for (const grant of await grantList(session.owner, backend)) if (grant.id !== replacement && !grant.connection) await revokeAccountGrant(session.owner, grant.id)
         const configuration = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
         const setups = agentClientSetups({ endpoint: mcpEndpoint, accessToken })
         const jobs = await jobResources(), props = jobProps(jobs)
-        journey(response, renderSettings({ ...props, imports: summaries(jobs), grants: await grantList(session.owner, backend), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector }), props.importJob, agentSetupCopyScript()); return
+        journey(response, renderSettings({ ...props, imports: summaries(jobs), grants: settingsGrants(await grantList(session.owner, backend)), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector,
+          agentAccess: { scope: issued.scope ?? (access[0] === 'connections' ? ACCOUNT_WRITE_SCOPE : undefined), missingTools: [], regenerated: true }, connectionActionsAvailable }), props.importJob, agentSetupCopyScript()); return
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         if (uploadBusy) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }

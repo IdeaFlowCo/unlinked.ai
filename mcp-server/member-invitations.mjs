@@ -79,6 +79,14 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = null, o
       const record = (await store.listByInviter(inviter)).find(value => value.id === id)
       if (!record || !(await store.transition(record.tokenHash, 'pending', { status: 'revoked', respondedAt: now() }, null))) throw new InvitationError('invitation_unavailable')
     },
+    // Either participant may end an accepted invite connection. The original
+    // token stays revoked; reconnecting uses a fresh member request.
+    async remove(member, id) {
+      owner(member)
+      const record = (await store.listAccepted(member)).find(value => value.id === id)
+      if (!record) throw new InvitationError('invitation_not_found')
+      if (!(await store.transition(record.tokenHash, 'accepted', { status: 'revoked', respondedAt: now() }, null))) throw new InvitationError('invitation_unavailable')
+    },
     // The accounts an owner is connected to through accepted invitations, either way round.
     async connections(member) {
       owner(member)

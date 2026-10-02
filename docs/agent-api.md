@@ -28,7 +28,7 @@ grant is only valid on the origin that issued it.
 ## Authentication and linkage (fail closed)
 
 Every call requires `Authorization: Bearer <account grant token>` — the
-per-user, revocable, read-only grant issued in **Settings → Connect my agent**
+per-user, revocable grant (read-only by default) issued in **Settings → Connect my agent**
 on the runtime, or through the OAuth connector flow below. There is no anonymous access to any `/api/agent/v1/` route and
 no email-based linkage anywhere: the grant token *is* the account linkage, and
 `unlinked_whoami` returns the stable Unlinked `ownerId` so a consumer can
@@ -137,7 +137,7 @@ the catalog entry for `(version, scope)` in
 |---|---|---|
 | 1 (pre-existing grants) | `unlinked_search_network` | + `unlinked_search_everyone` |
 | 2 | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
-| 3 (current issuance) | version 2 + `unlinked_list_connection_requests`, `unlinked_list_notifications` (read-only) | version 2 + the same two tools |
+| 3 | version 2 + `unlinked_list_connection_requests`, `unlinked_list_notifications` (read-only) | version 2 + the same two tools |
 
 - Old grants keep exactly their issued tools on both surfaces — MCP
   `tools/list` for a v1 grant still shows only the launch tools, and the HTTP
@@ -268,8 +268,7 @@ Read-only, grant catalog version 3. `direction` `received` (default: requests
 waiting for the owner's answer) or `sent` (the owner's requests still pending;
 a request the recipient ignored still reads as pending, as it does in the app).
 Response: `{ kind, direction, total, requests: [{ id, direction, status, name,
-profileId?, note?, createdAt }], visibility: "owner_private" }`. Agents cannot
-send, answer or withdraw requests; that stays a signed-in browser action.
+profileId?, note?, createdAt }], visibility: "owner_private" }`. Sending, accepting, ignoring and withdrawing require the separate explicit opt-in connection scope in catalog v4.
 
 ### `GET /api/agent/v1/notifications?limit` ⇄ `unlinked_list_notifications`
 Read-only, grant catalog version 3. Newest first, `limit` 1–50 (default 20).
@@ -416,3 +415,31 @@ person. Until an expiring, deletion-propagating revision store exists, bulk
 needs are served by `list_people` pagination (50/page inside the 120/min
 budget covers the full ~16k-profile index in ~3 minutes, always at the live
 revision, which is tombstone-safe by construction).
+
+
+## Catalog v4: optional connection actions
+
+Versions 1–3 are immutable. Version 4 retains the v3 read lists and adds
+`owner_network_and_public_and_write`, never a default. Settings regeneration
+and OAuth consent offer an unchecked optional choice; the server validates
+`access=connections`, availability and duplicate/unknown fields. Requesting
+OAuth `connections` alone does not grant it. Defaults and existing grants keep
+read access only; opting out at regeneration restores a read-only credential.
+
+| MCP tool | HTTP POST route | JSON fields |
+|---|---|---|
+| `unlinked_send_connection_request` | `/api/agent/v1/connection-requests/send` | `profileId`, optional `note` |
+| `unlinked_accept_connection_request` | `/api/agent/v1/connection-requests/accept` | `id` |
+| `unlinked_ignore_connection_request` | `/api/agent/v1/connection-requests/ignore` | `id` |
+| `unlinked_withdraw_connection_request` | `/api/agent/v1/connection-requests/withdraw` | `id` |
+
+Shared browser rules authorize the account and target, crossed requests accept,
+ignore stays private, 50 sends per rolling day and 21 days after withdrawal.
+An additional shared MCP/HTTP budget allows 20 writes per owner per minute,
+independent of read/AI budgets. Typed failures include `not_a_member`,
+`already_connected`, `request_pending`, `request_unavailable`, `cooldown_active`.
+MCP annotations mark these as writes. Messaging and posting are never available.
+
+Settings and `whoami.grant.update` suggest regeneration/reconnection only when
+the grant lacks tools its own scope now provides. A v3 read grant has no nudge
+solely because v4 adds an opt-in scope. Missing grant records render safely.

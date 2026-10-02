@@ -722,7 +722,7 @@
         },
         "responses": {
           "200": {
-            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } — token only in this response body, never logged"
+            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } \u2014 token only in this response body, never logged"
           },
           "400": {
             "description": "invalid_input"
@@ -740,7 +740,7 @@
             "description": "rate_limited (per-client budget; Retry-After)"
           },
           "503": {
-            "description": "upstream_unavailable (including an unavailable audit sink — provisioning fails closed rather than going unaudited)"
+            "description": "upstream_unavailable (including an unavailable audit sink \u2014 provisioning fails closed rather than going unaudited)"
           }
         }
       }
@@ -941,6 +941,238 @@
         "responses": {
           "200": {
             "description": "Revoked, or nothing to revoke"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/connection-requests/send": {
+      "post": {
+        "summary": "Send a member connection request (explicit opt-in only)",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "profileId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "profileId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Request updated"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid/revoked grant"
+          },
+          "403": {
+            "description": "Opt-in scope not granted"
+          },
+          "404": {
+            "description": "Request/profile not found"
+          },
+          "409": {
+            "description": "Request state conflict"
+          },
+          "429": {
+            "description": "Shared request/write budget exhausted"
+          },
+          "503": {
+            "description": "Upstream unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/connection-requests/accept": {
+      "post": {
+        "summary": "Accept a member connection request (explicit opt-in only)",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Request updated"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid/revoked grant"
+          },
+          "403": {
+            "description": "Opt-in scope not granted"
+          },
+          "404": {
+            "description": "Request/profile not found"
+          },
+          "409": {
+            "description": "Request state conflict"
+          },
+          "429": {
+            "description": "Shared request/write budget exhausted"
+          },
+          "503": {
+            "description": "Upstream unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/connection-requests/ignore": {
+      "post": {
+        "summary": "Ignore a member connection request (explicit opt-in only)",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Request updated"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid/revoked grant"
+          },
+          "403": {
+            "description": "Opt-in scope not granted"
+          },
+          "404": {
+            "description": "Request/profile not found"
+          },
+          "409": {
+            "description": "Request state conflict"
+          },
+          "429": {
+            "description": "Shared request/write budget exhausted"
+          },
+          "503": {
+            "description": "Upstream unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/connection-requests/withdraw": {
+      "post": {
+        "summary": "Withdraw a member connection request (explicit opt-in only)",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Request updated"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid/revoked grant"
+          },
+          "403": {
+            "description": "Opt-in scope not granted"
+          },
+          "404": {
+            "description": "Request/profile not found"
+          },
+          "409": {
+            "description": "Request state conflict"
+          },
+          "429": {
+            "description": "Shared request/write budget exhausted"
+          },
+          "503": {
+            "description": "Upstream unavailable"
           }
         }
       }
