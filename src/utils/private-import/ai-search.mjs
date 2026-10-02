@@ -29,12 +29,16 @@ export function createPrivateSearch({ readImport, complete }) {
       if (Buffer.byteLength(input) > MAX_INPUT_BYTES) throw new Error('private_search_context_limit')
       const answer = await complete({ input, candidateIds: observations.map(row => row.id), signal: rankSignal })
       if (!answer || !Array.isArray(answer.matches) || answer.matches.length > 10) throw new Error('private_search_invalid_result')
-      const local = new Set(observations.map(row => row.id)), unique = new Set()
+      const local = new Set(observations.map(row => row.id)), unique = new Set(), matches = []
       for (const match of answer.matches) {
-        if (!match || !local.has(match.id) || unique.has(match.id) || typeof match.reason !== 'string' || match.reason.length > 512) throw new Error('private_search_invalid_result')
-        unique.add(match.id)
+        if (!match || !local.has(match.id) || typeof match.reason !== 'string' || match.reason.length > 512) throw new Error('private_search_invalid_result')
+        // The provider's strict schema cannot enforce array uniqueness, so the
+        // model occasionally repeats an id; keep the first reason rather than
+        // failing the whole search. Foreign/oversized output still fails closed.
+        if (unique.has(match.id)) continue
+        unique.add(match.id); matches.push(match)
       }
-      return answer.matches
+      return matches
     }
     // Every connection is considered in bounded contexts. Only ranked IDs are
     // reduced between rounds; no first-N archive truncation or shared index.
