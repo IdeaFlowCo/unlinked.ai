@@ -64,3 +64,21 @@ test('curated enrichment refreshes legacy rows by id, never adds people, and a l
   await assert.rejects(bad(),/public_enrichment_invalid/)
  }
 })
+
+test('an account that published several imports keeps one member profile: the newest, with the older ones folded in', async () => {
+  const older = 'e'.repeat(64), newer = 'f'.repeat(64), other = '1'.repeat(64)
+  const job = (jobId, owner, createdAt) => ({ id: jobId, ownerId: owner, archiveSha256: source, consent: PUBLIC_UPLOAD_CONSENT, status: 'indexed', counts: { accepted: 2, indexed: 2 }, createdAt })
+  const rows = (jobId, owner, connectionId) => [{ id: other.slice(0, 63) + jobId[0], importId: jobId, ownerId: owner, category: 'profile', fields: { 'first name': 'Efe', 'last name': 'Zaladin' } }, { id: connectionId, importId: jobId, ownerId: owner, category: 'connections', fields: { 'first name': 'Test', 'last name': 'Person' } }]
+  const jobs = { [older]: job(older, 'efe-owner', 1), [newer]: job(newer, 'efe-owner', 2), [other]: job(other, 'someone', 3) }
+  const snapshots = { [older]: projectPublicMemberImport({ job: jobs[older], assertions: rows(older, 'efe-owner', 'a'.repeat(64)) }), [newer]: projectPublicMemberImport({ job: jobs[newer], assertions: rows(newer, 'efe-owner', 'b'.repeat(64)) }), [other]: projectPublicMemberImport({ job: jobs[other], assertions: rows(other, 'someone', 'c'.repeat(64)) }) }
+  const items = [older, newer, other].map(jobId => ({ id: jobId, owner: { ownerId: jobs[jobId].ownerId, userId: jobs[jobId].ownerId + '-user' }, revision: 1 }))
+  const read = createMemberPublicIndex({ readLegacy: async () => legacy, discover: async () => items, readMembers: async () => [],
+    getBackend: async owner => ({ readResource: async (type, jobId) => ({ sourceId: jobId, sourceOwnerId: owner.ownerId, sourceRevision: 1, payload: jobs[jobId] }) }),
+    publicPeople: { read: async dataset => dataset === ENRICHMENT_DATASET ? null : snapshots[dataset.slice('public-import-'.length)], publish: async () => { throw Error('cached') } } })
+  const result = await read()
+  assert.deepEqual(result.members, ['member-import-' + other, 'member-import-' + newer])
+  assert.deepEqual(result.aliases, { ['member-import-' + older]: 'member-import-' + newer })
+  assert.ok(!result.profiles.some(value => value.id === 'member-import-' + older))
+  // The older import's connection now hangs off the account's one profile.
+  assert.ok(result.connections.some(edge => edge.fromId === 'member-import-' + newer && edge.toId === 'public-' + 'a'.repeat(64)))
+})
