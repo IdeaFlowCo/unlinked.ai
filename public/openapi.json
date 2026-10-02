@@ -299,7 +299,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of public profile summaries"
+            "description": "Page of public profile summaries. Each person may carry presence (member or shadow: imported, not on Unlinked yet) and connectionCount (connections in both directions)."
           },
           "400": {
             "description": "invalid_input or cursor_invalid"
@@ -345,7 +345,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Public profile detail"
+            "description": "Public profile detail, with presence and connectionCount when known, and its connections as summaries."
           },
           "404": {
             "description": "not_found"

@@ -92,6 +92,24 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
+  // An own connection links to the published profile of the same person when one
+  // exists: a recovered legacy edge names it, and a public-consent import row is
+  // published as public-<row id>. Private-only rows stay plain text.
+  const contactRow = row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
+  const publicTarget = row => row.provenance?.source === 'recovered-legacy-public-v1' && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
+  async function contactRows(rows) {
+    const plainRows = rows.map(contactRow)
+    if (typeof readPublishedSnapshot !== 'function' || !rows.length) return plainRows
+    try {
+      // One malformed source ID must not stop the rest of the page from linking.
+      const targets = rows.map(publicTarget).map(id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null)
+      const found = await publicReader.lookup({ ids: [...new Set(targets.filter(Boolean))] })
+      return plainRows.map((value, index) => {
+        const match = found.get(targets[index])
+        return match ? { ...value, id: match.id, ...(match.presence ? { presence: match.presence, connectionCount: match.connectionCount } : {}) } : value
+      })
+    } catch { return plainRows }
+  }
   let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
   // Visitors can ask the AI about the public list. Each ask is a paid model call, so it is
   // bounded per minute, per day and in flight, for the whole site rather than per visitor.
@@ -455,11 +473,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
+        // Start reading the public index now; the contact lookup below joins it.
+        const warming = typeof readPublishedSnapshot === 'function' ? publicReader.lookup({ ids: [] }).catch(() => null) : null
         try {
           const connections = (await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()).assertions.filter(row => row.category === 'connections')
           connectionCount = connections.length
-          contacts = connections.slice(0, 10).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company }))
+          contacts = await contactRows(connections.slice(0, 10))
         } catch { /* The profile stands on its own while the network is still being read. */ }
+        await warming
         journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/card') {
@@ -504,7 +525,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const rows = ownMatches.rows
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
-        const props = jobProps(await jobResources()), contacts = rows.slice(index * 100, (index + 1) * 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url }))
+        const props = jobProps(await jobResources()), linking = contactRows(rows.slice(index * 100, (index + 1) * 100))
         const publicProfessionalSearch = typeof readPublishedSnapshot === 'function'
         let everyone, nextCursor, state = 'ready', match = ownMatches.match
         if (publicProfessionalSearch) {
@@ -514,6 +535,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
+        // The contact lookup ran alongside the public list and shares its snapshot read.
+        const contacts = await linking
         const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, match })
         if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}">Next contacts</a></p>`)
         journey(response, view, props.importJob)
@@ -582,13 +605,17 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           if (scope === 'everyone') {
             const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
             const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
-            const own = network.imports.length || network.legacyProfileId ? network.assertions.filter(row => row.category === 'connections').slice(0, 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })) : undefined
+            const own = network.imports.length || network.legacyProfileId ? await contactRows(network.assertions.filter(row => row.category === 'connections').slice(0, 100)) : undefined
             const view = renderPeople({ ...props, scope, aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.`, own, query: input.get('query'), state: 'ready' })
             journey(response, view, props.importJob); return
           }
-          const result = await createAccountNetwork({ owner: session.owner, getBackend, complete }).search({ query: input.get('query'), signal: controller.signal })
+          const account = createAccountNetwork({ owner: session.owner, getBackend, complete })
+          const result = await account.search({ query: input.get('query'), signal: controller.signal })
           const props = jobProps(await jobResources())
-          const view = renderPeople({ ...props, scope: 'own', query: input.get('query'), searchResults: result.matches.map(match => ({ name: [match.fields['first name'], match.fields['last name']].filter(Boolean).join(' '), headline: match.fields.position, company: match.fields.company, linkedinUrl: match.fields.url, reason: match.reason })) })
+          // Picks carry only the assertion; its source row says where the public profile is.
+          const sources = result.matches.length ? new Map((await account.readNetwork()).assertions.map(row => [row.id, row])) : new Map()
+          const picked = await contactRows(result.matches.map(match => sources.get(match.assertionId) ?? { fields: match.fields }))
+          const view = renderPeople({ ...props, scope: 'own', query: input.get('query'), searchResults: picked.map((value, index) => ({ ...value, reason: result.matches[index].reason })) })
           extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return
         }
