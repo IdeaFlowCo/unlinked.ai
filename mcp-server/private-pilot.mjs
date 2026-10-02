@@ -18,7 +18,7 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
   const grants = createPrivateGrantService({ issuer: base.origin, ...keys, getBackend })
   const accountGrants = signup ? createAccountGrantService({ issuer: base.origin, signingKey: accountGrantKey, getBackend, publicSearchEnabled: typeof readPublishedSnapshot === 'function' }) : null
   const browser = createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot,
-    issueAccountGrant: accountGrants?.issueGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
+    issueAccountGrant: accountGrants?.issueGrant, ensureAccountGrant: accountGrants?.ensureGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
     issueGrant: grants.issueGrant, mcpEndpoint: new URL('/mcp', base).href, dataMode, backgroundImports, audit })
   const mcp = accountGrants ? createAccountHostedHandler({ authenticateGrant: accountGrants.authenticateGrant, getBackend, complete, readPublishedSnapshot, origin: base.origin }) : createPrivateHostedHandler({ authenticateGrant: grants.authenticateGrant, complete, allowedHosts: [base.host], allowedOrigins: [base.origin],
     readResource: async (grant, type, id) => (await getBackend(grant)).readResource(type, id),
