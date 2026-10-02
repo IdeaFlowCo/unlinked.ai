@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
-const normalize = value => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}+#]+/gu, ' ').trim()
-const stop = new Set(['a','an','the','is','are','who','what','where','does','do','can','find','me','people','someone','with','on','at','for','of','in','and','or','to'])
+import { createQueryMatcher, words } from './text-match.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
 
 // Retrieval evaluates every public profile; model ranking receives the bounded
@@ -13,12 +12,13 @@ export function createSharedPeopleSearch({ readPublishedSnapshot, complete }) {
     signal?.throwIfAborted()
     const data = await readPublishedSnapshot({ signal })
     if (!data || data.state !== 'published' || data.complete !== true || typeof data.revision !== 'string' || !Array.isArray(data.profiles) || data.profiles.length > 20000) throw new Error('shared_people_unavailable')
-    const terms = [...new Set(normalize(query).split(' ').filter(word => word && !stop.has(word)))].slice(0, 32)
+    const matcher = createQueryMatcher(query, 'best')
     const eligible = []
     for (const profile of data.profiles) {
       const professional = [profile.name, profile.headline, profile.company, profile.about, ...(profile.positions ?? []).flatMap(value => [value.title, value.company, value.description]), ...(profile.education ?? []).flatMap(value => [value.institution, value.degree]), ...(profile.skills ?? [])].filter(value => typeof value === 'string')
-      const full = normalize(professional.join(' ')), name = normalize(profile.name)
-      const score = terms.reduce((sum, term) => sum + (full.includes(term) ? 1 : 0) + (name.includes(term) ? 2 : 0), 0)
+      // Word forms count (“investors” reaches “investor”); profiles with every word lead the shortlist.
+      const found = matcher ? matcher.test({ text: words(professional.join(' ')), name: words(profile.name) }) : { matched: 0 }
+      const score = found.matched ? found.matched * 3 + found.inName * 2 + (found.all ? 100 : 0) : 0
       if (score) eligible.push({ profile, score })
     }
     eligible.sort((a, b) => b.score - a.score || (a.profile.id < b.profile.id ? -1 : a.profile.id > b.profile.id ? 1 : 0))
