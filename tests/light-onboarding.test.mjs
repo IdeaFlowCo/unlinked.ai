@@ -171,6 +171,57 @@ test('People distinguishes empty own browsing, own no-match results and absent i
   assert.doesNotMatch(renderPeople({ ...account, own: contacts }).content, /No people matched|Bring your LinkedIn export/)
 })
 
+test('legacy People contacts and searchResults render own rows with PR35 precedence and empty copy', () => {
+  const contacts = [{ name: 'Original Contact' }]
+  const match = { name: 'Matched <Contact>', reason: 'Worked together & introduced partners' }
+  for (const [props, expected] of [
+    [{ contacts }, 'Original Contact'],
+    [{ contacts, searchResults: [match], query: 'partners' }, 'Matched &lt;Contact&gt;'],
+    [{ searchResults: [match], query: 'partners' }, 'Matched &lt;Contact&gt;'],
+  ]) {
+    const view = renderPeople({ ...account, scope: 'own', ...props })
+    const group = view.content.match(/<section class="own-group"[^>]*>(.*?)<\/section>/s)[1]
+    assert.ok(group.includes(expected))
+    assert.match(view.content, /class="scope-controls"/)
+    assert.match(view.content, /type="hidden" name="scope" value="own"/)
+    if (props.searchResults) {
+      assert.match(group, /Worked together &amp; introduced partners/)
+      assert.doesNotMatch(group, /Original Contact|Matched <Contact>/)
+    }
+  }
+  const noMatch = renderPeople({ ...account, contacts, searchResults: [], query: 'missing' })
+  assert.match(noMatch.content, /No people matched\. Try another name or company\./)
+  assert.doesNotMatch(noMatch.content, /Original Contact|Bring your LinkedIn export/)
+  for (const props of [{ contacts: [] }, { contacts: [], searchResults: [] }, { searchResults: [] }]) {
+    const empty = renderPeople({ ...account, query: 'missing', ...props })
+    assert.match(empty.content, /class="own-group"/)
+    assert.match(empty.content, /class="scope-controls"/)
+    assert.match(empty.content, /Bring your LinkedIn export to see your people\./)
+    assert.doesNotMatch(empty.content, /No people matched/)
+  }
+})
+
+test('People omits Everyone when absent and keeps supplied empty and unavailable states', () => {
+  for (const props of [{}, { contacts: [] }, { own: [] }, { state: 'unavailable', contacts: [] }]) {
+    const view = renderPeople({ ...account, ...props })
+    assert.doesNotMatch(view.content, /class="everyone-group"|Everyone on Unlinked|No members to show yet|Member search is on its way/)
+  }
+  assert.match(renderPeople({ ...account, everyone: [] }).content, /class="everyone-group"/)
+  assert.match(renderPeople({ ...account, everyone: [], state: 'unavailable' }).content, /Member search is on its way\./)
+})
+
+test('explicit own takes precedence over legacy inputs and keeps the new contract behaviour', () => {
+  const props = { ...account, scope: 'own', contacts: [{ name: 'Legacy Contact' }], searchResults: [{ name: 'Legacy Result' }], everyone: [{ id: 'member-id', name: 'Maya Chen' }] }
+  const view = renderPeople({ ...props, own: [{ name: 'Explicit Contact' }] })
+  assert.match(view.content, /Explicit Contact/)
+  assert.match(view.content, /href="\/people\/member-id">Maya Chen/)
+  assert.ok(view.content.indexOf('People you know') < view.content.indexOf('Everyone on Unlinked'))
+  assert.doesNotMatch(view.content, /Legacy Contact|Legacy Result/)
+  const noMatch = renderPeople({ ...props, own: [], query: 'missing' })
+  assert.match(noMatch.content, /No people matched\. Try another name or company\./)
+  assert.doesNotMatch(noMatch.content, /Legacy Contact|Legacy Result|Bring your LinkedIn export/)
+})
+
 test('signed-out Join header keeps logo and Meet without member navigation or session controls', () => {
   for (const props of [{}, { ...account, signedIn: false }]) {
     const view = renderJoin(props)
