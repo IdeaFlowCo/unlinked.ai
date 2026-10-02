@@ -518,14 +518,16 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           }
         }
         if (profileId && await selfClaims.claimable(profileId)) {
-          let detail = await publicReader.profile({ id: profileId })
+          // A test profile has its own card; no public reader knows it.
+          let detail = typeof selfClaims.preview === 'function' ? await selfClaims.preview(profileId) : null
+          if (!detail) detail = await publicReader.profile({ id: profileId })
           // A merged-away profile is claimed through the profile it was merged into.
           if (detail?.moved) { profileId = detail.moved; detail = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(profileId) && await selfClaims.claimable(profileId) ? await publicReader.profile({ id: profileId }) : null }
           if (detail?.profile) {
             // The confirmation is bound to this exact displayed candidate; a
             // newer lookup in another tab invalidates a stale card.
             session.selfClaim.candidate = { profileId, evidence, token: token() }
-            page({ status: 'found', profileName: detail.profile.name, headline: detail.profile.headline ?? '', listedBy: detail.profile.connections.length, claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token }); return
+            page({ status: 'found', profileName: detail.profile.name, headline: detail.profile.headline ?? '', listedBy: detail.profile.connections.length, claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token, ...(detail.test === true ? { test: true } : {}) }); return
           }
         }
         page({ status: 'none' }); return
@@ -537,7 +539,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const { profileId, evidence } = session.selfClaim.candidate
         try {
           const claimed = await selfClaims.claim({ owner: session.owner, issuer: session.selfClaim.identity.issuer, subject: session.selfClaim.identity.subject, emailHash: session.selfClaim.emailHash, profileId, evidence })
-          await recordAudit({ event: 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId, evidence, receiptId: claimed.receiptId })
+          await recordAudit({ event: claimed.test === true ? 'test_profile_self_claimed' : 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId, evidence, receiptId: claimed.receiptId })
           if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(profileId, session.owner).catch(() => {})
           session.selfClaim = null
           redirect(response, '/profile'); return
@@ -617,6 +619,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         }
         session.headline = profile.headline
         const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
+        let testClaim = null
+        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await backend.readTestProfileClaim() } catch { testClaim = null } }
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
         // Start reading the public index now; the contact lookup below joins it.
@@ -627,7 +631,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           contacts = await contactRows(connections.slice(0, 10))
         } catch { /* The profile stands on its own while the network is still being read. */ }
         await warming
-        journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
+        journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
       // The member's own card identity and the public profile URL its QR opens.
       const readOwnCard = async jobs => {
