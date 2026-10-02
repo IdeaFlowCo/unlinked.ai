@@ -112,7 +112,7 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   const oauth = spec.components.securitySchemes.connectorOAuth.flows.authorizationCode;
   assert.equal(oauth.authorizationUrl, 'https://www.unlinked.ai/oauth/authorize');
   assert.equal(oauth.tokenUrl, 'https://www.unlinked.ai/oauth/token');
-  assert.deepEqual(Object.keys(oauth.scopes), ['network', 'people']);
+  assert.deepEqual(Object.keys(oauth.scopes), ['network', 'people', 'connections']);
   assert.equal(spec.paths['/mcp'].post.responses['401'].description, 'Missing, invalid or revoked account grant');
   assert.deepEqual(spec.paths['/api/legacy-files'].get.security, [{ browserSession: [] }]);
   assert.deepEqual(spec.paths['/legacy-files/{objectId}'].get.security, [{ browserSession: [] }]);
