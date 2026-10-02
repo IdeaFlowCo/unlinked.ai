@@ -31,122 +31,102 @@ test('mandatory machine discovery files exist in public/', () => {
   );
 });
 
-test('public/.well-known/mcp/server-card.json is valid and matches MCP server tools', () => {
+test('public/.well-known/mcp/server-card.json describes canonical account MCP', () => {
   const content = fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/mcp/server-card.json'), 'utf8');
   const card = JSON.parse(content);
 
   assert.equal(card.name, 'unlinked');
-  assert.equal(card.package, '@unlinked/mcp-server');
-  assert.equal(card.version, '0.1.0');
-  assert.ok(card.transports?.stdio, 'stdio transport must be defined');
-  // The server is not published to npm, so the advertised launch must be the local build:
-  // `node <clone>/mcp-server/dist/index.js`, matching the package's own bin/start entrypoint.
-  const stdio = card.transports.stdio;
-  assert.equal(stdio.command, 'node');
-  assert.equal(stdio.args.length, 1);
-  const mcpPkg = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'mcp-server/package.json'), 'utf8'));
-  const entrypoint = path.posix.join('mcp-server', mcpPkg.bin['unlinked-mcp-server']);
-  assert.ok(stdio.args[0].endsWith(`/${entrypoint}`), `stdio arg must point at ${entrypoint}`);
-  assert.equal(stdio.setup.entrypoint, entrypoint);
+  assert.equal(card.version, '1.0.0');
+  assert.equal(card.homepage, 'https://www.unlinked.ai');
+  assert.equal(card.transports?.['streamable-http']?.url, 'https://www.unlinked.ai/mcp');
+  assert.equal(card.authentication?.type, 'bearer');
+  assert.equal(card.authentication?.setupUrl, 'https://www.unlinked.ai/settings');
+  assert.ok(!card.transports?.stdio, 'canonical card must not advertise legacy stdio bootstrap');
 
   const toolNames = card.tools.map((t) => t.name);
-  const expectedTools = [
-    'unlinked_me',
-    'unlinked_search_contacts',
-    'unlinked_get_profile',
-    'unlinked_list_imports',
-    'unlinked_draft_intro',
-  ];
-  assert.deepEqual(toolNames.sort(), expectedTools.sort());
-
-  // Verify against mcp-server/src/server.ts
-  const serverSource = fs.readFileSync(path.join(ROOT_DIR, 'mcp-server/src/server.ts'), 'utf8');
-  for (const expectedTool of expectedTools) {
-    assert.ok(
-      serverSource.includes(`"${expectedTool}"`) || serverSource.includes(`'${expectedTool}'`),
-      `Expected ${expectedTool} to be registered in mcp-server/src/server.ts`
-    );
-  }
+  assert.deepEqual(toolNames, ['unlinked_search_network']);
+  const searchTool = card.tools[0];
+  assert.deepEqual(searchTool.inputSchema.required, ['query']);
+  assert.equal(searchTool.inputSchema.additionalProperties, false);
+  assert.equal(searchTool.inputSchema.properties.query.type, 'string');
+  assert.equal(searchTool.inputSchema.properties.query.minLength, 1);
+  assert.equal(searchTool.inputSchema.properties.query.maxLength, 1024);
 });
 
 test('public/.well-known/unlinked.json product descriptor is valid', () => {
   const content = fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/unlinked.json'), 'utf8');
   const descriptor = JSON.parse(content);
 
-  assert.equal(descriptor.name, 'unlinked.ai');
-  assert.equal(descriptor.site, 'https://www.unlinked.ai');
-  assert.equal(descriptor.docs.llms_txt, '/llms.txt');
-  assert.equal(descriptor.docs.agents_md, '/AGENTS.md');
-  assert.equal(descriptor.docs.agents_page, '/agents');
-  assert.equal(descriptor.docs.openapi, '/openapi.json');
-  assert.equal(descriptor.docs.mcp_server_card, '/.well-known/mcp/server-card.json');
-  assert.equal(descriptor.api.auth.key_prefix, 'ul_');
-
-  const [command, ...args] = descriptor.mcp.command.split(' ');
-  assert.equal(command, 'node');
-  assert.equal(args.length, 1);
-  assert.ok(args[0].endsWith('/mcp-server/dist/index.js'), 'mcp.command must launch the local build');
+  assert.equal(descriptor.name, 'Unlinked');
+  assert.equal(descriptor.homepage, 'https://www.unlinked.ai');
+  assert.equal(descriptor.login, 'https://www.unlinked.ai/login');
+  assert.equal(descriptor.importInstructions, 'https://www.unlinked.ai/import-linkedin');
+  assert.equal(descriptor.agentSetup, 'https://www.unlinked.ai/settings');
+  assert.equal(descriptor.authentication.browser, 'Ideaflow ID issuer/subject');
+  assert.equal(descriptor.authentication.mcp, 'revocable account-scoped bearer grant');
+  assert.equal(descriptor.data.ownNetwork, true);
+  assert.equal(descriptor.data.globalSearch, false);
+  assert.equal(descriptor.data.rawArchiveAgentAccess, false);
+  assert.equal(descriptor.mcp.url, 'https://www.unlinked.ai/mcp');
+  assert.equal(descriptor.mcp.transport, 'streamable-http');
+  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network']);
 });
 
-test('machine-readable MCP launch config never advertises the broken npx github: form', () => {
+test('machine-readable MCP config never advertises legacy local launch bootstrap', () => {
   const card = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/mcp/server-card.json'), 'utf8'));
   const descriptor = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/unlinked.json'), 'utf8'));
   const launchValues = [
-    card.transports.stdio.command,
-    ...card.transports.stdio.args,
-    ...Object.values(card.transports.stdio.setup),
-    descriptor.mcp.command,
-    descriptor.mcp.setup,
-  ];
+    JSON.stringify(card),
+    JSON.stringify(descriptor),
+  ].filter(Boolean);
   for (const value of launchValues) {
     assert.ok(!/\bnpx\b/.test(value), `launch config must not use npx: ${value}`);
     assert.ok(!value.includes('github:'), `launch config must not use github: specifiers: ${value}`);
+    assert.ok(!value.includes('dist/index.js'), `launch config must not point at a local stdio build: ${value}`);
+    assert.ok(!value.includes('UNLINKED_API_KEY'), `launch config must not advertise legacy ul_ env setup: ${value}`);
   }
 });
 
-test('public/openapi.json describes agent routes accurately', () => {
+test('public/openapi.json describes canonical beta routes accurately', () => {
   const content = fs.readFileSync(path.join(ROOT_DIR, 'public/openapi.json'), 'utf8');
   const spec = JSON.parse(content);
 
   assert.equal(spec.openapi, '3.1.0');
-  assert.equal(spec.info.title, 'unlinked.ai Agent API');
+  assert.equal(spec.info.title, 'Unlinked canonical beta');
+  assert.equal(spec.info.version, '1.0.0');
+  assert.equal(spec.servers[0].url, 'https://www.unlinked.ai');
 
   const paths = Object.keys(spec.paths);
-  const expectedAgentPaths = [
-    '/api/me',
-    '/api/search-contacts',
-    '/api/profiles/{id}',
-    '/api/draft-intro',
-    '/api/imports',
-  ];
+  const expectedPaths = ['/login', '/mcp'];
 
-  for (const p of expectedAgentPaths) {
+  for (const p of expectedPaths) {
     assert.ok(paths.includes(p), `Expected openapi.json to include path ${p}`);
   }
+  assert.deepEqual(paths.sort(), expectedPaths.sort());
 
-  // Ensure internal cron is NOT published as an agent route
   assert.ok(!paths.includes('/api/cron/embed'), 'cron/embed must NOT be in openapi.json');
-
-  // Verify route files exist for each path
-  assert.ok(fs.existsSync(path.join(ROOT_DIR, 'src/app/api/me/route.ts')));
-  assert.ok(fs.existsSync(path.join(ROOT_DIR, 'src/app/api/search-contacts/route.ts')));
-  assert.ok(fs.existsSync(path.join(ROOT_DIR, 'src/app/api/profiles/[id]/route.ts')));
-  assert.ok(fs.existsSync(path.join(ROOT_DIR, 'src/app/api/draft-intro/route.ts')));
-  assert.ok(fs.existsSync(path.join(ROOT_DIR, 'src/app/api/imports/route.ts')));
+  assert.equal(spec.paths['/login'].get.responses['303'].description, 'Redirect to verified provider');
+  assert.equal(spec.paths['/mcp'].post.summary, 'Streamable HTTP MCP, account-scoped bearer');
+  assert.deepEqual(spec.paths['/mcp'].post.security, [{ accountGrant: [] }]);
+  assert.equal(spec.paths['/mcp'].post.responses['401'].description, 'Missing, invalid or revoked account grant');
+  assert.equal(spec.components.securitySchemes.accountGrant.type, 'http');
+  assert.equal(spec.components.securitySchemes.accountGrant.scheme, 'bearer');
 });
 
 test('public/llms.txt conforms to specification', () => {
   const content = fs.readFileSync(path.join(ROOT_DIR, 'public/llms.txt'), 'utf8');
 
-  assert.ok(content.startsWith('# unlinked.ai'), 'Must start with # unlinked.ai');
-  assert.ok(content.includes('> AI-powered LinkedIn network search'), 'Must contain blockquote');
+  assert.ok(content.startsWith('# Unlinked'), 'Must start with # Unlinked');
+  assert.ok(content.includes('> Import a LinkedIn export, search your own network and connect your agent.'), 'Must contain current blockquote');
   assert.ok(content.includes('(/agents)'), 'Must link to /agents');
   assert.ok(content.includes('(/AGENTS.md)'), 'Must link to /AGENTS.md');
   assert.ok(content.includes('(/.well-known/unlinked.json)'), 'Must link to unlinked.json');
   assert.ok(content.includes('(/.well-known/mcp/server-card.json)'), 'Must link to server-card.json');
   assert.ok(content.includes('(/openapi.json)'), 'Must link to openapi.json');
-  assert.ok(content.includes('ul_'), 'Must mention ul_ key prefix');
-  assert.ok(content.includes('unlinked_me'), 'Must mention unlinked_me tool');
+  assert.ok(content.includes('Streamable HTTP endpoint: https://www.unlinked.ai/mcp'), 'Must describe canonical MCP endpoint');
+  assert.ok(content.includes('unlinked_search_network'), 'Must mention current MCP tool');
+  assert.ok(content.includes('Global shared search is not yet available'), 'Must state global search is not live');
+  assert.ok(content.includes('Legacy Supabase routes and stdio tools are historical'), 'Must identify legacy setup as historical');
 });
 
 test('public/robots.txt allows AI discovery and is conservative about profile pages', () => {
@@ -187,7 +167,8 @@ test('root AGENTS.md and public/AGENTS.md are distinct audiences with proper gov
 
   assert.notEqual(rootAgents, publicAgents, 'Root AGENTS.md and public/AGENTS.md must not be identical');
   assert.ok(rootAgents.includes('## Maintaining this file'), 'Root AGENTS.md must include canonical maintenance section');
-  assert.ok(publicAgents.includes('served at `/AGENTS.md`'), 'Public AGENTS.md must identify as HTTP agent brief');
+  assert.ok(publicAgents.includes('# Unlinked agent guide'), 'Public AGENTS.md must identify as HTTP agent guide');
+  assert.ok(publicAgents.includes('Anonymous discovery and Meet are public'), 'Public AGENTS.md must state public/protected boundary');
 
   const claudePointer = fs.readFileSync(path.join(ROOT_DIR, 'CLAUDE.md'), 'utf8');
   assert.ok(claudePointer.includes('@AGENTS.md'), 'CLAUDE.md must point to AGENTS.md');

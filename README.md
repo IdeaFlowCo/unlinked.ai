@@ -1,23 +1,22 @@
-Unlinked helps people carry their network into useful introductions. The public landing, network/search/setup availability pages, LinkedIn archive preparation page, Ideaflow ID sign-in bridge, and `/meet` work independently of the paused legacy Supabase backend. Legacy profile and agent API implementations remain behind their backend and are preserved as historical reference.
+Unlinked helps people carry their network into useful introductions. The canonical beta at https://www.unlinked.ai runs the standalone Noos-backed runtime for sign-in, import, owner-network search, settings, scoped MCP and Meet. The Next.js public pages and legacy Supabase profile/API implementations remain source history and local reference.
 
 ## Meet someone
 
-`/meet` accepts only `https://chat.globalbr.ai/c/<24-letter-or-digit-token>` and `https://chat.ideaflow.app/c/<24-letter-or-digit-token>` card URLs. It offers live camera scanning, pasted URLs, and a phone camera photo fallback. A valid payload opens the public OpenChat card page on the same host as the scanned or pasted URL, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. Opening a card does not itself send a request.
+`/meet` accepts only `https://chat.globalbr.ai/c/<24-letter-or-digit-token>` and `https://chat.ideaflow.app/c/<24-letter-or-digit-token>` card URLs. The standalone runtime offers live camera scanning and pasted URLs using the checked-in OpenChat card parser and locked `jsqr` dependency. A valid payload opens the public OpenChat card page on the same host as the scanned or pasted URL, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. Opening a card does not itself send a request.
 
-The page displays the legacy network's unavailable state without querying Supabase. No live profiles or cards are imported into Unlinked.
+Meet is anonymous and does not resolve an Unlinked owner, read an archive, or import live profiles/cards into Unlinked.
 
 ## Import LinkedIn archive
 
-The homepage **Start** and navigation **Sign in** links open the working beta login at https://private.unlinked.ai/login.
+The canonical app sign-in is https://www.unlinked.ai/login.
 Anyone can sign in or create an account through Ideaflow ID; no invitation is needed.
-The beta app currently runs on private.unlinked.ai, separately from the public www.unlinked.ai homepage.
-This is an interim bridge, not a same-origin app migration.
+The older private.unlinked.ai host is a rollback/release-planning origin, not the current public onboarding URL.
 
 Prefer the full LinkedIn ZIP; Connections-only is also supported.
 `/import-linkedin` explains how to request and keep the export, then links to sign-in and upload.
-`/auth/login` provides the same working login bridge, and `/agents` points to Agent setup inside the app.
+`/login` starts Ideaflow ID sign-in in the standalone runtime, and `/agents` points to Settings for Agent setup.
 The fictional homepage answer illustrates title/company matching, not a live search result or inferred biography.
-Private upload, own-network AI search and agent setup live in the beta app; legacy Supabase APIs remain historical and are not the new login path.
+Private upload, own-network AI search and agent setup live in the canonical beta; legacy Supabase APIs remain historical and are not the login path.
 
 See the [private archive foundation contract](docs/private-archive-import.md) for the parser/job scope and adapter requirements, and [durable archive import](docs/durable-archive-import.md) for the default-off profile-first background worker.
 
@@ -31,14 +30,15 @@ See the [private archive foundation contract](docs/private-archive-import.md) fo
 
 ## Agent & MCP Surface
 
-unlinked.ai preserves a Model Context Protocol (MCP) server and REST API schema for autonomous agents. Current upload/search/Agent setup onboarding is in the beta app; the legacy REST schema and stdio package remain historical reference:
+unlinked.ai exposes a canonical account-scoped MCP endpoint from the standalone runtime. The legacy REST schema and stdio package remain historical reference:
 
-- **Setup status:** [`/agents`](https://www.unlinked.ai/agents) bridges to the beta app; see historical implementation notes in [`mcp-server/README.md`](mcp-server/README.md)
+- **Setup status:** [`/agents`](https://www.unlinked.ai/agents) describes current setup; signed-in users create/revoke grants in Settings.
 - **Machine discovery:** [`/llms.txt`](https://www.unlinked.ai/llms.txt), [`/.well-known/unlinked.json`](https://www.unlinked.ai/.well-known/unlinked.json), [`/.well-known/mcp/server-card.json`](https://www.unlinked.ai/.well-known/mcp/server-card.json), and [`/openapi.json`](https://www.unlinked.ai/openapi.json)
 - **Developer & contributor notes:** [`AGENTS.md`](AGENTS.md) (repo-internal) and [`public/AGENTS.md`](public/AGENTS.md) (HTTP agent brief)
-- **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — historical stdio server implementation supporting Claude Desktop, Claude Code, Cursor, and any MCP client
-- **Agent Keys:** Historical REST keys start with `ul_`; beta Agent setup is supplied by the app.
-- **Strict isolation:** Every legacy tool call and agent API request is resolved server-side to the authenticated user. An agent key can only access the owner's profile and direct connections.
+- **Current MCP:** Streamable HTTP at `https://www.unlinked.ai/mcp`, tool `unlinked_search_network(query)`, authorized by a revocable account-scoped bearer grant.
+- **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — historical stdio server implementation supporting the legacy REST API when that backend is available.
+- **Agent Keys:** Historical REST keys start with `ul_`; current Agent setup uses the standalone runtime's account grant.
+- **Strict isolation:** Current MCP grants are scoped to the owner's current and future published imports until revoked. Legacy tool calls and agent API requests are resolved server-side to the authenticated user and can only access that user's profile and direct connections.
 
 ## Private provider Preview Lab
 
@@ -46,16 +46,16 @@ See the [private lab guide](docs/provider-lab.md) for tester usage, stage config
 
 ## Getting Started
 
-For the public landing, Meet flow, availability pages and archive preparation page, install dependencies and run the development server on an available high port:
+For the historical Next.js public pages and archive preparation source routes, install dependencies and run the development server on an available high port:
 
 ```bash
 npm ci
 npm run dev -- --port 7743
 ```
 
-Open [http://localhost:7743](http://localhost:7743), `/meet`, `/import-linkedin`, `/network`, `/search`, `/agents`, `/auth/login`, and `/auth/signup`. These public GET/HEAD entry points bypass legacy session refresh, including trailing-slash forms, and need no Supabase environment variables or database access. The exact GET/HEAD `/auth/callback/ideaflow` path also bypasses legacy refresh so the canonical callback rewrite can be preflighted against the private runtime; it is not a file-upload or archive proxy. Existing API and data routes retain their middleware and require the existing Supabase settings and a reachable backend.
+Open [http://localhost:7743](http://localhost:7743), `/meet`, `/import-linkedin`, `/network`, `/search`, `/agents`, `/auth/login`, and `/auth/signup` to inspect the Next.js source routes. These local public GET/HEAD entry points bypass legacy session refresh, including trailing-slash forms, and need no Supabase environment variables or database access. In the standalone runtime, exact anonymous GET/HEAD discovery is limited to `/agents`, `/meet`, `/import-linkedin`, `/llms.txt`, `/AGENTS.md`, `/openapi.json`, `/.well-known/unlinked.json`, `/.well-known/agent.json`, `/.well-known/mcp/server-card.json`, and the fixed public card-scanner assets; owner data, uploads, settings, status and MCP stay authenticated. The exact GET/HEAD `/auth/callback/ideaflow` path also bypasses legacy refresh so the canonical callback can be preflighted against the private runtime; it is not a file-upload or archive proxy. Existing API and data routes retain their middleware and require the existing Supabase settings and a reachable backend.
 
-Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation, start the server with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` unset and confirm `/`, `/meet`, `/import-linkedin`, `/network`, `/search`, `/agents`, `/auth/login`, and `/auth/signup` return 200 or the expected signup redirect (following redirects for trailing-slash normalization), and that GET `/auth/callback/ideaflow` reaches the configured external callback without invoking Supabase session refresh. A card token with valid syntax can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
+Run `npm test` and `npx tsc --noEmit` for focused verification. To smoke test backend isolation in Next.js, start the server with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` unset and confirm `/`, `/meet`, `/import-linkedin`, `/network`, `/search`, `/agents`, `/auth/login`, and `/auth/signup` return 200 or the expected signup redirect (following redirects for trailing-slash normalization), and that GET `/auth/callback/ideaflow` reaches the configured external callback without invoking Supabase session refresh. To smoke test the standalone anonymous discovery guard, use `createPrivateBrowserHandler` and confirm the exact discovery paths above return 200 for GET/HEAD without owner reads while `/network`, `/settings`, import status and POST routes remain protected. A card token with valid syntax can still be revoked or unknown; OpenChat reports that on its card page. Live own-card, friend, and account-state tests require separate OpenChat test accounts and are not covered by this repository's fixtures.
 
 For lint validation, run `npx eslint` with the changed JavaScript or TypeScript file paths. The existing `npm run lint` invokes unsupported `next lint`; ESLint is configured in `eslint.config.mjs`. No separate formatter is configured.
 
@@ -76,9 +76,9 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-The isolated private Noos adapter, bounded publication journal, OIDC browser controller, scoped query-time AI tools and setup flows are documented in [Private Noos staging](docs/private-noos-staging.md). Production setup and AI search remain unavailable.
+The isolated private Noos adapter, bounded publication journal, OIDC browser controller, scoped query-time AI tools and setup flows are documented in [Private Noos staging](docs/private-noos-staging.md). Those source gates and recovery notes remain the authority for changes to the standalone runtime.
 
 ### Public network entry
 
-See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/auth/login` shows the Ideaflow ID path and current availability; `/auth/signup` returns there.
-The default-off private runtime includes durable profile-first archive processing, owner-wide multi-import browsing/search and account-scoped MCP grants, but it remains unmounted from the public app until the private release gates pass.
+See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/login` starts the current Ideaflow ID path in the standalone runtime; the Next.js `/auth/login` and `/auth/signup` pages remain local/historical source routes.
+The standalone runtime includes durable profile-first archive processing, owner-wide multi-import browsing/search and account-scoped MCP grants. The Next.js app still retains historical/public source routes rather than hosting that runtime.

@@ -1,3 +1,4 @@
+import { isPublicDiscoveryPath, servePublicDiscovery } from './public-discovery.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import * as oidc from 'openid-client'
@@ -122,11 +123,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     response.setHeader('X-Content-Type-Options', 'nosniff')
     response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
     if (request.headers.host !== base.host) { response.writeHead(403).end(); return }
-    if (!['GET', 'POST'].includes(request.method)) { response.writeHead(405).end(); return }
+    if (!['GET', 'POST'].includes(request.method) && !(request.method === 'HEAD' && isPublicDiscoveryPath(new URL(request.url, base).pathname))) { response.writeHead(405).end(); return }
     if (request.method === 'POST' && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      if (await servePublicDiscovery(request, response, url.pathname)) return
       const inviteMatch = url.pathname.match(/^\/invite\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && inviteMatch && invitationMode) {
         purge(invitations)

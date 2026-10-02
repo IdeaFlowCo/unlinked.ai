@@ -1,7 +1,7 @@
 # unlinked.ai — Repository Agent Memory
 
 Next.js 15 (App Router) + React 19 + Radix UI Themes + Supabase + Pinecone + OpenAI.
-Hosted on Vercel at **https://www.unlinked.ai**.
+The canonical beta at **https://www.unlinked.ai** runs the standalone Noos-backed runtime; Next.js retains historical/public source routes.
 
 This file is the repo-internal guide for autonomous agents and contributors working *in* this codebase. For agents arriving at unlinked.ai over HTTP, see the public brief at `public/AGENTS.md` (served at `/AGENTS.md`).
 
@@ -29,7 +29,7 @@ This file is the repo-internal guide for autonomous agents and contributors work
 
 ## Public entry availability
 
-See [README.md](README.md#import-linkedin-archive) for the public export-first journey and availability, and its [Getting Started](README.md#getting-started) section for backend-independent public routes. Legacy API schemas remain historical reference documentation.
+See [README.md](README.md#import-linkedin-archive) for the canonical export-first journey and availability, and its [Getting Started](README.md#getting-started) section for the distinction between Next.js source routes and standalone-runtime anonymous discovery. Legacy API schemas remain historical reference documentation.
 
 ## Private archive foundation
 
@@ -37,7 +37,7 @@ The default-off private Noos/OIDC browser/scoped AI and hosted setup slice and i
 The trusted invited-owner browser callback and direct Noos claim/readback wiring are documented in `docs/private-invited-browser.md`; they never infer ownership from email or imported profile data.
 The open-account private runtime adds issuer/subject signup, durable profile-first archive processing, owner-wide network search and persistent account-scoped MCP grants; see `docs/durable-archive-import.md` and `deploy/private-pilot/ACCOUNT-LAUNCH.md`.
 The exact canonical-host callback/runtime transition is documented in `deploy/private-pilot/CANONICAL-HOST.md`.
-The standalone private runtime composition and guarded deployment/recovery commands are in `mcp-server/private-composition.mjs` and `deploy/private-pilot/README.md`; they remain unmounted in the public Next.js application.
+The standalone private runtime composition and guarded deployment/recovery commands are in `mcp-server/private-composition.mjs` and `deploy/private-pilot/README.md`; the canonical beta uses that runtime at `https://www.unlinked.ai` while the public Next.js application retains historical/source routes.
 
 See `docs/private-archive-import.md` for the bounded parser/job adapter contract, `docs/durable-archive-import.md` for the default-off background worker/status/profile behavior, the test adapter boundary and links to live activation gates; see `README.md` for the public archive entry.
 
@@ -90,3 +90,7 @@ Keep this file for knowledge useful to almost every future agent session in this
 Do not repeat what the codebase already shows; point to the authoritative file or command instead.
 Prefer rewriting or pruning existing entries over appending new ones.
 When updating this file, preserve this bar for all agents and keep entries concise.
+
+## Canonical anonymous discovery
+
+`mcp-server/public-discovery.mjs` mounts exact GET/HEAD discovery/import/Meet routes before session resolution; its fixed asset map never exposes owner data or request-selected files.
