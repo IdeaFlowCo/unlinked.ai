@@ -141,4 +141,11 @@ test('ensureGrant reuses a manually created grant instead of minting an automati
   const [a, b] = [await freshGrants.ensureGrant({ ownerId: 'synthetic-fresh-owner', userId: 'synthetic-fresh-user' }), await freshGrants.ensureGrant({ ownerId: 'synthetic-fresh-owner', userId: 'synthetic-fresh-user' })]
   assert.equal(a.accessToken, b.accessToken)
   assert.equal(fresh.activeGrants().length, 1)
+
+  // Revoking the last manually created (pre-automation, random-jti) grant is
+  // just as sticky: ensure never quietly re-enables agent access afterwards.
+  await grants.revoke(owner, manual.grantId)
+  assert.equal(f.activeGrants().length, 0)
+  assert.equal(await grants.ensureGrant(owner), null)
+  assert.equal(f.activeGrants().length, 0)
 })
