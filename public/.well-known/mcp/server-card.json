@@ -15,6 +15,7 @@
   "tools": [
     {
       "name": "unlinked_search_network",
+      "description": "Search the owner's imported network, or pass degree 1/2 plus an optional cursor to read recorded public paths from the explicitly confirmed recovered profile.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -22,6 +23,17 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 1024
+          },
+          "degree": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 2048
           }
         },
         "required": [

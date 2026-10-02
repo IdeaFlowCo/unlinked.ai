@@ -93,6 +93,8 @@ Do not repeat what the codebase already shows; point to the authoritative file o
 Prefer rewriting or pruning existing entries over appending new ones.
 When updating this file, preserve this bar for all agents and keep entries concise.
 
+The provenance-backed one/two-hop reader, signed HTTP API and account MCP degree inputs are documented in `docs/private-pilot-release-plan.md`; an explicitly confirmed recovered profile is currently required as the graph anchor.
+
 ## Canonical anonymous discovery
 
 `mcp-server/public-discovery.mjs` mounts exact GET/HEAD discovery/import/Meet routes before session resolution; its fixed asset map never exposes owner data or request-selected files.

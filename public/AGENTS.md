@@ -6,7 +6,8 @@ Import a full LinkedIn ZIP or Connections-only ZIP/CSV, maximum 64 MiB.
 The server processes imports durably; /profile and /network show progress.
 
 Current MCP endpoint: https://www.unlinked.ai/mcp (Streamable HTTP).
-Current durable account tools: `unlinked_search_network` and `unlinked_search_everyone`, input `{ "query": "professional people search" }`.
+Current durable account tools: `unlinked_search_network` and `unlinked_search_everyone`; base input is `{ "query": "professional people search" }`.
+For `unlinked_search_network`, optional `degree: 1|2` and `cursor` select recorded public paths from your explicitly linked recovered profile; “my second-degree connections” also selects two hops. Unknown profile anchors are denied rather than inferred. Signed browser GET /api/my-connections supports degree, q and cursor.
 An explicit account grant authorizes current and future owner imports until revoked in Settings.
 Never derive owner authority from typed email, archive fields, profile IDs or a URL.
 The backend binds signed Ideaflow issuer/subject to the owner; recovered-profile confirmation uses only server-held signed email evidence plus CSRF and can be revoked.
