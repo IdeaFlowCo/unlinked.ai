@@ -8,7 +8,7 @@ A full ZIP is preferred; Connections-only ZIP or CSV is supported up to 64 MiB.
 Import processing continues server-side after navigation. Profile and People show real progress.
 Everyone People browsing reads only the published professional index and does not require sign-in or an import.
 Own-network AI search reads only the signed-in owner's published imports plus same-owner sanitized recovered Connections observations; Everyone AI ranks bounded matching candidates from the public index.
-Settings creates a revocable account-scoped MCP grant; keep its bearer credential private.
+Your agent setup is prepared automatically; Settings shows the revocable, regenerable account-scoped MCP grant. Keep its bearer credential private.
 Contact emails, phone numbers and original archive bytes are excluded from agent search.
 
 ## Entry and discovery
@@ -19,7 +19,10 @@ Contact emails, phone numbers and original archive bytes are excluded from agent
 - [MCP card](/.well-known/mcp/server-card.json)
 - [Product descriptor](/.well-known/unlinked.json)
 - [API description](/openapi.json)
-- [Meet: scan or paste an OpenChat card](/meet)
+- [Meet: scan an Unlinked profile card or an OpenChat card, confirm before opening](/meet)
+- [Install the app (PWA manifest)](/manifest.webmanifest)
+
+Signed-in members have a shareable business card with a QR of their public profile URL at /card; scanning it only opens that public page.
 
 ## Current authenticated MCP
 Streamable HTTP endpoint: https://www.unlinked.ai/mcp.

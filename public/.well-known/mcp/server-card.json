@@ -10,7 +10,8 @@
   },
   "authentication": {
     "type": "bearer",
-    "setupUrl": "https://www.unlinked.ai/settings"
+    "setupUrl": "https://www.unlinked.ai/settings",
+    "provisioning": "Prepared automatically at the setup URL; owner can revoke or regenerate there. Repeated provisioning never mints duplicate grants."
   },
   "tools": [
     {
