@@ -51,6 +51,20 @@
             }
           },
           {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "best",
+                "exact"
+              ],
+              "default": "best"
+            },
+            "description": "best: every word in any form and order, falling back to people who match some words (see match). exact: the typed phrase as written."
+          },
+          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -60,7 +74,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Safe profile summaries and optional nextCursor"
+            "description": "Safe profile summaries and optional nextCursor With a query, the body also carries match (all, some or none) and total."
           },
           "400": {
             "description": "Invalid query/cursor"

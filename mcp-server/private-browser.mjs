@@ -1,6 +1,7 @@
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
+import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from '../src/utils/public-people/text-match.mjs'
 import { isPublicDiscoveryPath, servePublicDiscovery } from './public-discovery.mjs'
 import { COMBINED_UPLOAD_CONSENT, PUBLIC_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { createHash, randomBytes } from 'node:crypto'
@@ -153,7 +154,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (++publicRequests > 120 || publicBusy >= 2) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         publicBusy++
         try {
-          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
           if (publicDetail || publicProfile) {
             let id
             try { id = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
@@ -162,9 +163,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
             journey(response, renderPerson({ ...chrome, profile: result.profile })); return
           }
-          const query = url.searchParams.get('q') ?? '', result = await publicReader.list({ query, cursor: url.searchParams.get('cursor') ?? undefined })
+          const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', result = await publicReader.list({ query, mode, cursor: url.searchParams.get('cursor') ?? undefined })
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
-          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, query, nextCursor: result.nextCursor, state: 'ready' })
+          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, query, mode, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
@@ -346,21 +347,26 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const connections = network.assertions.filter(row => row.category === 'connections')
         const typed = (url.searchParams.get('q') ?? '').trim(), filter = typed.toLowerCase()
         if (filter.length > 256) throw new Error('network_filter_limit')
-        const rows = connections.filter(row => !filter || [row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].some(value => value?.toLowerCase().includes(filter)))
+        const mode = url.searchParams.get('mode') ?? 'best'
+        if (!SEARCH_MODES.includes(mode) || url.searchParams.getAll('mode').length > 1) throw new Error('network_search_mode_invalid')
+        // The same matching as the public list: every word in any form, else the closest people.
+        const matcher = typed ? createQueryMatcher(typed, mode) : null
+        const ownMatches = matcher ? rankMatches(connections, matcher, row => ({ name: words([row.fields['first name'], row.fields['last name']].filter(Boolean).join(' ')), text: words([row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].filter(Boolean).join(' ')) })) : { rows: connections, match: 'none' }
+        const rows = ownMatches.rows
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
         const props = jobProps(await jobResources()), contacts = rows.slice(index * 100, (index + 1) * 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url }))
         const publicProfessionalSearch = typeof readPublishedSnapshot === 'function'
-        let everyone, nextCursor, state = 'ready'
+        let everyone, nextCursor, state = 'ready', match = ownMatches.match
         if (publicProfessionalSearch) {
           everyone = []
-          try { const result = await publicReader.list({ query: filter, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor }
+          try { const result = await publicReader.list({ query: filter, mode, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
           catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed })
-        if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a></p>`)
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, match })
+        if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}">Next contacts</a></p>`)
         journey(response, view, props.importJob)
         return
       }

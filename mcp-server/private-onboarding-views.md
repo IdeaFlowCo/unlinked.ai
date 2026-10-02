@@ -51,7 +51,9 @@ public guides in the same shell; Meet keeps the element ids its scanner script b
 The People contract is: `everyone: [{id, name, headline?, company?, location?}]`, optional `own`
 containing the existing own-contact DTOs (including reason), optional string `nextCursor`, and
 `state: 'ready' | 'unavailable'` plus existing welcome/error. With a query the title becomes
-“Results for …” with a Clear search link. Defined `own` renders People you know before Everyone
+“Results for …” with Best match / Exact words links (`mode`, default `best`) and a Clear search link;
+`mode: 'exact'` adds a hidden `mode` field to the header search and to Show more, and `match: 'some'`
+shows a line saying nobody has every word. Defined `own` renders People you know before Everyone
 on Unlinked. AI ranking is not a second search box: when a signed-in member has a query, the
 results show a small POST `/search-account` form carrying `csrf` and the hidden `query`, with one
 submit button per available scope (`everyone` when public search is on, `own` when `own` is
