@@ -9,6 +9,7 @@ That action records an expiring, one-use browser intent and starts fresh Ideaflo
 After signed ID-token verification against the configured issuer/client/JWKS, Unlinked renders the verified issuer/subject or authenticated IdP email for explicit confirmation before the trusted backend claims the invitation and reads back the same owner and private Noos principal.
 The guest can restart authentication to use another account or cancel before any owner is created.
 An email address never selects, links or creates an owner.
+In open-account deployments with the recovered-account capability enabled, signed Ideaflow email evidence may only offer a CSRF-protected legacy-profile confirmation after issuer/subject ownership is resolved; invitation claims still do not bind by email.
 The separate Unlinked profile does not link an existing OpenChat account.
 
 Supply the initialized Noos callback-role provisioner and operational store inside the trusted private backend:
