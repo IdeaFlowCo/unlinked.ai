@@ -13,12 +13,17 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .logo{text-decoration:none;letter-spacing:-.04em;color:var(--brand)}
 .unlinked-onboarding .logo strong{font-size:21px;font-weight:700;color:var(--brand)}
 .unlinked-onboarding .header-search{position:relative;display:flex;flex:1;max-width:440px;margin-right:auto}
-.unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 46px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
+.unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 84px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
 /* The icon is an element, not a data: background, so the page's default-src 'none' policy allows it. */
 .unlinked-onboarding .header-search .search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
 .unlinked-onboarding .header-search input[type=search]:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--tint)}
-.unlinked-onboarding .header-search button{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:34px;height:34px;min-height:0;padding:0;border:0;border-radius:50%;background:none;color:var(--brand-d);display:grid;place-items:center;cursor:pointer}
+.unlinked-onboarding .header-search button{position:absolute;right:41px;top:50%;transform:translateY(-50%);width:34px;height:34px;min-height:0;padding:0;border:0;border-radius:50%;background:none;color:var(--brand-d);display:grid;place-items:center;cursor:pointer}
 .unlinked-onboarding .header-search button:hover{background:var(--tint)}
+/* The QR scan button sits at the right end of the field; the submit arrow appears beside it once there is text. */
+.unlinked-onboarding .header-search input[type=search]:placeholder-shown{padding-right:46px}
+.unlinked-onboarding .header-search input:placeholder-shown~button{display:none}
+.unlinked-onboarding .header-search .scan{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:var(--brand-d);text-decoration:none}
+.unlinked-onboarding .header-search .scan:hover{background:var(--tint)}
 .unlinked-onboarding nav{display:flex;gap:18px;align-items:center;font-size:15px}
 .unlinked-onboarding nav a{color:var(--fg);text-decoration:none;white-space:nowrap}
 .unlinked-onboarding nav a:hover{text-decoration:underline}
@@ -130,7 +135,47 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .account{margin:0}
 .unlinked-onboarding :is(a,button,input,textarea,summary):focus-visible{outline:3px solid var(--brand);outline-offset:3px}
 .unlinked-onboarding [hidden]{display:none!important}
+/* "Me": one account menu. A dropdown on wide screens, a bottom sheet on phones. */
+.unlinked-onboarding .me{position:relative;margin:0}
+.unlinked-onboarding .me>summary{list-style:none;display:flex;min-height:0;align-items:center;gap:7px;padding:3px 11px 3px 3px;border:1px solid var(--line2);border-radius:99px;background:#fff;cursor:pointer;font-size:15px;white-space:nowrap}
+.unlinked-onboarding .me>summary::-webkit-details-marker{display:none}
+.unlinked-onboarding .me>summary:hover,.unlinked-onboarding .me[open]>summary{border-color:var(--brand)}
+.unlinked-onboarding .me .avatar{width:30px;height:30px;font-size:12px}
+.unlinked-onboarding .me-l{display:inline-flex;align-items:center;gap:3px}
+.unlinked-onboarding .me[open]>summary::before{content:"";position:fixed;inset:0;z-index:40;cursor:default}
+.unlinked-onboarding .me-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:41;width:300px;padding:6px 0;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(16,24,40,.14);font-size:15px}
+.unlinked-onboarding .me-head{display:grid;grid-template-columns:48px 1fr;gap:4px 12px;align-items:center;padding:12px 16px 14px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.unlinked-onboarding .me-head .avatar{width:48px;height:48px;font-size:16px}
+.unlinked-onboarding .me-who{min-width:0;line-height:1.3}
+.unlinked-onboarding .me-who b{display:block;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unlinked-onboarding .me-hl{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;color:var(--muted);white-space:normal}
+.unlinked-onboarding nav .me .me-view{grid-column:1/-1;margin-top:10px;min-height:34px;border-color:var(--brand);border-radius:99px;color:var(--brand-d)}
+.unlinked-onboarding nav .me .me-view:hover{background:var(--tint);text-decoration:none}
+.unlinked-onboarding .me-panel>a,.unlinked-onboarding .me .me-out{display:flex;align-items:center;gap:12px;width:100%;min-height:0;padding:10px 16px;border:0;border-radius:0;background:none;color:var(--fg);font:inherit;text-align:left;justify-content:flex-start;text-decoration:none;cursor:pointer}
+.unlinked-onboarding .me-panel>a svg{color:var(--muted);flex:none}
+.unlinked-onboarding .me-panel>a:hover,.unlinked-onboarding .me .me-out:hover{background:var(--page);text-decoration:none}
+.unlinked-onboarding .me-panel :is(a,button):focus-visible{outline-offset:-3px}
+.unlinked-onboarding .me-sep{height:1px;margin:6px 0;background:var(--line)}
+.unlinked-onboarding .me .me-out{color:var(--muted)}
+/* The scan sheet: Scan and My card tabs. */
+.unlinked-onboarding .sheet-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.unlinked-onboarding .sheet-top .hq{margin:0}
+.unlinked-onboarding .sheet-close{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;color:var(--muted);font-size:28px;line-height:1;text-decoration:none}
+.unlinked-onboarding .sheet-close:hover{background:var(--tint)}
+.unlinked-onboarding .tabs{display:flex;gap:4px;margin:18px 0 16px;padding:4px;background:#fff;border:1px solid var(--line);border-radius:99px}
+.unlinked-onboarding .tabs a{flex:1;padding:9px 12px;border-radius:99px;color:var(--fg);font-size:15px;font-weight:600;text-align:center;text-decoration:none}
+.unlinked-onboarding .tabs a[aria-selected=true]{background:var(--brand);color:#fff}
+.unlinked-onboarding .scan-cam{position:relative;display:grid;place-items:center;width:min(100%,62vh);aspect-ratio:1;margin:0 auto;background:#16181d;border-radius:14px;overflow:hidden}
+.unlinked-onboarding .scan-cam #camera{position:absolute;inset:0}
+.unlinked-onboarding .scan-cam video{display:block;width:100%;height:100%;object-fit:cover}
+.unlinked-onboarding .scan-frame{position:relative;width:62%;aspect-ratio:1;border:3px solid rgba(255,255,255,.9);border-radius:18px}
+.unlinked-onboarding .scan-hint{position:absolute;left:0;right:0;bottom:14px;margin:0;padding:0 16px;color:#fff;font-size:14px;text-align:center;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.unlinked-onboarding .scan-sheet #status:empty{display:none}
+.unlinked-onboarding .scan-paste{margin:16px 0}
+.unlinked-onboarding .scan-paste>summary{color:var(--brand-d);font-size:15px;cursor:pointer}
+.unlinked-onboarding .scan-sheet .phead{margin:0}
+.unlinked-onboarding .phead h2{font:600 24px/1.15 "Public Sans",system-ui,sans-serif;letter-spacing:-.01em;margin:12px 24px 2px}
 @media(max-width:900px){.unlinked-onboarding{padding:0 20px 30px}.unlinked-onboarding header{flex-wrap:wrap;gap:10px}.unlinked-onboarding .header-search{order:3;flex:1 0 100%;max-width:none}.unlinked-onboarding nav{gap:14px;font-size:14px;flex-wrap:wrap;margin-left:auto}.unlinked-onboarding .profile,.unlinked-onboarding .agentband{grid-template-columns:1fr}.unlinked-onboarding .land{grid-template-columns:1fr;gap:34px;padding-top:26px}.unlinked-onboarding .cta .button{width:100%}}
-@media(max-width:600px){body:has(.unlinked-onboarding){font-size:16px}.unlinked-onboarding nav .hide-m{display:none}.unlinked-onboarding .panel,.unlinked-onboarding .card,.unlinked-onboarding .linkedin-lookup{padding:18px}.unlinked-onboarding .list{padding:4px 18px}.unlinked-onboarding .phead{padding:0 0 18px}}
+@media(max-width:600px){body:has(.unlinked-onboarding){font-size:16px}.unlinked-onboarding .me[open]>summary::before{background:rgba(16,24,40,.38)}.unlinked-onboarding .me-panel{position:fixed;left:0;right:0;top:auto;bottom:0;width:auto;padding:8px 0 calc(14px + env(safe-area-inset-bottom));border-radius:16px 16px 0 0;font-size:16px;box-shadow:0 -8px 32px rgba(16,24,40,.18)}.unlinked-onboarding .me-panel::before{content:"";display:block;width:36px;height:4px;margin:0 auto 8px;border-radius:2px;background:var(--line2)}.unlinked-onboarding .me-panel>a,.unlinked-onboarding .me .me-out{padding:14px 20px}.unlinked-onboarding .me-head{padding:8px 20px 16px}.unlinked-onboarding .scan-sheet{padding-top:18px}.unlinked-onboarding nav .hide-m{display:none}.unlinked-onboarding .panel,.unlinked-onboarding .card,.unlinked-onboarding .linkedin-lookup{padding:18px}.unlinked-onboarding .list{padding:4px 18px}.unlinked-onboarding .phead{padding:0 0 18px}}
 @media(prefers-reduced-motion:reduce){.unlinked-onboarding *{scroll-behavior:auto;transition:none!important}}
 `
