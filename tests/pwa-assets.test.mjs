@@ -16,6 +16,11 @@ test('manifest, icons and offline page satisfy installability and reference only
   assert.equal(manifest.scope, '/')
   assert.equal(manifest.display, 'standalone')
   assert.equal(manifest.theme_color, '#4349c4')
+  
+  assert.equal(manifest.shortcuts.length, 2)
+  assert.equal(manifest.shortcuts[0].url, '/card')
+  assert.equal(manifest.shortcuts[1].url, '/scan')
+
   const sizes = manifest.icons.map(icon => icon.sizes).sort()
   assert.deepEqual(sizes, ['192x192', '512x512', '512x512'])
   assert.ok(manifest.icons.some(icon => icon.purpose === 'maskable'))
@@ -120,8 +125,25 @@ test('journey pages carry the manifest, worker registration and the extended-but
   assert.match(html, /<link rel="manifest" href="\/manifest.webmanifest">/)
   assert.match(html, /<link rel="apple-touch-icon" href="\/app-icon-192.png">/)
   assert.match(html, /<meta name="theme-color" content="#4349c4">/)
+  assert.match(html, /<meta name="apple-mobile-web-app-capable" content="yes">/)
+  assert.match(html, /<meta name="apple-mobile-web-app-status-bar-style" content="default">/)
+  // The page does not extend under the notch: no safe-area padding is defined for it.
+  assert.doesNotMatch(html, /viewport-fit=cover/)
   assert.match(html, /navigator\.serviceWorker\.register\('\/sw\.js'\)/)
   // The registration script runs under the page nonce, not an unsafe allowance.
   const nonce = html.match(/<script nonce="([^"]+)">/)[1]
   assert.ok(csp.includes(`'nonce-${nonce}'`))
+})
+
+test('the card page carries an install hint that starts hidden and is only revealed by the page script on phones', async () => {
+  const { renderCard, TOP_BAR_SCRIPT } = await import('../mcp-server/private-onboarding-views.mjs')
+  for (const share of ['public', 'contact']) {
+    const html = renderCard({ accountLabel: 'member@example.test', displayName: 'Member', csrf: 'x', profile: { name: 'Member' }, contact: { settings: {}, card: null, shareUrl: null, qr: null }, share }).content
+    assert.match(html, /<div id="pwa-hint" class="notice pwa-hint" hidden>/)
+    assert.match(html, /<button id="pwa-hint-dismiss" type="button"/)
+    assert.doesNotMatch(html.slice(html.indexOf('id="pwa-hint"'), html.indexOf('</div>', html.indexOf('id="pwa-hint"'))), /style=|onclick=/)
+  }
+  assert.match(TOP_BAR_SCRIPT, /matchMedia\('\(pointer:coarse\)'\)\.matches&&!matchMedia\('\(display-mode: standalone\)'\)\.matches/)
+  // Storage may be unavailable (private browsing): the hint then stays hidden instead of throwing.
+  assert.match(TOP_BAR_SCRIPT, /try\{return localStorage\.getItem\('pwa-hint-dismissed'\)\}catch\{return '1'\}/)
 })
