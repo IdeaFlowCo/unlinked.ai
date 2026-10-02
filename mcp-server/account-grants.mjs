@@ -15,8 +15,8 @@ export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
     owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone']),
   }),
   2: Object.freeze({
-    owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ask']),
-    owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ask']),
+    owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search']),
+    owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search']),
   }),
 })
 export const CURRENT_ACCOUNT_GRANT_VERSION = 2

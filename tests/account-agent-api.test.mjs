@@ -171,13 +171,13 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   assert.equal(missing.status, 404)
   assert.equal((await missing.json()).error.code, 'not_found')
 
-  // unlinked_ask over the owner's own network and over everyone.
-  const mine = await (await call(app.endpoint, accessToken, 'ask', { method: 'POST', body: JSON.stringify({ query: 'who is an engineer?', scope: 'mine' }) })).json()
+  // unlinked_ai_search over the owner's own network and over everyone.
+  const mine = await (await call(app.endpoint, accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'who is an engineer?', scope: 'mine' }) })).json()
   assert.equal(mine.scope, 'mine')
   assert.equal(mine.considered, 3)
   assert.equal(mine.matches[0].reason, 'Synthetic ranked reason')
   assert.ok(!JSON.stringify(mine).includes('private.invalid'))
-  const everyone = await (await call(app.endpoint, accessToken, 'ask', { method: 'POST', body: JSON.stringify({ query: 'graph engineer' }) })).json()
+  const everyone = await (await call(app.endpoint, accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'graph engineer' }) })).json()
   assert.equal(everyone.scope, 'everyone')
   assert.equal(everyone.considered, 3)
   assert.equal(everyone.matches.length, 1)
@@ -270,13 +270,13 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
     assert.equal(denied.status, 403)
     assert.equal((await denied.json()).error.code, 'scope_not_granted')
   }
-  const askEveryone = await call(narrowApp.endpoint, narrow.accessToken, 'ask', { method: 'POST', body: JSON.stringify({ query: 'graph', scope: 'everyone' }) })
+  const askEveryone = await call(narrowApp.endpoint, narrow.accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'graph', scope: 'everyone' }) })
   assert.equal(askEveryone.status, 403)
   assert.equal((await askEveryone.json()).error.code, 'scope_not_granted')
-  const askMine = await (await call(narrowApp.endpoint, narrow.accessToken, 'ask', { method: 'POST', body: JSON.stringify({ query: 'engineer', scope: 'mine' }) })).json()
+  const askMine = await (await call(narrowApp.endpoint, narrow.accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'engineer', scope: 'mine' }) })).json()
   assert.equal(askMine.scope, 'mine')
   // Omitted scope defaults to the widest scope the grant covers.
-  const askDefault = await (await call(narrowApp.endpoint, narrow.accessToken, 'ask', { method: 'POST', body: JSON.stringify({ query: 'engineer' }) })).json()
+  const askDefault = await (await call(narrowApp.endpoint, narrow.accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'engineer' }) })).json()
   assert.equal(askDefault.scope, 'mine')
   // Wrong method on an existing route is 405 with Allow, not a phantom 404.
   const wrongMethod = await call(narrowApp.endpoint, narrow.accessToken, 'whoami', { method: 'POST', body: JSON.stringify({}) })
@@ -308,14 +308,14 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const mcpTransport = new StreamableHTTPClientTransport(new URL(`${narrowApp.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${narrow.accessToken}` } } })
   try {
     await mcpClient.connect(mcpTransport)
-    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ask'])
+    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search'])
     const who = await mcpClient.callTool({ name: 'unlinked_whoami', arguments: {} })
     assert.ok(!who.isError)
     assert.equal(JSON.parse(who.content[0].text).ownerId, narrowApp.owner.ownerId)
     const unproven = await mcpClient.callTool({ name: 'unlinked_list_connections', arguments: { degree: 2 } })
     assert.equal(unproven.isError, true)
     assert.equal(JSON.parse(unproven.content[0].text).error.code, 'degree_unproven')
-    const denied = await mcpClient.callTool({ name: 'unlinked_ask', arguments: { query: 'graph', scope: 'everyone' } })
+    const denied = await mcpClient.callTool({ name: 'unlinked_ai_search', arguments: { query: 'graph', scope: 'everyone' } })
     assert.equal(denied.isError, true)
     assert.equal(JSON.parse(denied.content[0].text).error.code, 'scope_not_granted')
   } finally { await mcpClient.close() }
@@ -326,8 +326,8 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   await limited.call({ grant, name: 'unlinked_whoami' })
   await limited.call({ grant, name: 'unlinked_whoami' })
   await assert.rejects(limited.call({ grant, name: 'unlinked_whoami' }), error => error instanceof AccountToolError && error.code === 'rate_limited')
-  await limited.call({ grant, name: 'unlinked_ask', input: { query: 'engineer', scope: 'mine' } })
-  await assert.rejects(limited.call({ grant, name: 'unlinked_ask', input: { query: 'engineer', scope: 'mine' } }), error => error.code === 'rate_limited')
+  await limited.call({ grant, name: 'unlinked_ai_search', input: { query: 'engineer', scope: 'mine' } })
+  await assert.rejects(limited.call({ grant, name: 'unlinked_ai_search', input: { query: 'engineer', scope: 'mine' } }), error => error.code === 'rate_limited')
   // Budgets are per owner: another owner's grant is not starved.
   const otherOwner = { ownerId: 'synthetic-other-owner', userId: 'synthetic-other-user' }
   anchored.register(otherOwner)
@@ -343,7 +343,7 @@ test('republished index invalidates cursors as typed cursor_invalid; transient b
   const snapshot = () => ({ ...publishedSnapshot(), revision })
   const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   const service = createAccountToolService({ getBackend: f.getBackend, complete, readPublishedSnapshot: async () => snapshot() })
-  const grant = { ownerId: owner.ownerId, userId: owner.userId, grantId: 'x'.repeat(64), scope: 'owner_network_and_public', version: 2, tools: ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ask'] }
+  const grant = { ownerId: owner.ownerId, userId: owner.userId, grantId: 'x'.repeat(64), scope: 'owner_network_and_public', version: 2, tools: ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search'] }
   const first = (await service.call({ grant, name: 'unlinked_list_people', input: { limit: 1 } })).result
   assert.equal(first.revision, 'public-rev-1')
   revision = 'public-rev-2'

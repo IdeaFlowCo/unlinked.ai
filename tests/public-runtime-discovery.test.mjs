@@ -21,7 +21,7 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
   assert.equal((await fetch(endpoint+'/agents',{method:'POST',headers:{Origin:'https://wrong.invalid'}})).status,403)
   assert.equal((await fetch(endpoint+'/network',{method:'HEAD'})).status,405)
   assert.equal(await new Promise((resolve,reject)=>{const req=httpRequest(endpoint+'/meet',{headers:{Host:'wrong.invalid'}},res=>{res.resume();resolve(res.statusCode)});req.on('error',reject);req.end()}),403)
-  const card=await(await fetch(endpoint+'/.well-known/mcp/server-card.json')).json();assert.equal(card.transports['streamable-http'].url,'https://www.unlinked.ai/mcp');assert.deepEqual(card.tools.map(t=>t.name),['unlinked_search_network','unlinked_search_everyone','unlinked_whoami','unlinked_list_people','unlinked_list_connections','unlinked_get_profile','unlinked_ask'])
+  const card=await(await fetch(endpoint+'/.well-known/mcp/server-card.json')).json();assert.equal(card.transports['streamable-http'].url,'https://www.unlinked.ai/mcp');assert.deepEqual(card.tools.map(t=>t.name),['unlinked_search_network','unlinked_search_everyone','unlinked_whoami','unlinked_list_people','unlinked_list_connections','unlinked_get_profile','unlinked_ai_search'])
   const meet=await fetch(endpoint+'/meet');assert.match(meet.headers.get('content-security-policy'),/script-src 'self' 'nonce-/);assert.match(await meet.text(),/parseOpenChatCard/)
   const scanner=await(await fetch(endpoint+'/public-assets/browser-card-scanner.js')).text();assert.match(scanner,/from '\/public-assets\/jsqr-module.mjs'/)
 })

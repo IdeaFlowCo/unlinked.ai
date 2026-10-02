@@ -38,7 +38,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
     cursor: z.string().max(4096).optional(), limit: z.number().int().min(1).max(50).optional(),
   },
   unlinked_get_profile: { id: z.string().min(1).max(160), connectionsCursor: z.string().max(2048).optional() },
-  unlinked_ask: {
+  unlinked_ai_search: {
     query: z.string().min(1).max(1024), scope: z.enum(['everyone', 'mine']).optional(),
     timeoutMs: z.number().int().min(1000).max(40000).optional(),
   },
@@ -54,7 +54,7 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index. Paginated with an opaque cursor, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Paginated, at most 50 per page, typed provenance per entry.',
   unlinked_get_profile: 'Read one published public profile by id with its public connections page. Returns typed not_found when no published profile has that id.',
-  unlinked_ask: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
+  unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
 })
 
 const DETERMINISTIC_TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile'])
@@ -201,7 +201,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       return { kind: 'unlinked_list_connections', degree: 1, revision, total: rows.length, connections: selected,
         ...(offset + selected.length < rows.length ? { nextCursor: opaqueCursor(binding, offset + selected.length) } : {}) }
     },
-    async unlinked_ask(grant, { query, scope, timeoutMs = 40000 }, signal) {
+    async unlinked_ai_search(grant, { query, scope, timeoutMs = 40000 }, signal) {
       // Default to the widest scope the grant actually covers, so the natural
       // single-argument call works on every grant that includes the tool.
       scope ??= grant.scope === 'owner_network_and_public' ? 'everyone' : 'mine'
@@ -211,7 +211,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         let result
         try { result = await createAccountNetwork({ owner: { ownerId: grant.ownerId, userId: grant.userId }, getBackend, complete }).search({ query, signal: combined }) }
         catch (error) { throw askFailure(error, combined) }
-        return { kind: 'unlinked_ask', scope: 'mine', mode: result.mode, considered: result.considered, indexed: result.indexed,
+        return { kind: 'unlinked_ai_search', scope: 'mine', mode: result.mode, considered: result.considered, indexed: result.indexed,
           matches: result.matches.map(match => ({ assertionId: match.assertionId, sourceId: match.sourceId, rowId: match.rowId,
             name: [match.fields?.['first name'], match.fields?.['last name']].filter(Boolean).join(' ').slice(0, 256),
             ...(match.fields?.position ? { headline: match.fields.position } : {}), ...(match.fields?.company ? { company: match.fields.company } : {}),
@@ -222,7 +222,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       let result
       try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: combined }) }
       catch (error) { throw askFailure(error, combined) }
-      return { kind: 'unlinked_ask', scope: 'everyone', mode: result.mode, revision: result.revision, considered: result.considered,
+      return { kind: 'unlinked_ai_search', scope: 'everyone', mode: result.mode, revision: result.revision, considered: result.considered,
         lexicalMatches: result.lexicalMatches, modelCandidates: result.modelCandidates, matches: result.matches, visibility: 'public' }
     },
     // The two launch tools keep their exact names and result semantics; the
