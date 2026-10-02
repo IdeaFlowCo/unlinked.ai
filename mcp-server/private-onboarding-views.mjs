@@ -55,9 +55,27 @@ const jobStatus = job => {
 }
 const jobPill = job => { if (!knownJob(job) || terminalJob(job)) return ''; const value = jobProgress(job); return `<a class="pill" href="/profile" title="Importing keeps running even if you leave">${value ? `Importing · ${value.percent}%` : 'Importing…'}</a>` }
 const footer = ({ csrf, accountLabel }) => `<footer><span>unlinked · an open professional network</span><span><a href="https://www.unlinked.ai/meet" target="_blank" rel="noopener noreferrer">Meet someone in person ↗</a><a href="/agents">For agents</a><a href="/llms.txt">llms.txt</a></span><span>Not affiliated with LinkedIn.</span>${csrf ? `<span class="account">${accountLabel ? `Signed in as ${html(accountLabel)} · ` : ''}<form class="sign-out" method="post" action="/logout">${csrfInput(csrf)}<button class="link-button">Sign out</button></form></span>` : ''}</footer>`
+// My Network and the notification bell. The runtime fills the slot per request
+// (fillNavAlerts) with live counts, and only when those features are configured;
+// an unfilled slot is an empty comment.
+export const NAV_ALERTS_SLOT = '<!--nav-alerts-->'
+const NETWORK_NAV_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16.5 14c2.4.1 4 1.5 4.5 4.2"/></svg>'
+const BELL_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></svg>'
+const badgeCount = value => value > 99 ? '99+' : String(value)
+const navIcon = (href, label, icon, value, noun) => {
+  const counted = Number.isSafeInteger(value) && value > 0
+  return `<a class="nav-ico" href="${href}" title="${label}" aria-label="${label}${counted ? `, ${badgeCount(value)} ${noun}` : ''}">${icon}${counted ? `<span class="badge" aria-hidden="true">${badgeCount(value)}</span>` : ''}</a>`
+}
+// alerts: { network?: pending received requests, notifications?: unseen count }.
+// A missing key means that feature is off, so its icon is not shown.
+export function navAlerts(alerts) {
+  if (!alerts) return ''
+  return `${alerts.network !== undefined ? navIcon('/invitations', 'My Network', NETWORK_NAV_ICON, alerts.network, 'pending') : ''}${alerts.notifications !== undefined ? navIcon('/notifications', 'Notifications', BELL_ICON, alerts.notifications, 'new') : ''}`
+}
+export const fillNavAlerts = (content, alerts) => content.replace(NAV_ALERTS_SLOT, navAlerts(alerts))
 // The account chip shows a name, never a full address or an opaque identifier.
 const chipLabel = value => { const text = raw(value).trim(); return !text || /^[0-9a-f-]{20,}$/i.test(text) ? '' : text.includes('@') ? text.split('@')[0] : text }
-const base = (title, content, { accountLabel, displayName, csrf, importJob, query = '', mode } = {}) => ({ title, content: `<style>${ONBOARDING_STYLE}</style><div class="unlinked-onboarding"><header><a class="logo" href="https://www.unlinked.ai/" aria-label="Unlinked home"><strong>unlinked</strong></a>${headerSearch({ query, mode })}<nav aria-label="Main navigation">${csrf ? `${jobPill(importJob)}<a href="/network">People</a><a class="hide-m" href="/agents">For agents</a>${meMenu({ displayName, csrf })}` : '<a href="/people">Explore</a><a class="hide-m" href="/agents">For agents</a><a href="/login">Sign in</a><a class="button sm" href="/join">Join</a>'}</nav></header>${jobStatus(importJob)}<main class="journey">${content}</main>${footer({ csrf, accountLabel })}</div>` })
+const base = (title, content, { accountLabel, displayName, csrf, importJob, query = '', mode } = {}) => ({ title, content: `<style>${ONBOARDING_STYLE}</style><div class="unlinked-onboarding"><header><a class="logo" href="https://www.unlinked.ai/" aria-label="Unlinked home"><strong>unlinked</strong></a>${headerSearch({ query, mode })}<nav aria-label="Main navigation">${csrf ? `${jobPill(importJob)}<a href="/network">People</a><a class="hide-m" href="/agents">For agents</a>${NAV_ALERTS_SLOT}${meMenu({ displayName, csrf })}` : '<a href="/people">Explore</a><a class="hide-m" href="/agents">For agents</a><a href="/login">Sign in</a><a class="button sm" href="/join">Join</a>'}</nav></header>${jobStatus(importJob)}<main class="journey">${content}</main>${footer({ csrf, accountLabel })}</div>` })
 
 const HUES = ['#4349c4', '#2f6f8f', '#8a5a2b', '#6b4fa0', '#b0413e', '#3d6f7a']
 const hue = seed => { let hash = 0; for (const character of raw(seed)) hash = (hash * 31 + character.codePointAt(0)) >>> 0; return HUES[hash % HUES.length] }
@@ -207,7 +225,30 @@ export function renderFindMe({ accountLabel, displayName, csrf, importJob, looku
 }
 
 // Anyone's profile, readable with or without a session: who they are and who they know.
-export function renderPerson({ accountLabel, displayName, csrf, importJob, profile = {} } = {}) {
+// The Connect control on someone else's profile, by where the two accounts stand.
+const CONNECT_NOTICES = {
+  sent: 'Invitation sent. They will see it in My Network.', accepted: 'You are now connected.', withdrawn: 'Invitation withdrawn.', ignored: 'Invitation ignored.',
+  connection_pending: 'You already have an invitation waiting with them.', connection_exists: 'You are already connected.', connection_self: 'That is your own profile.',
+  connection_rate_limited: 'You have sent a lot of invitations today. Try again tomorrow.', connection_cooldown: 'You withdrew an invitation to them recently. You can invite them again in a few weeks.',
+  connection_note_invalid: 'Keep the note under 300 characters.', connection_unavailable: 'That invitation is no longer available.', connection_not_found: 'That invitation is no longer available.', connection_not_member: 'They are not on Unlinked yet.',
+}
+export const connectNoticeCodes = Object.freeze(Object.keys(CONNECT_NOTICES))
+const connectControl = ({ connect, csrf, id, name }) => {
+  if (!connect) return ''
+  const who = firstName(name) || 'them'
+  const back = `<input type="hidden" name="next" value="${html(`/people/${encodeURIComponent(id)}`)}">`
+  if (connect.state === 'signed-out') return `<a class="button sm" href="${html(`/login?next=${encodeURIComponent(`/people/${encodeURIComponent(id)}`)}`)}">Sign in to connect</a>`
+  if (connect.state === 'self') return '<a class="button sec sm" href="/profile">This is you · My profile</a>'
+  if (connect.state === 'connected') return '<span class="state-pill ok">✓ Connected</span>'
+  if (connect.state === 'outgoing') return `<span class="state-pill">Pending</span><form method="post" action="/connections/withdraw">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(connect.requestId)}">${back}<button class="quiet sm" type="submit">Withdraw</button></form>`
+  if (connect.state === 'incoming') return `<form method="post" action="/connections/respond">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(connect.requestId)}">${back}<button class="sm" name="action" value="accept">Accept invitation</button><button class="quiet sm" name="action" value="ignore">Ignore</button></form>`
+  if (connect.state === 'none') return `<form class="connect" method="post" action="/connections/request">${csrfInput(csrf)}<input type="hidden" name="profileId" value="${html(id)}"><button class="sm" type="submit">${PLUS_ICON}Connect</button><details><summary>Add a note</summary><label for="connect-note">A short note for ${html(who)} <span class="small">(optional, up to 300 characters)</span></label><textarea id="connect-note" name="note" rows="3" maxlength="300"></textarea><button class="sm" type="submit">Send with note</button></details></form>`
+  if (connect.state === 'invite') return '<a class="button sec sm" href="/invites">Invite to Unlinked</a>'
+  return ''
+}
+const PLUS_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>'
+
+export function renderPerson({ accountLabel, displayName, csrf, importJob, profile = {}, connect, connectNotice } = {}) {
   const connections = list(profile.connections), id = raw(profile.id), tone = hue(id || profile.name)
   const more = typeof profile.nextConnectionsCursor === 'string' && profile.nextConnectionsCursor ? `/people/${encodeURIComponent(id)}?cursor=${encodeURIComponent(profile.nextConnectionsCursor)}` : null
   const total = Number.isSafeInteger(profile.connectionCount) ? profile.connectionCount : null
@@ -215,7 +256,7 @@ export function renderPerson({ accountLabel, displayName, csrf, importJob, profi
   const shadowNote = profile.presence === 'shadow' ? `<p class="small shadow-note">${shadowBadge(profile, { withCount: false })} Not on Unlinked yet. This profile was imported from LinkedIn connections. Is this you? <a href="${csrf ? '/find-me' : '/join'}">Claim it</a></p>` : ''
   const facts = [raw(profile.location), known].filter(Boolean).join(' · ')
   const owner = firstName(profile.name)
-  return base(raw(profile.name) || 'Profile', `<section class="profile"><div><div class="card phead"><div class="banner" style="--h:${tone}"></div><div class="pav" style="--h:${tone}">${html(initials(profile.name))}</div><h1>${html(profile.name)}</h1>${profile.headline ? `<p class="hl">${html(profile.headline)}</p>` : ''}${facts ? `<span class="small">${html(facts)}</span>` : ''}${shadowNote}<div class="actions">${csrf ? '' : '<a class="button sm" href="/join">Join Unlinked</a>'}<a class="button sec sm" href="${csrf ? '/network' : '/people'}">Search everyone</a></div></div>${profile.about ? `<div class="card sec"><h3>About</h3><p>${html(profile.about)}</p></div>` : ''}${experience(profile.positions, 'Not listed.')}${education(profile.education)}${skills(profile.skills)}</div><aside><div class="card sec"><h3>${owner ? `${html(owner)}’s connections` : 'Connections'}${total ? ` · ${count(total)}` : connections.length ? ` · ${count(connections.length)}${more ? '+' : ''}` : ''}</h3>${connections.length ? connections.map(connectionRow).join('') : '<p class="small">None listed yet.</p>'}${more ? `<p><a href="${html(more)}">Show more</a></p>` : ''}</div></aside></section>`, { accountLabel, displayName, csrf, importJob })
+  return base(raw(profile.name) || 'Profile', `<section class="profile"><div><div class="card phead"><div class="banner" style="--h:${tone}"></div><div class="pav" style="--h:${tone}">${html(initials(profile.name))}</div><h1>${html(profile.name)}</h1>${profile.headline ? `<p class="hl">${html(profile.headline)}</p>` : ''}${facts ? `<span class="small">${html(facts)}</span>` : ''}${shadowNote}${connect?.state === 'incoming' ? `<p class="notice invite-note">${html(owner || 'They')} ${owner ? 'wants' : 'want'} to connect with you.${connect.note ? ` <q>${html(connect.note)}</q>` : ''}</p>` : ''}${CONNECT_NOTICES[connectNotice] ? `<p class="notice" role="status">${html(CONNECT_NOTICES[connectNotice])}</p>` : ''}<div class="actions">${connectControl({ connect, csrf, id, name: profile.name })}${csrf || connect ? '' : '<a class="button sm" href="/join">Join Unlinked</a>'}<a class="button sec sm" href="${csrf ? '/network' : '/people'}">Search everyone</a></div></div>${profile.about ? `<div class="card sec"><h3>About</h3><p>${html(profile.about)}</p></div>` : ''}${experience(profile.positions, 'Not listed.')}${education(profile.education)}${skills(profile.skills)}</div><aside><div class="card sec"><h3>${owner ? `${html(owner)}’s connections` : 'Connections'}${total ? ` · ${count(total)}` : connections.length ? ` · ${count(connections.length)}${more ? '+' : ''}` : ''}</h3>${connections.length ? connections.map(connectionRow).join('') : '<p class="small">None listed yet.</p>'}${more ? `<p><a href="${html(more)}">Show more</a></p>` : ''}</div></aside></section>`, { accountLabel, displayName, csrf, importJob })
 }
 
 // A company page, readable with or without a session: reviewed facts when we
@@ -300,3 +341,49 @@ export function renderScan({ accountLabel, displayName, csrf, importJob, tab = '
 
 // Runs after MEET_SCRIPT in the same module: tab switching for renderScan.
 export const SCAN_TABS_SCRIPT = `{const tabs=[...document.querySelectorAll('.scan-sheet [role=tab]')],start=document.getElementById('start'),stop=document.getElementById('stop');const show=(tab,focus)=>{for(const t of tabs){const on=t===tab;t.setAttribute('aria-selected',String(on));t.tabIndex=on?0:-1;document.getElementById(t.getAttribute('aria-controls')).hidden=!on}if(focus)tab.focus();history.replaceState(null,'',tab.getAttribute('href'));if(tab.id==='tab-scan')start.click();else stop.click()};for(const t of tabs){t.addEventListener('click',e=>{e.preventDefault();if(t.getAttribute('aria-selected')!=='true')show(t)});t.addEventListener('keydown',e=>{if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();show(tabs[(tabs.indexOf(t)+1)%tabs.length],true)})}const close=document.querySelector('.sheet-close');close.addEventListener('click',e=>{try{if(history.length>1&&document.referrer&&new URL(document.referrer).origin===location.origin){e.preventDefault();stop.click();history.back()}}catch{}});if(document.getElementById('tab-scan').getAttribute('aria-selected')==='true')start.click()}`
+
+// Short, server-side relative times; dates beyond a week.
+const ago = (at, now) => {
+  if (!Number.isSafeInteger(at)) return ''
+  const seconds = Math.max(0, Math.round((now - at) / 1000))
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
+  if (seconds < 7 * 86400) return `${Math.floor(seconds / 86400)}d`
+  return new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(new Date(at).getUTCFullYear() !== new Date(now).getUTCFullYear() ? { year: 'numeric' } : {}), timeZone: 'UTC' })
+}
+const profileHref = id => html(`/people/${encodeURIComponent(raw(id))}`)
+const named = value => value.profileId ? `<a href="${profileHref(value.profileId)}"><b>${html(value.name)}</b></a>` : `<b>${html(value.name)}</b>`
+const respondForm = (csrf, id, next = '') => `<form class="row-actions" method="post" action="/connections/respond">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(id)}">${next ? `<input type="hidden" name="next" value="${html(next)}">` : ''}<button class="quiet sm" name="action" value="ignore">Ignore</button><button class="sm" name="action" value="accept">Accept</button></form>`
+const INVITATION_NOTICES = { accepted: 'Accepted. You are now connected.', ignored: 'Ignored. They are not told.', withdrawn: 'Invitation withdrawn.', connection_unavailable: 'That invitation is no longer available.', connection_not_found: 'That invitation is no longer available.' }
+
+// My Network → Invitations: requests waiting for you, and the ones you sent.
+export function renderInvitations({ accountLabel, displayName, csrf, importJob, tab = 'received', received = [], sent = [], notice, now = Date.now() } = {}) {
+  const onSent = tab === 'sent'
+  const tabLink = (href, label, selected) => `<a href="${href}"${selected ? ' aria-current="page"' : ''}>${label}</a>`
+  const receivedRows = list(received).map(value => `<li class="req">${avatar(value.name, value.profileId ?? value.name)}<div class="req-body"><p>${named(value)} wants to connect</p>${value.note ? `<p class="req-note"><q>${html(value.note)}</q></p>` : ''}<p class="small">${html(ago(value.createdAt, now))}</p></div>${respondForm(csrf, value.id)}</li>`).join('')
+  const sentRows = list(sent).map(value => `<li class="req">${avatar(value.name, value.profileId ?? value.name)}<div class="req-body"><p>${named(value)}</p>${value.note ? `<p class="req-note"><q>${html(value.note)}</q></p>` : ''}<p class="small">Sent ${html(ago(value.createdAt, now))} · Pending</p></div><form class="row-actions" method="post" action="/connections/withdraw">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(value.id)}"><input type="hidden" name="next" value="/invitations?tab=sent"><button class="quiet sm" type="submit">Withdraw</button></form></li>`).join('')
+  const body = onSent
+    ? (sentRows ? `<ul class="reqs">${sentRows}</ul>` : '<p class="small empty">No invitations waiting on anyone. Find people in <a href="/network">People</a> and press Connect on their profile.</p>')
+    : (receivedRows ? `<ul class="reqs">${receivedRows}</ul>` : '<p class="small empty">No pending invitations. When someone asks to connect, it shows up here.</p>')
+  return base('My Network', `<section class="narrow wide mynet"><h1 class="hq">My Network</h1><p class="lead">Invitations to connect with members of Unlinked.</p>${INVITATION_NOTICES[notice] ? `<p class="notice" role="status">${html(INVITATION_NOTICES[notice])}</p>` : ''}<nav class="subtabs" aria-label="Invitations">${tabLink('/invitations', `Received${list(received).length ? ` · ${count(list(received).length)}` : ''}`, !onSent)}${tabLink('/invitations?tab=sent', `Sent${list(sent).length ? ` · ${count(list(sent).length)}` : ''}`, onSent)}<a href="/invites">Off-platform invites</a></nav><div class="card">${body}</div><p class="small">Accepting connects you both: each of you shows in the other’s people, and on both public profiles. Ignoring is private; the sender is not told. Inviting someone who is not on Unlinked yet? <a href="/invites">Create an invite link</a>.</p></section>`, { accountLabel, displayName, csrf, importJob })
+}
+
+const NOTIFICATION_TEXT = {
+  connection_request_received: value => `${named(value)} wants to connect with you`,
+  connection_request_accepted: value => `${named(value)} accepted your invitation to connect`,
+  invite_accepted: value => `${named(value)} accepted your invite and joined Unlinked. You are now connected.`,
+  profile_claimed: value => `${named(value)}, someone in your connections, joined Unlinked and claimed their profile`,
+}
+// The notification feed. `pending` maps request ids that still await an answer,
+// so a request notification can be answered in place.
+export function renderNotifications({ accountLabel, displayName, csrf, importJob, items = [], pending = new Map(), pendingCount = 0, now = Date.now() } = {}) {
+  const rows = list(items).filter(value => NOTIFICATION_TEXT[value.kind]).map(value => {
+    // The whole row opens the item (and marks it read), so the name is not a separate link.
+    const waiting = value.kind === 'connection_request_received' && pending.has(value.subjectId)
+    return `<li class="note${value.read ? '' : ' unread'}"><a class="note-open" href="/notifications/${html(value.id)}">${avatar(value.actorName, value.actorProfileId ?? value.actorName)}<span class="note-text">${NOTIFICATION_TEXT[value.kind]({ name: value.actorName })}${value.read ? '' : '<span class="vh"> (unread)</span>'}<span class="small note-time">${html(ago(value.createdAt, now))}</span></span></a>${waiting ? respondForm(csrf, value.subjectId, '/notifications') : ''}</li>`
+  }).join('')
+  const unread = list(items).some(value => !value.read)
+  const summary = pendingCount > 0 ? `<a class="note-summary" href="/invitations">${NETWORK_NAV_ICON}<span><b>${count(pendingCount)} pending ${pendingCount === 1 ? 'invitation' : 'invitations'}</b><span class="small">Review them in My Network</span></span></a>` : ''
+  return base('Notifications', `<section class="narrow wide notes"><div class="notes-top"><h1 class="hq">Notifications</h1>${unread ? `<form method="post" action="/notifications/read-all">${csrfInput(csrf)}<button class="quiet sm" type="submit">Mark all as read</button></form>` : ''}</div>${summary}<div class="card">${rows ? `<ul class="note-list">${rows}</ul>` : '<p class="small empty">Nothing yet. Invitations to connect, people accepting yours, and people you know joining Unlinked show up here.</p>'}</div><p class="small">Unlinked shows notifications here only; it does not email or push them yet.</p></section>`, { accountLabel, displayName, csrf, importJob })
+}

@@ -11,7 +11,7 @@ import { createAccountToolService } from './account-tools.mjs'
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
 // invocation; no operational credential or provider token is sent to clients.
-export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, legacyAccount, selfClaims, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic' }) {
+export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic' }) {
   const base = new URL(baseUrl)
   const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : networkMode === 'isolated-container' && host === '0.0.0.0' && ['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) && port === 9367
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !Number.isSafeInteger(port) || port < 7000 || port > 9999 || !privateHost || typeof complete !== 'function') throw new Error('explicit_isolated_pilot_configuration_required')
@@ -19,12 +19,12 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
   if (signup !== undefined && (typeof signup !== 'function' || !(accountGrantKey instanceof Uint8Array) || accountGrantKey.length < 32)) throw new Error('account_signup_configuration_required')
   const grants = createPrivateGrantService({ issuer: base.origin, ...keys, getBackend })
   const accountGrants = signup ? createAccountGrantService({ issuer: base.origin, signingKey: accountGrantKey, getBackend, publicSearchEnabled: typeof readPublishedSnapshot === 'function' }) : null
-  const browser = createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot,
+  const browser = createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot,
     issueAccountGrant: accountGrants?.issueGrant, ensureAccountGrant: accountGrants?.ensureGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
     issueGrant: grants.issueGrant, mcpEndpoint: new URL('/mcp', base).href, dataMode, backgroundImports, audit })
   // One tool service instance backs both agent surfaces, so the MCP tools and
   // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
-  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot }) : null
+  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications }) : null
   const mcp = accountGrants ? createAccountHostedHandler({ authenticateGrant: accountGrants.authenticateGrant, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService }) : createPrivateHostedHandler({ authenticateGrant: grants.authenticateGrant, complete, allowedHosts: [base.host], allowedOrigins: [base.origin],
     readResource: async (grant, type, id) => (await getBackend(grant)).readResource(type, id),
     readAsset: async (grant, sha256) => (await getBackend(grant)).readAsset(sha256),
