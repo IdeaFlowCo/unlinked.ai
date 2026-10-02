@@ -32,7 +32,7 @@ function fixture(owner) {
 }
 
 const configFrom = html => {
-  const encoded = html.match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/)?.[1]
+  const encoded = html.match(/<textarea id="onboarding-agent-configuration"[^>]*>([\s\S]*?)<\/textarea>/)?.[1]
   return encoded ? JSON.parse(encoded.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')) : null
 }
 
