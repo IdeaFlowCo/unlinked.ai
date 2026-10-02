@@ -21,7 +21,9 @@ there is no independent jobs/people database or live fixture substitution.
 Authenticated `/imports/:id/status` returns only the caller's job status/progress.
 `/profile` may read its own staged profile observations, with owner and live-job
 checks before and after reads. Owner AI/MCP still require terminal publication and the
-recorded upload disclosure; Everyone search uses only the separate public professional projection. `/network` and `/settings` rediscover pending jobs on
+recorded upload disclosure; before an uploaded profile is available it may fall back to a confirmed recovered legacy profile, rechecked through the same live owner binding.
+Owner-network browsing/search can include confirmed recovered directed contacts even when the owner has no imports; revoked links disappear on read.
+Everyone search uses only the separate public professional projection. `/network` and `/settings` rediscover pending jobs on
 return; technical receipts remain accessible under Settings. Pending progress is
 polled under the controller's CSP nonce and same-origin session.
 

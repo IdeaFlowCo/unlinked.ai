@@ -10,13 +10,14 @@ Meet is anonymous and does not resolve an Unlinked owner, read an archive, or im
 
 The canonical app sign-in is https://www.unlinked.ai/login.
 Anyone can sign in or create an account through Ideaflow ID; no invitation is needed.
+If the signed Ideaflow email matches one of the privately seeded recovered legacy accounts, the standalone runtime may ask once whether to continue with that old Unlinked profile before showing `/profile`.
 The older private.unlinked.ai host is a rollback/release-planning origin, not the current public onboarding URL.
 
 Prefer the full LinkedIn ZIP; Connections-only is also supported.
 `/import-linkedin` explains how to request and keep the export, then links to sign-in and upload.
 `/login` starts Ideaflow ID sign-in in the standalone runtime, and `/agents` points to Settings for Agent setup.
 The fictional homepage answer illustrates title/company matching, not a live search result or inferred biography.
-Public People browsing, private upload, owner-network AI search, Everyone AI search and agent setup live in the canonical beta; legacy Supabase APIs remain historical and are not the login path.
+Public People browsing, private upload, owner-network AI search, recovered-profile confirmation, Everyone AI search and agent setup live in the canonical beta; legacy Supabase APIs remain historical and are not the login path.
 
 See the [private archive foundation contract](docs/private-archive-import.md) for the parser/job scope and adapter requirements, and [durable archive import](docs/durable-archive-import.md) for the default-off profile-first background worker.
 
