@@ -1,5 +1,6 @@
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
+import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -186,6 +187,42 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend,
       onError: event => audit({ ...event, at: new Date().toISOString() }) })
     worker.start()
+    // Private LinkedIn slug -> legacy profile index, from the recovered source
+    // manifests. Shared by find-me and import identity. Memoizes the promise so
+    // concurrent first lookups share one parse; a failed load retries later.
+    let slugs = null
+    const slugIndex = () => {
+      if (!slugs) slugs = (async () => {
+        const directory = join(root, 'audit')
+        const names = (await readdir(directory)).filter(name => /^legacy-public-source-manifest-[a-f0-9]{64}\.json$/.test(name)).sort()
+        const index = new Map()
+        for (const name of names) {
+          const manifest = JSON.parse(await readFile(join(directory, name), 'utf8'))
+          for (const row of manifest.profiles ?? []) if (row.linkedinSlug && row.legacyId) index.set(String(row.linkedinSlug).toLowerCase(), row.legacyId)
+        }
+        return index
+      })().catch(error => { slugs = null; throw error })
+      return slugs
+    }
+    // Each published import's minted people and their LinkedIn addresses, read
+    // once per dataset revision (published imports never change in place).
+    const importRows = new Map()
+    const readImportRows = async session => {
+      const datasets = (await session.executeRead(tx => tx.run("MATCH (p:UnlinkedPublicDataset) WHERE p.id STARTS WITH 'public-import-' RETURN p.id AS id, p.revision AS revision ORDER BY id LIMIT 1001"))).records
+      const rows = []
+      for (const dataset of datasets) {
+        const key = `${dataset.get('id')}@${dataset.get('revision')}`
+        if (!importRows.has(key)) {
+          const chunks = await session.executeRead(tx => tx.run('MATCH (c:UnlinkedPublicChunk {dataset: $id, revision: $revision}) RETURN c.json AS json', { id: dataset.get('id'), revision: dataset.get('revision') }))
+          const minted = chunks.records.flatMap(record => { const value = JSON.parse(record.get('json')); return value.kind === 'profiles' ? value.rows : [] }).filter(row => typeof row.id === 'string' && row.id.startsWith('public-'))
+          const documents = await session.executeRead(tx => tx.run("UNWIND $ids AS id MATCH (a:OperationalResource {namespace: 'unlinked', type: 'assertion', sourceId: id}) RETURN id, a.document AS document", { ids: minted.map(row => row.id.slice('public-'.length)) }))
+          const subjects = new Map(documents.records.map(record => { let value = null; try { value = JSON.parse(record.get('document')) } catch { value = null } return [record.get('id'), value?.payload?.subject ?? null] }))
+          importRows.set(key, minted.map(row => ({ publicId: row.id, subject: subjects.get(row.id.slice('public-'.length)) ?? null })))
+        }
+        rows.push(...importRows.get(key))
+      }
+      return rows
+    }
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend,
       readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
       // An accepted invite is a connection both people agreed to: it joins the
@@ -205,7 +242,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         try {
           const result = await session.executeRead(tx => tx.run(`MATCH (d:UnlinkedProfileDecision) WHERE coalesce(d.revoked, false) = false
             RETURN d.id AS id, d.kind AS kind, d.profileId AS profileId, d.survivorId AS survivorId, d.name AS name ORDER BY d.decidedAt, d.id LIMIT 5001`))
-          return result.records.map(record => Object.fromEntries(['id', 'kind', 'profileId', 'survivorId', 'name'].filter(key => record.get(key) !== null).map(key => [key, record.get(key)])))
+          const explicit = result.records.map(record => Object.fromEntries(['id', 'kind', 'profileId', 'survivorId', 'name'].filter(key => record.get(key) !== null).map(key => [key, record.get(key)])))
+          // Imported copies of legacy people, matched by LinkedIn address only.
+          let automatic = []
+          try { automatic = urlIdentityMerges({ rows: await readImportRows(session), slugIndex: await slugIndex(), explicit }) } catch { automatic = [] }
+          return [...explicit, ...automatic]
         } finally { await session.close() }
       },
       // A legacy profile is a member's once its account claim is confirmed and the owner is active.
@@ -259,22 +300,6 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // treat the row like a seeded one. Operator rollback:
       // legacy-account-operator.mjs revoke <profileId> <receiptId>.
       selfClaims: legacyLinks && publicPeople ? (() => {
-        let slugs = null
-        const slugIndex = () => {
-          // Memoizes the promise so concurrent first lookups share one parse;
-          // a failed load is not cached and a later lookup retries.
-          if (!slugs) slugs = (async () => {
-            const directory = join(root, 'audit')
-            const names = (await readdir(directory)).filter(name => /^legacy-public-source-manifest-[a-f0-9]{64}\.json$/.test(name)).sort()
-            const index = new Map()
-            for (const name of names) {
-              const manifest = JSON.parse(await readFile(join(directory, name), 'utf8'))
-              for (const row of manifest.profiles ?? []) if (row.linkedinSlug && row.legacyId) index.set(String(row.linkedinSlug).toLowerCase(), row.legacyId)
-            }
-            return index
-          })().catch(error => { slugs = null; throw error })
-          return slugs
-        }
         const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
         return {
           lookupSlug: async slug => { try { return (await slugIndex()).get(String(slug).toLowerCase()) ?? null } catch { return null } },
