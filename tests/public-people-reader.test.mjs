@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createPublicPeopleReader, PublicPeopleReaderError } from '../src/utils/public-people/reader.mjs'
 
 const person = (id, name, company = 'Example') => ({ id, name, company, headline: 'Research', about: 'Published biography', positions: [{ title: '', company, email: 'private@example.test' }], education: [{ institution: 'College', phone: 'private-phone' }], skills: ['Research'], email: 'private@example.test', phone: 'private-phone', notes: 'private-notes', rawImport: 'private-archive' })
-const published = () => ({ state: 'published', complete: true, revision: 'immutable-fence-1', profiles: [person('z', 'Zoë'), person('b', 'alice', 'Climate'), person('a', 'Alice', 'Energy')], connections: [{ fromId: 'z', toId: 'a' }, { fromId: 'z', toId: 'b' }] })
+const published = () => ({ state: 'published', complete: true, revision: 'immutable-fence-1', profiles: [{ ...person('z', 'Zoë'), headline: 'Graph systems researcher' }, person('b', 'alice', 'Climate'), person('a', 'Alice', 'Energy')], connections: [{ fromId: 'z', toId: 'a' }, { fromId: 'z', toId: 'b' }] })
 const unavailable = error => error.status === 503 && error.code === 'public_people_unavailable'
 const invalid = error => error.status === 400 && error.code === 'public_people_input_invalid'
 
@@ -39,6 +39,7 @@ test('stable normalized name/id ordering and query-bound pagination survives pro
   const second = await reader.list({ cursor: first.nextCursor });assert.deepEqual(second.profiles.map(p => p.id), ['b'])
   const third = await reader.list({ cursor: second.nextCursor });assert.deepEqual(third.profiles.map(p => p.id), ['z']);assert.equal(third.nextCursor, undefined)
   assert.deepEqual((await reader.list({ query: 'ＡＬＩＣＥ climate' })).profiles.map(p => p.id), ['b'])
+  assert.deepEqual((await reader.list({ query: 'Graph' })).profiles.map(p => p.id), ['z'])
   await assert.rejects(reader.list({ query: 'alice', cursor: first.nextCursor }), invalid)
   const connectionPage = await reader.profile({ id: 'z' })
   source.revision = 'immutable-fence-2'
