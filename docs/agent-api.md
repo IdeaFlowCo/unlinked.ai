@@ -220,6 +220,24 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
   (`UNLINKED_AGENT_PROVISION_CLIENTS="clientId:secret,..."`, secrets ≥ 32
   chars; only their hashes are retained in memory). An empty/absent list
   disables the endpoint entirely: it answers `not_found` (404).
+  On the canonical runtime the list lives in the private runtime env file on
+  the Noos production host,
+  `/srv/unlinked-private-guest-pilot-20261001/runtime/runtime.env`, and is set
+  by the Unlinked host operator, not by the consumer. The runtime reads it
+  only at startup, so adding, rotating or removing a client requires a
+  runtime restart, and every restart signs all browser users out. Batch
+  allow-list changes with a release rollout rather than restarting on their
+  own.
+- **Issuer and subject:** the issuer must exactly equal the issuer the
+  Unlinked runtime is configured with (production:
+  `https://id.ideaflow.app/api/auth`). Any other issuer, including a
+  development Ideaflow ID instance, always answers `not_linked`, even for
+  people who have signed in to Unlinked. The subject is matched against the
+  one Unlinked recorded when the person signed in through Unlinked's own
+  Ideaflow ID client. This assumes Ideaflow ID issues the same subject for a
+  given user to every client (public, not pairwise, subjects). Consumers
+  should confirm that for their own client before relying on it, since
+  pairwise subjects would make every lookup answer `not_linked`.
 - **Rate limit:** 30 requests/min per client id (`rate_limited`, 429,
   `Retry-After`).
 - **Request:** `{"issuer": "<https OIDC issuer>", "subject": "<exact opaque
