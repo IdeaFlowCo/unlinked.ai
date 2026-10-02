@@ -211,3 +211,41 @@ test('connected directory navigation retains its filter through modes, clear and
   const href = output.match(/href="([^"]+)">Show more/)[1]
   assert.equal(new URL(href.replaceAll('&amp;', '&'), 'https://unlinked.invalid').searchParams.get('connected'), '1')
 })
+
+test('removing an invite settles older pending or ignored requests and reconnect requires fresh acceptance', async t => {
+  for (const status of ['pending', 'ignored']) for (const remover of [a, b]) for (const inviter of [a, b]) {
+    await t.test(`${status}, ${remover === a ? 'sender' : 'recipient'} removes, ${inviter === a ? 'sender' : 'recipient'} invited`, async () => {
+      const retracted = [], store = createMemoryConnectionStore()
+      const requests = createConnectionRequests({ store, notifications: {
+        notify: async () => {}, markReadByKey: async () => {}, retract: async key => retracted.push(key),
+      } })
+      const invites = createMemberInvitations({ store: createMemoryInvitationStore() })
+      const original = await requests.send({ sender: a, recipient: b })
+      if (status === 'ignored') await requests.respond(b, original.request.id, 'ignore')
+      const link = await invites.create({ inviter, inviterName: 'Member', inviteeName: 'Other' })
+      await invites.respond(link.token, inviter === a ? b : a, 'accept', 'Other')
+      const actions = createConnectionActions({ memberConnections: requests, memberInvitations: invites,
+        accountForProfile: async id => ({ a, b, c })[id],
+        readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'r', profiles: profiles.slice(0, 3), members: ['a', 'b', 'c'], connections: [] }) })
+      for (const [member, profileId] of [[a, 'b'], [b, 'a']]) {
+        assert.deepEqual(await actions.relationTo(member, profileId), { state: 'connected', requestId: `invite:${link.invitation.id}` })
+      }
+      await assert.rejects(actions.remove(c, `invite:${link.invitation.id}`), { code: 'connection_not_found' })
+      assert.equal((await requests.sent(a)).length, 1)
+      await actions.remove(remover, `invite:${link.invitation.id}`)
+      assert.deepEqual(await requests.sent(a), [])
+      assert.deepEqual(await requests.received(b), [])
+      assert.equal(await requests.pendingCount(b), 0)
+      assert.equal((await store.get(original.request.id)).status, 'removed')
+      assert.deepEqual(retracted, [`connection-request:${original.request.id}`])
+      for (const [member, profileId] of [[a, 'b'], [b, 'a']]) assert.equal((await actions.relationTo(member, profileId)).state, 'none')
+      const reconnected = await actions.send(remover, { profileId: remover === a ? 'b' : 'a' })
+      assert.equal(reconnected.code, 'sent')
+      assert.notEqual(reconnected.request.id, original.request.id)
+      assert.deepEqual(await requests.connections(a), [])
+      assert.deepEqual(await requests.connections(b), [])
+      await requests.respond(remover === a ? b : a, reconnected.request.id, 'accept')
+      assert.equal((await requests.connections(a)).length, 1)
+    })
+  }
+})
