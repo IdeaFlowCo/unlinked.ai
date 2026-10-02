@@ -9,7 +9,7 @@ import * as oidc from 'openid-client'
 import { ingestArchive } from '../src/utils/private-import/job.mjs'
 import { createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
 import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
-import { scopedSetupConfiguration } from '../src/utils/private-import/scoped-setup.mjs'
+import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/private-import/scoped-setup.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
@@ -625,9 +625,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         // setup stays revoked (ensure returns null) until the owner regenerates.
         const ensured = typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner) : null
         const configuration = ensured ? scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
+        const setups = ensured ? agentClientSetups({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const ids = await backend.listAccountGrantIds()
         const jobs = await jobResources(), props = jobProps(jobs)
-        const view=renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs), agentConfiguration: configuration, agentSetupAutomatic: typeof ensureAccountGrant === 'function' })
+        const view=renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function' })
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration?agentSetupCopyScript():'')
@@ -704,9 +705,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const { accessToken, grantId: replacement } = await issueAccountGrant(session.owner)
         for (const grantId of await backend.listAccountGrantIds()) if (grantId !== replacement) await revokeAccountGrant(session.owner, grantId)
         const configuration = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
+        const setups = agentClientSetups({ endpoint: mcpEndpoint, accessToken })
         const jobs = await jobResources(), props = jobProps(jobs)
         const grants = await backend.listAccountGrantIds()
-        journey(response, renderSettings({ ...props, imports: summaries(jobs), grants: grants.map(id => ({ id })), agentConfiguration: configuration, agentSetupAutomatic: typeof ensureAccountGrant === 'function' }), props.importJob, agentSetupCopyScript()); return
+        journey(response, renderSettings({ ...props, imports: summaries(jobs), grants: grants.map(id => ({ id })), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function' }), props.importJob, agentSetupCopyScript()); return
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         if (uploadBusy) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
