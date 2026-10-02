@@ -54,7 +54,7 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index. Paginated with an opaque cursor, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Paginated, at most 50 per page, typed provenance per entry.',
   unlinked_get_profile: 'Read one published public profile by id with its public connections page. Returns typed not_found when no published profile has that id.',
-  unlinked_ask: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. AI-backed: may exceed 10s; set timeoutMs to bound it.',
+  unlinked_ask: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
 })
 
 const DETERMINISTIC_TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile'])
@@ -74,19 +74,30 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
-  const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2 } = limits
-  let window = Date.now(), deterministicCount = 0
-  let aiWindow = Date.now(), aiCount = 0, aiDay = Math.floor(Date.now() / 86400000), aiDayCount = 0, aiBusy = 0
-  const admitDeterministic = () => {
-    if (Date.now() - window >= 60000) { window = Date.now(); deterministicCount = 0 }
-    if (++deterministicCount > deterministicPerMinute) throw new AccountToolError('rate_limited', 'Deterministic tool budget is exhausted; retry within a minute.')
-  }
-  const admitAi = () => {
+  const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8 } = limits
+  // Budgets are per grant owner, so one agent cannot starve other accounts;
+  // a shared in-flight ceiling still bounds total concurrent provider spend.
+  const budgets = new Map()
+  let aiBusyTotal = 0
+  const bucket = ownerId => {
     const now = Date.now(), day = Math.floor(now / 86400000)
-    if (now - aiWindow >= 60000) { aiWindow = now; aiCount = 0 }
-    if (day !== aiDay) { aiDay = day; aiDayCount = 0 }
-    if (aiCount >= aiPerMinute || aiDayCount >= aiPerDay || aiBusy >= aiInFlight) throw new AccountToolError('rate_limited', 'AI tool budget is exhausted; retry within a minute.')
-    aiCount++; aiDayCount++; aiBusy++
+    if (budgets.size > 5000) for (const [key, value] of budgets) if (value.aiDay !== day && now - value.window >= 60000 && !value.aiBusy) budgets.delete(key)
+    let value = budgets.get(ownerId)
+    if (!value) { value = { window: now, deterministic: 0, aiWindow: now, ai: 0, aiDay: day, aiDayCount: 0, aiBusy: 0 }; budgets.set(ownerId, value) }
+    return value
+  }
+  const admitDeterministic = ownerId => {
+    const value = bucket(ownerId)
+    if (Date.now() - value.window >= 60000) { value.window = Date.now(); value.deterministic = 0 }
+    if (++value.deterministic > deterministicPerMinute) throw new AccountToolError('rate_limited', 'Deterministic tool budget is exhausted; retry within a minute.')
+  }
+  const admitAi = ownerId => {
+    const value = bucket(ownerId), now = Date.now(), day = Math.floor(now / 86400000)
+    if (now - value.aiWindow >= 60000) { value.aiWindow = now; value.ai = 0 }
+    if (day !== value.aiDay) { value.aiDay = day; value.aiDayCount = 0 }
+    if (value.ai >= aiPerMinute || value.aiDayCount >= aiPerDay || value.aiBusy >= aiInFlight || aiBusyTotal >= aiInFlightTotal) throw new AccountToolError('rate_limited', 'AI tool budget is exhausted; retry within a minute.')
+    value.ai++; value.aiDayCount++; value.aiBusy++; aiBusyTotal++
+    return () => { value.aiBusy--; aiBusyTotal-- }
   }
 
   const publicReader = pageSize => {
@@ -100,9 +111,18 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     } })
     return { reader, captured }
   }
-  const readerFailure = error => error instanceof PublicPeopleReaderError && error.status === 400
-    ? new AccountToolError('invalid_input', 'The public People request was invalid (query, mode or cursor).')
-    : new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.')
+  // With q/mode already schema-validated, a reader 400 under a supplied cursor
+  // is a cursor problem; a post-snapshot failure under a supplied cursor is the
+  // revision moving between pages. Both mean: restart from the first page.
+  const readerFailure = (error, cursorSupplied, captured) => {
+    if (error instanceof PublicPeopleReaderError && error.status === 400)
+      return cursorSupplied
+        ? new AccountToolError('cursor_invalid', 'The cursor does not match this listing; restart from the first page.')
+        : new AccountToolError('invalid_input', 'The public People request was invalid (query or mode).')
+    if (cursorSupplied && captured?.revision)
+      return new AccountToolError('cursor_invalid', 'The published index revision changed; restart from the first page.')
+    return new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.')
+  }
 
   const connectionEntry = row => {
     const recorded = row.provenance?.source === 'recovered-legacy-public-v1'
@@ -135,7 +155,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     async unlinked_list_people(grant, { q = '', mode = 'best', cursor, limit = 50 }, signal) {
       const { reader, captured } = publicReader(limit)
       let result
-      try { result = await reader.list({ query: q, mode, cursor, signal }) } catch (error) { throw readerFailure(error) }
+      try { result = await reader.list({ query: q, mode, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
       return { kind: 'unlinked_list_people', revision: captured.revision, total: result.total ?? captured.total ?? result.profiles.length,
         ...(result.match ? { match: result.match } : {}), profiles: result.profiles,
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), visibility: 'public' }
@@ -143,7 +163,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     async unlinked_get_profile(grant, { id, connectionsCursor }, signal) {
       const { reader, captured } = publicReader(50)
       let result
-      try { result = await reader.profile({ id, cursor: connectionsCursor, signal }) } catch (error) { throw readerFailure(error) }
+      try { result = await reader.profile({ id, cursor: connectionsCursor, signal }) } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured) }
       if (!result) throw new AccountToolError('not_found', 'No published public profile has that id.')
       return { kind: 'unlinked_get_profile', revision: captured.revision, profile: result.profile, visibility: 'public' }
     },
@@ -181,7 +201,10 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       return { kind: 'unlinked_list_connections', degree: 1, revision, total: rows.length, connections: selected,
         ...(offset + selected.length < rows.length ? { nextCursor: opaqueCursor(binding, offset + selected.length) } : {}) }
     },
-    async unlinked_ask(grant, { query, scope = 'everyone', timeoutMs = 40000 }, signal) {
+    async unlinked_ask(grant, { query, scope, timeoutMs = 40000 }, signal) {
+      // Default to the widest scope the grant actually covers, so the natural
+      // single-argument call works on every grant that includes the tool.
+      scope ??= grant.scope === 'owner_network_and_public' ? 'everyone' : 'mine'
       if (typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'AI ranking is not configured.')
       const combined = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)])
       if (scope === 'mine') {
@@ -213,7 +236,9 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       try {
         if (connectionQuery.degree) {
           if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('degree_unproven', 'Recorded public connection paths require the published public index.')
-          return await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal })
+          // The HTTP contract caps pages at 50; offset cursors stay compatible
+          // with the hosted MCP launch tool's historical 100-row pages.
+          return await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal, pageSize: 50 })
         }
         if (typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'AI ranking is not configured.')
         return await createAccountNetwork({ owner, getBackend, complete }).search({ query, signal })
@@ -250,8 +275,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
-    const ai = !DETERMINISTIC_TOOLS.has(name)
-    if (ai) admitAi(); else admitDeterministic()
+    const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : admitAi(grant.ownerId)
     try {
       if (typeof revalidate === 'function') await revalidate()
       const result = await tools[name](grant, parsed.data, signal)
@@ -259,7 +283,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       const text = JSON.stringify(result)
       if (Buffer.byteLength(text) > 1024 * 1024) throw new AccountToolError('result_too_large', 'The result exceeded 1 MiB; narrow the query or lower the page size.')
       return { result, text }
-    } finally { if (ai) aiBusy-- }
+    } finally { release?.() }
   }
 
   return { call }

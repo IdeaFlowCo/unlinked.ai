@@ -35,6 +35,9 @@ verify linkage explicitly. Callers without a usable grant get typed
 
 Grant revocation is checked on **every** call, and re-checked after the tool
 body runs, so a revocation mid-call returns `grant_revoked` rather than data.
+`grant_revoked` is terminal — discard the token. A transient failure while
+verifying an otherwise valid token returns `upstream_unavailable` instead:
+retry with the same token.
 Deleting the account tombstones all owner data and revokes grants
 (`account_data_deleted` flow); a deleted account's tokens fail `grant_revoked`.
 
@@ -99,10 +102,14 @@ This vocabulary may be extended, never renamed.
 ## Rate limits and latency
 
 - Deterministic tools (`whoami`, `list_people`, `list_connections`,
-  `get_profile`): shared budget 120 requests/min per runtime; expected well
+  `get_profile`): 120 requests/min **per grant owner**; expected well
   under 1 s p95 at the current index size (~16k profiles, in-memory snapshot).
-- AI tools (`ask`, `search_network` free-text mode, `search_everyone`): shared
-  budget 20/min, 2000/day, 2 in flight. **Known conflict with a 10 s consumer
+- AI tools (`ask`, `search_network` free-text mode, `search_everyone`):
+  20/min, 2000/day and 2 in flight **per grant owner**, plus a shared ceiling
+  of 8 concurrent AI calls per runtime. These budgets are enforced on the
+  HTTP API and on the new MCP tools; the two launch tools keep their
+  historical unmetered behavior **on the MCP surface only** (preserved for
+  existing integrations). **Known conflict with a 10 s consumer
   timeout:** these call a provider with batched ranking rounds; worst case is
   bounded at 40 s and p95 is not guaranteed under 10 s. Mitigations the
   contract commits to: `unlinked_ask` accepts `timeoutMs` (1000–40000) and
@@ -165,8 +172,10 @@ visibility }], nextCursor? }`.
 
 ### `POST /api/agent/v1/ask` `{ query, scope?, timeoutMs? }` ⇄ `unlinked_ask`
 Explicit AI tool. `scope: "mine"` ranks only the owner's imported network
-(works on every grant); `scope: "everyone"` (default) ranks the published
-public index and requires the public scope, else `scope_not_granted`.
+(works on every grant); `scope: "everyone"` ranks the published public index
+and requires the public scope, else `scope_not_granted`. When `scope` is
+omitted it defaults to the widest scope the grant covers (`everyone` on
+public-scope grants, `mine` on owner-network grants).
 Response (`mine`): `{ kind, scope, mode, considered, indexed, matches: [{
 assertionId, sourceId, rowId, name, headline?, company?, reason,
 visibility: "owner_private" }] }`.
@@ -177,8 +186,9 @@ company?, reason }], visibility: "public" }`.
 ### `POST /api/agent/v1/search-network` `{ query, degree?, cursor? }` ⇄ `unlinked_search_network`
 Launch tool, unchanged semantics: free-text AI search of the owner network, or
 recorded-path reading with `degree`. On HTTP, failures are typed
-(`degree_unproven`, `cursor_invalid`, ...); on MCP it keeps its historical
-free-text error sentence.
+(`degree_unproven`, `cursor_invalid`, ...) and recorded-path pages cap at 50
+rows; on MCP it keeps its historical free-text error sentence and 100-row
+pages (offset cursors are interchangeable between the two).
 
 ### `POST /api/agent/v1/search-everyone` `{ query }` ⇄ `unlinked_search_everyone`
 Launch tool, unchanged semantics: AI search over the published public index.

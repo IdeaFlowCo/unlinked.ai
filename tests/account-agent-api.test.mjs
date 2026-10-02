@@ -275,6 +275,13 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   assert.equal((await askEveryone.json()).error.code, 'scope_not_granted')
   const askMine = await (await call(narrowApp.endpoint, narrow.accessToken, 'ask', { method: 'POST', body: JSON.stringify({ query: 'engineer', scope: 'mine' }) })).json()
   assert.equal(askMine.scope, 'mine')
+  // Omitted scope defaults to the widest scope the grant covers.
+  const askDefault = await (await call(narrowApp.endpoint, narrow.accessToken, 'ask', { method: 'POST', body: JSON.stringify({ query: 'engineer' }) })).json()
+  assert.equal(askDefault.scope, 'mine')
+  // Wrong method on an existing route is 405 with Allow, not a phantom 404.
+  const wrongMethod = await call(narrowApp.endpoint, narrow.accessToken, 'whoami', { method: 'POST', body: JSON.stringify({}) })
+  assert.equal(wrongMethod.status, 405)
+  assert.equal(wrongMethod.headers.get('allow'), 'GET')
 
   // An anchored owner reads recorded public paths — first and second degree.
   const anchored = fixture()
@@ -321,4 +328,43 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   await assert.rejects(limited.call({ grant, name: 'unlinked_whoami' }), error => error instanceof AccountToolError && error.code === 'rate_limited')
   await limited.call({ grant, name: 'unlinked_ask', input: { query: 'engineer', scope: 'mine' } })
   await assert.rejects(limited.call({ grant, name: 'unlinked_ask', input: { query: 'engineer', scope: 'mine' } }), error => error.code === 'rate_limited')
+  // Budgets are per owner: another owner's grant is not starved.
+  const otherOwner = { ownerId: 'synthetic-other-owner', userId: 'synthetic-other-user' }
+  anchored.register(otherOwner)
+  const otherGrant = { ...grant, ownerId: otherOwner.ownerId, userId: otherOwner.userId }
+  assert.equal((await limited.call({ grant: otherGrant, name: 'unlinked_whoami' })).result.ownerId, otherOwner.ownerId)
+})
+
+test('republished index invalidates cursors as typed cursor_invalid; transient backend failure is upstream_unavailable, not revocation', async t => {
+  const f = fixture()
+  const owner = { ownerId: 'synthetic-cursor-owner', userId: 'synthetic-cursor-user' }
+  f.register(owner)
+  let revision = 'public-rev-1'
+  const snapshot = () => ({ ...publishedSnapshot(), revision })
+  const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
+  const service = createAccountToolService({ getBackend: f.getBackend, complete, readPublishedSnapshot: async () => snapshot() })
+  const grant = { ownerId: owner.ownerId, userId: owner.userId, grantId: 'x'.repeat(64), scope: 'owner_network_and_public', version: 2, tools: ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ask'] }
+  const first = (await service.call({ grant, name: 'unlinked_list_people', input: { limit: 1 } })).result
+  assert.equal(first.revision, 'public-rev-1')
+  revision = 'public-rev-2'
+  await assert.rejects(service.call({ grant, name: 'unlinked_list_people', input: { limit: 1, cursor: first.nextCursor } }), error => error instanceof AccountToolError && error.code === 'cursor_invalid')
+  // A fresh first page at the new revision works.
+  assert.equal((await service.call({ grant, name: 'unlinked_list_people', input: { limit: 1 } })).result.revision, 'public-rev-2')
+  // A garbage cursor is typed the same way.
+  await assert.rejects(service.call({ grant, name: 'unlinked_list_people', input: { cursor: 'bm90LWEtY3Vyc29y' } }), error => error.code === 'cursor_invalid')
+
+  // Grant verification distinguishes a backend blip from revocation.
+  let backendDown = false
+  const flaky = async o => { if (backendDown) throw new Error('backend_unreachable'); return f.getBackend(o) }
+  const grants = createAccountGrantService({ issuer: 'https://synthetic-flaky.invalid', signingKey: randomBytes(32), getBackend: flaky, publicSearchEnabled: true })
+  const issued = await grants.issueGrant(owner)
+  const headers = { headers: { authorization: `Bearer ${issued.accessToken}` } }
+  assert.ok((await grants.authenticateGrantDetailed(headers)).grant)
+  backendDown = true
+  assert.deepEqual(await grants.authenticateGrantDetailed(headers), { error: 'upstream_unavailable' })
+  backendDown = false
+  assert.ok((await grants.authenticateGrantDetailed(headers)).grant)
+  assert.deepEqual(await grants.authenticateGrantDetailed({ headers: {} }), { error: 'not_linked' })
+  await grants.revoke(owner, issued.grantId)
+  assert.deepEqual(await grants.authenticateGrantDetailed(headers), { error: 'grant_revoked' })
 })
