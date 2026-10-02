@@ -5,6 +5,8 @@ import { createMemberInvitations, createNeo4jInvitationStore } from './member-in
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
 import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
 import { createContactCards, createNeo4jContactCardStore } from './contact-card.mjs'
+import { createSelfClaims } from './self-claims.mjs'
+import { isTestProfileId, testProfile, CLAIMED_PROFILE_FOR_OWNER, OWNER_FOR_CLAIMED_PROFILE, CLAIMED_MEMBER_PROFILES } from './test-profiles.mjs'
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { lstat, mkdir, open, readFile, readdir, rm } from 'node:fs/promises'
@@ -110,8 +112,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const publicProfileIdFor = async owner => {
       const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
       try {
-        const claimed = await session.executeRead(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount {ownerId: $ownerId, userId: $userId}) WHERE a.revoked = false
-          MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: $ownerId, userId: $userId}) WHERE coalesce(b.active, true) = true RETURN a.profileId AS id LIMIT 2`, owner))
+        const claimed = await session.executeRead(tx => tx.run(CLAIMED_PROFILE_FOR_OWNER, owner))
         if (claimed.records.length === 1) return claimed.records[0].get('id')
         const imported = await session.executeRead(tx => tx.run(`MATCH (r:OperationalResource {namespace: 'unlinked', type: 'import', publicationOwner: $ownerId, userId: $userId})
           WHERE r.document CONTAINS '"version":"public-professional-archive-openai-v2"'
@@ -135,9 +136,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           ? await session.executeRead(tx => tx.run(`MATCH (r:OperationalResource {namespace: 'unlinked', type: 'import', sourceId: $id}) WHERE r.publicationOwner IS NOT NULL
               MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: r.publicationOwner}) WHERE b.userId = r.userId AND coalesce(b.active, true) = true
               RETURN DISTINCT b.sourceOwnerId AS ownerId, b.userId AS userId LIMIT 2`, { id: imported[1] }))
-          : await session.executeRead(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount {profileId: $id}) WHERE a.revoked = false AND a.ownerId IS NOT NULL
-              MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: a.ownerId, userId: a.userId}) WHERE coalesce(b.active, true) = true
-              RETURN DISTINCT a.ownerId AS ownerId, a.userId AS userId LIMIT 2`, { id: profileId }))
+          : await session.executeRead(tx => tx.run(OWNER_FOR_CLAIMED_PROFILE, { id: profileId }))
         return result.records.length === 1 ? { ownerId: result.records[0].get('ownerId'), userId: result.records[0].get('userId') } : null
       } finally { await session.close() }
     }
@@ -185,7 +184,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       const backend = createNoosOwnerBackend({ baseUrl: `http://127.0.0.1:${operationalPort}/v1`, ownerId: owner.ownerId, accessToken })
       const readLegacyProfile=async()=>{
           const link = await legacyLinks?.readBound(owner.ownerId, owner.userId)
-          if (!link || !publicPeople) return null
+          // A test-profile claim is never a legacy anchor: no public profile,
+          // network, export or agent reader sees it (readTestProfileClaim does).
+          if (!link || !publicPeople || isTestProfileId(link.profileId)) return null
           const snapshot = await publicPeople.read('recovered-legacy-public-v1')
           if (!snapshot || snapshot.revision !== 'legacy-public-v1:' + link.sourceSha256) throw Error('legacy_profile_source_unavailable')
           const profile = snapshot.profiles.find(value => value.id === link.profileId)
@@ -210,7 +211,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         }
         return rows
       } : undefined
-      return { ...backend,readLegacyProfile,...(readInviteConnections ? { readInviteConnections } : {}),...(readMemberConnections ? { readMemberConnections } : {}),
+      // The account's claim on a test profile, for its own /profile page only.
+      const readTestProfileClaim = async () => {
+        const link = await legacyLinks?.readBound(owner.ownerId, owner.userId)
+        const test = link ? testProfile(link.profileId) : null
+        return test ? { profileId: test.id, name: test.name, headline: test.headline, receiptId: link.receiptId } : null
+      }
+      return { ...backend,readLegacyProfile,readTestProfileClaim,...(readInviteConnections ? { readInviteConnections } : {}),...(readMemberConnections ? { readMemberConnections } : {}),
         ...(recovery?{readLegacyFiles:recovery.list,readLegacyOriginal:recovery.readOriginal,readLegacyObservations:recovery.observations}:{}),
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
@@ -304,9 +311,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       readMembers: async () => {
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
         try {
-          const result = await session.executeRead(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount) WHERE a.ownerId IS NOT NULL AND a.revoked = false
-            MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: a.ownerId, userId: a.userId}) WHERE coalesce(b.active, true) = true
-            RETURN DISTINCT a.profileId AS id ORDER BY id LIMIT 20001`))
+          const result = await session.executeRead(tx => tx.run(CLAIMED_MEMBER_PROFILES))
           return result.records.map(record => record.get('id'))
         } finally { await session.close() }
       },
@@ -338,6 +343,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // Someone just claimed `profileId`: tell members whose own exports listed
       // that profile. Best effort and bounded; never blocks the claim.
       notifyProfileClaimed: notifications && publicPeople ? async (profileId, claimer) => {
+        if (isTestProfileId(profileId)) return 0
         const snapshot = await readPublishedSnapshot?.()
         if (!snapshot || !Array.isArray(snapshot.connections)) return 0
         const name = snapshot.profiles?.find(value => value.id === profileId)?.name
@@ -360,71 +366,17 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         if (!owner?.ownerId || !owner.userId) throw new Error('private_owner_recovery_required')
         const session = driver.session({ database: 'neo4j' })
         try {
+          // A test-profile claim is removed with the account, so the test
+          // profile and the address can be claimed again.
+          await session.executeWrite(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount {ownerId:$owner,userId:$user}) WHERE a.testProfile = true AND a.selfAsserted = true DETACH DELETE a`,
+          { owner: owner.ownerId, user: owner.userId }))
           await session.executeWrite(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount {ownerId:$owner,userId:$user,revoked:false})
             SET a._lock=true REMOVE a._lock SET a.revoked=true, a.revokedAt=coalesce(a.revokedAt,$now), a.revokedReason=coalesce(a.revokedReason,'owner_account_deletion')`,
           { owner: owner.ownerId, user: owner.userId, now: Date.now() }))
         } finally { await session.close() }
       } : undefined,
-      // Self-serve claims for legacy profiles outside the seeded manifest: a
-      // lookup hint (LinkedIn address, or the signed-in display name) selects an
-      // unclaimed legacy profile, and an explicit confirmation writes a
-      // self-asserted UnlinkedLegacyAccount row. The uniqueness constraints on
-      // profileId/ownerId/userId/emailHash make first-claim-wins and
-      // one-claim-per-account database-enforced; readBound/candidate/confirm
-      // treat the row like a seeded one. Operator rollback:
-      // legacy-account-operator.mjs revoke <profileId> <receiptId>.
-      selfClaims: legacyLinks && publicPeople ? (() => {
-        const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
-        return {
-          lookupSlug: async slug => { try { return (await slugIndex()).get(String(slug).toLowerCase()) ?? null } catch { return null } },
-          // Names resolve only against the recovered legacy dataset, never the
-          // merged shared snapshot — a member-imported contact with the same
-          // name must not shadow or displace a claimable legacy profile.
-          lookupName: async name => {
-            const wanted = normalizedName(name)
-            if (!wanted) return null
-            const snapshot = await publicPeople.read('recovered-legacy-public-v1')
-            if (!snapshot) return null
-            const matches = snapshot.profiles.filter(profile => normalizedName(profile.name) === wanted)
-            return matches.length === 1 ? matches[0].id : null
-          },
-          claimable: async profileId => {
-            const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
-            try { return !(await session.executeRead(tx => tx.run('MATCH (a:UnlinkedLegacyAccount {profileId:$profileId}) RETURN a LIMIT 1', { profileId }))).records.length }
-            finally { await session.close() }
-          },
-          claim: async ({ owner, issuer, subject, emailHash, profileId, evidence }) => {
-            if (!owner?.ownerId || !owner.userId || typeof issuer !== 'string' || !issuer || typeof subject !== 'string' || !subject || !/^[a-f0-9]{64}$/.test(emailHash ?? '') || typeof profileId !== 'string' || !profileId || !['self-asserted-linkedin-url-v1', 'self-asserted-display-name-v1'].includes(evidence)) throw new Error('self_claim_input_invalid')
-            const snapshot = await publicPeople.read('recovered-legacy-public-v1')
-            if (!snapshot || !snapshot.revision.startsWith('legacy-public-v1:')) throw new Error('legacy_profile_source_unavailable')
-            if (!snapshot.profiles.some(profile => profile.id === profileId)) throw new Error('self_claim_profile_unknown')
-            const legacyUserId = randomUUID()
-            const receiptId = createHash('sha256').update(JSON.stringify({ kind: 'self-asserted-claim-v1', profileId, legacyUserId, ownerId: owner.ownerId, userId: owner.userId, issuer, subject, evidence })).digest('hex')
-            const session = driver.session({ database: 'neo4j' })
-            try {
-              const result = await session.executeWrite(tx => tx.run(`
-                OPTIONAL MATCH (p:UnlinkedLegacyAccount {profileId:$profileId})
-                OPTIONAL MATCH (o:UnlinkedLegacyAccount {ownerId:$ownerId})
-                OPTIONAL MATCH (u:UnlinkedLegacyAccount {userId:$userId})
-                OPTIONAL MATCH (e:UnlinkedLegacyAccount {emailHash:$emailHash})
-                WITH p, o, u, e WHERE p IS NULL AND o IS NULL AND u IS NULL AND e IS NULL
-                CREATE (a:UnlinkedLegacyAccount {legacyUserId:$legacyUserId, profileId:$profileId, emailHash:$emailHash,
-                  sourceSha256:$sourceSha256, selfAsserted:true, claimEvidence:$evidence, revoked:false,
-                  ownerId:$ownerId, userId:$userId, issuer:$issuer, subject:$subject,
-                  receiptId:$receiptId, confirmedAt:$now, confirmedBy:'unlinked-private-browser'})
-                RETURN a.receiptId AS receiptId`,
-              { profileId, ownerId: owner.ownerId, userId: owner.userId, emailHash, legacyUserId, sourceSha256: snapshot.revision.slice('legacy-public-v1:'.length), evidence, receiptId, now: Date.now() }))
-              if (!result.records.length) throw new Error('self_claim_conflict')
-              return { profileId, receiptId: result.records[0].get('receiptId') }
-            } catch (error) {
-              // A race that slips past the guard reads lands on the uniqueness
-              // constraints; losing one is the same conflict, not an outage.
-              if (String(error.code ?? '').includes('ConstraintValidationFailed')) throw new Error('self_claim_conflict')
-              throw error
-            } finally { await session.close() }
-          },
-        }
-      })() : undefined,
+      // Self-serve claims, including the test-profile lane (mcp-server/self-claims.mjs).
+      selfClaims: legacyLinks && publicPeople ? createSelfClaims({ driver, publicPeople, slugIndex }) : undefined,
       removeOwnerAssets: async ownerId => {
         // Exact one-segment owner directory under the composition's asset root;
         // recovered legacy originals live under separate legacy storage keys.
