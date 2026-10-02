@@ -173,3 +173,26 @@ test('account network rejects an oversized next import before reading its rows o
   assert.equal(secondRowReads, 0)
   assert.equal(assetReads, 0)
 })
+
+test('real MCP client without imports reads Everyone with explicit durable grant, keeps old grants narrow and denies revocation', async t => {
+  const f=fixture(),owner={ownerId:'no-upload-member',userId:'no-upload-user'};f.register(owner)
+  const key=randomBytes(32),issuer='https://synthetic-global.invalid'
+  const old=createAccountGrantService({issuer,signingKey:key,getBackend:f.getBackend})
+  const grants=createAccountGrantService({issuer,signingKey:key,getBackend:f.getBackend,publicSearchEnabled:true})
+  const oldIssued=await old.issueGrant(owner),issued=await grants.issueGrant(owner)
+  assert.deepEqual((await grants.authenticateGrant({headers:{authorization:'Bearer '+oldIssued.accessToken}})).tools,['unlinked_search_network'])
+  assert.deepEqual((await grants.authenticateGrant({headers:{authorization:'Bearer '+issued.accessToken}})).tools,['unlinked_search_network','unlinked_search_everyone'])
+  let handler,revokeDuringModel=false
+  const server=createServer((req,res)=>void handler(req,res));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)))
+  const endpoint=`http://127.0.0.1:${server.address().port}`,origin=`https://127.0.0.1:${server.address().port}`
+  handler=createAccountHostedHandler({origin,authenticateGrant:grants.authenticateGrant,getBackend:f.getBackend,
+    readPublishedSnapshot:async()=>({state:'published',complete:true,revision:'public-fixture-v1',profiles:[{id:'legacy-person',name:'Public graph engineer',positions:[],education:[],skills:[]}],connections:[]}),
+    complete:async({candidateIds})=>{if(revokeDuringModel)await grants.revoke(owner,issued.grantId);return{matches:[{id:candidateIds[0],reason:'Recorded graph role'}]}}})
+  const client=new Client({name:'no-upload-global-proof',version:'1.0'}),transport=new StreamableHTTPClientTransport(new URL(endpoint+'/mcp'),{requestInit:{headers:{Authorization:'Bearer '+issued.accessToken}}})
+  try{await client.connect(transport);assert.deepEqual((await client.listTools()).tools.map(x=>x.name),['unlinked_search_network','unlinked_search_everyone'])
+    const result=await client.callTool({name:'unlinked_search_everyone',arguments:{query:'graph engineer'}});assert.ok(!result.isError);const data=JSON.parse(result.content[0].text);assert.equal(data.considered,1);assert.equal(data.matches[0].id,'legacy-person');assert.equal(data.scope,'everyone')
+    assert.equal((await f.getBackend(owner)).listImportIds? (await (await f.getBackend(owner)).listImportIds()).length:-1,0)
+    revokeDuringModel=true;const denied=await client.callTool({name:'unlinked_search_everyone',arguments:{query:'graph'}});assert.equal(denied.isError,true)
+    await assert.rejects(client.callTool({name:'unlinked_search_everyone',arguments:{query:'graph'}}))
+  }finally{await client.close()}
+})

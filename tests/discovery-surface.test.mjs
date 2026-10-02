@@ -44,7 +44,7 @@ test('public/.well-known/mcp/server-card.json describes canonical account MCP', 
   assert.ok(!card.transports?.stdio, 'canonical card must not advertise legacy stdio bootstrap');
 
   const toolNames = card.tools.map((t) => t.name);
-  assert.deepEqual(toolNames, ['unlinked_search_network']);
+  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone']);
   const searchTool = card.tools[0];
   assert.deepEqual(searchTool.inputSchema.required, ['query']);
   assert.equal(searchTool.inputSchema.additionalProperties, false);
@@ -65,11 +65,11 @@ test('public/.well-known/unlinked.json product descriptor is valid', () => {
   assert.equal(descriptor.authentication.browser, 'Ideaflow ID issuer/subject');
   assert.equal(descriptor.authentication.mcp, 'revocable account-scoped bearer grant');
   assert.equal(descriptor.data.ownNetwork, true);
-  assert.equal(descriptor.data.globalSearch, false);
+  assert.equal(descriptor.data.globalSearch, true);
   assert.equal(descriptor.data.rawArchiveAgentAccess, false);
   assert.equal(descriptor.mcp.url, 'https://www.unlinked.ai/mcp');
   assert.equal(descriptor.mcp.transport, 'streamable-http');
-  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network']);
+  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network', 'unlinked_search_everyone']);
 });
 
 test('machine-readable MCP config never advertises legacy local launch bootstrap', () => {
@@ -97,7 +97,7 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.servers[0].url, 'https://www.unlinked.ai');
 
   const paths = Object.keys(spec.paths);
-  const expectedPaths = ['/login', '/mcp'];
+  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}'];
 
   for (const p of expectedPaths) {
     assert.ok(paths.includes(p), `Expected openapi.json to include path ${p}`);
@@ -125,7 +125,7 @@ test('public/llms.txt conforms to specification', () => {
   assert.ok(content.includes('(/openapi.json)'), 'Must link to openapi.json');
   assert.ok(content.includes('Streamable HTTP endpoint: https://www.unlinked.ai/mcp'), 'Must describe canonical MCP endpoint');
   assert.ok(content.includes('unlinked_search_network'), 'Must mention current MCP tool');
-  assert.ok(content.includes('Global shared search is not yet available'), 'Must state global search is not live');
+  assert.ok(content.includes('Everyone People browsing reads only the published professional index'), 'Must state public index scope');
   assert.ok(content.includes('Legacy Supabase routes and stdio tools are historical'), 'Must identify legacy setup as historical');
 });
 
@@ -168,7 +168,7 @@ test('root AGENTS.md and public/AGENTS.md are distinct audiences with proper gov
   assert.notEqual(rootAgents, publicAgents, 'Root AGENTS.md and public/AGENTS.md must not be identical');
   assert.ok(rootAgents.includes('## Maintaining this file'), 'Root AGENTS.md must include canonical maintenance section');
   assert.ok(publicAgents.includes('# Unlinked agent guide'), 'Public AGENTS.md must identify as HTTP agent guide');
-  assert.ok(publicAgents.includes('Anonymous discovery and Meet are public'), 'Public AGENTS.md must state public/protected boundary');
+  assert.ok(publicAgents.includes('Anonymous discovery, professional People browsing and Meet are public'), 'Public AGENTS.md must state public/protected boundary');
 
   const claudePointer = fs.readFileSync(path.join(ROOT_DIR, 'CLAUDE.md'), 'utf8');
   assert.ok(claudePointer.includes('@AGENTS.md'), 'CLAUDE.md must point to AGENTS.md');

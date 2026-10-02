@@ -1,3 +1,4 @@
+import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { lstat, mkdir, open } from 'node:fs/promises'
@@ -15,6 +16,7 @@ function loadNoos(root) {
   const directory = join(root, 'runtime', 'noos'), require = createRequire(join(directory, 'package.json'))
   return { neo4j: require('neo4j-driver'), express: require('express'),
     ...require(join(directory, 'dist/operational/store.js')),
+    ...require(join(directory, 'dist/operational/public-people.js')),
     ...require(join(directory, 'dist/operational/invitations.js')),
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
@@ -70,6 +72,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     })
     await provisioner.initialize()
     await store.initialize()
+    const publicPeople = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
+    await publicPeople?.initialize()
     const login = await loginFactory({ issuer: config.issuer, clientId: config.clientId, clientSecret: config.clientSecret,
       callbackUrl: new URL('/auth/callback/ideaflow', base).href })
     const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), internalSubjects = new Set()
@@ -126,7 +130,27 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend,
       onError: event => audit({ ...event, at: new Date().toISOString() }) })
     worker.start()
+    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend,
+      readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
+      discover: async () => {
+        const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+        try {
+          const result = await session.executeRead(tx => tx.run(`MATCH (r:OperationalResource {namespace: 'unlinked', type: 'import'})
+            WHERE r.publicationOwner IS NOT NULL AND r.document CONTAINS '"version":"public-professional-archive-openai-v2"'
+            MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: r.publicationOwner})
+            WHERE b.userId = r.userId AND coalesce(b.active, true) = true
+            RETURN r.sourceId AS id, b.sourceOwnerId AS ownerId, b.userId AS userId, r.document AS document ORDER BY id LIMIT 1001`))
+          if (result.records.length > 1000) throw Error('public_member_import_limit')
+          return result.records.flatMap(record => {
+            const document = JSON.parse(record.get('document')), consent = document.payload?.consent
+            return !document.deleted && consent?.version === 'public-professional-archive-openai-v2' && consent.publicProfessionalSearch === true
+              ? [{ id:record.get('id'),owner:{ownerId:record.get('ownerId'),userId:record.get('userId')},revision:document.sourceRevision }] : []
+          })
+        } finally { await session.close() }
+      },
+    }) : undefined
     return { login, getBackend, close, audit, backgroundImports: true,
+      readPublishedSnapshot,
       resolveOwner: identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null,
       claimInvitation: provisioner.claim.bind(provisioner),
       signup: provisioner.signup.bind(provisioner),
