@@ -101,9 +101,10 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   // Prepare the account's setup without a click. Reuses any live grant
   // (whatever tool list its catalog version gives it — including pre-expansion
   // v1 grants) so repeated visits never mint duplicates and never clobber a
-  // manually created grant. Mints the one deterministic automatic grant only
-  // when the owner has no grants at all and has never revoked the automatic
-  // one; returns null once it is revoked.
+  // manually created grant. `readOnly` excludes opt-in write grants from reuse
+  // for server-to-server provisioning. Mints the deterministic read-only
+  // automatic grant when no eligible manual grant exists; its tombstone
+  // prevents automatic reissuance. OAuth grants are never reused.
   const ensureGrant = async (owner, { readOnly = false } = {}) => {
     const backend = await getBackend(owner)
     const autoId = privateId(owner.ownerId, 'account-grant-v1', AUTO_JTI)

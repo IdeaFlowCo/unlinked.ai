@@ -21,6 +21,7 @@ const profiles = ['a', 'b', 'c', 'shadow'].map(id => ({ id, name: `Person ${id}`
 const csrf = text => text.match(/name="csrf" value="([^"]+)"/)[1]
 async function site(t, limits) {
   const resources = new Map(), store = createMemoryConnectionStore(), connections = createConnectionRequests({ store })
+  const invitations = createMemberInvitations({ store: createMemoryInvitationStore() })
   const accounts = { a, b, c }
   const getBackend = async owner => ({ adapter: {}, listImportIds: async () => [], listImportJobIds: async () => [],
     listAccountGrantIds: async () => [...resources.values()].filter(x => !x.deleted && x.sourceOwnerId === owner.ownerId).map(x => x.sourceId),
@@ -40,7 +41,7 @@ async function site(t, limits) {
   api = createAccountAgentApiHandler({ authenticateGrantDetailed: grants.authenticateGrantDetailed, authenticateGrant: grants.authenticateGrant, service, origin })
   handler = createPrivateBrowserHandler({ baseUrl: origin, dataMode: 'private_live', signup: async () => accounts[subject], resolveOwner: async () => accounts[subject],
     login: { begin: async () => ({ location: 'https://idp.invalid/', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://idp.invalid', subject, displayName: `Person ${subject}` }) },
-    getBackend, readPublishedSnapshot, memberConnections: connections, accountForProfile, ownProfileId,
+    getBackend, readPublishedSnapshot, memberConnections: connections, memberInvitations: invitations, accountForProfile, ownProfileId,
     ensureAccountGrant: grants.ensureGrant, issueAccountGrant: grants.issueGrant, listAccountGrants: grants.listGrants, revokeAccountGrant: grants.revoke, mcpEndpoint: origin + '/mcp' })
   const go = (path, opts = {}) => fetch(endpoint+path,{ redirect:'manual',...opts })
   const signIn = async id => { subject=id; const login = await go('/login'); const cb = await go('/auth/callback/ideaflow?state=state&code=x',{headers:{Cookie:login.headers.getSetCookie()[0].split(';')[0]}}); const cookie=cb.headers.getSetCookie().find(x=>x.startsWith('__Host-ul-session=')).split(';')[0]; const text=await (await go('/settings',{headers:{Cookie:cookie}})).text(); return {cookie,csrf:csrf(text),text} }
@@ -95,6 +96,7 @@ test('browser rows and member-only filter count both graph directions; removal i
   const p=await site(t), sa=await p.signIn('a'), sb=await p.signIn('b'), sc=await p.signIn('c')
   const page=async s=>await(await p.go('/network',{headers:{Cookie:s.cookie}})).text()
   assert.match(await page(sa),/action="\/connections\/request"/)
+  assert.match(await page(sa),/href="\/invites">Invite to Unlinked<\/a>/)
   const sent=await p.post(sa,'/connections/request',{profileId:'b',next:'/network?presence=member'});assert.equal(sent.headers.get('location'),'/network?presence=member&notice=sent')
   assert.match(await page(sa),/Pending.*?Withdraw/s);assert.match(await page(sb),/Accept invitation.*?Ignore/s)
   const id=(await p.connections.received(b))[0].id

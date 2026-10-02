@@ -191,7 +191,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     return { kind: 'unlinked_connection_request_update', id, status, visibility: 'owner_private' }
   }
   const tools = {
-    async unlinked_send_connection_request(grant, { profileId, note }, signal) {
+    async unlinked_send_connection_request(grant, { profileId, note }) {
       requireConnections()
       let outcome
       try { outcome = await connectionActions.send(owner(grant), { profileId, note }) }
@@ -218,7 +218,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       return { kind: 'unlinked_notifications', unseen: counts.unseen, unread: counts.unread, visibility: 'owner_private',
         notifications: items.map(value => ({ id: value.id, kind: value.kind, actorName: value.actorName, ...(value.actorProfileId ? { actorProfileId: value.actorProfileId } : {}), createdAt: iso(value.createdAt), read: value.read })) }
     },
-    async unlinked_whoami(grant, _input, _signal) {
+    async unlinked_whoami(grant) {
       const backend = await getBackend({ ownerId: grant.ownerId, userId: grant.userId })
       const importIds = typeof backend.listImportIds === 'function' ? await backend.listImportIds() : []
       let legacy = null

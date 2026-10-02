@@ -20,8 +20,9 @@ additive and idempotent; no existing data is touched.
 | `connectedKey` | `pairKey` once accepted (unique) |
 | `sender*`, `recipient*` | `ownerId`, `userId`, a plain display name, the public profile id |
 | `note` | Optional, one paragraph, up to 300 characters |
-| `status` | `pending`, `accepted`, `ignored`, `withdrawn` |
-| `createdAt`, `respondedAt`, `withdrawnAt` | Epoch milliseconds |
+| `status` | `pending`, `accepted`, `ignored`, `withdrawn`, `removed` |
+| `createdAt`, `respondedAt`, `withdrawnAt`, `removedAt` | Epoch milliseconds |
+| `removedBy` | `sender` or `recipient` for a removed request |
 
 Rules:
 
@@ -81,9 +82,10 @@ then set `emailedAt`. Nothing else needs to change.
 | Route | What it does |
 |---|---|
 | `GET /people/<id>` | Shows Connect / Pending + Withdraw / Accept + Ignore / Connected / This is you; signed-out visitors get "Sign in to connect" |
-| `POST /connections/request` | `profileId`, optional `note`. Redirects to the profile with `?connect=<code>` |
+| `POST /connections/request` | `profileId`, optional `note`, optional `next`. Returns to the profile with `?connect=<code>` or a validated network listing with `?notice=<code>` |
 | `POST /connections/respond` | `id`, `action=accept\|ignore`, optional `next` |
 | `POST /connections/withdraw` | `id`, optional `next` |
+| `POST /connections/remove` | `id`, optional `next`; confirmed bilateral removal as described below |
 | `GET /invitations` | My Network: Received (default) and Sent tabs, with a link to off-platform invites |
 | `GET /notifications` | The feed. Pending requests can be answered in place. Clears the bell |
 | `GET /notifications/<id>` | Marks the item read, then redirects to its target |
@@ -97,19 +99,15 @@ shows no icon.
 
 ## Agents
 
-Grant catalog version 3 adds two read-only tools,
-`unlinked_list_connection_requests` and `unlinked_list_notifications` (see
-`docs/agent-api.md`). Grants issued earlier keep their own tool list, so a
-member gets these tools after regenerating their agent setup in Settings.
-Version 4 retains those reads and adds explicitly opted-in write tools. See `docs/agent-api.md`.
+The [agent API contract](agent-api.md#catalog-v4-optional-connection-actions)
+owns the read tools, explicit opt-in write scope and grant compatibility.
 
 ## Not yet
 
 - Email or push delivery (the model is ready; mail is not configured).
 
-
-## Follow-ups
+## Connection controls and removal
 
 People rows show Connect, Pending + Withdraw, Accept + Ignore, Connected, or Invite, with the same shared rules as profiles. `/network?connected=1&presence=member` (also via signed-in `/people`) lists only your connected real members, with member/shadow/all counts and both graph directions.
 
-Either participant can remove an accepted member request through `POST /connections/remove` (`id`, `next`, CSRF), after the profile/row confirmation. The request becomes `removed`, releases its pair key and removes the agreed edge from both accounts; no notification is sent. A new request can reconnect them. Accepted off-platform invite connections also offer removal (their link is revoked). Imported observations and claimed profiles remain independent provenance and are preserved.
+Either participant can remove an accepted member request through `POST /connections/remove`, after the profile/row confirmation. The request becomes `removed`, releases its pair key and removes the agreed edge from both accounts; no notification is sent. A new request can reconnect them. Accepted off-platform invite connections also offer removal (their link is revoked). Imported observations and claimed profiles remain independent provenance and are preserved.
