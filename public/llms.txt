@@ -10,12 +10,15 @@ Everyone People browsing reads only the published professional index and does no
 Own-network AI search reads only the signed-in owner's published imports plus same-owner sanitized recovered Connections observations; Everyone AI ranks bounded matching candidates from the public index.
 Your agent setup is prepared automatically; Settings shows the revocable, regenerable account-scoped MCP grant. Keep its bearer credential private.
 Contact emails, phone numbers and original archive bytes are excluded from agent search.
-Client setup: Streamable HTTP with header `Authorization: Bearer <grant>`. Claude Desktop/claude.ai: custom connector (Customize → Connectors, Authentication "No sign in", request header Authorization). claude_desktop_config.json accepts only local stdio servers, so use `{"command":"npx","args":["-y","mcp-remote@0.1.38","https://www.unlinked.ai/mcp","--header","Authorization:${UNLINKED_AUTH_HEADER}"],"env":{"UNLINKED_AUTH_HEADER":"Bearer <grant>"}}` there, never a url/headers entry. Claude Code: `claude mcp add --transport http unlinked https://www.unlinked.ai/mcp --header "Authorization: Bearer <grant>"`.
+Connect Claude or ChatGPT with OAuth (primary): add a custom connector with the URL https://www.unlinked.ai/mcp, choose Connect, sign in to Unlinked and Allow — no token to copy. Claude: Settings → Connectors → Add custom connector. ChatGPT: developer-mode connector with OAuth. Claude Code: `claude mcp add --transport http unlinked https://www.unlinked.ai/mcp`, then `/mcp` to sign in. Discovery: /mcp answers 401 with `WWW-Authenticate: Bearer resource_metadata="https://www.unlinked.ai/.well-known/oauth-protected-resource/mcp"`; authorization server metadata at /.well-known/oauth-authorization-server (PKCE S256, public clients, Client ID Metadata Documents for Claude's, Claude Code's and ChatGPT's published client ids, or dynamic registration at /oauth/register; redirect URIs limited to the Claude/ChatGPT connector callbacks and http://localhost / 127.0.0.1 loopback). Scopes: `network`, `people`. Each connection is a revocable account grant listed under Settings → Connected apps; tokens do not expire and are revoked there or at /oauth/revoke.
+Header alternative for clients that cannot sign in: Streamable HTTP with header `Authorization: Bearer <grant>`. Claude Desktop/claude.ai: custom connector (Customize → Connectors, Authentication "No sign in", request header Authorization). claude_desktop_config.json accepts only local stdio servers, so use `{"command":"npx","args":["-y","mcp-remote@0.1.38","https://www.unlinked.ai/mcp","--header","Authorization:${UNLINKED_AUTH_HEADER}"],"env":{"UNLINKED_AUTH_HEADER":"Bearer <grant>"}}` there, never a url/headers entry. Claude Code: `claude mcp add --transport http unlinked https://www.unlinked.ai/mcp --header "Authorization: Bearer <grant>"`.
 
 ## Entry and discovery
 - [Sign in](/login)
 - [Import instructions](/import-linkedin)
 - [Agent setup](/agents)
+- [OAuth protected resource metadata](/.well-known/oauth-protected-resource/mcp)
+- [OAuth authorization server metadata](/.well-known/oauth-authorization-server)
 - [Agent brief](/AGENTS.md)
 - [MCP card](/.well-known/mcp/server-card.json)
 - [Product descriptor](/.well-known/unlinked.json)

@@ -75,8 +75,31 @@ test('Settings shows a Claude connector, a valid claude_desktop_config.json entr
   assert.doesNotMatch(content, /<script|onclick=/)
 })
 
-test('the public agents page points Claude Desktop users at connectors, not a url entry in the config file', () => {
+test('the public agents page leads with connector sign-in, and the config file only via mcp-remote', () => {
   const { content } = renderAgents({})
-  assert.match(content, /Customize → Connectors/)
-  assert.match(content, /claude_desktop_config.json<\/code> file only runs local commands/)
+  assert.match(content, /Settings → Connectors → Add custom connector<\/b>, paste this address, choose <b>Connect<\/b>, sign in to Unlinked/)
+  assert.match(content, /claude mcp add --transport http unlinked https:\/\/www\.unlinked\.ai\/mcp/)
+  assert.match(content, /claude_desktop_config.json<\/code> \(via <code>mcp-remote<\/code>\)/)
+})
+
+test('with the OAuth connector, Settings leads with "paste the URL and sign in" and lists connected apps', () => {
+  const setups = agentClientSetups({ endpoint, accessToken })
+  const grants = [{ id: 'conn1', issuedAt: 1790000000, scope: 'owner_network_and_public', connection: { app: 'Claude', clientName: 'Claude', redirectHost: 'claude.ai' } }, { id: 'manual1', issuedAt: 1780000000 }]
+  const { content } = renderSettings({ accountLabel: 'a@example.invalid', displayName: 'A', csrf: 'c', agentConfiguration: setups.generic, agentSetups: setups, agentSetupAutomatic: true, grants, connector: { url: endpoint } })
+  const connectorPart = content.slice(0, content.indexOf('Use a private credential instead'))
+  assert.match(connectorPart, /paste this address, then sign in/)
+  assert.equal(field(content, 'agent-connector-url'), endpoint)
+  assert.equal(field(content, 'agent-connector-claude-code'), `claude mcp add --transport http unlinked ${endpoint}`)
+  assert.match(connectorPart, /Add custom connector/)
+  assert.match(connectorPart, /Developer mode/)
+  assert.equal(connectorPart.includes(accessToken), false, 'the connector path never shows a credential')
+  assert.match(connectorPart, /<b>Claude<\/b> · connected 2026-09-21 · your network and People<\/p><button class="quiet">Disconnect<\/button>/)
+  assert.match(connectorPart, /name="grantId" value="conn1"/)
+  assert.equal(connectorPart.includes('value="manual1"'), false)
+  // The header-based routes remain, below, as the alternative.
+  const manualPart = content.slice(content.indexOf('Use a private credential instead'))
+  assert.match(manualPart, /custom connector with a request header instead of signing in/)
+  assert.equal(field(content, 'agent-setup-claude-header'), `Bearer ${accessToken}`)
+  assert.match(manualPart, /name="grantId" value="manual1"/)
+  assert.match(manualPart, /Connected apps stay connected/)
 })
