@@ -1,8 +1,8 @@
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
-import { createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
+import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { lstat, mkdir, open, rm } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, readdir, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
@@ -181,6 +181,82 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           { owner: owner.ownerId, user: owner.userId, now: Date.now() }))
         } finally { await session.close() }
       } : undefined,
+      // Self-serve claims for legacy profiles outside the seeded manifest: a
+      // lookup hint (LinkedIn address, or the signed-in display name) selects an
+      // unclaimed legacy profile, and an explicit confirmation writes a
+      // self-asserted UnlinkedLegacyAccount row. The uniqueness constraints on
+      // profileId/ownerId/userId/emailHash make first-claim-wins and
+      // one-claim-per-account database-enforced; readBound/candidate/confirm
+      // treat the row like a seeded one. Operator rollback:
+      // legacy-account-operator.mjs revoke <profileId> <receiptId>.
+      selfClaims: legacyLinks && publicPeople ? (() => {
+        let slugs = null
+        const slugIndex = () => {
+          // Memoizes the promise so concurrent first lookups share one parse;
+          // a failed load is not cached and a later lookup retries.
+          if (!slugs) slugs = (async () => {
+            const directory = join(root, 'audit')
+            const names = (await readdir(directory)).filter(name => /^legacy-public-source-manifest-[a-f0-9]{64}\.json$/.test(name)).sort()
+            const index = new Map()
+            for (const name of names) {
+              const manifest = JSON.parse(await readFile(join(directory, name), 'utf8'))
+              for (const row of manifest.profiles ?? []) if (row.linkedinSlug && row.legacyId) index.set(String(row.linkedinSlug).toLowerCase(), row.legacyId)
+            }
+            return index
+          })().catch(error => { slugs = null; throw error })
+          return slugs
+        }
+        const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
+        return {
+          lookupSlug: async slug => { try { return (await slugIndex()).get(String(slug).toLowerCase()) ?? null } catch { return null } },
+          // Names resolve only against the recovered legacy dataset, never the
+          // merged shared snapshot — a member-imported contact with the same
+          // name must not shadow or displace a claimable legacy profile.
+          lookupName: async name => {
+            const wanted = normalizedName(name)
+            if (!wanted) return null
+            const snapshot = await publicPeople.read('recovered-legacy-public-v1')
+            if (!snapshot) return null
+            const matches = snapshot.profiles.filter(profile => normalizedName(profile.name) === wanted)
+            return matches.length === 1 ? matches[0].id : null
+          },
+          claimable: async profileId => {
+            const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+            try { return !(await session.executeRead(tx => tx.run('MATCH (a:UnlinkedLegacyAccount {profileId:$profileId}) RETURN a LIMIT 1', { profileId }))).records.length }
+            finally { await session.close() }
+          },
+          claim: async ({ owner, issuer, subject, emailHash, profileId, evidence }) => {
+            if (!owner?.ownerId || !owner.userId || typeof issuer !== 'string' || !issuer || typeof subject !== 'string' || !subject || !/^[a-f0-9]{64}$/.test(emailHash ?? '') || typeof profileId !== 'string' || !profileId || !['self-asserted-linkedin-url-v1', 'self-asserted-display-name-v1'].includes(evidence)) throw new Error('self_claim_input_invalid')
+            const snapshot = await publicPeople.read('recovered-legacy-public-v1')
+            if (!snapshot || !snapshot.revision.startsWith('legacy-public-v1:')) throw new Error('legacy_profile_source_unavailable')
+            if (!snapshot.profiles.some(profile => profile.id === profileId)) throw new Error('self_claim_profile_unknown')
+            const legacyUserId = randomUUID()
+            const receiptId = createHash('sha256').update(JSON.stringify({ kind: 'self-asserted-claim-v1', profileId, legacyUserId, ownerId: owner.ownerId, userId: owner.userId, issuer, subject, evidence })).digest('hex')
+            const session = driver.session({ database: 'neo4j' })
+            try {
+              const result = await session.executeWrite(tx => tx.run(`
+                OPTIONAL MATCH (p:UnlinkedLegacyAccount {profileId:$profileId})
+                OPTIONAL MATCH (o:UnlinkedLegacyAccount {ownerId:$ownerId})
+                OPTIONAL MATCH (u:UnlinkedLegacyAccount {userId:$userId})
+                OPTIONAL MATCH (e:UnlinkedLegacyAccount {emailHash:$emailHash})
+                WITH p, o, u, e WHERE p IS NULL AND o IS NULL AND u IS NULL AND e IS NULL
+                CREATE (a:UnlinkedLegacyAccount {legacyUserId:$legacyUserId, profileId:$profileId, emailHash:$emailHash,
+                  sourceSha256:$sourceSha256, selfAsserted:true, claimEvidence:$evidence, revoked:false,
+                  ownerId:$ownerId, userId:$userId, issuer:$issuer, subject:$subject,
+                  receiptId:$receiptId, confirmedAt:$now, confirmedBy:'unlinked-private-browser'})
+                RETURN a.receiptId AS receiptId`,
+              { profileId, ownerId: owner.ownerId, userId: owner.userId, emailHash, legacyUserId, sourceSha256: snapshot.revision.slice('legacy-public-v1:'.length), evidence, receiptId, now: Date.now() }))
+              if (!result.records.length) throw new Error('self_claim_conflict')
+              return { profileId, receiptId: result.records[0].get('receiptId') }
+            } catch (error) {
+              // A race that slips past the guard reads lands on the uniqueness
+              // constraints; losing one is the same conflict, not an outage.
+              if (String(error.code ?? '').includes('ConstraintValidationFailed')) throw new Error('self_claim_conflict')
+              throw error
+            } finally { await session.close() }
+          },
+        }
+      })() : undefined,
       removeOwnerAssets: async ownerId => {
         // Exact one-segment owner directory under the composition's asset root;
         // recovered legacy originals live under separate legacy storage keys.
