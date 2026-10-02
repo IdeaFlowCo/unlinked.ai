@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
 import Papa from 'papaparse'
 
-export const PARSER_VERSION = 'linkedin-archive-v5'
+export const PARSER_VERSION = 'linkedin-archive-v6'
 export const LIMITS = Object.freeze({ archiveBytes: 64 * 1024 * 1024, fileBytes: 8 * 1024 * 1024, expandedBytes: 40 * 1024 * 1024, files: 2000, rows: 100000, headerRows: 20, recordChars: 65536, fieldChars: 32768, fields: 256, quoteTokens: 1024 })
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const crcTable = Array.from({ length: 256 }, (_, n) => {
@@ -27,7 +27,7 @@ export function unpackArchive(input, filename, { selectedOnly = false } = {}) {
   if (!bytes.length || bytes.length > LIMITS.archiveBytes) fail('archive_size_limit')
   if (/\.csv$/i.test(filename)) {
     if (bytes.length > LIMITS.fileBytes) fail('file_size_limit')
-    return [{ path: safePath(filename), bytes }]
+    return [{ path: safePath(filename), bytes, direct: true }]
   }
   if (!/\.zip$/i.test(filename)) fail('unsupported_archive_format')
   let end = -1
@@ -135,7 +135,10 @@ function* csvRecords(text) {
 
 export function parseSource(source, budget = { remaining: LIMITS.rows }, limitError = 'csv_row_limit') {
   const filename = source.path.split('/').pop().toLowerCase()
-  const spec = Object.hasOwn(categories, filename) ? categories[filename] : undefined
+  // A CSV uploaded on its own is often renamed ("Connections (1).csv",
+  // "Connections_sans_email.csv"); ZIP entries keep LinkedIn's exact names.
+  const key = Object.hasOwn(categories, filename) ? filename : source.direct && /^connections[^a-z].*\.csv$/.test(filename) ? 'connections.csv' : null
+  const spec = key ? categories[key] : undefined
   const base = { path: source.path, sha256: digest(source.bytes), bytes: source.bytes.length, category: spec?.category ?? 'unsupported', accepted: [], rejected: [], skipped: !spec }
   if (!spec) return base
   let text

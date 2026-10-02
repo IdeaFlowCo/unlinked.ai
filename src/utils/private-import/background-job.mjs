@@ -60,8 +60,8 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
     if (!Buffer.isBuffer(bytes) || bytes.length > LIMITS.archiveBytes || digest(bytes) !== current.archiveSha256) throw new Error('private_archive_recovery_invalid')
     let parsed
     try { parsed = parseArchive(bytes, current.filename) }
-    catch {
-      await save({ status: 'failed', phase: 'failed', error: 'archive_parse_failed', progress: { processed: 0, total: null, profileReady: false } })
+    catch (error) {
+      await save({ status: 'failed', phase: 'failed', error: 'archive_parse_failed', failureReason: /^[a-z0-9_]{1,64}$/.test(error?.message) ? error.message : 'unknown', progress: { processed: 0, total: null, profileReady: false } })
       return current
     }
     const sources = [], assertions = [], totals = counts()
@@ -82,7 +82,8 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
     const candidate = { ...current, sources, counts: totals }
     const supportError = store.validatePublication?.(candidate, assertions)
     if (supportError || !totals.accepted) {
-      await save({ status: 'failed', phase: supportError ? 'unsupported_private_publication' : 'no_accepted_rows', error: supportError ?? 'no_accepted_rows', counts: totals })
+      await save({ status: 'failed', phase: supportError ? 'unsupported_private_publication' : 'no_accepted_rows', error: supportError ?? 'no_accepted_rows',
+        ...(supportError ? {} : { failureReason: emptyImportReason(sources) }), counts: totals })
       return current
     }
     await save({ status: 'indexing', phase: 'staging_private_observations', counts: totals,
@@ -130,5 +131,43 @@ export function importJobStatus(job) {
   return { id: job.id, status: job.status, profileReady: job.progress?.profileReady === true,
     processed: job.progress?.processed ?? (terminal(job) ? job.counts?.indexed ?? 0 : 0),
     total: job.progress?.total ?? (terminal(job) ? job.counts?.accepted ?? 0 : null), statusUrl: `/imports/${job.id}/status`,
-    ...(job.error ? { errorMessage: 'This file could not be fully imported. See Settings for details.' } : {}) }
+    ...(job.error ? { errorMessage: importErrorMessage(job) } : {}) }
+}
+
+// Why a file produced no people, from its per-file receipts. The first
+// specific cause wins; a file we do not read at all is the commonest one.
+export function emptyImportReason(sources) {
+  const read = sources.filter(source => !source.skipped)
+  if (!read.length) return 'unrecognized_file'
+  const error = read.map(source => source.error).find(Boolean)
+  if (['invalid_utf8', 'csv_header_not_found', 'invalid_csv_header'].includes(error)) return error
+  if (error) return 'csv_unreadable'
+  return read.some(source => source.rejectedCount ?? source.rejected?.length) ? 'rows_rejected' : 'no_rows'
+}
+
+const READS = 'Unlinked reads Connections.csv (and Profile.csv, Positions.csv, Education.csv, Skills.csv) from your LinkedIn export, or the whole export ZIP.'
+const failureMessages = {
+  unrecognized_file: name => `We didn’t recognize “${name}”. ${READS} If you renamed the file, name it Connections.csv and upload it again.`,
+  csv_header_not_found: name => `“${name}” is missing the First Name, Last Name and URL columns. Upload the file as LinkedIn exported it, without removing or renaming columns.`,
+  invalid_csv_header: name => `“${name}” has a repeated or blank column name. Upload the file as LinkedIn exported it.`,
+  invalid_utf8: name => `“${name}” isn’t saved as UTF-8 text. Upload the file straight from your LinkedIn export, or re-save it as “CSV UTF-8”.`,
+  csv_unreadable: name => `“${name}” isn’t a CSV file we can read. Upload the file as LinkedIn exported it.`,
+  rows_rejected: name => `No row in “${name}” had a first name, last name and a linkedin.com/in/ profile address, so no one was added.`,
+  no_rows: name => `“${name}” has no people in it.`,
+  unsupported_archive_format: () => 'Only .zip and .csv files can be imported.',
+  file_size_limit: () => 'This CSV is larger than 8 MB. Upload the whole export ZIP instead.',
+  archive_size_limit: () => 'This file is larger than 64 MB. Upload Connections.csv on its own instead.',
+  archive_row_limit: () => 'This file has more than 100,000 rows, more than Unlinked can import at once. Upload Connections.csv on its own instead.',
+  private_publication_support_limit: () => 'This file is larger than Unlinked can import at once. Upload Connections.csv on its own instead.',
+}
+
+// Plain-language reason for a failed or partial import. Jobs saved before
+// failureReason existed fall back to the stored error code.
+export function importErrorMessage(job) {
+  const name = String(job?.filename ?? 'this file').slice(0, 120)
+  const reason = job?.failureReason ?? job?.error
+  if (failureMessages[reason]) return failureMessages[reason](name)
+  if (job?.error === 'no_accepted_rows') return `No people were found in “${name}”. ${READS} If you renamed the file, name it Connections.csv and upload it again.`
+  if (job?.error === 'archive_parse_failed') return `We couldn’t open “${name}”. Upload the ZIP or CSV exactly as LinkedIn exported it.`
+  return 'This file could not be fully imported. See Settings for details.'
 }

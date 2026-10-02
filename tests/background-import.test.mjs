@@ -276,6 +276,8 @@ test('profile page keeps prior indexed profile when newer malformed upload fails
   const settings = await (await fetch(endpoint + '/settings', { headers: { Cookie: cookie } })).text()
   assert.match(settings, /newer-broken\.zip/)
   assert.match(settings, /failed/)
+  assert.match(settings, /We couldn’t open “newer-broken\.zip”/)
+  assert.match(profile, /We couldn’t open “newer-broken\.zip”/)
 })
 
 test('profile page selects newest successful profile from reverse job discovery order', async t => {
