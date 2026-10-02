@@ -17,9 +17,10 @@ import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { companyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
+import { ContactCardError, renderContactVcard } from './contact-card.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { renderScan, fillMeHeadline, TOP_BAR_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError } from './private-onboarding-views.mjs'
 import { MEET_SCRIPT } from './public-discovery.mjs'
@@ -72,7 +73,7 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -80,6 +81,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   if (memberInvitations !== undefined && ['create', 'list', 'open', 'respond', 'revoke', 'removeOwner'].some(key => typeof memberInvitations[key] !== 'function')) throw new Error('member_invitation_configuration_required')
   if (memberConnections !== undefined && (['send', 'respond', 'withdraw', 'received', 'sent', 'pendingCount', 'between', 'removeOwner'].some(key => typeof memberConnections[key] !== 'function') || typeof accountForProfile !== 'function')) throw new Error('member_connection_configuration_required')
   if (notifications !== undefined && ['list', 'counts', 'markSeen', 'open', 'markAllRead', 'removeOwner'].some(key => typeof notifications[key] !== 'function')) throw new Error('notification_configuration_required')
+  if (contactCards !== undefined && ['read', 'save', 'rotate', 'syncIdentity', 'open', 'exportOwner', 'removeOwner'].some(key => typeof contactCards[key] !== 'function')) throw new Error('contact_card_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
   if (oauth !== undefined && (typeof signup !== 'function' || typeof oauth.readAuthorization !== 'function' || typeof oauth.approve !== 'function' || typeof oauth.deny !== 'function')) throw new Error('oauth_connector_configuration_required')
@@ -94,7 +96,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map()
-  let invitationWindow = 0, invitationRequests = 0
+  let invitationWindow = 0, invitationRequests = 0, contactWindow = 0, contactRequests = 0
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
   // Pages a sign-in may return to. Everything else lands on the home route.
@@ -290,6 +292,23 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         response.setHeader('Referrer-Policy', 'no-referrer')
         const invitation = await memberInvitations.open(invitationLink[1])
         journey(response, renderInviteLanding({ ...chrome, token: invitationLink[1], invitation }), null, '', invitation ? 200 : 404); return
+      }
+      // A member's contact card, opened by the link or QR code they handed over.
+      // Not indexed, never cached, and bounded for the whole site: the token is
+      // the only way in, and a reset or hidden card answers as not found.
+      const contactLink = url.pathname.match(/^\/c\/([0-9A-Za-z]{24})(\/contact\.vcf)?$/)
+      if (request.method === 'GET' && contactLink && contactCards && signup) {
+        if (Date.now() - contactWindow >= 60000) { contactWindow = Date.now(); contactRequests = 0 }
+        if (++contactRequests > 240) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        response.setHeader('Referrer-Policy', 'no-referrer')
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        const card = await contactCards.open(contactLink[1])
+        if (contactLink[2]) {
+          if (!card) { response.writeHead(404).end(); return }
+          response.writeHead(200, { 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': 'attachment; filename="contact.vcf"' })
+          response.end(renderContactVcard(card, base.origin)); return
+        }
+        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1] }), null, '', card ? 200 : 404); return
       }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
       const publicProfile = url.pathname.match(/^\/people\/([^/]+)$/)
@@ -609,8 +628,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         await warming
         journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
-      if (signup && request.method === 'GET' && (url.pathname === '/card' || url.pathname === '/scan')) {
-        const jobs = await jobResources(), props = jobProps(jobs)
+      // The member's own card identity and the public profile URL its QR opens.
+      const readOwnCard = async jobs => {
         const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs: profileJobs(jobs), backend }))
         let legacy = null
         if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
@@ -637,8 +656,46 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           }
         }
         session.headline = profile.headline
+        return { profile, cardUrl, identity: { name: profile.name, headline: profile.headline, location: profile.location, profilePath: cardUrl ? new URL(cardUrl).pathname : null } }
+      }
+      // The contact version of the card, for its owner: the details, their show
+      // switches, and the link and QR once something is shown.
+      const ownContactCard = stored => {
+        const shareUrl = stored?.card ? new URL(`/c/${stored.token}`, base).href : null
+        return { settings: stored?.settings ?? {}, card: stored?.card ?? null, shareUrl, qr: shareUrl ? qrSvg(shareUrl, { label: 'QR code opening your contact card' }) : null }
+      }
+      if (signup && request.method === 'GET' && (url.pathname === '/card' || url.pathname === '/scan')) {
+        const jobs = await jobResources(), props = jobProps(jobs)
+        const { profile, cardUrl, identity } = await readOwnCard(jobs)
         const card = { ...props, profile, cardUrl, qr: cardUrl ? qrSvg(cardUrl, { label: `QR code opening ${cardUrl}` }) : null }
-        journey(response, url.pathname === '/scan' ? renderScan({ ...card, tab: url.searchParams.get('tab') }) : renderCard(card), props.importJob); return
+        if (url.pathname === '/scan') { journey(response, renderScan({ ...card, tab: url.searchParams.get('tab') }), props.importJob); return }
+        let contact = null
+        if (contactCards) {
+          // The card still renders, without its contact version, while the graph is unavailable.
+          try { await contactCards.syncIdentity(session.owner, identity); contact = ownContactCard(await contactCards.read(session.owner)) } catch { contact = null }
+        }
+        const notice = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.' }[url.searchParams.get('done')]
+        journey(response, renderCard({ ...card, contact, share: contact && url.searchParams.get('share') === 'contact' ? 'contact' : 'public', notice }), props.importJob); return
+      }
+      if (signup && contactCards && request.method === 'POST' && ['/card/contact', '/card/contact/reset'].includes(url.pathname)) {
+        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        const fields = ['phone', 'whatsapp', 'email', 'link'], switches = ['showPhone', 'showWhatsapp', 'showEmail', 'showLink']
+        const allowed = url.pathname === '/card/contact' ? ['csrf', ...fields, ...switches] : ['csrf']
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || allowed.some(key => input.getAll(key).length > 1) || [...input.keys()].some(key => !allowed.includes(key))) throw new Error('private_browser_csrf')
+        const jobs = await jobResources(), props = jobProps(jobs)
+        const { profile, cardUrl, identity } = await readOwnCard(jobs)
+        const values = { ...Object.fromEntries(fields.map(key => [key, (input.get(key) ?? '').slice(0, 400)])), ...Object.fromEntries(switches.map(key => [key, input.get(key) === 'yes'])) }
+        try {
+          if (url.pathname === '/card/contact') await contactCards.save(session.owner, values, identity)
+          else await contactCards.rotate(session.owner)
+        } catch (failure) {
+          if (!(failure instanceof ContactCardError)) throw failure
+          const error = { contact_phone_invalid: 'Write your phone number with its country code, like +1 415 555 0123.', contact_whatsapp_invalid: 'Write your WhatsApp number with its country code, like +1 415 555 0123.',
+            contact_email_invalid: 'That email address does not look right.', contact_link_invalid: 'Use a web address of up to 200 characters, like https://example.com.', contact_card_not_found: 'Add a contact detail first.' }[failure.code] ?? 'That did not work. Try again.'
+          const contact = { ...ownContactCard(await contactCards.read(session.owner).catch(() => null)), ...(url.pathname === '/card/contact' ? { settings: values } : {}) }
+          journey(response, renderCard({ ...props, profile, cardUrl, qr: null, contact, share: 'contact', error }), props.importJob, '', 400); return
+        }
+        redirect(response, `/card?share=contact&done=${url.pathname === '/card/contact' ? 'saved' : 'reset'}`); return
       }
       // Off-platform people: add someone to your own people, or invite them.
       if (signup && request.method === 'GET' && url.pathname === '/people/add') {
@@ -814,6 +871,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const data = await exportAccountData({ owner: session.owner, backend, jobs, grants })
         data.account.accountLabel = session.accountLabel
         data.account.displayName = session.displayName
+        // The contact card's details belong to the export; its link does not.
+        if (contactCards) data.contactCard = await contactCards.exportOwner(session.owner).catch(() => null)
         await recordAudit({ event: 'account_data_exported', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="unlinked-export-${new Date().toISOString().slice(0, 10)}.json"` })
         response.end(JSON.stringify(data, null, 2)); return
@@ -834,6 +893,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)
+        // The contact card and its link.
+        if (contactCards) await contactCards.removeOwner(session.owner)
         // Best effort beyond the graph: the legacy claim and the stored archive bytes.
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})
