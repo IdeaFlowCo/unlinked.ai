@@ -17,10 +17,12 @@ test('private AI search limits provider context and returns persisted provenance
   await assert.rejects(search({ importId: id, query: 'x'.repeat(1025) }), /query_limit/)
   assert.equal(calls, 1)
 })
-test('foreign/duplicate model IDs, deleted publication and changed publication fail closed', async () => {
-  for (const matches of [[{ id: 'd'.repeat(64), reason: 'wrong owner' }], [{ id: rowId, reason: 'one' }, { id: rowId, reason: 'two' }]]) {
-    await assert.rejects(createPrivateSearch({ readImport: async () => publication, complete: async () => ({ matches }) })({ importId: id, query: 'engineer' }), /invalid_result/)
-  }
+test('foreign model IDs fail closed, repeated IDs dedupe to the first reason, deleted/changed publications fail closed', async () => {
+  await assert.rejects(createPrivateSearch({ readImport: async () => publication, complete: async () => ({ matches: [{ id: 'd'.repeat(64), reason: 'wrong owner' }] }) })({ importId: id, query: 'engineer' }), /invalid_result/)
+  // The provider schema cannot enforce uniqueness; a repeated id keeps its first reason.
+  const deduped = await createPrivateSearch({ readImport: async () => publication, complete: async () => ({ matches: [{ id: rowId, reason: 'one' }, { id: rowId, reason: 'two' }] }) })({ importId: id, query: 'engineer' })
+  assert.equal(deduped.matches.length, 1)
+  assert.equal(deduped.matches[0].reason, 'one')
   let reads = 0
   await assert.rejects(createPrivateSearch({ readImport: async () => { if (++reads === 2) throw new Error('private_import_not_found'); return publication }, complete: async () => ({ matches: [{ id: rowId, reason: 'engineer' }] }) })({ importId: id, query: 'engineer' }), /private_import_not_found/)
   reads = 0
