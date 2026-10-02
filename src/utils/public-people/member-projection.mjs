@@ -41,14 +41,15 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges }) {
   let work = null
   // Operator merges and renames apply last, over the complete union.
-  const decide = async snapshot => typeof readDecisions === 'function' ? applyProfileDecisions(snapshot, await readDecisions()) : snapshot
+  // Operator and automatic decisions; the index's own merges come first.
+  const decide = async (snapshot, own = []) => applyProfileDecisions(snapshot, [...own, ...(typeof readDecisions === 'function' ? await readDecisions() : [])])
   const build = async () => {
     const legacy = await readLegacy()
     if (!legacy) return null
     const items = await discover()
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
     if (!Array.isArray(items) || items.length > 1000) throw Error('public_member_import_limit')
-    const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision], linkedChecks = [], overlays = new Map(), members = new Set()
+    const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision], linkedChecks = [], overlays = new Map(), members = new Set(), ownerImports = new Map()
     const enrichment = await publicPeople.read(ENRICHMENT_DATASET)
     if (enrichment) {
       if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(ENRICHMENT_DATASET + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length) throw Error('public_enrichment_invalid')
@@ -80,11 +81,23 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         members.add(linked.profileId)
         revisions.push('legacy-link:' + linked.receiptId)
         linkedChecks.push(async () => { const current = await backend.readLegacyProfile(); if (!current || current.receiptId !== linked.receiptId || current.revision !== linked.revision) throw Error('public_member_source_changed') })
-      } else { profiles.push(...snapshot.profiles); connections.push(...snapshot.connections); members.add('member-import-' + item.id) }
+      } else {
+        profiles.push(...snapshot.profiles); connections.push(...snapshot.connections); members.add('member-import-' + item.id)
+        const owner = `${item.owner.ownerId}\u0000${item.owner.userId}`
+        ownerImports.set(owner, [...(ownerImports.get(owner) ?? []), { id: 'member-import-' + item.id, key: [resource.payload.createdAt ?? 0, item.id] }])
+      }
       revisions.push(snapshot.revision)
       if (profiles.length > 20000 || connections.length > 100000) throw Error('shared_public_capacity_limit')
     }
     if (identity(await discover()) !== identity(items)) throw Error('public_member_source_changed')
+    // One account, one profile: when an account without a claimed legacy profile
+    // published several imports, the newest stands for it and the others fold in.
+    const ownerMerges = []
+    for (const list of ownerImports.values()) {
+      if (list.length < 2) continue
+      const ordered = [...list].sort((a, b) => b.key[0] - a.key[0] || (a.key[1] < b.key[1] ? 1 : -1))
+      for (const older of ordered.slice(1)) { members.delete(older.id); ownerMerges.push({ id: `owner:${older.id}`, kind: 'merge', profileId: older.id, survivorId: ordered[0].id }) }
+    }
     for (const check of linkedChecks) await check()
     for (const [id, value] of overlays) profiles[profiles.findIndex(profile => profile.id === id)] = value.profile
     if (typeof readInviteEdges === 'function') {
@@ -94,7 +107,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     }
     // Replayed source edges are canonicalized without changing their receipts.
     const uniqueConnections = [...new Map(connections.map(edge => [JSON.stringify([edge.fromId, edge.toId]), edge])).values()]
-    if (typeof readMembers !== 'function') return decide({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections})
+    if (typeof readMembers !== 'function') return decide({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections}, ownerMerges)
     // Claimed profiles are members; everyone else in the index is a shadow.
     const claimed = await readMembers()
     if (!Array.isArray(claimed) || claimed.length > 20000) throw Error('public_member_presence_invalid')
@@ -102,7 +115,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     for (const id of claimed) if (known.has(id)) members.add(id)
     const memberIds = [...members].sort()
     revisions.push('members:' + hash(JSON.stringify(memberIds)))
-    return decide({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds})
+    return decide({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds}, ownerMerges)
   }
   return async ({signal} = {}) => {
     signal?.throwIfAborted()
