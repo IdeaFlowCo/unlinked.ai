@@ -15,7 +15,7 @@ import { LIMITS } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus } from '../src/utils/private-import/background-job.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderPerson, renderPeople, renderCompany, renderSettings, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderPerson, renderPeople, renderCompany, renderSettings, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { companyFacts } from './company-metadata.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 
@@ -67,13 +67,14 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
+  if (selfClaims !== undefined && (typeof selfClaims.lookupSlug !== 'function' || typeof selfClaims.lookupName !== 'function' || typeof selfClaims.claimable !== 'function' || typeof selfClaims.claim !== 'function')) throw new Error('self_claims_configuration_required')
   const invitationMode = typeof claimInvitation === 'function' && typeof signup !== 'function'
   const authorizationOrigin = login.authorizationOrigin ?? null
   if (invitationMode && authorizationOrigin === null) throw new Error('explicit_private_authorization_origin_required')
@@ -100,6 +101,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
   const sessionFor = request => { purge(sessions); return sessions.get(cookies(request)['__Host-ul-session']) }
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
+  const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
   const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never changes identity authority. */ } }
   const journey = (response, view, job = null, script = '', status = 200) => {
@@ -121,11 +123,13 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (!claimed || typeof claimed.ownerId !== 'string' || !claimed.ownerId || typeof claimed.userId !== 'string' || !claimed.userId) throw new Error('private_owner_recovery_required')
     }
     let owner = await resolveOwner(identity)
+    let newOwner = false
     if (!owner && !invitationToken && typeof signup === 'function') {
       const provisioned = await signup({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
         verifiedAt: identity.verifiedAt, provenanceReceiptId: identity.provenanceReceiptId, newProfileIntent: true })
       owner = await resolveOwner(identity)
       if (!provisioned || provisioned.ownerId !== owner?.ownerId || provisioned.userId !== owner?.userId) throw new Error('private_owner_recovery_required')
+      newOwner = true
     }
     if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new Error('private_owner_recovery_required')
     if (claimed && (claimed.ownerId !== owner.ownerId || claimed.userId !== owner.userId)) throw new Error('private_owner_recovery_required')
@@ -134,10 +138,13 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const sessionId = token()
     const legacyProof = identity.verifiedEmail && identity.emailEvidence === 'signed-ideaflow-beta-v1' ? Object.freeze({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId, verifiedAt: identity.verifiedAt, email: identity.verifiedEmail, emailEvidence: identity.emailEvidence, ownerId: owner.ownerId, userId: owner.userId }) : null
     const legacyCandidate = legacyProof && legacyAccount ? await legacyAccount.candidate(legacyProof) : null
-    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + SESSION_SECONDS * 1000 })
+    // A lookup-hint claim identity: the hash mirrors the manifest's email
+    // formula so a later seeded row for the same address collides cleanly.
+    const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
+    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + SESSION_SECONDS * 1000 })
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
-    redirect(response, legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : returnPath(next) ?? '/')
+    redirect(response, legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/')
   }
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -312,6 +319,67 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         session.legacyCandidate = null
         redirect(response, '/profile'); return
       }
+      if (request.method === 'GET' && url.pathname === '/find-me') {
+        if (!selfClaims || !session.selfClaim) { redirect(response, '/profile'); return }
+        journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf })); return
+      }
+      if (request.method === 'POST' && url.pathname === '/find-me') {
+        if (!selfClaims || !session.selfClaim) { redirect(response, '/profile'); return }
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('linkedinUrl').length > 1 || [...input.keys()].some(key => !['csrf', 'linkedinUrl'].includes(key))) throw new Error('private_browser_csrf')
+        const address = (input.get('linkedinUrl') ?? '').trim()
+        if (address.length > 2048) throw new Error('self_claim_input_invalid')
+        // One person finding themselves needs a handful of tries; a session
+        // enumerating the private slug index does not.
+        session.selfClaim.lookups = (session.selfClaim.lookups ?? 0) + 1
+        if (session.selfClaim.lookups > 20) { response.writeHead(429, { 'Retry-After': '3600' }).end(); return }
+        session.selfClaim.candidate = null
+        const page = lookupResult => journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, lookupResult }))
+        let profileId = null, evidence = null
+        const slugMatch = address.match(/linkedin\.com\/in\/([^/?#]+)/i) ?? (/^[A-Za-z0-9%._-]{1,120}$/.test(address) ? [null, address] : null)
+        if (address && slugMatch) {
+          let slug = slugMatch[1]
+          try { slug = decodeURIComponent(slug) } catch { /* use the raw segment */ }
+          profileId = await selfClaims.lookupSlug(slug)
+          evidence = 'self-asserted-linkedin-url-v1'
+        }
+        if (!profileId) {
+          // The fallback name comes from the identity provider, never from a
+          // typed field, and must match exactly one legacy profile; email and
+          // bare-subject fallbacks never qualify.
+          const wanted = normalizedName(session.displayName)
+          if (wanted.includes(' ') && !wanted.includes('@')) {
+            profileId = await selfClaims.lookupName(session.displayName)
+            if (profileId) evidence = 'self-asserted-display-name-v1'
+          }
+        }
+        if (profileId && await selfClaims.claimable(profileId)) {
+          const detail = await publicReader.profile({ id: profileId })
+          if (detail) {
+            // The confirmation is bound to this exact displayed candidate; a
+            // newer lookup in another tab invalidates a stale card.
+            session.selfClaim.candidate = { profileId, evidence, token: token() }
+            page({ status: 'found', profileName: detail.profile.name, headline: detail.profile.headline ?? '', listedBy: detail.profile.connections.length, claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token }); return
+          }
+        }
+        page({ status: 'none' }); return
+      }
+      if (request.method === 'POST' && url.pathname === '/claim-me') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('candidate').length !== 1 || [...input.keys()].some(key => !['csrf', 'candidate'].includes(key))) throw new Error('private_browser_csrf')
+        if (!selfClaims || !session.selfClaim?.candidate || input.get('candidate') !== session.selfClaim.candidate.token) throw new Error('self_claim_unavailable')
+        const { profileId, evidence } = session.selfClaim.candidate
+        try {
+          const claimed = await selfClaims.claim({ owner: session.owner, issuer: session.selfClaim.identity.issuer, subject: session.selfClaim.identity.subject, emailHash: session.selfClaim.emailHash, profileId, evidence })
+          await recordAudit({ event: 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId, evidence, receiptId: claimed.receiptId })
+          session.selfClaim = null
+          redirect(response, '/profile'); return
+        } catch (error) {
+          if (error.message !== 'self_claim_conflict') throw error
+          if (session.selfClaim) session.selfClaim.candidate = null
+          journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, notice: 'That profile can’t be claimed right now. If it’s yours, contact us.' })); return
+        }
+      }
       if (request.method === 'GET' && url.pathname === '/api/my-connections') {
         try {
           if ([...url.searchParams.keys()].some(key => !['degree','q','cursor'].includes(key)) || ['degree','q','cursor'].some(key => url.searchParams.getAll(key).length > 1)) throw Error('known_connections_input_invalid')
@@ -379,6 +447,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           const legacy = await backend.readLegacyProfile()
           if (legacy) Object.assign(profile, legacy.profile)
         }
+        const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
         try {
@@ -386,7 +455,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           connectionCount = connections.length
           contacts = connections.slice(0, 10).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company }))
         } catch { /* The profile stands on its own while the network is still being read. */ }
-        journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs) }), props.importJob); return
+        journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/network') {
         const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
