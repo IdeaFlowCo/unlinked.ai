@@ -100,3 +100,5 @@ The provenance-backed one/two-hop reader, signed HTTP API and account MCP degree
 `mcp-server/public-discovery.mjs` mounts exact GET/HEAD discovery/import/Meet routes before session resolution; its fixed asset map never exposes owner data or request-selected files.
 
 Shared public People/API/AI and backward-compatible account grant behavior are documented in `docs/shared-people-beta.md`; no raw private import or identity data is projected publicly.
+
+The immutable private legacy Storage recovery, owner confirmation/download boundary and offline operator are documented in `docs/legacy-storage-recovery.md`; originals are excluded from agent grants and public projections.

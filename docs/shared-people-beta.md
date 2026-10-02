@@ -12,6 +12,7 @@ A member with no imports can POST `/search-account` with query, CSRF and `scope=
 Everyone retrieval evaluates all public profiles lexically and passes at most 200 matching professional candidates to OpenAI for ranking.
 The response reports total considered/candidate counts; it is retrieval plus AI ranking, with no claim that all profiles were sent to the model.
 Model input excludes emails, phones, raw source archives and private notes.
+Owner-network matches also omit contact emails and phones from returned fields; retained originals remain private recovery data.
 A changed/revoked public publication is rechecked after model processing and denies the result.
 
 New production upload actions record `public-professional-archive-openai-v2` alongside existing retention/AI consent.
@@ -24,7 +25,7 @@ Legacy-directed source edges are canonicalized with member upload edges so revok
 
 New account grants include `unlinked_search_everyone` and `unlinked_search_network`; `unlinked_search_network` degree/cursor mode and signed `GET /api/my-connections` read recorded one/two-hop paths from the current complete public snapshot only after an explicitly confirmed recovered-profile anchor. Old single-tool grants keep their exact original scope.
 Stored grant and owner binding are checked before and after model work; revocation remains durable.
-No grant exposes raw archives or identity/provider credentials.
+No grant exposes raw archives, recovered original files or identity/provider credentials.
 
 The first complete shared-snapshot bound is 20,000 profiles/100,000 edges; the recovered seed uses 16,296 profiles.
 Exceeding the bound fails explicitly rather than truncating; this is a real scaling limit for subsequent member additions, separate from the owner-private parser/import limit of 100,000 records.
