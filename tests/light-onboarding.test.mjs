@@ -607,3 +607,13 @@ test('a connections heading uses a given name, never a bare initial', () => {
   assert.equal(heading('Al Green'), 'Connections · 1')
   assert.equal(heading(''), 'Connections · 1')
 })
+
+test('Settings opens with a visible account section: who is signed in and a native sign-out', () => {
+  const view = renderSettings({ accountLabel: 'member@example.test', displayName: 'Member', csrf: 'csrf-value', imports: [] })
+  const section = view.content.match(/<h2>Your account<\/h2>(.*?)<h2>Your agent<\/h2>/s)[1]
+  assert.match(section, /Signed in as <b>member@example\.test<\/b>/)
+  assert.match(section, /<form method="post" action="\/logout">/)
+  assert.match(section, /name="csrf" value="csrf-value"/)
+  assert.match(section, /type="submit">Sign out</)
+  assert.doesNotMatch(section, /<script|onclick=/)
+})
