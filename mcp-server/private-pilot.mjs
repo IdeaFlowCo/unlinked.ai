@@ -5,6 +5,8 @@ import { createPrivateHostedHandler } from './private-hosted.mjs'
 import { createPrivateGrantService } from './private-grants.mjs'
 import { createAccountGrantService } from './account-grants.mjs'
 import { createAccountHostedHandler } from './account-hosted.mjs'
+import { createAccountAgentApiHandler } from './account-api.mjs'
+import { createAccountToolService } from './account-tools.mjs'
 
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
@@ -20,12 +22,18 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
   const browser = createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot,
     issueAccountGrant: accountGrants?.issueGrant, ensureAccountGrant: accountGrants?.ensureGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
     issueGrant: grants.issueGrant, mcpEndpoint: new URL('/mcp', base).href, dataMode, backgroundImports, audit })
-  const mcp = accountGrants ? createAccountHostedHandler({ authenticateGrant: accountGrants.authenticateGrant, getBackend, complete, readPublishedSnapshot, origin: base.origin }) : createPrivateHostedHandler({ authenticateGrant: grants.authenticateGrant, complete, allowedHosts: [base.host], allowedOrigins: [base.origin],
+  // One tool service instance backs both agent surfaces, so the MCP tools and
+  // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
+  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot }) : null
+  const mcp = accountGrants ? createAccountHostedHandler({ authenticateGrant: accountGrants.authenticateGrant, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService }) : createPrivateHostedHandler({ authenticateGrant: grants.authenticateGrant, complete, allowedHosts: [base.host], allowedOrigins: [base.origin],
     readResource: async (grant, type, id) => (await getBackend(grant)).readResource(type, id),
     readAsset: async (grant, sha256) => (await getBackend(grant)).readAsset(sha256),
   })
+  const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin }) : null
   const server = createServer((request, response) => {
-    void (new URL(request.url, base).pathname === '/mcp' ? mcp(request, response) : browser(request, response)).catch(() => {
+    let pathname
+    try { pathname = new URL(request.url, base).pathname } catch { response.writeHead(400).end(); return }
+    void (pathname === '/mcp' ? mcp(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(() => {
       if (!response.headersSent) response.writeHead(503).end()
       else response.end()
     })

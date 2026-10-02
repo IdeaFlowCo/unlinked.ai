@@ -4,12 +4,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
+import { accountGrantTools } from './account-grants.mjs'
+import { ACCOUNT_TOOL_DESCRIPTIONS, ACCOUNT_TOOL_SCHEMAS, AccountToolError, createAccountToolService } from './account-tools.mjs'
 
 // Tool failures carry sanitized typed causes (code/message plus an internal
 // error identifier) so a provider or aggregation failure is distinguishable
 // from real revocation. Only constant internal identifiers pass through —
 // never raw exception text, which could carry request or profile data. The
-// code vocabulary matches docs discussed in PR #52 (grant_revoked,
+// code vocabulary is the docs/agent-api.md contract (grant_revoked,
 // invalid_input, cursor_invalid, degree_unproven, result_too_large,
 // upstream_unavailable).
 const TOOL_FAILURES = {
@@ -30,15 +32,23 @@ export function typedToolFailure(error) {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code, message: text, ...(cause ? { cause } : {}) } }) }] }
 }
 
-export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin }) {
+// Tools beyond the two launch tools are registered from the shared service so
+// the MCP surface and the HTTP agent API (docs/agent-api.md) stay one contract.
+const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search']
+
+export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service }) {
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || ![authenticateGrant, getBackend, complete].every(x => typeof x === 'function')) throw new Error('account_host_configuration_required')
+  const toolService = service ?? createAccountToolService({ getBackend, complete, readPublishedSnapshot })
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
     if (request.headers.host !== base.host || request.headers.origin && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
     if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
     const grant = await authenticateGrant(request)
-    if (!grant || !['owner_network','owner_network_and_public'].includes(grant.scope) || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(grant.scope === 'owner_network' ? ['unlinked_search_network'] : ['unlinked_search_network','unlinked_search_everyone'])) { response.writeHead(401).end(); return }
+    // Every issued grant stores the exact tool list of its catalog version;
+    // old grants keep exposing only the tools they were created with.
+    const catalog = grant ? accountGrantTools(grant.version ?? 1, grant.scope) : null
+    if (!grant || !catalog || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(catalog)) { response.writeHead(401).end(); return }
     const server = new McpServer({ name: 'unlinked-account-network', version: '1.0.0' })
     server.registerTool('unlinked_search_network', {
       description: 'Search all currently published LinkedIn observations owned by your authenticated Unlinked account. Every result retains archive provenance. With degree1/2 (or a second-degree query), read recorded public connection paths from your explicitly linked legacy profile. Unknown identity/relationship matches are not invented; no other owner/private fields are accessed.',
@@ -74,6 +84,25 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
         return { content: [{ type: 'text', text: JSON.stringify(result) }] }
       } catch (error) { return typedToolFailure(error) }
     })
+    const revalidate = async () => {
+      const current = await authenticateGrant(request)
+      if (!current || current.grantId !== grant.grantId || current.ownerId !== grant.ownerId || current.userId !== grant.userId || JSON.stringify(current.tools) !== JSON.stringify(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant was revoked; sign in and create a new agent grant.')
+    }
+    for (const name of SERVICE_TOOLS) {
+      if (!grant.tools.includes(name)) continue
+      server.registerTool(name, { description: ACCOUNT_TOOL_DESCRIPTIONS[name], inputSchema: ACCOUNT_TOOL_SCHEMAS[name] }, async input => {
+        const controller = new AbortController()
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
+        response.once('close', () => { if (!response.writableFinished) controller.abort() })
+        try {
+          const { text } = await toolService.call({ grant, name, input, signal, revalidate })
+          return { content: [{ type: 'text', text }] }
+        } catch (error) {
+          const typed = error instanceof AccountToolError ? error : new AccountToolError('upstream_unavailable', 'The tool could not finish; retry.')
+          return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: typed.code, message: typed.message } }) }] }
+        }
+      })
+    }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     response.once('close', () => { void transport.close(); void server.close() })
     await server.connect(transport)
