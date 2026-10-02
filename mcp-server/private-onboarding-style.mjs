@@ -141,6 +141,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .me>summary::-webkit-details-marker{display:none}
 .unlinked-onboarding .me>summary:hover,.unlinked-onboarding .me[open]>summary{border-color:var(--brand)}
 .unlinked-onboarding .me .avatar{width:30px;height:30px;font-size:12px}
+.unlinked-onboarding .me-face{display:inline-flex;border-radius:50%;text-decoration:none}.unlinked-onboarding .me-face .avatar{width:32px;height:32px;font-size:12px}.unlinked-onboarding .me-face:hover .avatar,.unlinked-onboarding .me-face:focus-visible .avatar{box-shadow:0 0 0 2px var(--brand)}.unlinked-onboarding .me>summary{padding-left:11px}
 .unlinked-onboarding .me-l{display:inline-flex;align-items:center;gap:3px}
 .unlinked-onboarding .me[open]>summary::before{content:"";position:fixed;inset:0;z-index:40;cursor:default}
 .unlinked-onboarding .me-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:41;width:300px;padding:6px 0;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(16,24,40,.14);font-size:15px}

@@ -135,7 +135,7 @@ test('stage returns durable uploaded receipt; crash after profile before connect
   assert.equal(result.assertions.filter(row => row.category === 'connections').length, 1001)
   assert.equal((await stageArchive(request)).id, staged.id)
   assert.equal(Object.keys(await f.snapshot()).filter(key => key.startsWith('assertion/')).length, 1003)
-  assert.deepEqual(importJobStatus(completed), { id: completed.id, status: 'indexed', profileReady: true, processed: 1003, total: 1003, statusUrl: `/imports/${completed.id}/status` })
+  assert.deepEqual(importJobStatus(completed), { id: completed.id, status: 'indexed', profileReady: true, processed: 1003, total: 1003, rejected: 0, failedFiles: 0, statusUrl: `/imports/${completed.id}/status` })
 })
 
 test('same archive uses independent owners and worker survives browser absence; tombstone wins delayed publication', async t => {

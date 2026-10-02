@@ -130,7 +130,9 @@ export function createArchiveWorker({ listPendingImports, getBackend, intervalMs
 export function importJobStatus(job) {
   return { id: job.id, status: job.status, profileReady: job.progress?.profileReady === true,
     processed: job.progress?.processed ?? (terminal(job) ? job.counts?.indexed ?? 0 : 0),
-    total: job.progress?.total ?? (terminal(job) ? job.counts?.accepted ?? 0 : null), statusUrl: `/imports/${job.id}/status`,
+    total: job.progress?.total ?? (terminal(job) ? job.counts?.accepted ?? 0 : null),
+    rejected: job.counts?.rejected ?? 0, failedFiles: job.counts?.failedFiles ?? 0,
+    statusUrl: `/imports/${job.id}/status`,
     ...(job.error ? { errorMessage: importErrorMessage(job) } : {}) }
 }
 
