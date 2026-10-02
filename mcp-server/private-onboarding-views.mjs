@@ -18,7 +18,7 @@ const profileLookup = ({ linkedinLookup, lookupResult, csrf }) => {
 
 // One search box, in the header of every page. A plain GET, so it works before
 // sign-in, can be bookmarked and needs no script.
-const headerSearch = ({ query }) => `<form class="header-search" method="get" action="/network" role="search"><input name="q" type="search" maxlength="200" aria-label="Search everyone on Unlinked" value="${html(query)}" placeholder="Search people, roles, companies"><button type="submit" aria-label="Search"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg></button></form>`
+const headerSearch = ({ query }) => `<form class="header-search" method="get" action="/network" role="search"><svg class="search-icon" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="m11 11 4 4"/></svg><input name="q" type="search" maxlength="200" aria-label="Search everyone on Unlinked" value="${html(query)}" placeholder="Search people, roles, companies"><button type="submit" aria-label="Search"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg></button></form>`
 const steps = active => `<div class="steps" aria-label="Getting started">${['Account', 'Your LinkedIn export', 'Your profile'].map((name, index) => `<${active === index + 1 ? 'b aria-current="step"' : 'span'}>${index + 1}. ${name}</${active === index + 1 ? 'b' : 'span'}>`).join('<span aria-hidden="true">·</span>')}</div>`
 const terminalJob = job => ['indexed', 'partial', 'failed'].includes(job?.status)
 const jobLabel = job => job?.status === 'indexed' ? 'Import finished' : job?.status === 'partial' ? 'Import needs attention' : job?.status === 'failed' ? 'Import could not finish' : 'Importing…'
@@ -42,7 +42,8 @@ const base = (title, content, { accountLabel, displayName, csrf, importJob, quer
 const HUES = ['#4349c4', '#2f6f8f', '#8a5a2b', '#6b4fa0', '#b0413e', '#3d6f7a']
 const hue = seed => { let hash = 0; for (const character of raw(seed)) hash = (hash * 31 + character.codePointAt(0)) >>> 0; return HUES[hash % HUES.length] }
 const initials = name => raw(name).trim().split(/\s+/).slice(0, 2).map(word => [...word][0] ?? '').join('')
-const firstName = name => raw(name).trim().split(/\s+/)[0] ?? ''
+// A given name reads well as a possessive; an initial such as “A.” does not.
+const firstName = name => { const first = raw(name).trim().split(/\s+/)[0] ?? ''; return [...first].length > 2 && !first.endsWith('.') ? first : '' }
 const avatar = (name, seed = name) => `<span class="initials avatar" style="background:${hue(seed)}" aria-hidden="true">${html(initials(name))}</span>`
 const externalProfile = value => { try { const url = new URL(value); return url.protocol === 'https:' && ['linkedin.com', 'www.linkedin.com'].includes(url.hostname) && !url.username && !url.password ? url.href : null } catch { return null } }
 const subline = value => [raw(value.headline), raw(value.company)].filter(Boolean).join(' · ')
