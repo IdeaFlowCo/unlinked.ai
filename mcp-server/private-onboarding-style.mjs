@@ -31,6 +31,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .button.sm,.unlinked-onboarding button.sm{min-height:38px;padding:8px 14px;font-size:14px}
 .unlinked-onboarding .quiet,.unlinked-onboarding .button.sec{background:#fff;color:var(--fg);border-color:var(--line2)}
 .unlinked-onboarding button:disabled{opacity:.65;cursor:not-allowed}
+.unlinked-onboarding button.danger{background:#b0413e;border-color:#b0413e}
 .unlinked-onboarding .link-button{display:inline;min-height:0;padding:0;border:0;background:none;color:var(--brand-d);font:inherit;text-decoration:underline;text-underline-offset:3px}
 .unlinked-onboarding .small{font-size:14px;color:var(--muted)}
 .unlinked-onboarding .import-status{max-width:780px;margin:20px auto 0;padding:14px 18px;background:var(--tint);border:1px solid var(--brand);border-radius:var(--r);font-size:14px;overflow-wrap:anywhere}

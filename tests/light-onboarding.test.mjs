@@ -402,7 +402,10 @@ test('only HTTPS LinkedIn profile links are exposed, with safe outbound attribut
 test('unimplemented editing, public discovery and removal are stated truthfully', () => {
   assert.match(renderOwnProfile(account).content, /Editing comes soon/)
   assert.match(renderPeople(account).content, /Friends come soon/)
-  assert.match(renderSettings(account).content, /Permanent removal and data export are not available/)
+  assert.match(renderSettings(account).content, /action="\/export"/)
+  assert.match(renderSettings(account).content, /action="\/delete-account"/)
+  assert.match(renderSettings(account).content, /Type <b>delete everything<\/b> to confirm/)
+  assert.doesNotMatch(renderSettings(account).content, /not available in this beta/)
   assert.match(renderPeople({ ...account, state: 'error' }).content, /does not mean your network is empty/)
   assert.match(renderJoin().content, /href="\/login"/)
 })

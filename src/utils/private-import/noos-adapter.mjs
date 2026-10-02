@@ -146,9 +146,22 @@ export function createNoosOwnerBackend({ baseUrl, accessToken, ownerId, fetchImp
       return response ? response.json() : null
     },
     async writeResource(input) {
-      if (input.namespace !== 'unlinked' || input.sourceOwnerId !== ownerId || !/^[a-f0-9]{64}$/.test(input.sourceId) || input.type !== 'import') throw new Error('private_resource_key_invalid')
+      if (input.namespace !== 'unlinked' || input.sourceOwnerId !== ownerId || !/^[a-f0-9]{64}$/.test(input.sourceId) ||
+          (input.type !== 'import' && !(input.deleted === true && ['assertion', 'source'].includes(input.type)))) throw new Error('private_resource_key_invalid')
       const payload = { ...input }; delete payload.namespace; delete payload.type; delete payload.sourceId
       const response = await request(`${input.type}/${input.sourceId}`, { method: 'PUT', body: JSON.stringify(payload) })
+      if (!response) throw new Error('private_noos_binding_not_found')
+      return response.json()
+    },
+    // Bounded owner-only tombstone batches, for the account's own data removal.
+    // Every item must be this owner's resource and an explicit deletion.
+    async writeBatch(items) {
+      if (!Array.isArray(items) || !items.length || items.length > 600) throw new Error('private_resource_key_invalid')
+      for (const item of items) {
+        if (!item || item.namespace !== 'unlinked' || item.sourceOwnerId !== ownerId || item.deleted !== true || item.payload !== null ||
+            !['import', 'assertion', 'source'].includes(item.type) || !/^[a-f0-9]{64}$/.test(item.sourceId)) throw new Error('private_resource_key_invalid')
+      }
+      const response = await request('batch', { method: 'POST', body: JSON.stringify(items) })
       if (!response) throw new Error('private_noos_binding_not_found')
       return response.json()
     },

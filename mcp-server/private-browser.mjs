@@ -14,7 +14,8 @@ import { createAccountNetwork } from '../src/utils/private-import/account-networ
 import { LIMITS } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus } from '../src/utils/private-import/background-job.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderPerson, renderPeople, renderSettings, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
@@ -65,7 +66,7 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, revokeAccountGrant, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -409,6 +410,37 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob)
+        return
+      }
+      if (signup && request.method === 'GET' && url.pathname === '/export') {
+        const jobs = await jobResources()
+        const grants = await backend.listAccountGrantIds()
+        const data = await exportAccountData({ owner: session.owner, backend, jobs, grants })
+        data.account.accountLabel = session.accountLabel
+        data.account.displayName = session.displayName
+        await recordAudit({ event: 'account_data_exported', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="unlinked-export-${new Date().toISOString().slice(0, 10)}.json"` })
+        response.end(JSON.stringify(data, null, 2)); return
+      }
+      if (signup && request.method === 'POST' && url.pathname === '/delete-account') {
+        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) throw new Error('private_browser_csrf')
+        if ((input.get('confirm') ?? '').trim().toLowerCase() !== 'delete everything') {
+          const jobs = await jobResources(), props = jobProps(jobs)
+          const ids = await backend.listAccountGrantIds()
+          journey(response, renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs), deleteError: 'Type “delete everything” exactly to confirm. Nothing was deleted.' }), props.importJob, '', 400)
+          return
+        }
+        const jobs = await jobResources()
+        const grantIds = await backend.listAccountGrantIds()
+        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds })
+        // Best effort beyond the graph: the legacy claim and the stored archive bytes.
+        if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
+        if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})
+        for (const [id, value] of sessions) if (value.owner.ownerId === session.owner.ownerId) sessions.delete(id)
+        response.setHeader('Set-Cookie', cookie('__Host-ul-session', '', 0))
+        await recordAudit({ event: 'account_data_deleted', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), deletedResources: result.deletedResources })
+        journey(response, renderDataDeleted())
         return
       }
       if (signup && request.method === 'POST' && ['/setup-account', '/revoke-account', '/search-account'].includes(url.pathname)) {
