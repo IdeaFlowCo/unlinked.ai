@@ -84,7 +84,33 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // Member-delivered invites, when the runtime supplies their graph store.
     const invitationStore = typeof dependencies.createMemberInvitationStore === 'function' ? dependencies.createMemberInvitationStore(driver, 'neo4j') : null
     await invitationStore?.initialize()
-    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore }) : undefined
+    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }) }) : undefined
+    // The public profile that stands for an account: its confirmed legacy
+    // profile, else the newest public-consent import it published.
+    const publicProfileIdFor = async owner => {
+      const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+      try {
+        const claimed = await session.executeRead(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount {ownerId: $ownerId, userId: $userId}) WHERE a.revoked = false
+          MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: $ownerId, userId: $userId}) WHERE coalesce(b.active, true) = true RETURN a.profileId AS id LIMIT 2`, owner))
+        if (claimed.records.length === 1) return claimed.records[0].get('id')
+        const imported = await session.executeRead(tx => tx.run(`MATCH (r:OperationalResource {namespace: 'unlinked', type: 'import', publicationOwner: $ownerId, userId: $userId})
+          WHERE r.document CONTAINS '"version":"public-professional-archive-openai-v2"'
+          MATCH (b:OperationalOwner {namespace: 'unlinked', sourceOwnerId: $ownerId, userId: $userId}) WHERE coalesce(b.active, true) = true
+          RETURN r.sourceId AS id, r.document AS document ORDER BY id`, owner))
+        const live = imported.records.map(record => ({ id: record.get('id'), document: JSON.parse(record.get('document')) }))
+          .filter(value => !value.document.deleted && value.document.payload?.consent?.publicProfessionalSearch === true)
+          .sort((a, b) => (b.document.payload?.createdAt ?? 0) - (a.document.payload?.createdAt ?? 0))
+        return live.length ? 'member-import-' + live[0].id : null
+      } finally { await session.close() }
+    }
+    const publicProfileResolver = () => {
+      const known = new Map()
+      return async owner => {
+        const key = `${owner.ownerId}\u0000${owner.userId}`
+        if (!known.has(key)) known.set(key, await publicProfileIdFor(owner))
+        return known.get(key)
+      }
+    }
     const legacyStorage=typeof dependencies.UnlinkedLegacyStorageStore==='function'?new dependencies.UnlinkedLegacyStorageStore(driver,'neo4j','callback'):null
     await legacyStorage?.initialize()
     const login = await loginFactory({ issuer: config.issuer, clientId: config.clientId, clientSecret: config.clientSecret,
@@ -129,7 +155,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           return { ...link, profile, connections: snapshot.connections.filter(edge => edge.fromId === link.profileId), profiles: snapshot.profiles, revision: snapshot.revision }
       }
       const recovery=legacyStorage?createLegacyStorageReader({owner,readOwner:legacyStorage.readOwner.bind(legacyStorage),assets:files,readLegacyProfile}):null
-      return { ...backend,readLegacyProfile,
+      // People this account is connected to through accepted invites.
+      const readInviteConnections = memberInvitations ? async () => {
+        const resolve = publicProfileResolver(), rows = []
+        for (const value of await memberInvitations.connections(owner)) rows.push({ ...value, publicProfileId: await resolve(value.other) })
+        return rows
+      } : undefined
+      return { ...backend,readLegacyProfile,...(readInviteConnections ? { readInviteConnections } : {}),
         ...(recovery?{readLegacyFiles:recovery.list,readLegacyOriginal:recovery.readOriginal,readLegacyObservations:recovery.observations}:{}),
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
@@ -156,6 +188,26 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     worker.start()
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend,
       readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
+      // An accepted invite is a connection both people agreed to: it joins the
+      // public graph when both accounts have a public profile.
+      readInviteEdges: memberInvitations ? async () => {
+        // Each account is resolved once per build, one at a time, and each pair counts once.
+        const resolve = publicProfileResolver(), edges = new Map()
+        for (const value of await memberInvitations.accepted()) {
+          const fromId = await resolve(value.inviter), toId = await resolve(value.invitee)
+          if (fromId && toId && fromId !== toId) edges.set(JSON.stringify([fromId, toId]), { fromId, toId })
+        }
+        return [...edges.values()]
+      } : undefined,
+      // Operator merges and renames (mcp-server/profile-decisions-operator.mjs); revoked ones are ignored.
+      readDecisions: async () => {
+        const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+        try {
+          const result = await session.executeRead(tx => tx.run(`MATCH (d:UnlinkedProfileDecision) WHERE coalesce(d.revoked, false) = false
+            RETURN d.id AS id, d.kind AS kind, d.profileId AS profileId, d.survivorId AS survivorId, d.name AS name ORDER BY d.decidedAt, d.id LIMIT 5001`))
+          return result.records.map(record => Object.fromEntries(['id', 'kind', 'profileId', 'survivorId', 'name'].filter(key => record.get(key) !== null).map(key => [key, record.get(key)])))
+        } finally { await session.close() }
+      },
       // A legacy profile is a member's once its account claim is confirmed and the owner is active.
       readMembers: async () => {
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })

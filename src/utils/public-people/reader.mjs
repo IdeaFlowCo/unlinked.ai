@@ -123,7 +123,13 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         }
       }
       const ordered = [...summaries.values()].sort((a, b) => compare(normalized(a.name), normalized(b.name)) || compare(a.id, b.id))
-      return { revision: value.revision, ordered, summaries, details, connected, tokens }
+      // A merged profile's address points at its survivor.
+      const aliases = new Map()
+      if (value.aliases !== undefined) {
+        if (!plain(value.aliases) || Object.keys(value.aliases).length > maxProfiles) unavailable()
+        for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to) }
+      }
+      return { revision: value.revision, ordered, summaries, details, connected, tokens, aliases }
     } catch {
       unavailable()
     } finally {
@@ -175,6 +181,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const scope = `connections:${id}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
       if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
+      if (data.aliases.has(id)) return { moved: data.aliases.get(id) }
       if (!data.details.has(id)) return null
       const connections = page(data.ordered.filter(person => data.connected.get(id).has(person.id)), decodedCursor, scope, data.revision)
       return { profile: { ...data.details.get(id), connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
@@ -185,7 +192,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { ids, signal } = requestValue(request)
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(idValid)) invalid()
       const data = await snapshot(signal)
-      return new Map(ids.filter(id => data.summaries.has(id)).map(id => [id, data.summaries.get(id)]))
+      const resolved = id => data.aliases.get(id) ?? id
+      return new Map(ids.filter(id => data.summaries.has(resolved(id))).map(id => [id, data.summaries.get(resolved(id))]))
     },
     // Everyone whose public profile ties them to a company, by the company name
     // as it appears on profiles: a position at it, or a headline naming it.

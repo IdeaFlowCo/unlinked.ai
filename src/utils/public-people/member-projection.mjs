@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { PUBLIC_UPLOAD_CONSENT } from '../private-import/consent.mjs'
 import { createScopedImportReader } from '../private-import/noos-adapter.mjs'
+import { applyProfileDecisions } from './profile-decisions.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
 const permitted = job => job?.consent?.version === PUBLIC_UPLOAD_CONSENT.version && job.consent.publicProfessionalSearch === true && job.consent.privateRetention === true && job.consent.boundedOpenAIProcessing === true
 const profile = (id, name) => ({ id, name, positions: [], education: [], skills: [] })
@@ -37,8 +38,10 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // is read again through the existing owner-authorized immutable publication.
 // Old/private/synthetic consent is excluded; tombstones/owner revocation remove
 // a source from every live snapshot even if its public chunks are retained.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers }) {
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges }) {
   let work = null
+  // Operator merges and renames apply last, over the complete union.
+  const decide = async snapshot => typeof readDecisions === 'function' ? applyProfileDecisions(snapshot, await readDecisions()) : snapshot
   const build = async () => {
     const legacy = await readLegacy()
     if (!legacy) return null
@@ -84,9 +87,14 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     if (identity(await discover()) !== identity(items)) throw Error('public_member_source_changed')
     for (const check of linkedChecks) await check()
     for (const [id, value] of overlays) profiles[profiles.findIndex(profile => profile.id === id)] = value.profile
+    if (typeof readInviteEdges === 'function') {
+      const known = new Set(profiles.map(value => value.id)), edges = (await readInviteEdges()).filter(edge => known.has(edge.fromId) && known.has(edge.toId))
+      connections.push(...edges)
+      revisions.push('invites:' + hash(JSON.stringify(edges.map(edge => [edge.fromId, edge.toId]).sort())))
+    }
     // Replayed source edges are canonicalized without changing their receipts.
     const uniqueConnections = [...new Map(connections.map(edge => [JSON.stringify([edge.fromId, edge.toId]), edge])).values()]
-    if (typeof readMembers !== 'function') return {state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections}
+    if (typeof readMembers !== 'function') return decide({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections})
     // Claimed profiles are members; everyone else in the index is a shadow.
     const claimed = await readMembers()
     if (!Array.isArray(claimed) || claimed.length > 20000) throw Error('public_member_presence_invalid')
@@ -94,7 +102,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     for (const id of claimed) if (known.has(id)) members.add(id)
     const memberIds = [...members].sort()
     revisions.push('members:' + hash(JSON.stringify(memberIds)))
-    return {state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds}
+    return decide({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds})
   }
   return async ({signal} = {}) => {
     signal?.throwIfAborted()
