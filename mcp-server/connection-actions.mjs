@@ -77,12 +77,19 @@ export function createConnectionActions({ memberConnections, accountForProfile, 
     const isInvite = typeof id === 'string' && id.startsWith('invite:')
     const selected = isInvite ? invitations.find(value => `invite:${value.invitationId}` === id) : requests.find(value => value.requestId === id)
     if (!selected) throw new ConnectionError('connection_not_found')
-    // The selected accepted agreement authorizes settling every request for
-    // this pair, including older pending/ignored requests from before an invite.
-    await memberConnections.settleRemovedPair(owner, selected.other)
-    for (const invitation of invitations.filter(value => sameAccount(value.other, selected.other))) {
-      try { await memberInvitations.remove(owner, invitation.invitationId) }
+    const requestIds = await memberConnections.captureRemovalPair(owner, selected.other)
+    const pairedInvitations = invitations.filter(value => sameAccount(value.other, selected.other))
+    const removeInvite = async invitationId => {
+      try { await memberInvitations.remove(owner, invitationId) }
       catch (error) { if (error instanceof InvitationError) throw new ConnectionError(error.code === 'invitation_not_found' ? 'connection_not_found' : 'connection_unavailable'); throw error }
+    }
+    if (isInvite) await removeInvite(selected.invitationId)
+    else await memberConnections.remove(owner, selected.requestId)
+    await memberConnections.settleRemovedPair(owner, selected.other, requestIds)
+    for (const invitation of pairedInvitations) {
+      if (isInvite && invitation.invitationId === selected.invitationId) continue
+      try { await removeInvite(invitation.invitationId) }
+      catch (error) { if (!(error instanceof ConnectionError) || !['connection_not_found', 'connection_unavailable'].includes(error.code)) throw error }
     }
   }
   return { relations, relationTo, send, remove }
