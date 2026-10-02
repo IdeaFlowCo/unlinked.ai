@@ -102,7 +102,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     try { owner = await provisioning.resolveOwner({ issuer, subject }) } catch { throw new AccountToolError('upstream_unavailable', 'The identity binding could not be read right now; retry.') }
     if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new AccountToolError('not_linked', 'No Unlinked account is bound to that verified identity. The person must sign in at /login once; linkage is never established by email matching.')
     let ensured = null
-    try { ensured = await provisioning.ensureGrant({ ownerId: owner.ownerId, userId: owner.userId }) } catch { throw new AccountToolError('upstream_unavailable', 'Grant provisioning could not finish; retry.') }
+    try { ensured = await provisioning.ensureGrant({ ownerId: owner.ownerId, userId: owner.userId }, { readOnly: true }) } catch { throw new AccountToolError('upstream_unavailable', 'Grant provisioning could not finish; retry.') }
     if (!ensured) throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
     // Validate end to end before handing anything out: the returned token must
     // authenticate against the live grant record.
