@@ -13,7 +13,8 @@ import { createAccountNetwork } from '../src/utils/private-import/account-networ
 import { LIMITS } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus } from '../src/utils/private-import/background-job.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
-import { renderJoin, renderBringArchive, renderImporting, renderOwnProfile, renderPeople, renderSettings, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderPerson, renderPeople, renderSettings, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -57,7 +58,7 @@ async function body(request, limit) {
 
 function page(response, title, content, status = 200) {
   response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-  response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${html(title)} · Unlinked</title><style>body{font:18px system-ui;max-width:760px;margin:4rem auto;padding:0 1.5rem;color:#272947;background:#f4f5fb}h1{font-size:2rem}form,article{padding:1.5rem;margin:1.5rem 0;background:white;border:1px solid #d3d5ea;border-radius:12px}label{display:block;margin:1rem 0}input[type=text],textarea{display:block;width:95%;padding:.75rem;font:inherit}button,a.action{display:inline-block;padding:.8rem 1.1rem;background:#4349c4;color:white;border:0;border-radius:6px;font:inherit;cursor:pointer}a{color:#4349c4}small{display:block;margin:.75rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><main><a href="/">Unlinked</a><h1>${html(title)}</h1>${content}</main></html>`)
+  response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${html(title)} · Unlinked</title><style>body{font:17px/1.55 system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:0 1.5rem 3rem;color:#16181d;background:#f5f6fc}main>a:first-child{display:block;padding:24px 0;margin-bottom:2rem;border-bottom:1px solid #e6e8ec;font-weight:700;font-size:21px;letter-spacing:-.04em;text-decoration:none;text-transform:lowercase}h1{font-size:2rem;letter-spacing:-.03em;line-height:1.1}form,article{padding:1.25rem 1.4rem;margin:1rem 0;background:white;border:1px solid #e6e8ec;border-radius:8px}label{display:block;margin:1rem 0}input[type=text],textarea{display:block;width:95%;padding:.75rem;font:inherit}button,a.action{display:inline-block;padding:.7rem 1.2rem;margin:.2rem .3rem .2rem 0;background:#4349c4;color:white;border:0;border-radius:8px;font:600 16px system-ui;cursor:pointer;text-decoration:none}a{color:#32379c}small{display:block;margin:.75rem 0;color:#667085}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><main><a href="/">Unlinked</a><h1>${html(title)}</h1>${content}</main></html>`)
 }
 
 // Default-off standalone controller. The operator must supply the reviewed
@@ -78,6 +79,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map()
+  // A member stays signed in on this browser until they sign out or the runtime restarts.
+  const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
+  // Pages a sign-in may return to. Everything else lands on the home route.
+  const returnPath = value => typeof value === 'string' && /^\/(?:profile|settings|import|network|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) ? value : null
+  const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
   let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
@@ -88,15 +94,15 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
   const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never changes identity authority. */ } }
-  const journey = (response, view, job = null, script = '') => {
+  const journey = (response, view, job = null, script = '', status = 200) => {
     const nonce = token()
-    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
-    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${html(view.title)} · Unlinked</title>${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${view.content}${script ? `<script nonce="${nonce}">${script}</script>` : ''}</html>`)
+    response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${html(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${view.content}${script ? `<script nonce="${nonce}">${script}</script>` : ''}</html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
-  async function establishSession(response, identity, invitationToken = null) {
+  async function establishSession(response, identity, invitationToken = null, next = null) {
     let claimed
     if (invitationToken) {
       if (typeof claimInvitation !== 'function') throw new Error('private_invitation_intent_invalid')
@@ -116,14 +122,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new Error('private_owner_recovery_required')
     if (claimed && (claimed.ownerId !== owner.ownerId || claimed.userId !== owner.userId)) throw new Error('private_owner_recovery_required')
     purge(sessions)
-    if (sessions.size >= 100) throw new Error('private_login_capacity')
+    if (sessions.size >= SESSION_CAPACITY) throw new Error('private_login_capacity')
     const sessionId = token()
     const legacyProof = identity.verifiedEmail && identity.emailEvidence === 'signed-ideaflow-beta-v1' ? Object.freeze({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId, verifiedAt: identity.verifiedAt, email: identity.verifiedEmail, emailEvidence: identity.emailEvidence, ownerId: owner.ownerId, userId: owner.userId }) : null
     const legacyCandidate = legacyProof && legacyAccount ? await legacyAccount.candidate(legacyProof) : null
-    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + 15 * 60000 })
-    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, 900)])
+    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + SESSION_SECONDS * 1000 })
+    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
-    redirect(response, legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : '/')
+    redirect(response, legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : returnPath(next) ?? '/')
   }
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -136,10 +142,13 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
-      if (await servePublicDiscovery(request, response, url.pathname)) return
+      const viewer = sessionFor(request)
+      const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf } : {}
+      if (await servePublicDiscovery(request, response, url.pathname, chrome)) return
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
       const publicProfile = url.pathname.match(/^\/people\/([^/]+)$/)
-      if (request.method === 'GET' && (url.pathname === '/api/people' || publicDetail || publicProfile || url.pathname === '/people' || (url.pathname === '/network' && !sessionFor(request)))) {
+      if (request.method === 'GET' && url.pathname === '/people' && viewer) { redirect(response, `/network${url.search}`); return }
+      if (request.method === 'GET' && (url.pathname === '/api/people' || publicDetail || publicProfile || url.pathname === '/people' || (url.pathname === '/network' && !viewer))) {
         if (Date.now() - publicWindow >= 60000) { publicWindow = Date.now(); publicRequests = 0 }
         if (++publicRequests > 120 || publicBusy >= 2) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         publicBusy++
@@ -151,12 +160,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             const result = await publicReader.profile({ id, cursor: url.searchParams.get('cursor') ?? undefined })
             if (!result) { response.writeHead(404).end(); return }
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
-            const profile = result.profile
-            render(response, profile.name, `<p><a href="/network">Everyone on Unlinked</a> · <a href="/login">Sign in</a></p><p>${html(profile.headline ?? '')}</p><p>${html(profile.about ?? '')}</p>${profile.positions.map(value => `<article><h2>${html(value.title)}</h2><p>${html(value.company)}</p><p>${html(value.description ?? '')}</p></article>`).join('')}<p>${profile.skills.map(html).join(' · ')}</p><h2>Connections</h2>${profile.connections.map(value => `<p><a href="/people/${encodeURIComponent(value.id)}">${html(value.name)}</a></p>`).join('')}`); return
+            journey(response, renderPerson({ ...chrome, profile: result.profile })); return
           }
           const query = url.searchParams.get('q') ?? '', result = await publicReader.list({ query, cursor: url.searchParams.get('cursor') ?? undefined })
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
-          const view = renderPeople({ scope: 'everyone', everyone: result.profiles, anonymousPublic: true, query, nextCursor: result.nextCursor, state: 'ready' })
+          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, query, nextCursor: result.nextCursor, state: 'ready' })
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
@@ -210,7 +218,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
         const result = await login.begin(), id = token()
-        pending.set(id, { ...result.transaction, expiresAt: Date.now() + 5 * 60000 })
+        pending.set(id, { ...result.transaction, next: returnPath(url.searchParams.get('next')), expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
         redirect(response, result.location); return
       }
@@ -231,14 +239,17 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           render(response, 'Confirm your Ideaflow account', `<p>Ideaflow returned this verified account for your invitation. Confirm it here before Unlinked creates a private owner for the invitation.</p><article><strong>${displayIdentity(identity)}</strong></article><form method="post" action="/invite/confirm"><input type="hidden" name="csrf" value="${html(csrf)}"><button name="action" value="confirm">Use this account</button><button name="action" value="restart">Use another account</button><button name="action" value="cancel">Cancel</button></form>`)
           return
         }
-        await establishSession(response, identity); return
+        await establishSession(response, identity, null, transaction.next); return
       }
       const session = sessionFor(request)
       if (!session) {
-        if (request.method === 'GET' && url.pathname === '/') journey(response, renderJoin())
-        else render(response, 'Sign in required', '<a class="action" href="/login">Continue with Ideaflow</a>', 401)
+        if (request.method === 'GET' && url.pathname === '/') journey(response, renderLanding())
+        else if (request.method === 'GET' && url.pathname === '/join') journey(response, renderJoin())
+        else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(url.pathname) }), null, '', 401)
+        else render(response, 'Sign in required', '<a class="action" href="/login">Sign in</a>', 401)
         return
       }
+      if (request.method === 'GET' && url.pathname === '/join') { redirect(response, '/'); return }
       if (request.method === 'GET' && url.pathname === '/legacy-account') {
         if (!session.legacyCandidate) { redirect(response, '/profile'); return }
         render(response, 'Your existing Unlinked profile', `<p>This looks like your old Unlinked account. Continue?</p><small>Signed in as ${html(session.accountLabel)}</small><form method="post" action="/legacy-account"><input type="hidden" name="csrf" value="${html(session.csrf)}"><button name="action" value="confirm">Continue with my old profile</button><button name="action" value="skip">Continue without linking</button></form>`); return
@@ -286,7 +297,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const jobProps = jobs => {
         const ordered = [...jobs].sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0))
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
-        return { accountLabel: session.accountLabel, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
+        return { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
       const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed, visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
       const statusMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/status$/)
@@ -295,8 +306,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (!resource || resource.deleted || resource.sourceOwnerId !== session.owner.ownerId || resource.payload?.ownerId !== session.owner.ownerId || resource.payload.id !== statusMatch[1] || resource.payload.kind || resource.payload.receiptOf) { response.writeHead(404).end(); return }
         response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(importJobStatus(resource.payload))); return
       }
-      if (request.method === 'GET' && url.pathname === '/') {
-        if (signup) { const jobs = await jobResources(); const props = jobProps(jobs); journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic' }), props.importJob, uploadProgressScript()); return }
+      if (request.method === 'GET' && (url.pathname === '/' || (signup && url.pathname === '/import'))) {
+        if (signup) { const jobs = await jobResources(); if (url.pathname === '/' && jobs.length) { redirect(response, '/network'); return } const props = jobProps(jobs); journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic' }), props.importJob, uploadProgressScript()); return }
         const ids = signup ? await backend.listImportIds() : []
         const jobs = await Promise.all(ids.map(id => backend.readResource('import', id)))
         render(response, 'Import your LinkedIn archive', `${signup ? accountNav : ''}<p>Complete archive preferred. Connections-only ZIP or CSV also works. Re-uploading the same named archive returns its durable receipt.</p><form method="post" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>LinkedIn export ZIP or CSV <input required type="file" name="archive" accept=".zip,.csv"></label><small>Maximum 64 MiB and 100,000 parser records. Larger imports fail explicitly and do not publish observations.</small><p>By importing, your profile and connections join your Unlinked network, searchable by you and by any agent you connect. Contact details stay private.</p>${dataMode === 'synthetic' ? '<label><input required type="checkbox" name="syntheticConsent" value="yes"> This file contains synthetic test data only.</label>' : ''}<button>Import archive</button></form>${signup ? `<h2>Your imports</h2>${jobs.filter(job => job && !job.deleted && job.sourceOwnerId === session.owner.ownerId).map(job => `<article><a href="/imports/${html(job.sourceId)}">${html(job.payload.filename)}</a><p>${html(job.payload.counts?.indexed ?? 0)} observations indexed</p></article>`).join('') || '<p>Your first upload will appear here.</p>'}` : ''}`)
@@ -311,12 +322,18 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           if (legacy) Object.assign(profile, legacy.profile)
         }
         if (!profile.name) profile.name = session.displayName
-        journey(response, renderOwnProfile({ ...props, profile, imports: summaries(jobs) }), props.importJob); return
+        let contacts = [], connectionCount
+        try {
+          const connections = (await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()).assertions.filter(row => row.category === 'connections')
+          connectionCount = connections.length
+          contacts = connections.slice(0, 10).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company }))
+        } catch { /* The profile stands on its own while the network is still being read. */ }
+        journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs) }), props.importJob); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/network') {
         const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
         const connections = network.assertions.filter(row => row.category === 'connections')
-        const filter = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+        const typed = (url.searchParams.get('q') ?? '').trim(), filter = typed.toLowerCase()
         if (filter.length > 256) throw new Error('network_filter_limit')
         const rows = connections.filter(row => !filter || [row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].some(value => value?.toLowerCase().includes(filter)))
         const index = Number(url.searchParams.get('page') ?? '0')
@@ -331,8 +348,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: filter })
-        if (rows.length > (index + 1) * 100) view.content += `<a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a>`
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed })
+        if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a></p>`)
         journey(response, view, props.importJob)
         return
       }
@@ -362,13 +379,13 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
             const own = network.imports.length || network.legacyProfileId ? network.assertions.filter(row => row.category === 'connections').slice(0, 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })) : undefined
             const view = renderPeople({ ...props, scope, everyone: result.matches, own, query: input.get('query'), state: 'ready', searchResults: result.matches })
-            view.content += `<p>${result.considered} public profiles considered; ${result.modelCandidates} matching candidates ranked with AI.</p>`
+            extend(view, `<p class="dir small">${result.considered} public profiles considered; ${result.modelCandidates} matching candidates ranked with AI.</p>`)
             journey(response, view, props.importJob); return
           }
           const result = await createAccountNetwork({ owner: session.owner, getBackend, complete }).search({ query: input.get('query'), signal: controller.signal })
           const props = jobProps(await jobResources())
           const view = renderPeople({ ...props, scope: 'own', query: input.get('query'), searchResults: result.matches.map(match => ({ name: [match.fields['first name'], match.fields['last name']].filter(Boolean).join(' '), headline: match.fields.position, company: match.fields.company, linkedinUrl: match.fields.url, reason: match.reason })) })
-          view.content += `<p>${result.considered} connection observations searched across your own files.</p>`
+          extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return
         }
         const { accessToken } = await issueAccountGrant(session.owner)
