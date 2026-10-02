@@ -127,6 +127,8 @@ test('dynamic registration accepts only connector callbacks and loopback, always
     assert.match((await refused.json()).error, /^invalid_(redirect_uri|client_metadata)$/)
   }
   assert.equal((await p.register({ redirect_uris: [CLAUDE], response_types: ['token'] })).status, 400)
+  const long = await p.register({ redirect_uris: Array.from({ length: 8 }, (_, i) => `http://localhost/${i}${'a'.repeat(400)}`) })
+  assert.equal(long.status, 400, 'a registration whose client_id would be too long to verify is refused up front')
   assert.equal((await p.go('/oauth/register', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: '{}' })).status, 400)
   assert.equal((await p.go('/oauth/register')).status, 405)
 
