@@ -429,15 +429,15 @@ test('agent copy enhancement is nonce-ready, copies exact setup and selects it o
     let focused = false
     let selected = false
     const configuration = { value: '{"token":"fictional"}', focus: () => { focused = true }, select: () => { selected = true } }
-    const button = { addEventListener: (event, handler) => { assert.equal(event, 'click'); click = handler } }
+    const button = { getAttribute: name => ({ 'data-copy-target': 'onboarding-agent-configuration', 'data-copy-help': 'onboarding-copy-help' }[name]), addEventListener: (event, handler) => { assert.equal(event, 'click'); click = handler } }
     const help = { textContent: '' }
-    vm.runInNewContext(agentSetupCopyScript(), { document: { getElementById: id => ({ 'onboarding-copy-agent': button, 'onboarding-agent-configuration': configuration, 'onboarding-copy-help': help }[id]) }, navigator: { clipboard: { writeText: async value => { assert.equal(value, configuration.value); if (fails) throw new Error('clipboard denied') } } } })
+    vm.runInNewContext(agentSetupCopyScript(), { document: { querySelectorAll: selector => { assert.equal(selector, '[data-copy-target]'); return [button] }, getElementById: id => ({ 'onboarding-agent-configuration': configuration, 'onboarding-copy-help': help }[id]) }, navigator: { clipboard: { writeText: async value => { assert.equal(value, configuration.value); if (fails) throw new Error('clipboard denied') } } } })
     await click()
     assert.equal(focused, true)
     assert.equal(selected, true)
-    assert.equal(help.textContent, fails ? 'Setup selected. Copy it from the field above.' : 'Agent setup copied.')
+    assert.equal(help.textContent, fails ? 'Selected. Copy it from the field above.' : 'Copied.')
   }
-  vm.runInNewContext(agentSetupCopyScript(), { document: { getElementById: () => null } })
+  vm.runInNewContext(agentSetupCopyScript(), { document: { querySelectorAll: () => [], getElementById: () => null } })
   const view = renderSettings({ ...account, agentConfiguration: { example: 'fictional' }, grants: [{ id: 'grant' }] })
   assert.match(view.content, /<textarea id="onboarding-agent-configuration" readonly/)
   assert.match(view.content, /type="button"[^>]*>Copy agent setup/)

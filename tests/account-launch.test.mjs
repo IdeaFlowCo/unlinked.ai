@@ -123,7 +123,7 @@ test('open browser signup →1001 ConnectionsZIP→whole-owner search→durable 
   const post=(path,input)=>fetch(endpoint+path,{method:'POST',redirect:'manual',headers:{Cookie:signed.cookie,Origin:baseUrl},body:new URLSearchParams({csrf:signed.csrf,...input})})
   const searched=await post('/search-account',{query:'Zephyr engineer'});assert.equal(searched.status,200);assert.match(await searched.text(),/Synthetic1000 Contact/);assert.equal(seen.size,1002)
   const setup=await post('/setup-account',{});assert.equal(setup.status,200)
-  const setupHtml=await setup.text(),encoded=setupHtml.match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/)[1]
+  const setupHtml=await setup.text(),encoded=setupHtml.match(/<textarea id="onboarding-agent-configuration"[^>]*>([\s\S]*?)<\/textarea>/)[1]
   const config=JSON.parse(encoded.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&'))
   const authorization=config.mcpServers['unlinked-private'].headers.Authorization
   assert.ok(!Object.hasOwn(JSON.parse(Buffer.from(authorization.split('.')[1],'base64url')),'exp'))
