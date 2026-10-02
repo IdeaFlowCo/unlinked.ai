@@ -5,15 +5,15 @@ import { writeFile } from 'node:fs/promises'
 import { createPrivateSearch, responsesRequest, parseResponsesResult } from '../src/utils/private-import/ai-search.mjs'
 
 const id = 'a'.repeat(64), rowId = 'b'.repeat(64)
-const publication = { consent: COMBINED_UPLOAD_CONSENT, importId: id, assertions: [{ id: rowId, sourceId: 'c'.repeat(64), rowId: 'Connections.csv#record=2', category: 'connections', subject: 'https://www.linkedin.com/in/synthetic-ada', fields: { 'first name': 'Ada', position: 'Engineer', 'email address': 'private@example.invalid' } }] }
+const publication = { consent: COMBINED_UPLOAD_CONSENT, importId: id, assertions: [{ id: rowId, sourceId: 'c'.repeat(64), rowId: 'Connections.csv#record=2', category: 'connections', subject: 'https://www.linkedin.com/in/synthetic-ada', fields: { 'first name': 'Ada', position: 'Engineer', 'email address': 'private@example.invalid', phone: 'private-phone' } }] }
 test('private AI search limits provider context and returns persisted provenance', async () => {
   let calls = 0
   const search = createPrivateSearch({ readImport: async requested => { assert.equal(requested, id); return publication }, complete: async ({ input, candidateIds }) => {
-    calls++; assert.deepEqual(candidateIds, [rowId]); assert.equal(input.includes('private@example.invalid'), false)
+    calls++; assert.deepEqual(candidateIds, [rowId]); assert.equal(input.includes('private@example.invalid'), false); assert.equal(input.includes('private-phone'), false)
     return { matches: [{ id: rowId, reason: 'Engineer observation' }] }
   } })
   const result = await search({ importId: id, query: 'engineer' })
-  assert.equal(calls, 1); assert.equal(result.indexed, 0); assert.equal(result.matches[0].sourceId, 'c'.repeat(64))
+  assert.equal(calls, 1); assert.equal(result.indexed, 0); assert.equal(result.matches[0].sourceId, 'c'.repeat(64)); assert.equal(result.matches[0].fields['email address'], undefined); assert.equal(result.matches[0].fields.phone, undefined); assert.equal(result.matches[0].fields.position, 'Engineer')
   await assert.rejects(search({ importId: id, query: 'x'.repeat(1025) }), /query_limit/)
   assert.equal(calls, 1)
 })

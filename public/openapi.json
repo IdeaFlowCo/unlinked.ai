@@ -156,6 +156,65 @@
           }
         }
       }
+    },
+    "/api/legacy-files": {
+      "get": {
+        "summary": "List own recovered original files after explicit legacy confirmation; no agent access",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped recovered file list"
+          },
+          "401": {
+            "description": "Browser session required"
+          },
+          "404": {
+            "description": "Recovered object unavailable to this owner"
+          },
+          "503": {
+            "description": "Recovery unavailable"
+          }
+        }
+      }
+    },
+    "/legacy-files/{objectId}": {
+      "get": {
+        "summary": "Download own preserved original; browser-only, not public or agent-accessible",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original private CSV bytes"
+          },
+          "401": {
+            "description": "Browser session required"
+          },
+          "404": {
+            "description": "Recovered object unavailable to this owner"
+          },
+          "503": {
+            "description": "Recovery unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "objectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {

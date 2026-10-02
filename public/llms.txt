@@ -28,3 +28,5 @@ Grant tokens are distinct from Ideaflow tokens and Noos operational credentials.
 Legacy Supabase routes and stdio tools are historical source references, not live bootstrap instructions.
 
 Known graph paths: unlinked_search_network(query, degree=1|2, cursor?) or query “my second-degree connections” reads recorded directed public paths from your explicitly confirmed legacy profile. Unknown profile/relationship identity is not inferred. Both endpoints at both hops must remain publicly visible; source and link revocation fence the response. The signed browser counterpart is GET /api/my-connections. No legacy link means no asserted graph anchor, not global owner substitution.
+
+Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.

@@ -268,6 +268,17 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const accountNav = `<nav><a href="/">Import</a> · <a href="/network">My network</a> · <a href="/settings">Agent setup & settings</a></nav><small>Signed in as ${html(session.accountLabel)}</small><form method="post" action="/logout"><input type="hidden" name="csrf" value="${html(session.csrf)}"><button>Sign out</button></form>`
       const backend = await getBackend(session.owner)
       if (!backend?.adapter || typeof backend.readResource !== 'function') throw new Error('private_backend_unavailable')
+      const legacyFileMatch=url.pathname.match(/^\/legacy-files\/([a-f0-9-]{36})$/i)
+      if(request.method==='GET'&&(url.pathname==='/api/legacy-files'||legacyFileMatch)){
+        try{
+          if(!backend.readLegacyFiles)throw Error('legacy_storage_not_found')
+          if(legacyFileMatch){
+            const bytes=await backend.readLegacyOriginal(legacyFileMatch[1])
+            response.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="legacy-${legacyFileMatch[1]}.csv"`});response.end(bytes)
+          }else{const value=await backend.readLegacyFiles();response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({files:value?.objects??[]}))}
+        }catch(error){response.writeHead(error.message==='legacy_storage_not_found'?404:503,{'Content-Type':'application/json'});response.end(JSON.stringify({error:'legacy_storage_unavailable'}))}
+        return
+      }
       const jobResources = async () => {
         const ids = signup ? await (backend.listImportJobIds ?? backend.listImportIds)() : []
         const resources = []
@@ -339,7 +350,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         const ids = await backend.listAccountGrantIds()
         const jobs = await jobResources(), props = jobProps(jobs)
-        journey(response, renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs) }), props.importJob)
+        const view=renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs) })
+        const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
+        if(recovered?.objects.length)view.content+=`<details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details>`
+        journey(response,view,props.importJob)
         return
       }
       if (signup && request.method === 'POST' && ['/setup-account', '/revoke-account', '/search-account'].includes(url.pathname)) {

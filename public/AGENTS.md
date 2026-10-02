@@ -20,3 +20,5 @@ A downloaded/copied configuration is setup; a successful authenticated MCP call 
 
 Anonymous discovery, professional People browsing and Meet are public. Owner data, uploads, settings, status and MCP require their specific authentication.
 Legacy Supabase APIs and legacy stdio tools remain historical code, not current onboarding instructions.
+
+Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
