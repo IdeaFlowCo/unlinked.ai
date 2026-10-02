@@ -603,6 +603,65 @@
           }
         }
       }
+    },
+    "/api/agent/v1/provision-grant": {
+      "post": {
+        "summary": "Server-to-server: allow-listed confidential client ensures a read-only account grant for a verified issuer+subject binding (never email). Disabled (404) unless the operator configured the allow list.",
+        "security": [
+          {
+            "provisionClientBasic": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "issuer": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "issuer",
+                  "subject"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } \u2014 token only in this response body, never logged"
+          },
+          "400": {
+            "description": "invalid_input"
+          },
+          "401": {
+            "description": "not_linked (person has no owner binding) or grant_revoked (owner turned agent access off)"
+          },
+          "403": {
+            "description": "client_unauthorized"
+          },
+          "404": {
+            "description": "not_found (provisioning disabled on this runtime)"
+          },
+          "429": {
+            "description": "rate_limited (per-client budget; Retry-After)"
+          },
+          "503": {
+            "description": "upstream_unavailable (including an unavailable audit sink \u2014 provisioning fails closed rather than going unaudited)"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -615,6 +674,11 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "__Host-ul-session"
+      },
+      "provisionClientBasic": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Allow-listed confidential client id + secret (client_secret_basic); timing-safe verification"
       }
     }
   }

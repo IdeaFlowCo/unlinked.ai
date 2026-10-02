@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { AccountToolError } from './account-tools.mjs'
 
-const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]{4,64}$/
+export const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]{4,64}$/
 const sha256 = value => createHash('sha256').update(value).digest()
 
 // Confidential-client Basic credentials (client_secret_basic). Unknown client
@@ -52,6 +52,7 @@ async function readJsonBody(request, limit = 8192) {
 }
 
 export function createAccountAgentApiHandler({ authenticateGrantDetailed, authenticateGrant, service, origin, provisioning }) {
+  provisioning = provisioning ?? undefined
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || typeof authenticateGrantDetailed !== 'function' || typeof authenticateGrant !== 'function' || typeof service?.call !== 'function') throw new Error('account_agent_api_configuration_required')
   // Server-to-server grant provisioning is default-off: it exists only when an
@@ -69,7 +70,11 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     const now = Date.now()
     let value = provisionBudgets.get(clientId)
     if (!value || now - value.window >= 60000) { value = { window: now, count: 0 }; provisionBudgets.set(clientId, value) }
-    if (++value.count > limit) throw new AccountToolError('rate_limited', 'Provisioning budget for this client is exhausted; retry within a minute.')
+    if (++value.count > limit) {
+      const error = new AccountToolError('rate_limited', 'Provisioning budget for this client is exhausted; retry when the window resets.')
+      error.retryAfter = Math.max(1, Math.ceil((value.window + 60000 - now) / 1000))
+      throw error
+    }
   }
   async function provisionGrant(request, response) {
     // Client authentication comes first and uses its own typed code so a
@@ -95,10 +100,17 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     if (!ensured) throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
     // Validate end to end before handing anything out: the returned token must
     // authenticate against the live grant record.
-    const grant = await authenticateGrant({ headers: { authorization: `Bearer ${ensured.accessToken}` } })
-    if (!grant || grant.ownerId !== owner.ownerId) throw new AccountToolError('upstream_unavailable', 'The provisioned grant failed verification; retry.')
-    // Audit the event — never the token.
-    try { await provisioning.audit?.({ event: ensured.created ? 'account_grant_provisioned' : 'account_grant_reused', clientId: client.clientId, ownerHash: createHash('sha256').update(owner.ownerId).digest('hex'), grantId: ensured.grantId, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never blocks provisioning. */ }
+    const verified = await authenticateGrantDetailed({ headers: { authorization: `Bearer ${ensured.accessToken}` } })
+    if (verified.error === 'grant_revoked') throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
+    if (!verified.grant || verified.grant.ownerId !== owner.ownerId) throw new AccountToolError('upstream_unavailable', 'The provisioned grant could not be verified right now; retry.')
+    const grant = verified.grant
+    // Audit the event — never the token. The contract promises an audit row
+    // for every issuance/reuse, so an unauditable provisioning fails closed:
+    // the token is simply not returned (the grant record itself is unchanged).
+    if (provisioning.audit) {
+      try { await provisioning.audit({ event: ensured.created ? 'account_grant_provisioned' : 'account_grant_reused', clientId: client.clientId, ownerHash: createHash('sha256').update(owner.ownerId).digest('hex'), grantId: ensured.grantId, at: new Date().toISOString(), origin: base.origin }) }
+      catch { throw new AccountToolError('upstream_unavailable', 'Provisioning could not be audited, so no credential was returned; retry after the operator restores the audit sink.') }
+    }
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
     response.end(JSON.stringify({ kind: 'unlinked_provision_grant', ownerId: owner.ownerId, grantId: ensured.grantId, created: ensured.created === true,
       version: grant.version, scope: grant.scope, tools: grant.tools, accessToken: ensured.accessToken }))
@@ -122,8 +134,8 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
       if (url.pathname === '/api/agent/v1/provision-grant') {
-        if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
         if (!provisioning) { failure(response, new AccountToolError('not_found', 'Grant provisioning is not enabled on this runtime.')); return }
+        if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
         await provisionGrant(request, response); return
       }
       const detailMatch = url.pathname.match(/^\/api\/agent\/v1\/people\/([^/]+)$/)

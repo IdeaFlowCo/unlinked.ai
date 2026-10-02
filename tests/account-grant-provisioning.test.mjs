@@ -133,12 +133,36 @@ test('client allow list is strict: wrong secret, unknown client, missing auth, d
   assert.equal((await limited.json()).error.code, 'rate_limited')
   assert.equal(limited.headers.get('retry-after'), '60')
 
-  // Empty allow list = endpoint does not exist.
+  // Empty allow list = endpoint does not exist — for every method, so a
+  // disabled runtime is not fingerprintable via 405.
   const off = await launch(t, { clients: null })
   const disabled = await off.provision({ issuer: ISSUER, subject: 'subject-2' })
   assert.equal(disabled.status, 404)
   assert.equal((await disabled.json()).error.code, 'not_found')
-  // GET is not a thing either.
+  assert.equal((await fetch(`${off.endpoint}/api/agent/v1/provision-grant`)).status, 404)
+  // On an enabled runtime, GET is 405.
   const wrongMethod = await fetch(`${app.endpoint}/api/agent/v1/provision-grant`)
   assert.equal(wrongMethod.status, 405)
+})
+
+test('provisioning fails closed when the audit sink is down, and a mid-provision revocation is typed grant_revoked', async t => {
+  const app = await launch(t, {})
+  const owner = { ownerId: 'synthetic-prov-owner3', userId: 'synthetic-prov-user3' }
+  app.f.register({ issuer: ISSUER, subject: 'subject-3' }, owner)
+  // Break the audit sink: no credential may be returned unaudited.
+  app.audits.push = () => { throw new Error('private_audit_capacity') }
+  const unaudited = await app.provision({ issuer: ISSUER, subject: 'subject-3' })
+  assert.equal(unaudited.status, 503)
+  assert.equal((await unaudited.json()).error.code, 'upstream_unavailable')
+  delete app.audits.push
+  const ok = await app.provision({ issuer: ISSUER, subject: 'subject-3' })
+  assert.equal(ok.status, 200)
+  const grantId = (await ok.json()).grantId
+  // Revoke between ensure and verification: typed grant_revoked, not a retryable 503.
+  const realEnsure = app.grants.ensureGrant
+  void realEnsure
+  await app.grants.revoke(owner, grantId)
+  const revoked = await app.provision({ issuer: ISSUER, subject: 'subject-3' })
+  assert.equal(revoked.status, 401)
+  assert.equal((await revoked.json()).error.code, 'grant_revoked')
 })
