@@ -82,7 +82,7 @@ const categories = {
   'education.csv': { category: 'education', required: ['school name'] },
   'skills.csv': { category: 'skills', required: ['name'] },
 }
-function linkedinUrl(value) {
+export function linkedinUrl(value) {
   try {
     const url = new URL(value)
     if (url.protocol !== 'https:' || !['linkedin.com', 'www.linkedin.com'].includes(url.hostname) || url.username || url.password || url.port || url.search || url.hash || !/^\/in\/[\w%-]+\/?$/.test(url.pathname)) return null

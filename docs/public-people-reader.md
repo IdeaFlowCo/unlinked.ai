@@ -29,6 +29,7 @@ Connections are `{fromId,toId}` and remain directed; reciprocal relationships an
 `reader.profile({id,cursor,signal?})` returns `{profile:{...summary,about?,positions,education,skills,connections,nextConnectionsCursor?}}`, or null for an unknown/unpublished profile in an otherwise valid published snapshot.
 A profile's connections are its edges from both ends: an edge is stored only from the person whose export listed it, and an edge recorded by both people appears once.
 When the snapshot carries `members` (profile IDs; the shared index lists confirmed legacy claims with an active owner and members' own imports), every summary and detail adds `presence: 'member'|'shadow'` and `connectionCount` (both directions). Snapshots without `members` add neither field. A member ID missing from the profiles is a malformed snapshot (503).
+`reader.list({query?,mode?,presence?,cursor?,signal?})` accepts `presence: 'member'|'shadow'` and then also returns the filtered `total`; the filter is part of the cursor scope, so a cursor never pages a different filter. A snapshot without `members` matches neither filter; any other value is a 400.
 `reader.lookup({ids,signal?})` takes at most 1000 IDs and returns a `Map` of the summaries that are published, in request order; unknown IDs are omitted.
 Overlapping reads without their own signal share one snapshot build; nothing is kept after it, so later reads see the current publication.
 The controller maps null to HTTP404; `PublicPeopleReaderError.status===503` maps to unavailable.
