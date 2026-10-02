@@ -229,6 +229,354 @@
           }
         ]
       }
+    },
+    "/api/agent/v1/whoami": {
+      "get": {
+        "summary": "Grant owner identity: stable owner id, grant scope/version/tools, import count, legacy anchor",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner summary; no contact email/phone"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked (typed error body)"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/people": {
+      "get": {
+        "summary": "Deterministic published public People listing (opaque cursor, max 50/page, total and revision)",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "best",
+                "exact"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of public profile summaries"
+          },
+          "400": {
+            "description": "invalid_input or cursor_invalid"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/people/{id}": {
+      "get": {
+        "summary": "One published public profile with its public connections page",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            }
+          },
+          {
+            "name": "connectionsCursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public profile detail"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/connections": {
+      "get": {
+        "summary": "Deterministic owner connections: degree 1 includes owner-imported contacts; degree 2 only recorded public paths with proving provenance",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "degree",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                1,
+                2
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of connection entries with typed provenance and visibility labels"
+          },
+          "400": {
+            "description": "invalid_input or cursor_invalid"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "409": {
+            "description": "degree_unproven"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/ask": {
+      "post": {
+        "summary": "Explicit AI people search: scope mine (own network) or everyone (public index, public-scope grant)",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "everyone",
+                      "mine"
+                    ]
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 40000
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked matches with reasons"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable (including elapsed timeoutMs)"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/search-network": {
+      "post": {
+        "summary": "Launch tool over HTTP: AI owner-network search or recorded public paths by degree",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "degree": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  },
+                  "cursor": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search or recorded-path result"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "409": {
+            "description": "degree_unproven"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/search-everyone": {
+      "post": {
+        "summary": "Launch tool over HTTP: AI search over the published public People index",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked public matches"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -101,4 +101,6 @@ The provenance-backed one/two-hop reader, signed HTTP API and account MCP degree
 
 Shared public People/API/AI and backward-compatible account grant behavior are documented in `docs/shared-people-beta.md`; no raw private import or identity data is projected publicly.
 
+The versioned agent tool contract — hosted MCP tools plus the grant-authenticated HTTP JSON API under `/api/agent/v1/` (`mcp-server/account-tools.mjs`, `account-api.mjs`), typed error codes, grant-scope version catalog and old-grant compatibility — is `docs/agent-api.md`. Grant tool lists are versioned in `ACCOUNT_GRANT_TOOL_VERSIONS` (`mcp-server/account-grants.mjs`): add a new version to add tools; never mutate an existing version's list.
+
 The immutable private legacy Storage recovery, owner confirmation/download boundary and offline operator are documented in `docs/legacy-storage-recovery.md`; originals are excluded from agent grants and public projections.

@@ -44,7 +44,7 @@ test('public/.well-known/mcp/server-card.json describes canonical account MCP', 
   assert.ok(!card.transports?.stdio, 'canonical card must not advertise legacy stdio bootstrap');
 
   const toolNames = card.tools.map((t) => t.name);
-  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone']);
+  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ask']);
   const searchTool = card.tools[0];
   assert.deepEqual(searchTool.inputSchema.required, ['query']);
   assert.equal(searchTool.inputSchema.additionalProperties, false);
@@ -69,7 +69,7 @@ test('public/.well-known/unlinked.json product descriptor is valid', () => {
   assert.equal(descriptor.data.rawArchiveAgentAccess, false);
   assert.equal(descriptor.mcp.url, 'https://www.unlinked.ai/mcp');
   assert.equal(descriptor.mcp.transport, 'streamable-http');
-  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network', 'unlinked_search_everyone']);
+  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ask']);
 });
 
 test('machine-readable MCP config never advertises legacy local launch bootstrap', () => {
@@ -97,7 +97,7 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.servers[0].url, 'https://www.unlinked.ai');
 
   const paths = Object.keys(spec.paths);
-  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}'];
+  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/ask', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone'];
 
   for (const p of expectedPaths) {
     assert.ok(paths.includes(p), `Expected openapi.json to include path ${p}`);
