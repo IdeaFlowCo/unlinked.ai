@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 
 const profile = (id, name) => ({ id, name, headline: 'Engineer', positions: [{ title: 'Engineer', company: 'Test Company' }], education: [], skills: [] })
 test('anonymous People reads only public professional snapshot; no-import member searches Everyone with CSRF and exact owner', async t => {
@@ -51,4 +52,35 @@ test('anonymous unavailable projection returns503, never empty or owner-private 
   const endpoint=`http://127.0.0.1:${server.address().port}`
   handler=createPrivateBrowserHandler({baseUrl:endpoint.replace('http:','https:'), login:{begin:async()=>{},finish:async()=>{}},resolveOwner:async()=>null,getBackend:async()=>{throw Error('private read forbidden')}})
   const response=await fetch(endpoint+'/api/people');assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'public_people_unavailable'})
+})
+
+test('signed-in network without public provider defaults search to own network', async t => {
+  let handler, models = 0
+  const owner = { ownerId: 'legacy-owner', userId: 'legacy-user' }
+  const importId = '1'.repeat(64), rowId = '2'.repeat(64)
+  const resources = new Map([
+    [importId, { sourceOwnerId: owner.ownerId, sourceRevision: 1, deleted: false, payload: { id: importId, status: 'indexed', assertionIds: [rowId], counts: { accepted: 1, indexed: 1, rejected: 0, skippedFiles: 0, failedFiles: 0 }, consent: COMBINED_UPLOAD_CONSENT } }],
+    [rowId, { sourceOwnerId: owner.ownerId, deleted: false, payload: { id: rowId, ownerId: owner.ownerId, importId, sourceId: importId, rowId: 'Connections.csv#record=2', category: 'connections', subject: 'https://www.linkedin.com/in/legacy-contact', fields: { 'first name': 'Legacy', 'last name': 'Contact', company: 'Archive Co', position: 'Engineer' } } }],
+  ])
+  const server = createServer((req,res) => void handler(req,res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'synthetic', login: {
+    begin: async () => ({ location: 'https://test.invalid/login', transaction: { state: 'state' } }),
+    finish: async () => ({ issuer: 'https://test.invalid', subject: 'legacy-subject', verifiedEmail: 'legacy@example.invalid', displayName: 'Legacy Person' }),
+  }, resolveOwner: async identity => identity.subject === 'legacy-subject' ? owner : null,
+  signup: async () => owner, issueAccountGrant: async () => ({ accessToken: 'test-grant' }), revokeAccountGrant: async () => {},
+  getBackend: async value => { assert.deepEqual(value, owner); return { adapter: {}, listImportIds: async () => [importId], listImportJobIds: async () => [], readResource: async (_type, id) => structuredClone(resources.get(id) ?? null) } },
+  complete: async ({ candidateIds }) => { models++; return { matches: [{ id: candidateIds[0], reason: 'Owner network match' }] } },
+  })
+  const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
+  const start = await request('/login'), loginCookie = start.headers.getSetCookie()[0].split(';')[0]
+  const callback = await request('/auth/callback/ideaflow?code=test&state=state',{headers:{Cookie:loginCookie}})
+  const session = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const people = await request('/network',{headers:{Cookie:session}}); assert.equal(people.status,200)
+  const page = await people.text(), csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
+  assert.match(page, /type="hidden" name="scope" value="own"/)
+  assert.doesNotMatch(page, /name="scope" value="everyone"|Everyone on Unlinked|Member search is on its way/)
+  const searched = await request('/search-account', { method:'POST', headers:{Cookie:session,Origin:baseUrl,'Content-Type':'application/x-www-form-urlencoded'}, body:new URLSearchParams({ query:'Legacy', scope:'everyone', csrf }) })
+  assert.equal(searched.status,200); assert.match(await searched.text(),/1 connection observations searched/); assert.equal(models,1)
 })

@@ -288,12 +288,16 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
         const props = jobProps(await jobResources()), contacts = rows.slice(index * 100, (index + 1) * 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url }))
-        let everyone = [], nextCursor, state = 'ready'
-        try { const result = await publicReader.list({ query: filter, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor }
-        catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
-        const scope = url.searchParams.get('scope') ?? 'everyone'
+        const publicProfessionalSearch = typeof readPublishedSnapshot === 'function'
+        let everyone, nextCursor, state = 'ready'
+        if (publicProfessionalSearch) {
+          everyone = []
+          try { const result = await publicReader.list({ query: filter, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor }
+          catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
+        }
+        const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
-        const view = renderPeople({ ...props, scope, own: network.imports.length ? contacts : undefined, everyone, nextCursor, state, ...(!readPublishedSnapshot ? {contacts} : {}), query: filter })
+        const view = renderPeople({ ...props, scope, own: network.imports.length ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: filter })
         if (rows.length > (index + 1) * 100) view.content += `<a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a>`
         journey(response, view, props.importJob)
         return
@@ -316,7 +320,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
           if (input.getAll('scope').length > 2 || input.getAll('scope').some(value => !['everyone','own'].includes(value))) throw new Error('shared_search_scope_invalid')
-          const scope = input.getAll('scope').at(-1) ?? (readPublishedSnapshot ? 'everyone' : 'own')
+          const publicProfessionalSearch = typeof readPublishedSnapshot === 'function'
+          const scope = publicProfessionalSearch ? input.getAll('scope').at(-1) ?? 'everyone' : 'own'
           if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
           if (scope === 'everyone') {
             const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
