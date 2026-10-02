@@ -22,7 +22,7 @@ No public route exposes generic graph access.
 When a confirmed member also has a recovered legacy profile, shared publication reuses that existing legacy profile ID and overlays the member's uploaded professional profile only while the link and source are still live.
 Legacy-directed source edges are canonicalized with member upload edges so revoking the link removes the overlay and returns the recovered public profile.
 
-New account grants include `unlinked_search_everyone` and `unlinked_search_network`; old single-tool grants keep their exact original scope.
+New account grants include `unlinked_search_everyone` and `unlinked_search_network`; `unlinked_search_network` degree/cursor mode and signed `GET /api/my-connections` read recorded one/two-hop paths from the current complete public snapshot only after an explicitly confirmed recovered-profile anchor. Old single-tool grants keep their exact original scope.
 Stored grant and owner binding are checked before and after model work; revocation remains durable.
 No grant exposes raw archives or identity/provider credentials.
 

@@ -87,3 +87,13 @@ Operator preparation uses `createLegacyAccountManifest` with the exact mode-600 
 The helper requires all 81 profile anchors in the published recovered source and reports only count/hash/time; never send the inventory or graph/provider credentials in argv or public logs.
 Scoped rollback is `node mcp-server/legacy-account-operator.mjs revoke <profileId> <receiptId>` with the exact confirmed receipt.
 No live seed/link or personal-browser confirmation is implied by source tests; exact-head Noos graph CI and guarded paired rollout remain required.
+
+## Known connection paths
+
+Signed GET `/api/my-connections?degree=1|2&q=&cursor=` and scoped `unlinked_search_network` with optional degree/cursor derive only recorded directed edges from the confirmed legacy profile.
+The natural query "my second-degree connections" selects degree 2; ordinary owner-network AI queries retain their current behavior.
+Both endpoints at both hops must exist in the current complete public professional snapshot.
+Second-degree results exclude self/direct contacts, preserve a deterministic witnessed path/source revision, and paginate at 100.
+No linked graph anchor returns an explicit unavailable state; uploaded names/email/URLs never invent a member binding or a second-degree edge.
+Publication/link/grant revocation is rechecked before response.
+Ideaflow cross-app subject delegation remains a separate auth adapter; unrelated service bearers are not forwarded.

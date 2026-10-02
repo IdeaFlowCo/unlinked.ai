@@ -13,7 +13,12 @@
     "globalSearch": true,
     "recoveredLegacyProfileConfirmation": true,
     "rawArchiveAgentAccess": false,
-    "anonymousPublicPeople": true
+    "anonymousPublicPeople": true,
+    "recordedConnectionDegrees": [
+      1,
+      2
+    ],
+    "connectionAnchor": "explicitly confirmed recovered profile"
   },
   "mcp": {
     "url": "https://www.unlinked.ai/mcp",
