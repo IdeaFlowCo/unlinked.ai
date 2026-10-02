@@ -23,6 +23,7 @@ Authenticated `/imports/:id/status` returns only the caller's job status/progres
 checks before and after reads. Owner AI/MCP still require terminal publication and the
 recorded upload disclosure; before an uploaded profile is available it may fall back to a confirmed recovered legacy profile, rechecked through the same live owner binding.
 Owner-network browsing/search can include confirmed recovered directed contacts even when the owner has no imports; revoked links disappear on read.
+It can also include sanitized recovered Storage Connections observations for the same confirmed owner; original recovered files remain browser-only under Settings and never become agent-readable.
 Everyone search uses only the separate public professional projection. `/network` and `/settings` rediscover pending jobs on
 return; technical receipts remain accessible under Settings. Pending progress is
 polled under the controller's CSP nonce and same-origin session.

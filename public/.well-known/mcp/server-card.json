@@ -1,7 +1,7 @@
 {
   "name": "unlinked",
   "version": "1.0.0",
-  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant.",
+  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants.",
   "homepage": "https://www.unlinked.ai",
   "transports": {
     "streamable-http": {

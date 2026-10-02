@@ -50,6 +50,7 @@ Browser and scoped agent search use the same committed owner-specific dataset in
 
 Synthetic parser evidence alone does not authorize activation. The remaining provider, identity, storage/recovery and deployment gates are owned by the [pilot release plan](private-pilot-release-plan.md) and [real guest pilot proposal](private-real-guest-pilot-delta.md).
 The old Supabase source, archived bytes and historical IDs must remain available for recovery and rollback.
+Historical Supabase Storage object recovery is separate from new archive uploads and is documented in [Recovered legacy LinkedIn files](legacy-storage-recovery.md); it preserves original legacy files and exposes only same-owner browser downloads after explicit recovered-account confirmation.
 A parser test or a fresh synthetic import does not prove historical migration parity.
 This unmounted slice changes no existing writer, auth deployment, paid service or provider setting; reverting its code needs no live data rollback.
 

@@ -97,7 +97,7 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.servers[0].url, 'https://www.unlinked.ai');
 
   const paths = Object.keys(spec.paths);
-  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections'];
+  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}'];
 
   for (const p of expectedPaths) {
     assert.ok(paths.includes(p), `Expected openapi.json to include path ${p}`);
@@ -109,8 +109,11 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.paths['/mcp'].post.summary, 'Streamable HTTP MCP, account-scoped bearer');
   assert.deepEqual(spec.paths['/mcp'].post.security, [{ accountGrant: [] }]);
   assert.equal(spec.paths['/mcp'].post.responses['401'].description, 'Missing, invalid or revoked account grant');
+  assert.deepEqual(spec.paths['/api/legacy-files'].get.security, [{ browserSession: [] }]);
+  assert.deepEqual(spec.paths['/legacy-files/{objectId}'].get.security, [{ browserSession: [] }]);
   assert.equal(spec.components.securitySchemes.accountGrant.type, 'http');
   assert.equal(spec.components.securitySchemes.accountGrant.scheme, 'bearer');
+  assert.equal(spec.components.securitySchemes.browserSession.type, 'apiKey');
 });
 
 test('public/llms.txt conforms to specification', () => {

@@ -1,3 +1,4 @@
+import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -19,6 +20,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/public-people.js')),
     ...require(join(directory, 'dist/operational/invitations.js')),
     ...require(join(directory, 'dist/operational/legacy-links.js')),
+    ...require(join(directory, 'dist/operational/legacy-storage.js')),
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')) }
@@ -77,6 +79,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await publicPeople?.initialize()
     const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
     await legacyLinks?.initialize()
+    const legacyStorage=typeof dependencies.UnlinkedLegacyStorageStore==='function'?new dependencies.UnlinkedLegacyStorageStore(driver,'neo4j','callback'):null
+    await legacyStorage?.initialize()
     const login = await loginFactory({ issuer: config.issuer, clientId: config.clientId, clientSecret: config.clientSecret,
       callbackUrl: new URL('/auth/callback/ideaflow', base).href })
     const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), internalSubjects = new Set()
@@ -109,8 +113,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         .setProtectedHeader({ alg: 'RS256', typ: 'at+jwt' }).setIssuer(operationsIssuer).setAudience('unlinked-private-operations')
         .setSubject(owner.userId).setJti(randomUUID()).setIssuedAt().setExpirationTime('15m').sign(keys.privateKey)
       const backend = createNoosOwnerBackend({ baseUrl: `http://127.0.0.1:${operationalPort}/v1`, ownerId: owner.ownerId, accessToken })
-      return { ...backend,
-        async readLegacyProfile() {
+      const readLegacyProfile=async()=>{
           const link = await legacyLinks?.readBound(owner.ownerId, owner.userId)
           if (!link || !publicPeople) return null
           const snapshot = await publicPeople.read('recovered-legacy-public-v1')
@@ -118,7 +121,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           const profile = snapshot.profiles.find(value => value.id === link.profileId)
           if (!profile) throw Error('legacy_profile_source_unavailable')
           return { ...link, profile, connections: snapshot.connections.filter(edge => edge.fromId === link.profileId), profiles: snapshot.profiles, revision: snapshot.revision }
-        },
+      }
+      const recovery=legacyStorage?createLegacyStorageReader({owner,readOwner:legacyStorage.readOwner.bind(legacyStorage),assets:files,readLegacyProfile}):null
+      return { ...backend,readLegacyProfile,
+        ...(recovery?{readLegacyFiles:recovery.list,readLegacyOriginal:recovery.readOriginal,readLegacyObservations:recovery.observations}:{}),
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listAccountGrantIds: () => store.listAccountGrantIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),

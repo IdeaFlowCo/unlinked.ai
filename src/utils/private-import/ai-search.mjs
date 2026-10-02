@@ -59,7 +59,7 @@ export function createPrivateSearch({ readImport, complete }) {
       if (!match || !eligible.has(match.id) || seen.has(match.id) || typeof match.reason !== 'string' || match.reason.length > 512) throw new Error('private_search_invalid_result')
       seen.add(match.id)
       const row = rows.get(match.id)
-      return { assertionId: row.id, sourceId: row.sourceId, rowId: row.rowId, subject: row.subject, fields: row.fields, reason: match.reason }
+      return { assertionId: row.id, sourceId: row.sourceId, rowId: row.rowId, subject: row.subject, fields: byId.get(row.id).fields, reason: match.reason }
     })
     // A delayed model response cannot reveal an import deleted or changed while
     // it was running. The reader also performs live owner/publication checks.

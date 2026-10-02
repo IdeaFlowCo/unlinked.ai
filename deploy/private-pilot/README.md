@@ -52,6 +52,7 @@ The login object must implement `begin`, `finish` and the exact HTTPS `authoriza
 The authorization request uses `prompt=login`; Unlinked confirms the returned verified account before an invited owner claim, rather than silently binding by email.
 The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `signup` is its guarded open-account method, `claimInvitation` remains its guarded invitation method, and `resolveOwner` resolves the same verified issuer/subject mapping. The operational store must expose `listPendingImportJobs` and owner-scoped `listImportJobIds`; older Noos artifacts fail startup instead of falling back to synchronous import.
 When `legacyAccount` is present, it is backed by Noos `UnlinkedLegacyLinks`; candidate lookup uses only server-held signed Ideaflow email evidence after owner resolution, and confirmation writes a private association receipt without creating a new owner or duplicating the recovered public profile.
+When the paired Noos artifact also exposes `UnlinkedLegacyStorageStore`, the composition may add browser-only recovered-original listing/downloads and sanitized recovered Connections observations for that same confirmed owner; those originals are not account-grant resources.
 `getBackend` must revalidate active immutable owner/principal and publication access on every operation.
 The operational API exposes only its scoped router, never the legacy generic graph query routes.
 The returned `close` capability must stop the background worker, operational listener and graph driver on shutdown.
@@ -88,6 +89,7 @@ The Noos operator CLI owns invitation creation/replay/revocation and accepts a p
 Its `create --config PRIVATE.json --out NEW-PRIVATE.json` writes the mode-600, fsynced recovery bundle before the graph operation.
 Retain that exact bundle under `invitations/operator-recovery.json`; never place its token or URL in a release receipt, shell history, CI output or proxy logs.
 The recovered-account operator helper seeds only the exact 81-row hash-only manifest against the published recovered public source, and revokes by exact profile/receipt; raw inventory, email addresses and graph/provider credentials must never enter argv or logs.
+The legacy Storage operator helper publishes/revokes only from the owned isolated runtime with exact pinned backup and ZIP sources, verifies asset readback before the immutable manifest fence and has no browser or agent route.
 The offline operator capability never enters the browser runtime.
 
 ## Recovery and ingress

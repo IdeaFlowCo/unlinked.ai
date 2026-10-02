@@ -47,7 +47,7 @@ The paused legacy Supabase route is not such proof.
 `startPrivatePilot` needs reviewed `login`, `resolveOwner`, `getBackend`, `complete`, and `baseUrl` configuration plus either invited `claimInvitation` or open-account `signup` with an account-grant key. Invitation-capable `login` must expose the exact HTTPS authorization origin for the landing-page CSP.
 `mcp-server/private-composition.mjs` supplies the real process-only factory for the deployment launcher. It loads only compiled Noos operational modules from the dedicated private checkout, waits for graph connectivity before provisioning, exposes callback-role invitation claiming and open-account signup, starts the singleton background import worker, and mints internal operations bearers only after owner/principal revalidation. It requires Noos pending-job and owner job-history methods and fails startup if those methods are absent.
 `getBackend` rechecks the immutable owner UUID/Noos user binding and returns an owner-specific private operational adapter; arbitrary browser fields cannot select it.
-MCP uses independent tool audiences and durable Noos grant records. Invited setup is scoped to exactly one import and short-lived; open-account setup is scoped to the owner network and, for new shared People grants, the published professional index. It persists until revoked or signing-secret replacement and exposes `unlinked_search_network` plus `unlinked_search_everyone`; older single-tool grants remain owner-network only.
+MCP uses independent tool audiences and durable Noos grant records. Invited setup is scoped to exactly one import and short-lived; open-account setup is scoped to the owner network, same-owner sanitized recovered Connections observations and, for new shared People grants, the published professional index. It persists until revoked or signing-secret replacement, excludes recovered original files, and exposes `unlinked_search_network` plus `unlinked_search_everyone`; older single-tool grants remain owner-network only.
 Noos operational tokens and provider tokens never enter the download.
 Revocation/deletion is checked live, and ephemeral stage signing keys revoke all delegated grants on runtime restart.
 
@@ -82,6 +82,10 @@ A second subject cannot take an already-linked profile, and each owner/user can 
 Confirmation receipts replay, while operator revocation permanently fences the link without deleting the existing owner, imports, or immutable recovered public source.
 The linked own profile falls back to the recovered professional profile until an archive profile replaces its display; public member projection reuses the same legacy profile ID.
 The original recovered publication is immutable, and overlays disappear after link/source revocation.
+
+The legacy Storage recovery lane is separate from the hash-only account manifest: an offline operator publishes exact original-object coverage plus sanitized professional assets into a private immutable Noos manifest after all asset readbacks pass.
+Only the active owner with this same confirmed recovered profile can list or download its original files under Settings; agent grants, public People, Everyone search and generic graph access cannot read them.
+Sanitized recovered Connections observations join only that owner's network search with live owner/link/fence rechecks.
 
 Operator preparation uses `createLegacyAccountManifest` with the exact mode-600 private inventory, then pipes its hash-only JSON to `node mcp-server/legacy-account-operator.mjs seed` in the owned isolated backend container.
 The helper requires all 81 profile anchors in the published recovered source and reports only count/hash/time; never send the inventory or graph/provider credentials in argv or public logs.
