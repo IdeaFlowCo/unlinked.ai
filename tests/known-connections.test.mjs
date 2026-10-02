@@ -20,6 +20,8 @@ test('unknown owner anchor, private-only endpoint and revoked/changing source ca
 test('pagination cursor is owner, query, degree, confirmation and live revision bound',async()=>{
  const large={...snapshot,profiles:[profile('a'),...Array.from({length:101},(_,i)=>profile('n'+String(i).padStart(3,'0')))],connections:Array.from({length:101},(_,i)=>({fromId:'a',toId:'n'+String(i).padStart(3,'0')}))}
  const read=make({readPublishedSnapshot:async()=>large}), first=await read();assert.equal(first.profiles.length,100);assert.equal((await read({cursor:first.nextCursor})).profiles.length,1)
+ const small=await read({pageSize:2});assert.equal(small.profiles.length,2);assert.equal(small.total,101);assert.equal((await read({cursor:small.nextCursor,pageSize:2})).profiles[0].id,'n002')
+ await assert.rejects(read({pageSize:0}),/input_invalid/);await assert.rejects(read({pageSize:101}),/input_invalid/)
  await assert.rejects(read({cursor:first.nextCursor,degree:2}),/cursor_invalid/)
  await assert.rejects(read({cursor:first.nextCursor,query:'Engineer'}),/cursor_invalid/)
  const mutable={...owner},captured=createKnownConnectionsReader({owner:mutable,getBackend:async actual=>{assert.deepEqual(actual,owner);return{readLegacyProfile:async()=>anchor}},readPublishedSnapshot:async()=>large});mutable.ownerId='other';assert.equal((await captured()).profiles.length,100)
