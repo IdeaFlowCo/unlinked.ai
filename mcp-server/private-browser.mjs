@@ -369,7 +369,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const jobs = await jobResources(), props = jobProps(jobs)
         const view=renderSettings({ ...props, grants: ids.map(id => ({ id })), imports: summaries(jobs) })
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
-        if(recovered?.objects.length)view.content+=`<details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details>`
+        if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob)
         return
       }
