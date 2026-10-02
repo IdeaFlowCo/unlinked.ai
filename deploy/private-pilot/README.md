@@ -7,6 +7,31 @@ A real private release manifest must pin the final reviewed merge plus compatibl
 All-zero image digests are deliberately unusable proposals; replace them with individually reviewed dependency-complete images, never floating tags.
 No dependencies are installed by this packet.
 
+## ⚠ Two nginx variants — canonical rollouts MUST swap the config
+
+`compose.yaml` mounts `./nginx.conf` from the release directory, and the
+repo's `deploy/private-pilot/nginx.conf` is the **private.unlinked.ai
+rollback-host variant** (its Host check answers every www request with
+`return 444`: connections close with no response; `curl` shows TLS
+established then exit code 000/35). `private.unlinked.ai` is NOT defunct —
+DNS still points at the production address and it remains the documented
+rollback/release-planning origin asserted by `topology-check.py` and
+`tests/private-pilot-ingress.test.mjs` — so the private variant stays the
+committed default and must not be deleted or renamed.
+
+For every **canonical www.unlinked.ai release directory**, after copying the
+packet files and before `start`:
+
+```sh
+cat $R/release/durable-<sha8>/nginx.canonical.conf > $R/release/durable-<sha8>/nginx.conf
+```
+
+If a canonical release is already live with the wrong config: overwrite the
+file **in place** (keep the inode; single-file bind mounts do not propagate
+replacements) and `sudo -n docker restart <project>-ingress`.
+This omission caused a ~9 minute www outage on 2026-10-02 (release
+`durable-ef1ea5b9`).
+
 ## Commands
 
 ```sh
