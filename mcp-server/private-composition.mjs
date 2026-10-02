@@ -2,7 +2,7 @@ import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-read
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { lstat, mkdir, open } from 'node:fs/promises'
+import { lstat, mkdir, open, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
@@ -170,6 +170,27 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     return { login, getBackend, close, audit, backgroundImports: true,
       readPublishedSnapshot,
       legacyAccount: legacyLinks ? { candidate: legacyLinks.candidate.bind(legacyLinks), confirm: legacyLinks.confirm.bind(legacyLinks) } : undefined,
+      // Owner-scoped parts of account deletion that live outside the resource
+      // API: the legacy claim row and the owner's own staged asset directory.
+      revokeLegacyLink: legacyLinks ? async owner => {
+        if (!owner?.ownerId || !owner.userId) throw new Error('private_owner_recovery_required')
+        const session = driver.session({ database: 'neo4j' })
+        try {
+          await session.executeWrite(tx => tx.run(`MATCH (a:UnlinkedLegacyAccount {ownerId:$owner,userId:$user,revoked:false})
+            SET a._lock=true REMOVE a._lock SET a.revoked=true, a.revokedAt=coalesce(a.revokedAt,$now), a.revokedReason=coalesce(a.revokedReason,'owner_account_deletion')`,
+          { owner: owner.ownerId, user: owner.userId, now: Date.now() }))
+        } finally { await session.close() }
+      } : undefined,
+      removeOwnerAssets: async ownerId => {
+        // Exact one-segment owner directory under the composition's asset root;
+        // recovered legacy originals live under separate legacy storage keys.
+        if (typeof ownerId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(ownerId)) throw new Error('private_owner_recovery_required')
+        const target = join(assetRoot, ownerId)
+        let state
+        try { state = await lstat(target) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+        if (!state.isDirectory() || state.isSymbolicLink()) throw new Error('private_asset_root_required')
+        await rm(target, { recursive: true, force: true })
+      },
       resolveOwner: identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null,
       claimInvitation: provisioner.claim.bind(provisioner),
       signup: provisioner.signup.bind(provisioner),
