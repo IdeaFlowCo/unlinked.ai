@@ -36,19 +36,23 @@ export function typedToolFailure(error) {
 // the MCP surface and the HTTP agent API (docs/agent-api.md) stay one contract.
 const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search']
 
-export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service }) {
+export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || ![authenticateGrant, getBackend, complete].every(x => typeof x === 'function')) throw new Error('account_host_configuration_required')
   const toolService = service ?? createAccountToolService({ getBackend, complete, readPublishedSnapshot })
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
     if (request.headers.host !== base.host || request.headers.origin && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
-    if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
+    // Unauthenticated requests get the OAuth challenge (RFC 9728) whatever the
+    // method, so connectors can discover sign-in from their first request.
     const grant = await authenticateGrant(request)
     // Every issued grant stores the exact tool list of its catalog version;
     // old grants keep exposing only the tools they were created with.
     const catalog = grant ? accountGrantTools(grant.version ?? 1, grant.scope) : null
-    if (!grant || !catalog || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(catalog)) { response.writeHead(401).end(); return }
+    if (!grant || !catalog || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(catalog)) {
+      response.writeHead(401, typeof challenge === 'function' ? { 'WWW-Authenticate': challenge({ invalidToken: typeof request.headers.authorization === 'string' }) } : {}).end(); return
+    }
+    if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
     const server = new McpServer({ name: 'unlinked-account-network', version: '1.0.0' })
     server.registerTool('unlinked_search_network', {
       description: 'Search all currently published LinkedIn observations owned by your authenticated Unlinked account. Every result retains archive provenance. With degree1/2 (or a second-degree query), read recorded public connection paths from your explicitly linked legacy profile. Unknown identity/relationship matches are not invented; no other owner/private fields are accessed.',
