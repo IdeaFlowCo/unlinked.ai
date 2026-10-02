@@ -45,8 +45,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     clientSecret: process.env.IDEAFLOW_CLIENT_SECRET, graphPassword: process.env.NOOS_PRIVATE_PASSWORD,
     apiKey: process.env.OPENAI_API_KEY }, modules, loginFactory = createIdeaflowLogin,
   completionFactory = createResponsesCompletion, graphReadyDeadlineMs = 90000, graphReadyRetryMs = 1000,
-  // Email delivery (docs/email.md): UNLINKED_EMAIL_ENABLED, RESEND_API_KEY, UNLINKED_EMAIL_FROM.
-  emailEnv = process.env, emailTransportFactory = createResendTransport }) {
+  // Email delivery (docs/email.md): UNLINKED_EMAIL_ENABLED, RESEND_API_KEY, UNLINKED_EMAIL_SECRET,
+  // UNLINKED_EMAIL_FROM, UNLINKED_INVITE_EMAILS_PER_DAY.
+  emailEnv = process.env, emailTransportFactory = createResendTransport, emailLog = line => process.stderr.write(`${line}\n`) }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : networkMode === 'isolated-container' && bolt.hostname === 'graph' && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -107,14 +108,18 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const contactCards = contactCardStore ? createContactCards({ store: contactCardStore }) : undefined
     // Invite and notification emails, when the runtime supplies their store.
     // Without RESEND_API_KEY (or with UNLINKED_EMAIL_ENABLED=false) nothing is
-    // sent and no address is recorded; unsubscribe links keep working.
+    // sent and no address is recorded; unsubscribe links keep working. Without
+    // a usable UNLINKED_EMAIL_SECRET the feature is absent (no routes, no sending).
     const emailStore = typeof dependencies.createEmailStore === 'function' ? dependencies.createEmailStore(driver, 'neo4j') : null
     await emailStore?.initialize()
-    if (emailStore) {
-      const settings = emailConfig(emailEnv)
+    const emailSettings = emailStore ? emailConfig(emailEnv) : null
+    // One non-secret line when an operator configured a key but email cannot run.
+    if (emailSettings?.problem) emailLog(`unlinked_email_disabled: ${emailSettings.problem === 'email_secret_missing_or_short' ? 'UNLINKED_EMAIL_SECRET is missing or shorter than 32 bytes' : 'UNLINKED_EMAIL_FROM is invalid'}`)
+    if (emailStore && emailSettings.secret) {
+      const settings = emailSettings
       let lastReport = 0
       memberEmail = createMemberEmail({ config: settings, transport: settings.enabled ? emailTransportFactory({ apiKey: settings.apiKey }) : null, store: emailStore, notificationStore,
-        secret: createHmac('sha256', config.graphPassword).update(`unlinked-email-v1:${base.origin}`).digest(), origin: base.origin,
+        secret: settings.secret, origin: base.origin,
         // Failures carry only a code; at most one audit row per ten minutes.
         onError: event => { if (Date.now() - lastReport < 600000) return; lastReport = Date.now(); return audit({ ...event, at: new Date().toISOString() }) } })
     }

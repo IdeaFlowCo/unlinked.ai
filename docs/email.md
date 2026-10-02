@@ -20,9 +20,11 @@ Tests: `tests/member-email.test.mjs` (a fake transport; no network).
 |---|---|---|
 | `UNLINKED_EMAIL_ENABLED` | on | `false`, `0`, `off` or `no` turns **all** sending off. Anything else (or unset) leaves it on |
 | `RESEND_API_KEY` | none | Resend API key. Without it nothing is sent and the app behaves exactly as before |
+| `UNLINKED_EMAIL_SECRET` | none | **Required.** Dedicated key for unsubscribe-link signatures and invitee-address hashes: hex or base64/base64url, **at least 32 bytes after decoding** (e.g. `openssl rand -hex 32`). Missing or shorter: email is disabled entirely (no routes, no sending) and the runtime logs one line, `unlinked_email_disabled: UNLINKED_EMAIL_SECRET is missing or shorter than 32 bytes`. Changing it invalidates unsubscribe links already sent and resets the per-recipient invite history |
+| `UNLINKED_INVITE_EMAILS_PER_DAY` | `500` | Site-wide ceiling on invite emails per rolling day |
 | `UNLINKED_EMAIL_FROM` | `Unlinked <noreply@id.ideaflow.app>` | Sender for notification emails. Its address is also the sender of invite emails, which use the display name `<Member> via Unlinked`. Must be on a domain verified in Resend (`id.ideaflow.app` is). An invalid value turns sending off |
 
-Sending happens only when the flag is on **and** a key is present. In the
+Sending happens only when the flag is on **and** a key and a valid secret are present. In the
 private pilot these go in the runtime's private `runtime/runtime.env`, which
 Compose passes to the runtime container as its `env_file`; nothing else needs
 to change (see `deploy/private-pilot/README.md`). The key is never logged,
@@ -40,9 +42,11 @@ On `/invites` the member types a name and, optionally, the invitee's address.
 1. A bad address is refused before anything is created.
 2. The invite link is created exactly as before and shown once on the page.
 3. If an address was given, the email is sent at once (10-second bound), from
-   `"<Member> via Unlinked" <noreply@id.ideaflow.app>`, with `Reply-To` set to
-   the member's **verified** sign-in address when one is known. It contains
-   the exact `<origin>/i/<token>` link.
+   `"<Member> via Unlinked" <noreply@id.ideaflow.app>` (a long name is
+   shortened to 60 characters; the suffix always stays), with `Reply-To` set to
+   the member's **verified** sign-in address when one is known. The form says
+   so beside the address field ("Replies go to <your address>, so they will see
+   your address"). It contains the exact `<origin>/i/<token>` link.
 4. The page says whether it was emailed. Either way the link is still there to
    copy, so a failed or refused email never loses the invite.
 
@@ -53,10 +57,18 @@ and a hash of the sender's account, pruned after seven days. Claiming an invite
 never uses email (accepting needs a signed-in account and a click), so nothing
 else needs the address.
 
-Limits (refused sends are reported on the page and nothing is emailed):
+Limits (refused sends are reported on the page and nothing is emailed). They
+are checked and reserved in **one atomic step** (`reserveInvite`): in the graph,
+one write transaction takes the `UnlinkedEmailInviteLock` node, recounts and
+creates the send row only when every limit allows it, so parallel requests can
+never exceed a cap. A failed send releases its reservation.
 
 - **Per member:** 50 invite emails per rolling day (`INVITE_EMAILS_PER_DAY`,
-  equal to the heavy-use report threshold `HEAVY_INVITES_PER_DAY`).
+  equal to the heavy-use report threshold `HEAVY_INVITES_PER_DAY`); **10** in
+  an account's first 24 hours (`NEW_ACCOUNT_INVITE_EMAILS_PER_DAY`). An
+  account's start is recorded only when it signs up while email is on;
+  accounts that existed before are never treated as new.
+- **Site-wide:** `UNLINKED_INVITE_EMAILS_PER_DAY` (default 500) per rolling day.
 - **Per recipient:** one invite email per address per seven days, from anyone.
 - **Suppressed addresses:** someone who used the unsubscribe link in an invite
   email never gets another invite email (`UnlinkedEmailSuppression`, keyed
@@ -82,7 +94,9 @@ next tick. Each pass:
 
 1. Reads up to 500 notifications without `emailedAt`, created between one
    minute and 24 hours ago (older history is never emailed, so turning email
-   on does not send a backlog).
+   on does not send a backlog). Members inside their 15-minute window or their
+   backoff are excluded from that read, so their held rows can never fill the
+   batch and starve other members.
 2. Per member: notifications already seen in the app, turned off in Settings,
    or for a member without a verified address are settled without email
    (`emailedAt` set, `emailOutcome: skipped`).
@@ -90,14 +104,29 @@ next tick. Each pass:
    the next email. Otherwise they are claimed (`emailClaim`, compare-and-set),
    sent as one email (a digest when there are several), and stamped
    `emailedAt` with `emailOutcome: sent`.
-4. A failed send releases the claim, so the next pass retries. A pass that
-   crashed between sending and stamping leaves a claim that goes stale after
-   ten minutes; the retry uses the same Resend `Idempotency-Key`, so Resend
-   does not deliver it twice within its 24-hour idempotency window.
+4. Failures, by kind:
+   - **429, 5xx, or 401 (rejected key):** the claim is released, the pass
+     stops, and all sending (notifications and invites) pauses: for
+     `Retry-After` when Resend sends one, otherwise 2, 4, 8 … minutes, capped
+     at one hour. A success resets it. (401 is treated like an outage rather
+     than a per-message rejection, so a bad key cannot discard every
+     notification.)
+   - **Any other 4xx (403, 422 …):** permanent. `emailedAt` is set with
+     `emailOutcome: failed` and the notification is never retried.
+   - **Network errors:** the claim is released and only that member backs off
+     (2 minutes doubling to one hour, `retryAfter` on their recipient record);
+     a success clears it.
+   A pass that crashed between sending and stamping leaves a claim that goes
+   stale after ten minutes; the retry uses the same Resend `Idempotency-Key`,
+   so Resend does not deliver it twice within its 24-hour idempotency window.
 
 `emailedAt` is only ever set where it is still null, under the record's write
 lock, so it is set exactly once. A withdrawn request's notification is a
 tombstone and is never emailed.
+
+**Known limit:** the 15-minute window and the provider pause live in one
+runtime. Two runtimes sharing a graph could each send a member one email in the
+same window (never the same notification twice). We run one runtime.
 
 ### Where the member's address comes from
 
@@ -123,8 +152,8 @@ is included in their data export and is deleted with their account.
   turns it off. That one POST route is exempt from the same-origin check,
   because mail providers post without the site's `Origin`; the signed token is
   its only authority and it can only turn email off.
-- **Tokens** are `v1.<payload>.<HMAC-SHA256>` with a key derived from the
-  runtime's private graph credential. The payload names an account hash (never
+- **Tokens** are `v1.<payload>.<HMAC-SHA256>` with a key derived from
+  `UNLINKED_EMAIL_SECRET` (never from another credential). The payload names an account hash (never
   an id or address) or an invitee-address HMAC, the kinds to stop, and an
   expiry one year out. Forged, altered, expired or out-of-scope tokens are
   refused. Notification emails stop exactly the kinds they contained; invite
@@ -135,7 +164,8 @@ is included in their data export and is deleted with their account.
 - No email address, token or key is ever logged or written to the audit log;
   failures record only a code such as `email_transport_status_422`.
 - Graph labels: `UnlinkedEmailRecipient` (member address, verified flag,
-  preferences, last-emailed time), `UnlinkedEmailSuppression` and
-  `UnlinkedEmailSend` (hashes only). `initialize()` only adds their own
+  preferences, last-emailed time, backoff, new-account start),
+  `UnlinkedEmailSuppression` and `UnlinkedEmailSend` (hashes only), and one
+  `UnlinkedEmailInviteLock` node. `initialize()` only adds their own
   constraints and indexes.
 - Account deletion removes the member's recipient record and their send rows.

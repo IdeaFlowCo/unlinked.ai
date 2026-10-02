@@ -244,7 +244,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
     const accountLabel = identity.verifiedEmail ?? identity.subject
     // The sign-in address, kept privately for notification emails and invite Reply-To while email is on.
-    if (memberEmail?.sending && identity.verifiedEmail) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true }), false)
+    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner }), false)
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
@@ -337,6 +337,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // Settings grant listing: labels for OAuth-connected apps when available.
   const grantList = async (owner, backend) => typeof listAccountGrants === 'function' ? await listAccountGrants(owner) : (await backend.listAccountGrantIds()).map(id => ({ id }))
   const connector = oauth && mcpEndpoint ? { url: mcpEndpoint } : undefined
+  // The invite form says where replies go: the member's own verified address.
+  const inviteEmailProps = async owner => memberEmail?.sending ? { emailInvites: true, replyAddress: (await bounded(() => memberEmail.settings(owner), null))?.address ?? null } : { emailInvites: false }
   let lastPrune = Date.now()
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -848,7 +850,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       }
       if (signup && memberInvitations && request.method === 'GET' && url.pathname === '/invites') {
         const props = jobProps(await jobResources())
-        journey(response, renderInvites({ ...props, origin: base.origin, emailInvites: memberEmail?.sending === true, invitations: await memberInvitations.list(session.owner) }), props.importJob); return
+        journey(response, renderInvites({ ...props, origin: base.origin, ...await inviteEmailProps(session.owner), invitations: await memberInvitations.list(session.owner) }), props.importJob); return
       }
       if (signup && memberInvitations && request.method === 'POST' && ['/invites', '/invites/revoke'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
@@ -871,7 +873,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           error = { invitation_name_invalid: 'Use a plain name of up to 120 characters.', invitation_unavailable: 'That invite can no longer be revoked.', invitation_not_found: 'That invite can no longer be revoked.' }[failure.code] ?? 'That did not work. Try again.'
         }
         response.setHeader('Cache-Control', 'no-store')
-        journey(response, renderInvites({ ...props, origin: base.origin, created, error, emailed, emailInvites: memberEmail?.sending === true, invitations: await memberInvitations.list(session.owner) }), props.importJob, '', error ? 400 : 200); return
+        journey(response, renderInvites({ ...props, origin: base.origin, created, error, emailed, ...await inviteEmailProps(session.owner), invitations: await memberInvitations.list(session.owner) }), props.importJob, '', error ? 400 : 200); return
       }
       // Member-to-member connection requests.
       if (signup && memberConnections && request.method === 'POST' && ['/connections/request', '/connections/respond', '/connections/withdraw', '/connections/remove'].includes(url.pathname)) {
