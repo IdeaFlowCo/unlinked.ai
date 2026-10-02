@@ -1,127 +1,34 @@
 {
   "name": "unlinked",
-  "description": "Historical Model Context Protocol server contract for unlinked.ai. Current Agent setup is in the open-beta app at private.unlinked.ai.",
-  "version": "0.1.0",
-  "package": "@unlinked/mcp-server",
-  "repository": "https://github.com/IdeaFlowCo/unlinked.ai",
+  "version": "1.0.0",
+  "description": "Search your owner-scoped imported network until the explicit grant is revoked.",
   "homepage": "https://www.unlinked.ai",
   "transports": {
-    "stdio": {
-      "status": "historical_reference",
-      "command": "node",
-      "args": ["/absolute/path/to/unlinked.ai/mcp-server/dist/index.js"],
-      "env": ["UNLINKED_API_KEY", "UNLINKED_BASE_URL"],
-      "setup": {
-        "clone": "git clone https://github.com/IdeaFlowCo/unlinked.ai",
-        "build_command": "cd unlinked.ai/mcp-server && npm install && npm run build",
-        "entrypoint": "mcp-server/dist/index.js",
-        "note": "Reference only for the legacy stdio server; use Agent setup in the beta app for current onboarding. Replace /absolute/path/to/unlinked.ai with the absolute path of your clone. The server is not published to npm."
-      }
+    "streamable-http": {
+      "url": "https://www.unlinked.ai/mcp"
     }
   },
   "authentication": {
-    "status": "historical_reference",
     "type": "bearer",
-    "prefix": "ul_",
-    "header": "Authorization",
-    "env_var": "UNLINKED_API_KEY",
-    "credentials_file": "~/.unlinked/credentials.json",
-    "create_key_url": null,
-    "historical_create_key_path": "/settings/agent-keys",
-    "scoping": "Resolved server-side to the authenticated user. Accessible data is strictly limited to the caller's own profile and direct connections."
+    "setupUrl": "https://www.unlinked.ai/settings"
   },
   "tools": [
     {
-      "name": "unlinked_me",
-      "description": "Return the authenticated caller's own unlinked.ai profile, plus connection and upload counts.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {}
-      }
-    },
-    {
-      "name": "unlinked_search_contacts",
-      "description": "Semantic search restricted to the caller's own direct connections. Returns matching profiles with a similarity score and a one-sentence reason each was included.",
+      "name": "unlinked_search_network",
       "inputSchema": {
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
             "minLength": 1,
-            "description": "What kind of contact you're looking for"
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 25,
-            "default": 10,
-            "description": "Max results to return (default 10, max 25)"
+            "maxLength": 1024
           }
         },
-        "required": ["query"]
-      }
-    },
-    {
-      "name": "unlinked_get_profile",
-      "description": "Look up a profile by id. Only readable if it's your own profile or a direct connection of yours; anything else returns not-found.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "profileId": {
-            "type": "string",
-            "minLength": 1,
-            "description": "The profile id (uuid)"
-          }
-        },
-        "required": ["profileId"]
-      }
-    },
-    {
-      "name": "unlinked_list_imports",
-      "description": "Return the caller's LinkedIn archive uploads plus counts of what has been ingested into their graph.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {}
-      }
-    },
-    {
-      "name": "unlinked_draft_intro",
-      "description": "Draft a short, forwardable intro message between the caller and one of their direct connections. Read-only -- nothing is written to unlinked.ai.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "contactProfileId": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Profile id (uuid) of the direct connection to introduce yourself to"
-          },
-          "context": {
-            "type": "string",
-            "maxLength": 2000,
-            "description": "Optional context on what you want out of the intro"
-          }
-        },
-        "required": ["contactProfileId"]
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
       }
     }
-  ],
-  "fallback": {
-    "rest_api": "https://www.unlinked.ai/api",
-    "docs": "https://www.unlinked.ai/agents",
-    "openapi": "https://www.unlinked.ai/openapi.json"
-  },
-  "private_archive_availability": {
-    "status": "staging_only_unmounted",
-    "production_setup": "beta_app",
-    "ai_search": "beta_app",
-    "note": "Open-beta upload, own-network AI search and Agent setup are at https://private.unlinked.ai/login while the source contracts remain default-off in this public app. See https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/private-noos-staging.md and https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/durable-archive-import.md for the staging contracts and release gates; synthetic receipts do not verify a production rollout."
-  },
-  "browser_entry": {
-    "path": "/auth/login",
-    "provider": "Ideaflow ID",
-    "status": "beta_external",
-    "signup_path": "/auth/login",
-    "agent_setup_path": "/agents",
-    "note": "The public www app bridges to the separate beta host. Legacy auth/key fields describe historical API schemas."
-  }
+  ]
 }
