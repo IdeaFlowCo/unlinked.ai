@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { ACCOUNT_GRANT_TOOL_VERSIONS as MAIN_ACCOUNT_GRANT_TOOL_VERSIONS } from './fixtures/account-grant-catalog-v1-v3.mjs'
 import { createRequire } from 'node:module'
 import { createAccountGrantService, ACCOUNT_GRANT_TOOL_VERSIONS, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from '../mcp-server/account-grants.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
@@ -51,11 +51,7 @@ async function site(t, limits) {
 }
 
 test('catalog 1–3 retains main semantics; v4 is a sibling and defaults are read-only', async t => {
-  const baseline = execFileSync('git',['show','origin/main:mcp-server/account-grants.mjs'],{encoding:'utf8'})
-  // Execute the catalog declaration from the baseline as a semantic compatibility contract.
-  const declaration = baseline.slice(baseline.indexOf('export const ACCOUNT_GRANT_TOOL_VERSIONS'), baseline.indexOf('export const CURRENT_ACCOUNT_GRANT_VERSION'))
-  const prior = (await import('data:text/javascript,' + encodeURIComponent(declaration))).ACCOUNT_GRANT_TOOL_VERSIONS
-  for (const version of [1,2,3]) assert.deepEqual(ACCOUNT_GRANT_TOOL_VERSIONS[version], prior[version])
+  for (const version of [1,2,3]) assert.deepEqual(ACCOUNT_GRANT_TOOL_VERSIONS[version], MAIN_ACCOUNT_GRANT_TOOL_VERSIONS[version])
   assert.equal(CURRENT_ACCOUNT_GRANT_VERSION,4)
   assert.ok(ACCOUNT_GRANT_TOOL_VERSIONS[4][ACCOUNT_WRITE_SCOPE])
   const p=await site(t), issued=await p.grants.issueGrant(a)
