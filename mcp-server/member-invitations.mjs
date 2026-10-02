@@ -28,7 +28,9 @@ export function invitationName(value) {
   return name
 }
 
-export function createMemberInvitations({ store, now = Date.now, ttlMs = null, onHeavyUse = () => {} } = {}) {
+// `onAccepted` hears about each accepted invitation (the inviter's
+// notification); it never decides whether accepting works.
+export function createMemberInvitations({ store, now = Date.now, ttlMs = null, onHeavyUse = () => {}, onAccepted = () => {} } = {}) {
   if (!store || ['insert', 'get', 'listByInviter', 'listAccepted', 'transition', 'countByInviter', 'deleteByInviter'].some(key => typeof store[key] !== 'function')) throw new Error('invitation_store_required')
   // An expired invitation reads as expired; the stored status stays pending.
   const expired = record => record.expiresAt != null && record.expiresAt <= now()
@@ -68,6 +70,7 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = null, o
       try { if (next === 'accepted' && responderName) shownName = invitationName(responderName) } catch { shownName = null }
       const changed = await store.transition(record.tokenHash, 'pending', { status: next, respondedAt: now(), responderOwnerId: invitee.ownerId, responderUserId: invitee.userId, ...(shownName ? { responderName: shownName } : {}) }, now())
       if (!changed) throw new InvitationError('invitation_unavailable')
+      if (next === 'accepted') await Promise.resolve().then(() => onAccepted({ invitationId: record.id, inviter: { ownerId: record.inviterOwnerId, userId: record.inviterUserId }, invitee: { ownerId: invitee.ownerId, userId: invitee.userId }, inviteeName: shownName ?? record.inviteeName })).catch(() => {})
       return { status: next, inviterName: record.inviterName }
     },
     async revoke(inviter, id) {

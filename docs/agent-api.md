@@ -53,7 +53,8 @@ the catalog entry for `(version, scope)` in
 | Version | `owner_network` scope | `owner_network_and_public` scope |
 |---|---|---|
 | 1 (pre-existing grants) | `unlinked_search_network` | + `unlinked_search_everyone` |
-| 2 (current issuance) | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
+| 2 | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
+| 3 (current issuance) | version 2 + `unlinked_list_connection_requests`, `unlinked_list_notifications` (read-only) | version 2 + the same two tools |
 
 - Old grants keep exactly their issued tools on both surfaces — MCP
   `tools/list` for a v1 grant still shows only the launch tools, and the HTTP
@@ -178,6 +179,21 @@ Deterministic owner-connections listing; see **Degree semantics**.
 Response: `{ kind, degree, revision, total, anchorId? (degree 2),
 connections: [{ id, name, headline?, company?, linkedinUrl?, provenance,
 visibility }], nextCursor? }`.
+
+### `GET /api/agent/v1/connection-requests?direction` ⇄ `unlinked_list_connection_requests`
+Read-only, grant catalog version 3. `direction` `received` (default: requests
+waiting for the owner's answer) or `sent` (the owner's requests still pending;
+a request the recipient ignored still reads as pending, as it does in the app).
+Response: `{ kind, direction, total, requests: [{ id, direction, status, name,
+profileId?, note?, createdAt }], visibility: "owner_private" }`. Agents cannot
+send, answer or withdraw requests; that stays a signed-in browser action.
+
+### `GET /api/agent/v1/notifications?limit` ⇄ `unlinked_list_notifications`
+Read-only, grant catalog version 3. Newest first, `limit` 1–50 (default 20).
+Response: `{ kind, unseen, unread, notifications: [{ id, kind, actorName,
+actorProfileId?, createdAt, read }], visibility: "owner_private" }`. Kinds:
+`connection_request_received`, `connection_request_accepted`,
+`invite_accepted`, `profile_claimed`. Reading here marks nothing seen or read.
 
 ### `POST /api/agent/v1/ai-search` `{ query, scope?, timeoutMs? }` ⇄ `unlinked_ai_search`
 Explicit AI tool. `scope: "mine"` ranks only the owner's imported network

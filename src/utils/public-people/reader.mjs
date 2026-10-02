@@ -195,6 +195,16 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const resolved = id => data.aliases.get(id) ?? id
       return new Map(ids.filter(id => data.summaries.has(resolved(id))).map(id => [id, data.summaries.get(resolved(id))]))
     },
+    // Whether the public graph already connects two profiles (either direction,
+    // merged addresses resolved). Used to avoid offering "Connect" to people
+    // who are already connected through an import.
+    async linked(request = {}) {
+      const { fromId, toId, signal } = requestValue(request)
+      if (!idValid(fromId) || !idValid(toId)) invalid()
+      const data = await snapshot(signal)
+      const from = data.aliases.get(fromId) ?? fromId, to = data.aliases.get(toId) ?? toId
+      return from !== to && Boolean(data.connected.get(from)?.has(to))
+    },
     // Everyone whose public profile ties them to a company, by the company name
     // as it appears on profiles: a position at it, or a headline naming it.
     async company(request = {}) {
