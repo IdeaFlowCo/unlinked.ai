@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createMemberPublicIndex, projectPublicMemberImport } from '../src/utils/public-people/member-projection.mjs'
+import { createMemberPublicIndex, projectPublicMemberImport, ENRICHMENT_DATASET } from '../src/utils/public-people/member-projection.mjs'
 import { PUBLIC_UPLOAD_CONSENT, COMBINED_UPLOAD_CONSENT, hasCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 const id='a'.repeat(64), other='b'.repeat(64), source='c'.repeat(64)
 const job={id,ownerId:'bound-owner',archiveSha256:source,consent:PUBLIC_UPLOAD_CONSENT,status:'indexed',counts:{accepted:2,indexed:2}}
@@ -21,7 +21,7 @@ test('public union uses only active exact-owner sources and drops retained cache
  const cached=projectPublicMemberImport({job,assertions})
  const read=createMemberPublicIndex({readLegacy:async()=>legacy,discover:async()=>items,
  getBackend:async owner=>{assert.deepEqual(owner,items[0].owner);reads++;return{readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job})}},
- publicPeople:{read:async dataset=>{assert.equal(dataset,'public-import-'+id);return cached},publish:async()=>{throw Error('immutable cache must replay without write')}},})
+ publicPeople:{read:async dataset=>{if(dataset===ENRICHMENT_DATASET)return null;assert.equal(dataset,'public-import-'+id);return cached},publish:async()=>{throw Error('immutable cache must replay without write')}},})
  const before=await read();assert.equal(before.profiles.length,3);assert.equal(reads,1)
  items=[];const after=await read();assert.deepEqual(after.profiles,legacy.profiles);assert.notEqual(before.revision,after.revision)
 })
@@ -29,7 +29,7 @@ test('public union uses only active exact-owner sources and drops retained cache
 test('delayed source removal fails the final shared publication read fence',async()=>{
  let calls=0
  const read=createMemberPublicIndex({readLegacy:async()=>legacy,discover:async()=>++calls===1?[{id,owner:{ownerId:'bound-owner',userId:'bound-user'},revision:4}]:[],
- getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job})}),publicPeople:{read:async()=>projectPublicMemberImport({job,assertions})}})
+ getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job})}),publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?null:projectPublicMemberImport({job,assertions})}})
  await assert.rejects(read(),/public_member_source_changed/)
 })
 
@@ -37,7 +37,30 @@ test('confirmed legacy member reuses existing profile; latest uploaded profile o
  const sourceSha='e'.repeat(64), recovered={...legacy,revision:'legacy-public-v1:'+sourceSha}, link={profileId:'legacy',sourceSha256:sourceSha,receiptId:'link-receipt',revision:'legacy-public-v1:'+sourceSha}
  let active=true
  const cached=projectPublicMemberImport({job,assertions})
- const read=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[{id,owner:{ownerId:'bound-owner',userId:'bound-user'},revision:4}],getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job}),readLegacyProfile:async()=>active?link:null}),publicPeople:{read:async()=>cached}})
+ const read=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[{id,owner:{ownerId:'bound-owner',userId:'bound-user'},revision:4}],getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job}),readLegacyProfile:async()=>active?link:null}),publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?null:cached}})
  const before=await read();assert.equal(before.profiles.length,2);assert.equal(before.profiles.find(p=>p.id==='legacy').name,'Test Member');assert.equal(before.connections[0].fromId,'legacy');assert.equal(cached.profiles[0].id,'member-import-'+id);assert.equal(recovered.profiles[0].name,'Legacy Person')
  active=false;const after=await read();assert.equal(after.profiles.find(p=>p.id==='legacy').name,'Legacy Person');assert.notEqual(before.revision,after.revision)
+})
+
+test('curated enrichment refreshes legacy rows by id, never adds people, and a linked member upload still wins',async()=>{
+ const sourceSha='e'.repeat(64), recovered={state:'published',complete:true,revision:'legacy-public-v1:'+sourceSha,profiles:[{id:'legacy',name:'Legacy Person',headline:'Stale headline',positions:[],education:[],skills:[]},{id:'bare',name:'Bare Person',positions:[],education:[],skills:[]}],connections:[]}
+ const fresh={id:'legacy',name:'Legacy Person',headline:'Fresh headline',positions:[{title:'CEO',company:'Example'}],education:[],skills:['Sailing']}
+ let enrichment={state:'published',complete:true,revision:ENRICHMENT_DATASET+':'+'f'.repeat(64),profiles:[fresh,{id:'unknown',name:'Not In Legacy',positions:[],education:[],skills:[]}],connections:[]}
+ const read=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[],getBackend:async()=>{throw Error('unused')},publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?enrichment:null}})
+ const value=await read()
+ assert.equal(value.profiles.length,2)
+ assert.deepEqual(value.profiles.find(p=>p.id==='legacy'),fresh)
+ assert.equal(value.profiles.find(p=>p.id==='bare').name,'Bare Person')
+ assert.ok(!value.profiles.some(p=>p.id==='unknown'))
+ enrichment=null;const without=await read();assert.equal(without.profiles.find(p=>p.id==='legacy').headline,'Stale headline');assert.notEqual(value.revision,without.revision)
+ // A linked member's own upload overlays the enriched row.
+ enrichment={state:'published',complete:true,revision:ENRICHMENT_DATASET+':'+'f'.repeat(64),profiles:[fresh],connections:[]}
+ const link={profileId:'legacy',sourceSha256:sourceSha,receiptId:'link-receipt',revision:'legacy-public-v1:'+sourceSha}
+ const cached=projectPublicMemberImport({job,assertions})
+ const linked=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[{id,owner:{ownerId:'bound-owner',userId:'bound-user'},revision:4}],getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job}),readLegacyProfile:async()=>link}),publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?enrichment:cached}})
+ const overlaid=await linked();assert.equal(overlaid.profiles.find(p=>p.id==='legacy').name,'Test Member')
+ for(const broken of [{...enrichment,connections:[{fromId:'legacy',toId:'legacy'}]},{...enrichment,revision:'other-dataset-v1:'+'f'.repeat(64)},{...enrichment,state:'staging'}]) {
+  const bad=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[],getBackend:async()=>{throw Error('unused')},publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?broken:null}})
+  await assert.rejects(bad(),/public_enrichment_invalid/)
+ }
 })
