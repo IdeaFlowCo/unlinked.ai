@@ -3,6 +3,7 @@
 > Import a LinkedIn export, search your own network and connect your agent.
 
 Canonical app: https://www.unlinked.ai. Sign in with Ideaflow ID at /login; no invitation required.
+If signed Ideaflow email evidence matches a recovered legacy account, the browser may ask once whether to continue with the old Unlinked profile.
 A full ZIP is preferred; Connections-only ZIP or CSV is supported up to 64 MiB.
 Import processing continues server-side after navigation. Profile and People show real progress.
 Everyone People browsing reads only the published professional index and does not require sign-in or an import.

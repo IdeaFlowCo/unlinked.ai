@@ -18,6 +18,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/store.js')),
     ...require(join(directory, 'dist/operational/public-people.js')),
     ...require(join(directory, 'dist/operational/invitations.js')),
+    ...require(join(directory, 'dist/operational/legacy-links.js')),
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')) }
@@ -74,6 +75,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await store.initialize()
     const publicPeople = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
     await publicPeople?.initialize()
+    const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
+    await legacyLinks?.initialize()
     const login = await loginFactory({ issuer: config.issuer, clientId: config.clientId, clientSecret: config.clientSecret,
       callbackUrl: new URL('/auth/callback/ideaflow', base).href })
     const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), internalSubjects = new Set()
@@ -107,6 +110,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         .setSubject(owner.userId).setJti(randomUUID()).setIssuedAt().setExpirationTime('15m').sign(keys.privateKey)
       const backend = createNoosOwnerBackend({ baseUrl: `http://127.0.0.1:${operationalPort}/v1`, ownerId: owner.ownerId, accessToken })
       return { ...backend,
+        async readLegacyProfile() {
+          const link = await legacyLinks?.readBound(owner.ownerId, owner.userId)
+          if (!link || !publicPeople) return null
+          const snapshot = await publicPeople.read('recovered-legacy-public-v1')
+          if (!snapshot || snapshot.revision !== 'legacy-public-v1:' + link.sourceSha256) throw Error('legacy_profile_source_unavailable')
+          const profile = snapshot.profiles.find(value => value.id === link.profileId)
+          if (!profile) throw Error('legacy_profile_source_unavailable')
+          return { ...link, profile, connections: snapshot.connections.filter(edge => edge.fromId === link.profileId), profiles: snapshot.profiles, revision: snapshot.revision }
+        },
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listAccountGrantIds: () => store.listAccountGrantIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
@@ -151,6 +163,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     }) : undefined
     return { login, getBackend, close, audit, backgroundImports: true,
       readPublishedSnapshot,
+      legacyAccount: legacyLinks ? { candidate: legacyLinks.candidate.bind(legacyLinks), confirm: legacyLinks.confirm.bind(legacyLinks) } : undefined,
       resolveOwner: identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null,
       claimInvitation: provisioner.claim.bind(provisioner),
       signup: provisioner.signup.bind(provisioner),

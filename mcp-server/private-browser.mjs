@@ -39,7 +39,7 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
       // Prototype policy accepts the authenticated IdP email for display, even
       // without email_verified. Owner authority remains exact signed issuer/sub.
       // No access/ID token reaches an agent, cookie or imported source record.
-      return { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), verifiedEmail: typeof claims.email === 'string' ? claims.email : null, displayName: typeof claims.name === 'string' && claims.name.length <= 256 ? claims.name : null }
+      return { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), emailEvidence: 'signed-ideaflow-beta-v1', providerEmailVerified: claims.email_verified === true, verifiedEmail: typeof claims.email === 'string' ? claims.email : null, displayName: typeof claims.name === 'string' && claims.name.length <= 256 ? claims.name : null }
     },
   }
 }
@@ -62,12 +62,13 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, revokeAccountGrant, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, revokeAccountGrant, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
+  if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
   const invitationMode = typeof claimInvitation === 'function' && typeof signup !== 'function'
   const authorizationOrigin = login.authorizationOrigin ?? null
   if (invitationMode && authorizationOrigin === null) throw new Error('explicit_private_authorization_origin_required')
@@ -116,10 +117,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     purge(sessions)
     if (sessions.size >= 100) throw new Error('private_login_capacity')
     const sessionId = token()
-    sessions.set(sessionId, { owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + 15 * 60000 })
+    const legacyProof = identity.verifiedEmail && identity.emailEvidence === 'signed-ideaflow-beta-v1' ? Object.freeze({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId, verifiedAt: identity.verifiedAt, email: identity.verifiedEmail, emailEvidence: identity.emailEvidence, ownerId: owner.ownerId, userId: owner.userId }) : null
+    const legacyCandidate = legacyProof && legacyAccount ? await legacyAccount.candidate(legacyProof) : null
+    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + 15 * 60000 })
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, 900)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
-    redirect(response, '/')
+    redirect(response, legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : '/')
   }
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -235,6 +238,21 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         else render(response, 'Sign in required', '<a class="action" href="/login">Continue with Ideaflow</a>', 401)
         return
       }
+      if (request.method === 'GET' && url.pathname === '/legacy-account') {
+        if (!session.legacyCandidate) { redirect(response, '/profile'); return }
+        render(response, 'Your existing Unlinked profile', `<p>This looks like your old Unlinked account. Continue?</p><small>Signed in as ${html(session.accountLabel)}</small><form method="post" action="/legacy-account"><input type="hidden" name="csrf" value="${html(session.csrf)}"><button name="action" value="confirm">Continue with my old profile</button><button name="action" value="skip">Continue without linking</button></form>`); return
+      }
+      if (request.method === 'POST' && url.pathname === '/legacy-account') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('action').length !== 1 || [...input.keys()].some(key => !['csrf','action'].includes(key))) throw new Error('private_browser_csrf')
+        if (!session.legacyCandidate || !session.legacyProof || !legacyAccount) throw new Error('legacy_confirmation_unavailable')
+        if (input.get('action') === 'confirm') {
+          await legacyAccount.confirm(session.legacyProof, session.legacyCandidate.profileId, true)
+          await recordAudit({ event: 'legacy_profile_confirmed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
+        } else if (input.get('action') !== 'skip') throw new Error('legacy_confirmation_required')
+        session.legacyCandidate = null
+        redirect(response, '/profile'); return
+      }
       const accountNav = `<nav><a href="/">Import</a> · <a href="/network">My network</a> · <a href="/settings">Agent setup & settings</a></nav><small>Signed in as ${html(session.accountLabel)}</small><form method="post" action="/logout"><input type="hidden" name="csrf" value="${html(session.csrf)}"><button>Sign out</button></form>`
       const backend = await getBackend(session.owner)
       if (!backend?.adapter || typeof backend.readResource !== 'function') throw new Error('private_backend_unavailable')
@@ -276,6 +294,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const jobs = await jobResources(), props = jobProps(jobs)
         if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
         const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs: profileJobs(jobs), backend }))
+        if (!profile.name && typeof backend.readLegacyProfile === 'function') {
+          const legacy = await backend.readLegacyProfile()
+          if (legacy) Object.assign(profile, legacy.profile)
+        }
         if (!profile.name) profile.name = session.displayName
         journey(response, renderOwnProfile({ ...props, profile, imports: summaries(jobs) }), props.importJob); return
       }
@@ -297,7 +319,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
-        const view = renderPeople({ ...props, scope, own: network.imports.length ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: filter })
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: filter })
         if (rows.length > (index + 1) * 100) view.content += `<a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a>`
         journey(response, view, props.importJob)
         return
@@ -326,7 +348,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           if (scope === 'everyone') {
             const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
             const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
-            const own = network.imports.length ? network.assertions.filter(row => row.category === 'connections').slice(0, 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })) : undefined
+            const own = network.imports.length || network.legacyProfileId ? network.assertions.filter(row => row.category === 'connections').slice(0, 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })) : undefined
             const view = renderPeople({ ...props, scope, everyone: result.matches, own, query: input.get('query'), state: 'ready', searchResults: result.matches })
             view.content += `<p>${result.considered} public profiles considered; ${result.modelCandidates} matching candidates ranked with AI.</p>`
             journey(response, view, props.importJob); return

@@ -70,3 +70,20 @@ The private container recipe uses a frontend bridge for nginx/runtime and a sepa
 Only non-root nginx publishes 443 to container 8443; neither app nor graph has a published port, and operations remains container loopback.
 The runtime's private parent tmpfs is part of that recipe; graph, backups and invitation trees are not broadly mounted into the app.
 The process default remains host loopback; exact isolated-container mode and private service addresses must be explicitly selected.
+
+## Recovered account confirmation
+
+The canonical runtime may privately seed the hash-only manifest for all 81 recovered accounts after the exact recovered public profile revision is verified.
+This creates no owner or subject binding.
+On first matching authenticated Ideaflow sign-in, `/legacy-account` asks “This looks like your old Unlinked account. Continue?”
+Only the server-held signed issuer/subject/email and current owner tuple authorize the CSRF-protected confirmation; typed or uploaded email has no authority.
+For this prototype, signed Ideaflow email is treated as verified, including matches to the 29 legacy email-provider-only accounts.
+A second subject cannot take an already-linked profile, and each owner/user can link only one legacy profile.
+Confirmation receipts replay, while operator revocation permanently fences the link without deleting the existing owner, imports, or immutable recovered public source.
+The linked own profile falls back to the recovered professional profile until an archive profile replaces its display; public member projection reuses the same legacy profile ID.
+The original recovered publication is immutable, and overlays disappear after link/source revocation.
+
+Operator preparation uses `createLegacyAccountManifest` with the exact mode-600 private inventory, then pipes its hash-only JSON to `node mcp-server/legacy-account-operator.mjs seed` in the owned isolated backend container.
+The helper requires all 81 profile anchors in the published recovered source and reports only count/hash/time; never send the inventory or graph/provider credentials in argv or public logs.
+Scoped rollback is `node mcp-server/legacy-account-operator.mjs revoke <profileId> <receiptId>` with the exact confirmed receipt.
+No live seed/link or personal-browser confirmation is implied by source tests; exact-head Noos graph CI and guarded paired rollout remain required.

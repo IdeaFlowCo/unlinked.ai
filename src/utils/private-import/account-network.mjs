@@ -26,7 +26,22 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       indexed += publication.indexed ?? 0
       imports.push(id)
     }
-    return { id: networkId, ownerId: owner.ownerId, imports, indexed, assertions, consent: COMBINED_UPLOAD_CONSENT }
+    const legacy = typeof backend.readLegacyProfile === 'function' ? await backend.readLegacyProfile() : null
+    if (legacy) {
+      const people = new Map(legacy.profiles.map(profile => [profile.id, profile]))
+      for (const edge of legacy.connections) {
+        const person = people.get(edge.toId)
+        if (!person || edge.fromId !== legacy.profileId) throw Error('legacy_network_source_invalid')
+        if (assertions.length >= observationLimit) throw Error('account_observation_limit')
+        const id = privateId(owner.ownerId, 'legacy-connection', legacy.sourceSha256, legacy.profileId, person.id)
+        assertions.push({ id, ownerId: owner.ownerId, importId: networkId, sourceId: legacy.sourceSha256, rowId: `legacy:${legacy.profileId}:${person.id}`, category: 'connections', fields: { 'first name': person.name, company: person.company ?? person.positions?.[0]?.company ?? '', position: person.headline ?? '' }, provenance: { source: 'recovered-legacy-public-v1', revision: legacy.revision, fromId: edge.fromId, toId: edge.toId } })
+      }
+      indexed += legacy.connections.length
+      // Linking/revocation is rechecked before these legacy rows are returned.
+      const current = await backend.readLegacyProfile()
+      if (!current || current.receiptId !== legacy.receiptId || current.revision !== legacy.revision) throw Error('legacy_network_changed')
+    }
+    return { legacyProfileId: legacy?.profileId, id: networkId, ownerId: owner.ownerId, imports, indexed, assertions, consent: COMBINED_UPLOAD_CONSENT }
   }
   return { readNetwork, search: typeof complete === 'function' ? async ({ query, signal }) => {
     const result = await createPrivateSearch({ readImport: readNetwork, complete })({ importId: networkId, query, signal })

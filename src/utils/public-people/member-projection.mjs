@@ -40,7 +40,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const items = await discover()
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
     if (!Array.isArray(items) || items.length > 1000) throw Error('public_member_import_limit')
-    const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision]
+    const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision], linkedChecks = [], overlays = new Map()
     for (const item of items) {
       const backend = await getBackend(item.owner), resource = await backend.readResource('import',item.id)
       if (!resource || resource.deleted || resource.sourceOwnerId !== item.owner.ownerId || resource.sourceRevision !== item.revision || resource.payload?.ownerId !== item.owner.ownerId || resource.payload.id !== item.id || !permitted(resource.payload)) throw Error('public_member_source_changed')
@@ -53,11 +53,27 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         await publicPeople.publish(dataset,snapshot,resource.payload.archiveSha256)
       }
       if (snapshot.revision !== 'member-public-v1:' + item.id) throw Error('public_member_source_changed')
-      profiles.push(...snapshot.profiles);connections.push(...snapshot.connections);revisions.push(snapshot.revision)
+      const linked = typeof backend.readLegacyProfile === 'function' ? await backend.readLegacyProfile() : null
+      if (linked) {
+        if (linked.sourceSha256 !== legacy.revision.slice('legacy-public-v1:'.length) || !profiles.some(value => value.id === linked.profileId)) throw Error('public_member_legacy_link_invalid')
+        const ownId = 'member-import-' + item.id, own = snapshot.profiles.find(value => value.id === ownId)
+        if (!own) throw Error('public_member_source_changed')
+        profiles.push(...snapshot.profiles.filter(value => value.id !== ownId))
+        connections.push(...snapshot.connections.map(edge => ({ fromId: edge.fromId === ownId ? linked.profileId : edge.fromId, toId: edge.toId })))
+        const winner = overlays.get(linked.profileId), key = [resource.payload.createdAt ?? 0, item.id]
+        if (own.name !== 'Unlinked member' && (!winner || key[0] > winner.key[0] || (key[0] === winner.key[0] && key[1] > winner.key[1]))) overlays.set(linked.profileId, { key, profile: { ...own, id: linked.profileId } })
+        revisions.push('legacy-link:' + linked.receiptId)
+        linkedChecks.push(async () => { const current = await backend.readLegacyProfile(); if (!current || current.receiptId !== linked.receiptId || current.revision !== linked.revision) throw Error('public_member_source_changed') })
+      } else { profiles.push(...snapshot.profiles); connections.push(...snapshot.connections) }
+      revisions.push(snapshot.revision)
       if (profiles.length > 20000 || connections.length > 100000) throw Error('shared_public_capacity_limit')
     }
     if (identity(await discover()) !== identity(items)) throw Error('public_member_source_changed')
-    return {state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections}
+    for (const check of linkedChecks) await check()
+    for (const [id, value] of overlays) profiles[profiles.findIndex(profile => profile.id === id)] = value.profile
+    // Replayed source edges are canonicalized without changing their receipts.
+    const uniqueConnections = [...new Map(connections.map(edge => [JSON.stringify([edge.fromId, edge.toId]), edge])).values()]
+    return {state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections}
   }
   return async ({signal} = {}) => {
     signal?.throwIfAborted()

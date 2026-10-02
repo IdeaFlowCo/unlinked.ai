@@ -39,7 +39,7 @@ The production identity operation and new persistent OpenAI secret destination r
 
 ## Trusted runtime capability
 
-The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, signup, accountGrantKey, getBackend, complete, backgroundImports, audit, port, host, networkMode, dataMode})`; its real-data mode is exactly `private_live`.
+The inspected product exports `startPrivatePilot({baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, accountGrantKey, getBackend, complete, backgroundImports, audit, port, host, networkMode, dataMode})`; its real-data mode is exactly `private_live`.
 `mcp-server/private-composition.mjs` provides the process-only `createPrivatePilotDependencies(options)` implementation.
 Install this packet's `wiring.mjs` as mode 600 at `/srv/unlinked-private-guest-pilot-20261001/runtime/wiring.mjs`; its relative export resolves the exact private Unlinked checkout.
 The factory loads only compiled Noos operational modules from the private Noos checkout, never its legacy auth or generic query application.
@@ -47,10 +47,11 @@ It validates the dedicated root, exact approved live origin and ports, initializ
 Before provisioning or exposing HTTP readiness, it waits for the dedicated Bolt driver to report graph connectivity with the same bounded driver timeouts.
 The server-side operations key never leaves the runtime; hosted MCP uses its separate search-only grants and live publication fences.
 The private env, production client, TLS/DNS, dependency-complete source artifacts and built deployment images remain activation inputs.
-It must start the isolated operational service only at container `127.0.0.1:9022` and return `login`, `resolveOwner`, `signup`, `accountGrantKey`, `getBackend`, `complete`, `backgroundImports`, `audit` and `close` capabilities; invitation-capable deployments may also return `claimInvitation`.
+It must start the isolated operational service only at container `127.0.0.1:9022` and return `login`, `resolveOwner`, `signup`, `accountGrantKey`, `getBackend`, `complete`, `backgroundImports`, `audit` and `close` capabilities; invitation-capable deployments may also return `claimInvitation`, and recovered-account deployments may return `legacyAccount`.
 The login object must implement `begin`, `finish` and the exact HTTPS `authorizationOrigin` using `createIdeaflowLogin` with the verified production issuer/client and callback.
 The authorization request uses `prompt=login`; Unlinked confirms the returned verified account before an invited owner claim, rather than silently binding by email.
 The Noos integration uses `OperationalStore`, `StagingFileAssets` and callback-role `InvitedOwnerProvisioner`; `signup` is its guarded open-account method, `claimInvitation` remains its guarded invitation method, and `resolveOwner` resolves the same verified issuer/subject mapping. The operational store must expose `listPendingImportJobs` and owner-scoped `listImportJobIds`; older Noos artifacts fail startup instead of falling back to synchronous import.
+When `legacyAccount` is present, it is backed by Noos `UnlinkedLegacyLinks`; candidate lookup uses only server-held signed Ideaflow email evidence after owner resolution, and confirmation writes a private association receipt without creating a new owner or duplicating the recovered public profile.
 `getBackend` must revalidate active immutable owner/principal and publication access on every operation.
 The operational API exposes only its scoped router, never the legacy generic graph query routes.
 The returned `close` capability must stop the background worker, operational listener and graph driver on shutdown.
@@ -86,6 +87,7 @@ Run it as the explicitly provisioned private host operator UID/GID recorded in t
 The Noos operator CLI owns invitation creation/replay/revocation and accepts a private config plus `NOOS_PROVISIONING_PASSWORD` without printing its secret.
 Its `create --config PRIVATE.json --out NEW-PRIVATE.json` writes the mode-600, fsynced recovery bundle before the graph operation.
 Retain that exact bundle under `invitations/operator-recovery.json`; never place its token or URL in a release receipt, shell history, CI output or proxy logs.
+The recovered-account operator helper seeds only the exact 81-row hash-only manifest against the published recovered public source, and revokes by exact profile/receipt; raw inventory, email addresses and graph/provider credentials must never enter argv or logs.
 The offline operator capability never enters the browser runtime.
 
 ## Recovery and ingress
