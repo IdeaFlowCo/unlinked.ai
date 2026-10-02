@@ -75,13 +75,12 @@ test('signed-in People and profile rows link to the published profile of a legac
   assert.match(profile, /<a class="crow" href="\/people\/second">/); assert.match(profile, /<a class="crow" href="\/people\/third">/)
 })
 
-test('a reader may reuse a built index briefly; by default every request reads the snapshot', async () => {
-  let reads = 0
-  const source = async () => { reads++; return published({ members: ['first'] }) }
-  const reusing = createPublicPeopleReader({ readPublishedSnapshot: source, reuseMs: 60000 })
-  await reusing.list(); await reusing.lookup({ ids: ['second'] }); await reusing.profile({ id: 'second' })
+test('overlapping reads share one snapshot build; later reads see the current publication', async () => {
+  let reads = 0, current = published({ members: ['first'] })
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => { reads++; await new Promise(resolve => setTimeout(resolve, 5)); return current } })
+  await Promise.all([reader.list(), reader.lookup({ ids: ['second'] }), reader.profile({ id: 'second' })])
   assert.equal(reads, 1)
-  const fresh = createPublicPeopleReader({ readPublishedSnapshot: source })
-  await fresh.list(); await fresh.list(); assert.equal(reads, 3)
-  assert.throws(() => createPublicPeopleReader({ readPublishedSnapshot: source, reuseMs: 120000 }), TypeError)
+  current = published({ members: ['first', 'second'] })
+  assert.equal((await reader.lookup({ ids: ['second'] })).get('second').presence, 'member'); assert.equal(reads, 2)
+  await reader.list({ signal: new AbortController().signal }); assert.equal(reads, 3)
 })

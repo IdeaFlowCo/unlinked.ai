@@ -27,6 +27,10 @@ Connections are `{fromId,toId}` and remain directed; reciprocal relationships an
 
 `reader.list({query,cursor,signal?})` returns `{profiles:[{id,name,headline?,location?}],nextCursor?}`.
 `reader.profile({id,cursor,signal?})` returns `{profile:{...summary,about?,positions,education,skills,connections,nextConnectionsCursor?}}`, or null for an unknown/unpublished profile in an otherwise valid published snapshot.
+A profile's connections are its edges from both ends: an edge is stored only from the person whose export listed it, and an edge recorded by both people appears once.
+When the snapshot carries `members` (profile IDs; the shared index lists confirmed legacy claims with an active owner and members' own imports), every summary and detail adds `presence: 'member'|'shadow'` and `connectionCount` (both directions). Snapshots without `members` add neither field. A member ID missing from the profiles is a malformed snapshot (503).
+`reader.lookup({ids,signal?})` takes at most 1000 IDs and returns a `Map` of the summaries that are published, in request order; unknown IDs are omitted.
+Overlapping reads without their own signal share one snapshot build; nothing is kept after it, so later reads see the current publication.
 The controller maps null to HTTP404; `PublicPeopleReaderError.status===503` maps to unavailable.
 Requests must be plain data objects. Invalid request shapes, signals, queries, IDs and cursor structures/scopes return a data-free status400 error before backend access or unknown-profile handling.
 No HTTP route is implemented by this module; the standalone runtime maps it to anonymous `/network`, `/people`, `/people/:id`, `/api/people` and `/api/people/:id`.
@@ -38,6 +42,6 @@ Cursors bind offset to normalized query/profile scope and publication revision, 
 A stale publication cursor returns503 so the caller can restart against the new revision; a cursor from another query/profile is invalid400.
 The backend must supply one coherent complete snapshot for that revision; this module cannot make unrelated backend reads transactional.
 
-Synthetic tests exercise unavailable/default behavior, whitelist output, deterministic pagination/search, directed connection pages, malformed/oversized snapshots, immutable viewer propagation, aborts/timeouts and invalid client input.
+Synthetic tests exercise unavailable/default behavior, whitelist output, deterministic pagination/search, connection pages from both ends, member/shadow presence, malformed/oversized snapshots, immutable viewer propagation, aborts/timeouts and invalid client input.
 These fixtures are confined to tests and are never production fallback data.
 Real Noos publication/readback and standalone route integration are covered by the shared People beta work; Next.js route injection remains separate.

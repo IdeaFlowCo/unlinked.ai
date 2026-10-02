@@ -42,17 +42,17 @@ const requestValue = value => {
 
 // The injected provider owns public projection and both-endpoint visibility.
 // No reader exists by default; private records and fixtures are never fallback sources.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000, reuseMs = 0 } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || !(reuseMs === 0 || bounded(reuseMs, 60000)) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer)))) throw new TypeError('public_people_configuration_invalid')
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000 } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer)))) throw new TypeError('public_people_configuration_invalid')
 
-  // A built index may serve later requests for a few seconds: one page view
-  // often reads the same snapshot more than once, and building it is slow.
-  let reused = null
+  // Reads that overlap share one build: a page may read the snapshot twice at
+  // once, and building it is slow. Nothing outlives the build, so every new
+  // read still sees the current publication. A caller's own signal reads alone.
+  let inflight = null
   async function snapshot(signal) {
-    if (reuseMs && reused && Date.now() - reused.at < reuseMs) { signal?.throwIfAborted(); return reused.data }
-    const data = await build(signal)
-    if (reuseMs) reused = { at: Date.now(), data }
-    return data
+    if (signal) return build(signal)
+    if (!inflight) inflight = build().finally(() => { inflight = null })
+    return inflight
   }
   async function build(signal) {
     if (!readPublishedSnapshot) unavailable()

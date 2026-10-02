@@ -91,7 +91,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const returnPath = value => typeof value === 'string' && /^\/(?:profile|card|settings|import|network|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
-  const publicReader = createPublicPeopleReader({ readPublishedSnapshot, reuseMs: 10000 })
+  const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
@@ -471,11 +471,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
+        // Start reading the public index now; the contact lookup below joins it.
+        const warming = typeof readPublishedSnapshot === 'function' ? publicReader.lookup({ ids: [] }).catch(() => null) : null
         try {
           const connections = (await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()).assertions.filter(row => row.category === 'connections')
           connectionCount = connections.length
           contacts = await contactRows(connections.slice(0, 10))
         } catch { /* The profile stands on its own while the network is still being read. */ }
+        await warming
         journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/card') {
@@ -520,7 +523,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const rows = ownMatches.rows
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
-        const props = jobProps(await jobResources()), contacts = await contactRows(rows.slice(index * 100, (index + 1) * 100))
+        const props = jobProps(await jobResources()), linking = contactRows(rows.slice(index * 100, (index + 1) * 100))
         const publicProfessionalSearch = typeof readPublishedSnapshot === 'function'
         let everyone, nextCursor, state = 'ready', match = ownMatches.match
         if (publicProfessionalSearch) {
@@ -530,6 +533,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
+        // The contact lookup ran alongside the public list and shares its snapshot read.
+        const contacts = await linking
         const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, match })
         if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}">Next contacts</a></p>`)
         journey(response, view, props.importJob)
