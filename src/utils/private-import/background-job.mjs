@@ -10,8 +10,13 @@ const LEASE_MS = 180000
 
 // The original private asset and uploaded receipt must be durable before the
 // browser receives a redirect. A browser disconnect never owns the worker.
-export async function stageArchive({ ownerId, filename, bytes, adapter, consent, now = Date.now }) {
+// A person a member added by hand is staged as a one-row Connections.csv with
+// this origin, so Settings and the import status can tell it from an export.
+export const ADDED_PERSON = 'added-person'
+const originValid = origin => origin === undefined || (origin && Object.keys(origin).length === 2 && origin.kind === ADDED_PERSON && typeof origin.label === 'string' && origin.label.trim() && [...origin.label].length <= 241)
+export async function stageArchive({ ownerId, filename, bytes, adapter, consent, origin, now = Date.now }) {
   requireCombinedUploadConsent(consent)
+  if (!originValid(origin)) throw new Error('archive_origin_invalid')
   if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > LIMITS.archiveBytes) throw new Error('archive_size_limit')
   const archiveSha256 = digest(bytes), id = privateId(ownerId, 'import', archiveSha256, filename, PARSER_VERSION)
   return adapter.withImport(ownerId, id, async store => {
@@ -20,7 +25,7 @@ export async function stageArchive({ ownerId, filename, bytes, adapter, consent,
     const job = { id, ownerId, filename, archiveSha256, parserVersion: PARSER_VERSION,
       status: 'uploaded', phase: 'uploaded', revision: 1, createdAt: now(),
       counts: counts(), sources: [], consent: structuredClone(consent),
-      backgroundVersion: 'profile-first-v1', progress: { processed: 0, total: null, profileReady: false } }
+      backgroundVersion: 'profile-first-v1', progress: { processed: 0, total: null, profileReady: false }, ...(origin ? { origin: structuredClone(origin) } : {}) }
     await store.putAsset(archiveSha256, bytes)
     try { await store.saveJob(job) }
     catch (error) {

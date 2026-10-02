@@ -11,11 +11,12 @@ import { createScopedImportReader } from '../src/utils/private-import/noos-adapt
 import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 import { scopedSetupConfiguration } from '../src/utils/private-import/scoped-setup.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
-import { LIMITS } from '../src/utils/private-import/archive.mjs'
-import { stageArchive, importJobStatus } from '../src/utils/private-import/background-job.mjs'
+import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
+import { stageArchive, importJobStatus, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
+import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderPerson, renderPeople, renderCompany, renderSettings, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { companyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
@@ -68,11 +69,12 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
+  if (memberInvitations !== undefined && ['create', 'list', 'open', 'respond', 'revoke', 'removeOwner'].some(key => typeof memberInvitations[key] !== 'function')) throw new Error('member_invitation_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
   if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
@@ -85,10 +87,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map()
+  let invitationWindow = 0, invitationRequests = 0
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
   // Pages a sign-in may return to. Everything else lands on the home route.
-  const returnPath = value => typeof value === 'string' && /^\/(?:profile|card|settings|import|network|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) ? value : null
+  const returnPath = value => typeof value === 'string' && /^\/(?:profile|card|settings|import|network|invites|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
@@ -167,7 +170,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + SESSION_SECONDS * 1000 })
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
-    redirect(response, legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/')
+    // An invitation link someone signed in to answer comes first; its page then
+    // continues to the old-account or find-me step when there is one.
+    const invitation = returnPath(next)?.startsWith('/i/') ? returnPath(next) : null
+    redirect(response, invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
   }
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -183,6 +189,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const viewer = sessionFor(request)
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf } : {}
       if (await servePublicDiscovery(request, response, url.pathname, chrome)) return
+      const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
+      if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
+        if (Date.now() - invitationWindow >= 60000) { invitationWindow = Date.now(); invitationRequests = 0 }
+        if (++invitationRequests > 60) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        response.setHeader('Referrer-Policy', 'no-referrer')
+        const invitation = await memberInvitations.open(invitationLink[1])
+        journey(response, renderInviteLanding({ ...chrome, token: invitationLink[1], invitation }), null, '', invitation ? 200 : 404); return
+      }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
       const publicProfile = url.pathname.match(/^\/people\/([^/]+)$/)
       const publicCompanyApi = url.pathname.match(/^\/api\/companies\/([^/]+)$/)
@@ -435,7 +449,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         for (let start = 0; start < ids.length; start += 8) resources.push(...await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id))))
         return resources.filter(resource => resource && !resource.deleted && resource.sourceOwnerId === session.owner.ownerId && resource.payload?.id === resource.sourceId && !resource.payload.kind && !resource.payload.receiptOf)
       }
-      const profileJobs = jobs => [...jobs].sort((a, b) => {
+      const profileJobs = jobs => jobs.filter(resource => resource.payload.origin?.kind !== ADDED_PERSON).sort((a, b) => {
         const key = resource => {
           if (resource.payload.backgroundVersion !== 'profile-first-v1') return [0, 0, resource.sourceId]
           if (!Number.isSafeInteger(resource.payload.createdAt)) throw new Error('private_import_created_at_invalid')
@@ -445,11 +459,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         return left[0] - right[0] || left[1] - right[1] || left[2].localeCompare(right[2])
       })
       const jobProps = jobs => {
-        const ordered = [...jobs].sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0))
+        // A person added by hand is not an export: it never drives the import status.
+        const ordered = jobs.filter(resource => resource.payload.origin?.kind !== ADDED_PERSON).sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0))
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
         return { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
-      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed, visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
+      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed, visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
       const statusMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/status$/)
       if (request.method === 'GET' && statusMatch) {
         const resource = await backend.readResource('import', statusMatch[1])
@@ -513,6 +528,65 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         }
         journey(response, renderCard({ ...props, profile, cardUrl, qr: cardUrl ? qrSvg(cardUrl, { label: `QR code opening ${cardUrl}` }) : null }), props.importJob); return
       }
+      // Off-platform people: add someone to your own people, or invite them.
+      if (signup && request.method === 'GET' && url.pathname === '/people/add') {
+        const props = jobProps(await jobResources())
+        journey(response, renderAddPerson(props), props.importJob); return
+      }
+      if (signup && request.method === 'POST' && url.pathname === '/people/add') {
+        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        const keys = ['csrf', 'firstName', 'lastName', 'linkedinUrl', 'company', 'position']
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || keys.some(key => input.getAll(key).length > 1) || [...input.keys()].some(key => !keys.includes(key))) throw new Error('private_browser_csrf')
+        const values = Object.fromEntries(keys.slice(1).map(key => [key, (input.get(key) ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim()]))
+        const address = linkedinUrl(/^https?:\/\//i.test(values.linkedinUrl) ? values.linkedinUrl.replace(/^http:/i, 'https:') : `https://${values.linkedinUrl}`)
+        const problem = !values.firstName || !values.lastName ? 'Add both a first and a last name.'
+          : ['firstName', 'lastName', 'company', 'position'].some(key => [...values[key]].length > 120 || /[\u0000-\u001f\u007f]/.test(values[key])) ? 'Keep each field under 120 characters.'
+          : !address ? 'Use a LinkedIn profile address, like https://www.linkedin.com/in/their-name.' : null
+        const props = jobProps(await jobResources())
+        if (problem) { journey(response, renderAddPerson({ ...props, error: problem, values }), props.importJob, '', 400); return }
+        // The same one-row file LinkedIn's export would give, kept private: never published.
+        const cell = value => `"${value.replace(/"/g, '""')}"`
+        const csv = `First Name,Last Name,URL,Email Address,Company,Position,Connected On\n${[values.firstName, values.lastName, address, '', values.company, values.position, ''].map(cell).join(',')}\n`
+        await stageArchive({ ownerId: session.owner.ownerId, filename: 'Connections.csv', bytes: Buffer.from(csv, 'utf8'), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT, origin: { kind: ADDED_PERSON, label: `${values.firstName} ${values.lastName}` } })
+        redirect(response, '/network?added=1'); return
+      }
+      if (signup && memberInvitations && request.method === 'GET' && url.pathname === '/invites') {
+        const props = jobProps(await jobResources())
+        journey(response, renderInvites({ ...props, origin: base.origin, invitations: await memberInvitations.list(session.owner) }), props.importJob); return
+      }
+      if (signup && memberInvitations && request.method === 'POST' && ['/invites', '/invites/revoke'].includes(url.pathname)) {
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        const field = url.pathname === '/invites' ? 'inviteeName' : 'id'
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll(field).length !== 1 || [...input.keys()].some(key => ![ 'csrf', field ].includes(key))) throw new Error('private_browser_csrf')
+        const props = jobProps(await jobResources())
+        let created, error
+        try {
+          if (field === 'inviteeName') created = await memberInvitations.create({ inviter: session.owner, inviterName: session.displayName || session.accountLabel, inviteeName: input.get('inviteeName') })
+          else await memberInvitations.revoke(session.owner, input.get('id'))
+        } catch (failure) {
+          if (!(failure instanceof InvitationError)) throw failure
+          error = { invitation_name_invalid: 'Use a plain name of up to 120 characters.', invitation_limit: 'You have reached the invite limit for now. Try again tomorrow.', invitation_unavailable: 'That invite can no longer be revoked.', invitation_not_found: 'That invite can no longer be revoked.' }[failure.code] ?? 'That did not work. Try again.'
+        }
+        response.setHeader('Cache-Control', 'no-store')
+        journey(response, renderInvites({ ...props, origin: base.origin, created, error, invitations: await memberInvitations.list(session.owner) }), props.importJob, '', error ? 400 : 200); return
+      }
+      const invitationAnswer = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
+      if (signup && memberInvitations && request.method === 'POST' && invitationAnswer && INVITATION_TOKEN.test(invitationAnswer[1])) {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('action').length !== 1 || [...input.keys()].some(key => !['csrf', 'action'].includes(key))) throw new Error('private_browser_csrf')
+        const invitation = await memberInvitations.open(invitationAnswer[1])
+        const chromeProps = { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, token: invitationAnswer[1] }
+        let outcome
+        try { outcome = (await memberInvitations.respond(invitationAnswer[1], session.owner, input.get('action'))).status }
+        catch (failure) {
+          if (!(failure instanceof InvitationError)) throw failure
+          journey(response, renderInviteLanding({ ...chromeProps, invitation: invitation ? { ...invitation, status: failure.code === 'invitation_own' ? 'own' : 'unavailable' } : null }), null, '', 409); return
+        }
+        const view = renderInviteLanding({ ...chromeProps, invitation, outcome })
+        // After answering, continue to the old-account or find-me step when there is one.
+        if (outcome === 'accepted' && (session.legacyCandidate || session.selfClaim)) view.content = view.content.replace('href="/profile"', `href="${session.legacyCandidate ? '/legacy-account' : '/find-me'}"`)
+        journey(response, view); return
+      }
       if (signup && request.method === 'GET' && url.pathname === '/network') {
         const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
         const connections = network.assertions.filter(row => row.category === 'connections')
@@ -540,7 +614,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
         // The contact lookup ran alongside the public list and shares its snapshot read.
         const contacts = await linking
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, match })
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match })
         if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}">Next contacts</a></p>`)
         journey(response, view, props.importJob)
         return
@@ -580,6 +654,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         }
         const jobs = await jobResources()
         const grantIds = await backend.listAccountGrantIds()
+        // Invitations hold names the owner typed: they go with the account.
+        if (memberInvitations) await memberInvitations.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds })
         // Best effort beyond the graph: the legacy claim and the stored archive bytes.
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
