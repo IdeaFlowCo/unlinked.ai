@@ -119,7 +119,7 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   const whoami = await who.json()
   assert.equal(whoami.ownerId, app.owner.ownerId)
   assert.equal(whoami.grant.version, CURRENT_ACCOUNT_GRANT_VERSION)
-  assert.deepEqual(whoami.grant.tools, [...ACCOUNT_GRANT_TOOL_VERSIONS[2].owner_network_and_public])
+  assert.deepEqual(whoami.grant.tools, [...ACCOUNT_GRANT_TOOL_VERSIONS[3].owner_network_and_public])
   assert.equal(whoami.importCount, 1)
   assert.equal(whoami.publicIndexAvailable, true)
 
@@ -308,7 +308,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const mcpTransport = new StreamableHTTPClientTransport(new URL(`${narrowApp.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${narrow.accessToken}` } } })
   try {
     await mcpClient.connect(mcpTransport)
-    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search'])
+    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
     const who = await mcpClient.callTool({ name: 'unlinked_whoami', arguments: {} })
     assert.ok(!who.isError)
     assert.equal(JSON.parse(who.content[0].text).ownerId, narrowApp.owner.ownerId)

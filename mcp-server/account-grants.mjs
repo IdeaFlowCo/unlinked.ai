@@ -18,8 +18,14 @@ export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
     owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search']),
     owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search']),
   }),
+  // Version 3 adds two read-only tools: the owner's pending connection
+  // requests and their notification feed.
+  3: Object.freeze({
+    owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
+    owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
+  }),
 })
-export const CURRENT_ACCOUNT_GRANT_VERSION = 2
+export const CURRENT_ACCOUNT_GRANT_VERSION = 3
 export const accountGrantTools = (version, scope) => ACCOUNT_GRANT_TOOL_VERSIONS[version]?.[scope] ?? null
 
 // Deterministic jti for the one automatically prepared grant per owner, so

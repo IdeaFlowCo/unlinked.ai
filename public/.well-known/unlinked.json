@@ -44,7 +44,9 @@
       "unlinked_list_people",
       "unlinked_list_connections",
       "unlinked_get_profile",
-      "unlinked_ai_search"
+      "unlinked_ai_search",
+      "unlinked_list_connection_requests",
+      "unlinked_list_notifications"
     ],
     "grantVersioning": "old grants keep exactly their issued tool list; new grants receive the current catalog version"
   },

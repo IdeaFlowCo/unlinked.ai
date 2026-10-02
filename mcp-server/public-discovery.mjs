@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { renderAgents, renderImportGuide, renderMeet, fillMeHeadline, TOP_BAR_SCRIPT } from './private-onboarding-views.mjs'
+import { renderAgents, renderImportGuide, renderMeet, fillMeHeadline, fillNavAlerts, TOP_BAR_SCRIPT } from './private-onboarding-views.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 
 const root = new URL('../', import.meta.url)
@@ -34,7 +34,8 @@ export const isPublicDiscoveryPath = pathname => pages.has(pathname) || assets.h
 export const MEET_SCRIPT = `import { BrowserCardScanner } from '/public-assets/browser-card-scanner.js';import { classifyMeetCode } from '/public-assets/meet-scan.js';const status=document.getElementById('status'),confirmBox=document.getElementById('confirm'),confirmLabel=document.getElementById('confirm-label'),confirmOpen=document.getElementById('confirm-open');let scanner=null;const stop=()=>{scanner?.stop();scanner=null};const clear=()=>{confirmBox.hidden=true;confirmOpen.setAttribute('href','/meet');confirmLabel.textContent=''};const offer=code=>{stop();confirmLabel.textContent=code.label;confirmOpen.setAttribute('href',code.href);confirmBox.hidden=false;status.textContent='Nothing opens until you choose Open.'};document.getElementById('confirm-cancel').addEventListener('click',()=>{clear();status.textContent=''});document.getElementById('paste').addEventListener('submit',event=>{event.preventDefault();const code=classifyMeetCode(document.getElementById('card-url').value);if(code)offer(code);else{clear();status.textContent='Use an Unlinked profile link or an OpenChat card link.'}});document.getElementById('start').addEventListener('click',async()=>{stop();clear();scanner=new BrowserCardScanner(document.getElementById('camera'),{parse:classifyMeetCode,onCard:offer,onUnsupportedCode:()=>{status.textContent='This QR code is not an Unlinked profile or an OpenChat card.'}});try{await scanner.start();status.textContent='Point your camera at a card.'}catch{stop();status.textContent='Camera unavailable or permission declined. Paste the link printed with the card instead.'}});document.getElementById('stop').addEventListener('click',stop);addEventListener('pagehide',stop);`
 const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 // Every page carries the header's Me-menu script under its own nonce.
-const document = (view, { headline, nonce }) => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillMeHeadline(view.content, headline)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script></html>`
+// Header counts (`alerts`) are display-only, like the rest of `chrome`.
+const document = (view, { headline, nonce, alerts }) => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script></html>`
 const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
 
 // Exact, source-controlled anonymous discovery only. Never resolves an owner,
@@ -57,7 +58,7 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
   } else if (pathname === '/public-assets/jsqr-module.mjs') { type = 'text/javascript'; content = 'export default globalThis.jsQR;' }
   else {
     type = 'text/html; charset=utf-8'
-    const nonce = randomBytes(24).toString('base64url'), page = { headline: chrome.headline, nonce }
+    const nonce = randomBytes(24).toString('base64url'), page = { headline: chrome.headline, nonce, alerts: chrome.alerts }
     response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
     if (pathname === '/agents') content = document(renderAgents(chrome), page)
     if (pathname === '/import-linkedin') content = document(renderImportGuide(chrome), page)
