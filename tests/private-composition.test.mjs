@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { createPrivatePilotDependencies } from '../mcp-server/private-composition.mjs'
+import { createMemoryEmailStore } from '../mcp-server/member-email.mjs'
+import { createMemoryNotificationStore } from '../mcp-server/member-notifications.mjs'
 
 const require = createRequire(new URL('../mcp-server/package.json', import.meta.url))
 const { importSPKI, jwtVerify } = await import(require.resolve('jose'))
@@ -185,4 +187,25 @@ test('canonical origin uses its exact OIDC callback and keeps owner operations p
   assert.deepEqual(await (await dependencies.getBackend(owner)).readResource('import', 'a'.repeat(64)), state.resource)
   await assert.rejects(dependencies.getBackend({ ...owner, ownerId: 'another-owner' }), /owner_denied/)
   assert.equal((await fetch(`http://127.0.0.1:${port}/v1/unlinked/import/${'a'.repeat(64)}`)).status, 401)
+})
+
+test('email delivery is wired only with its store; no key or the off flag sends nothing, and the mailer stops with the runtime', async t => {
+  const { options } = await fixture(t)
+  const plain = await createPrivatePilotDependencies(options)
+  assert.equal(plain.memberEmail, undefined)
+  await plain.close()
+  for (const [emailEnv, sending] of [[{}, false], [{ RESEND_API_KEY: 'synthetic-resend-key', UNLINKED_EMAIL_ENABLED: '0' }, false], [{ RESEND_API_KEY: 'synthetic-resend-key' }, true]]) {
+    const { options: next } = await fixture(t)
+    const transports = []
+    const dependencies = await createPrivatePilotDependencies({ ...next, emailEnv,
+      modules: { ...next.modules, createEmailStore: () => createMemoryEmailStore(), createNotificationStore: () => ({ ...createMemoryNotificationStore(), initialize: async () => {} }) },
+      emailTransportFactory: settings => { transports.push(settings.apiKey); return { send: async () => ({ id: null }) } } })
+    assert.equal(dependencies.memberEmail.sending, sending)
+    assert.deepEqual(transports, sending ? ['synthetic-resend-key'] : [])
+    // A second start is refused while the composition's own timer runs.
+    assert.equal(dependencies.memberEmail.start(), false)
+    await dependencies.close()
+    assert.equal(dependencies.memberEmail.start(), sending, 'close stopped the timer')
+    await dependencies.memberEmail.stop()
+  }
 })

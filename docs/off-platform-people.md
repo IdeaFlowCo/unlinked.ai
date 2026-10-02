@@ -38,8 +38,10 @@ store.
   name. The server mints 32 random bytes as a 43-character base64url token and
   stores only its SHA-256, the inviter's owner id and display name, the invitee
   name and `status: pending`. Links do not expire (Jacob, 2026-10-02). The link
-  `<origin>/i/<token>` is shown once, with an optional `mailto:` draft. Unlinked
-  never sends anything.
+  `<origin>/i/<token>` is shown once, with an optional `mailto:` draft. While
+  email is on, the member may also give the invitee's address and Unlinked
+  emails the link for them, from "<Member> via Unlinked"; the address is not
+  stored ([email.md](email.md)).
 - **No caps.** Every 50th invite an account creates within a day writes a
   `member_invites_heavy_use` event (owner hash and count) to the runtime audit
   log, so heavy use is visible without blocking anyone.

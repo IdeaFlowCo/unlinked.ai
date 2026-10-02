@@ -7,10 +7,10 @@ import { randomUUID } from 'node:crypto'
 // member opens the notifications page) and `readAt` clears an item's highlight
 // (set when they open that item, or mark everything read).
 //
-// Delivery beyond the page is deliberately not built yet: a later mailer can
-// select records whose kind has `email: true` in NOTIFICATION_KINDS and that
-// carry no `emailedAt`, send, then set `emailedAt`. Nothing here assumes the
-// page is the only channel.
+// Email (mcp-server/member-email.mjs, docs/email.md): `email` is whether a kind
+// is emailed by default; members change it per kind in Settings. The mailer
+// claims records without `emailedAt`, sends, then sets `emailedAt` exactly once
+// (`emailOutcome` says whether it was sent or settled without email).
 export const NOTIFICATION_KINDS = Object.freeze({
   // Someone asked to connect with you.
   connection_request_received: Object.freeze({ email: true }),
@@ -110,10 +110,36 @@ export function createMemoryNotificationStore() {
       return removed
     },
     async prune(member, keep) { for (const value of mine(member).sort(newest).slice(keep)) records.delete(value.id) },
+    // Email delivery: records not yet emailed, created in (since, before], unclaimed or with a stale claim.
+    async pendingEmail({ since, before, staleClaimBefore, limit }) {
+      return [...records.values()].filter(value => value.retracted !== true && value.id && value.emailedAt == null && value.createdAt > since && value.createdAt <= before && (value.emailClaim == null || value.emailClaimAt < staleClaimBefore))
+        .sort((a, b) => a.createdAt - b.createdAt).slice(0, limit).map(value => structuredClone(value))
+    },
+    async claimEmail(ids, { claim, at, staleClaimBefore }) {
+      const claimed = []
+      for (const id of ids) {
+        const value = records.get(id)
+        if (!value || value.retracted === true || value.emailedAt != null || (value.emailClaim != null && value.emailClaimAt >= staleClaimBefore)) continue
+        Object.assign(value, { emailClaim: claim, emailClaimAt: at }); claimed.push(id)
+      }
+      return claimed
+    },
+    async releaseEmail(ids, claim) { for (const id of ids) { const value = records.get(id); if (value?.emailClaim === claim) { delete value.emailClaim; delete value.emailClaimAt } } },
+    // Sets emailedAt once: only on records not yet emailed and held by this claim (or unclaimed when claim is null).
+    async markEmailed(ids, { claim, at, outcome, staleClaimBefore = -Infinity }) {
+      let changed = 0
+      for (const id of ids) {
+        const value = records.get(id)
+        if (!value || value.retracted === true || value.emailedAt != null) continue
+        if (claim ? value.emailClaim !== claim : value.emailClaim != null && value.emailClaimAt >= staleClaimBefore) continue
+        Object.assign(value, { emailedAt: at, emailOutcome: outcome }); delete value.emailClaim; delete value.emailClaimAt; changed++
+      }
+      return changed
+    },
   }
 }
 
-const RECORD_KEYS = ['id', 'dedupeKey', 'recipientOwnerId', 'recipientUserId', 'kind', 'actorOwnerId', 'actorUserId', 'actorName', 'actorProfileId', 'subjectId', 'createdAt', 'seenAt', 'readAt', 'emailedAt']
+const RECORD_KEYS = ['id', 'dedupeKey', 'recipientOwnerId', 'recipientUserId', 'kind', 'actorOwnerId', 'actorUserId', 'actorName', 'actorProfileId', 'subjectId', 'createdAt', 'seenAt', 'readAt', 'emailedAt', 'emailOutcome', 'emailClaim', 'emailClaimAt']
 const fromNode = properties => {
   const value = {}
   for (const name of RECORD_KEYS) if (properties[name] !== undefined && properties[name] !== null) value[name] = typeof properties[name]?.toNumber === 'function' ? properties[name].toNumber() : properties[name]
@@ -133,6 +159,7 @@ export function createNeo4jNotificationStore(driver, database = 'neo4j') {
       await write('CREATE CONSTRAINT unlinked_notification_dedupe IF NOT EXISTS FOR (n:UnlinkedNotification) REQUIRE n.dedupeKey IS UNIQUE', {})
       await write('CREATE INDEX unlinked_notification_recipient IF NOT EXISTS FOR (n:UnlinkedNotification) ON (n.recipientOwnerId)', {})
       await write('CREATE INDEX unlinked_notification_actor IF NOT EXISTS FOR (n:UnlinkedNotification) ON (n.actorOwnerId)', {})
+      await write('CREATE INDEX unlinked_notification_created IF NOT EXISTS FOR (n:UnlinkedNotification) ON (n.createdAt)', {})
     },
     // MERGE on the dedupe key: an event that already exists is left alone.
     async insertOnce(record) {
@@ -166,7 +193,7 @@ export function createNeo4jNotificationStore(driver, database = 'neo4j') {
       await write(`MERGE (n:UnlinkedNotification {dedupeKey: $dedupeKey})
         ON CREATE SET n.recipientOwnerId = $ownerId, n.recipientUserId = $userId
         SET n._notificationLock = coalesce(n._notificationLock, 0) + 1, n.retracted = true
-        REMOVE n.id, n.kind, n.actorName, n.actorProfileId, n.subjectId, n.createdAt, n.seenAt, n.readAt, n.emailedAt`,
+        REMOVE n.id, n.kind, n.actorName, n.actorProfileId, n.subjectId, n.createdAt, n.seenAt, n.readAt, n.emailedAt, n.emailOutcome, n.emailClaim, n.emailClaimAt`,
       { dedupeKey, ownerId: member?.ownerId ?? null, userId: member?.userId ?? null })
     },
     async deleteOwner(member) {
@@ -176,6 +203,28 @@ export function createNeo4jNotificationStore(driver, database = 'neo4j') {
     },
     async prune(member, keep) {
       await write(`MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) WHERE coalesce(n.retracted, false) = false WITH n ORDER BY n.createdAt DESC, n.id SKIP ${count(keep)} SET n._notificationLock = coalesce(n._notificationLock, 0) + 1 WITH n WHERE coalesce(n.retracted, false) = false DETACH DELETE n`, recipient(member))
+    },
+    // Email delivery (mcp-server/member-email.mjs). Every write takes the
+    // record's lock first and re-checks, so a claim and emailedAt land once.
+    async pendingEmail({ since, before, staleClaimBefore, limit }) {
+      const result = await read(`MATCH (n:UnlinkedNotification) WHERE n.createdAt > $since AND n.createdAt <= $before AND n.emailedAt IS NULL AND n.id IS NOT NULL AND coalesce(n.retracted, false) = false
+        AND (n.emailClaim IS NULL OR n.emailClaimAt < $staleClaimBefore) RETURN properties(n) AS n ORDER BY n.createdAt LIMIT ${count(limit)}`, { since, before, staleClaimBefore })
+      return result.records.map(record => fromNode(record.get('n')))
+    },
+    async claimEmail(ids, { claim, at, staleClaimBefore }) {
+      const result = await write(`UNWIND $ids AS id MATCH (n:UnlinkedNotification {id: id}) SET n._notificationLock = coalesce(n._notificationLock, 0) + 1
+        WITH n WHERE coalesce(n.retracted, false) = false AND n.emailedAt IS NULL AND (n.emailClaim IS NULL OR n.emailClaimAt < $staleClaimBefore)
+        SET n.emailClaim = $claim, n.emailClaimAt = $at RETURN n.id AS id`, { ids, claim, at, staleClaimBefore })
+      return result.records.map(record => record.get('id'))
+    },
+    async releaseEmail(ids, claim) {
+      await write('UNWIND $ids AS id MATCH (n:UnlinkedNotification {id: id}) SET n._notificationLock = coalesce(n._notificationLock, 0) + 1 WITH n WHERE n.emailClaim = $claim REMOVE n.emailClaim, n.emailClaimAt', { ids, claim })
+    },
+    async markEmailed(ids, { claim, at, outcome, staleClaimBefore = 0 }) {
+      const result = await write(`UNWIND $ids AS id MATCH (n:UnlinkedNotification {id: id}) SET n._notificationLock = coalesce(n._notificationLock, 0) + 1
+        WITH n WHERE coalesce(n.retracted, false) = false AND n.emailedAt IS NULL AND (CASE WHEN $claim IS NULL THEN n.emailClaim IS NULL OR n.emailClaimAt < $staleClaimBefore ELSE n.emailClaim = $claim END)
+        SET n.emailedAt = $at, n.emailOutcome = $outcome REMOVE n.emailClaim, n.emailClaimAt RETURN count(n) AS changed`, { ids, claim, at, outcome, staleClaimBefore })
+      return number(result.records[0]?.get('changed'))
     },
   }
 }
