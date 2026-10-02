@@ -435,7 +435,7 @@ test('fixture previews cover every requested screen and are reproducible without
   const directory = await mkdtemp(join(tmpdir(), 'unlinked-onboarding-test-'))
   try {
     const files = await buildPreviews(directory)
-    assert.equal(files.length, 15)
+    assert.equal(files.length, 16)
     const first = await Promise.all(files.map(file => readFile(file, 'utf8')))
     await buildPreviews(directory)
     const second = await Promise.all(files.map(file => readFile(file, 'utf8')))
@@ -476,4 +476,25 @@ test('fixture previews cover every requested screen and are reproducible without
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+test('anonymous Everyone has one native GET search and only public navigation without account or csrf authority', () => {
+  const view = renderPeople({ anonymousPublic: true, everyone: [{ id: 'legacy-person', name: 'Public Person' }], query: 'A&B' })
+  assert.match(view.content, /method="get" action="\/network"/)
+  assert.match(view.content, /name="q"/)
+  assert.match(view.content, /A&amp;B/)
+  assert.match(view.content, /Join \/ Sign in/)
+  assert.doesNotMatch(view.content, /name="csrf"|name="scope"|\/search-account|\/logout|\/settings|Signed in as/)
+})
+
+test('controller-marked public uploads disclose member and visitor discovery; old private imports remain explicitly private in Settings', () => {
+  const publicView = renderBringArchive({ csrf: 'csrf', publicProfessionalSearch: true })
+  assert.match(publicView.content, /found on Unlinked by members and visitors/)
+  assert.match(publicView.content, /Contact details and your original file stay private/)
+  const privateView = renderBringArchive({ csrf: 'csrf' })
+  assert.doesNotMatch(privateView.content, /by members and visitors/)
+  const settings = renderSettings({ csrf: 'csrf', publicProfessionalSearch: true, imports: [{ filename: 'old.zip', visibility: 'private' }, { filename: 'new.zip', visibility: 'public' }] })
+  assert.match(settings.content, /earlier private imports remain private/)
+  assert.match(settings.content, /connections: private/)
+  assert.match(settings.content, /connections: public/)
 })

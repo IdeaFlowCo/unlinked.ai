@@ -1,7 +1,6 @@
 # Public directory reader integration
 
-`/people` and `/people/[id]` are UI-ready public routes, deliberately absent from navigation until a real public reader is integrated.
-They currently show an unavailable state, not an empty directory or fictional results.
+`/people` and `/people/[id]` are UI-ready public routes. In the standalone runtime, they are backed by the published professional People reader; in the historical Next.js source app they still show an unavailable state rather than fictional results.
 The paused legacy Supabase `/profiles` routes are unchanged.
 
 `src/components/public-directory/contract.ts` owns the runtime-validated DTO and injectable `PublicDirectoryReader` interface.
@@ -17,10 +16,9 @@ Detail includes optional about text, experience, education, skills, public conne
 See the schema for exact field names and bounds.
 Unknown fields are stripped and malformed output is unavailable; transport failure is never displayed as an empty network.
 
-The runtime owner agreed this DTO, but confirms no public reader/projection endpoint exists.
+The runtime owner agreed this DTO and wires it through the standalone public People projection.
 Publication eligibility must be verified before records, counts or ranking reach the UI.
-The concrete service URL, publication enforcement, stable identifier and cursor semantics remain the integration handoff.
-Once agreed and backed by real public data, wire the exported directory instance to that reader, verify actual public profiles and pagination, and only then add People to navigation.
+The Next.js exported directory instance remains a historical/local reference until a live reader is injected there.
 The existing open-beta login, full-archive export guidance and agent setup bridge remain in place.
 
 `node --test tests/public-directory.test.mjs` exercises the injectable read contract without a live graph.

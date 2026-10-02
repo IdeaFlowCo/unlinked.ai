@@ -2,8 +2,7 @@
 
 The standalone account runtime stages the original ZIP/CSV in owner-private assets
 and commits its Noos `uploaded` receipt before redirecting the browser to `/profile`.
-The upload action records the existing combined retention/AI-processing disclosure;
-there is no additional consent checkbox. Replays do not broaden older receipts.
+The upload action records a versioned retention/AI-processing disclosure; production shared People uploads use `public-professional-archive-openai-v2`, while older/private receipts remain narrow. There is no additional consent checkbox. Replays do not broaden older receipts.
 
 A process-wide worker discovers pending imports through the trusted private Noos
 store, obtains a fresh owner-authorized backend, and claims a CAS lease lasting 180 seconds. Profile, Positions, Education and Skills observations are staged before
@@ -21,8 +20,8 @@ there is no independent jobs/people database or live fixture substitution.
 
 Authenticated `/imports/:id/status` returns only the caller's job status/progress.
 `/profile` may read its own staged profile observations, with owner and live-job
-checks before and after reads. AI/MCP still require terminal publication and the
-recorded upload disclosure. `/network` and `/settings` rediscover pending jobs on
+checks before and after reads. Owner AI/MCP still require terminal publication and the
+recorded upload disclosure; Everyone search uses only the separate public professional projection. `/network` and `/settings` rediscover pending jobs on
 return; technical receipts remain accessible under Settings. Pending progress is
 polled under the controller's CSP nonce and same-origin session.
 

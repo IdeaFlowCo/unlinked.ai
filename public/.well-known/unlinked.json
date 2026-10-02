@@ -10,14 +10,16 @@
   },
   "data": {
     "ownNetwork": true,
-    "globalSearch": false,
-    "rawArchiveAgentAccess": false
+    "globalSearch": true,
+    "rawArchiveAgentAccess": false,
+    "anonymousPublicPeople": true
   },
   "mcp": {
     "url": "https://www.unlinked.ai/mcp",
     "transport": "streamable-http",
     "tools": [
-      "unlinked_search_network"
+      "unlinked_search_network",
+      "unlinked_search_everyone"
     ]
   }
 }

@@ -38,6 +38,67 @@
           }
         }
       }
+    },
+    "/api/people": {
+      "get": {
+        "summary": "Browse/search the published public professional People index without sign-in",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Safe profile summaries and optional nextCursor"
+          },
+          "400": {
+            "description": "Invalid query/cursor"
+          },
+          "429": {
+            "description": "Public read rate or concurrency bound"
+          },
+          "503": {
+            "description": "Published complete index unavailable"
+          }
+        }
+      }
+    },
+    "/api/people/{id}": {
+      "get": {
+        "summary": "Read a public professional profile and public connection summaries",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Safe public professional profile"
+          },
+          "404": {
+            "description": "Profile absent from complete publication"
+          },
+          "503": {
+            "description": "Index unavailable"
+          }
+        }
+      }
     }
   },
   "components": {

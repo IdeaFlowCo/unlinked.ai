@@ -80,9 +80,7 @@ prop could restore connections wording; the current totals cannot supply that co
 The background private browser path implements durable job continuation, authenticated same-owner status, and early own-profile staging when `backgroundImports` is enabled; any other runtime must supply equivalent behavior before enabling those states.
 `total` may remain null until parsing knows the count.
 Only final `indexed` status reports ready. The importing screen uses terminal status for its title and body, without pending progress or continuation promises.
-The upload notice says profile and connections join the member's own network and are
-searchable by them and any connected agent; contact details stay private. Settings
-explains private retention and bounded OpenAI query-time processing in plain words.
+The upload notice says profile and connections join the member's Unlinked network and can be used for search; in the global runtime, the public-search notice and Settings copy also explain that new imports make professional profiles and connections findable by members and visitors. Contact details stay private. Settings explains private retention and bounded OpenAI query-time processing in plain words.
 
 Profile editing, friends, permanent removal, and data export remain explicitly unavailable.
 The Everyone group renders only the member availability and DTOs supplied by the runtime.
@@ -117,3 +115,5 @@ Generate fictional, static preview pages with
 `buildPreviews(outDir)` writes the same minimal title/content wrapper as the server,
 without a network connection or server. Preview generation does not install scripts;
 both optional enhancements remain separate for controller CSP integration.
+
+Global runtime integration supplies `anonymousPublic` to People for a native GET `/network?q=` search without session controls; `publicProfessionalSearch` controls the NEW upload action notice and Settings public/private explanation. Individual import summaries carry `visibility: public|private`; older private imports retain private wording. No renderer prop itself grants authority or publishes data.

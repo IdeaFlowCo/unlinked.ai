@@ -15,12 +15,13 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
     const head=await fetch(endpoint+path,{method:'HEAD'});assert.equal(head.status,200,path);assert.equal(await head.text(),'')
   }
   assert.equal(ownerReads,0)
-  for(const path of ['/network','/profile','/settings','/imports/'+'a'.repeat(64)+'/status','/public-assets/runtime.env']) assert.equal((await fetch(endpoint+path)).status,401,path)
+  assert.equal((await fetch(endpoint+'/network')).status,503) // Public source unavailable; never private fallback.
+  for(const path of ['/profile','/settings','/imports/'+'a'.repeat(64)+'/status','/public-assets/runtime.env']) assert.equal((await fetch(endpoint+path)).status,401,path)
   assert.equal((await fetch(endpoint+'/agents',{method:'POST',headers:{Origin:`https://127.0.0.1:${server.address().port}`}})).status,401)
   assert.equal((await fetch(endpoint+'/agents',{method:'POST',headers:{Origin:'https://wrong.invalid'}})).status,403)
   assert.equal((await fetch(endpoint+'/network',{method:'HEAD'})).status,405)
   assert.equal(await new Promise((resolve,reject)=>{const req=httpRequest(endpoint+'/meet',{headers:{Host:'wrong.invalid'}},res=>{res.resume();resolve(res.statusCode)});req.on('error',reject);req.end()}),403)
-  const card=await(await fetch(endpoint+'/.well-known/mcp/server-card.json')).json();assert.equal(card.transports['streamable-http'].url,'https://www.unlinked.ai/mcp');assert.deepEqual(card.tools.map(t=>t.name),['unlinked_search_network'])
+  const card=await(await fetch(endpoint+'/.well-known/mcp/server-card.json')).json();assert.equal(card.transports['streamable-http'].url,'https://www.unlinked.ai/mcp');assert.deepEqual(card.tools.map(t=>t.name),['unlinked_search_network','unlinked_search_everyone'])
   const meet=await fetch(endpoint+'/meet');assert.match(meet.headers.get('content-security-policy'),/script-src 'self' 'nonce-/);assert.match(await meet.text(),/parseOpenChatCard/)
   const scanner=await(await fetch(endpoint+'/public-assets/browser-card-scanner.js')).text();assert.match(scanner,/from '\/public-assets\/jsqr-module.mjs'/)
 })

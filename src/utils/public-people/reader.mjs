@@ -90,7 +90,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         detail.skills = array(input.skills, 500).map(skill => text(skill, true))
         const company = text(input.company)
         summaries.set(input.id, summary); details.set(input.id, detail)
-        search.set(input.id, normalized([summary.name, company, ...detail.positions.map(position => position.company)].filter(Boolean).join(' ')))
+        search.set(input.id, normalized([summary.name, summary.headline, company, ...detail.positions.map(position => position.company)].filter(Boolean).join(' ')))
       }
       const outgoing = new Map([...summaries.keys()].map(id => [id, new Set()]))
       for (const edge of value.connections) {
