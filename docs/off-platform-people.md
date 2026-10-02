@@ -60,6 +60,8 @@ store.
   "Accepted" with the name the invitee signed in with. Accepting never claims a
   profile, and the inviter's private notes never transfer.
 - **Revoke** (`POST /invites/revoke`): only the inviter, only while pending.
+  Removing an accepted invite connection is covered by the
+  [member connection guide](member-connections.md#connection-controls-and-removal).
 - **Account deletion** removes every invite the account created and revokes the
   invites it accepted, which ends those connections.
 

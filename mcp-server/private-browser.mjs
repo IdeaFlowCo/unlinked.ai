@@ -1002,7 +1002,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         // bearer credentials die as soon as the new one exists.
         // OAuth-connected apps are separate connections and stay connected.
         // `access=connections` is the explicit opt-in to connection-request
-        // write tools; anything else (or nothing) issues the read-only setup.
+        // write tools; absent access or `access=read` issues the read-only setup.
+        // Unknown fields and unsupported access values are rejected.
         const access = input.getAll('access')
         if (access.length > 1 || (access.length && !['read', 'connections'].includes(access[0])) || (access[0] === 'connections' && !connectionActionsAvailable) || [...input.keys()].some(key => !['csrf', 'access'].includes(key))) throw new Error('private_browser_csrf')
         const issued = await issueAccountGrant(session.owner, undefined, access[0] === 'connections' ? { scope: ACCOUNT_WRITE_SCOPE } : {})

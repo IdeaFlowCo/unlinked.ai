@@ -35,8 +35,10 @@ no email-based linkage anywhere: the grant token *is* the account linkage, and
 verify linkage explicitly. Callers without a usable grant get typed
 `not_linked` — never empty results.
 
-Grant revocation is checked on **every** call, and re-checked after the tool
-body runs, so a revocation mid-call returns `grant_revoked` rather than data.
+Grant revocation is checked before **every** call and re-checked after reads,
+so a revocation during a read returns `grant_revoked` rather than data. Writes
+are checked before the action only: a completed action is not reported as a
+failure if the grant is revoked mid-call.
 `grant_revoked` is terminal — discard the token. A transient failure while
 verifying an otherwise valid token returns `upstream_unavailable` instead:
 retry with the same token.
@@ -202,8 +204,8 @@ This vocabulary may be extended, never renamed.
 ## Rate limits and latency
 
 - Deterministic tools (`whoami`, `list_people`, `list_connections`,
-  `get_profile`): 120 requests/min **per grant owner**; expected well
-  under 1 s p95 at the current index size (~16k profiles, in-memory snapshot).
+  `get_profile`, `list_connection_requests`, `list_notifications`): 120
+  requests/min **per grant owner**; expected well under 1 s p95 at the current index size (~16k profiles, in-memory snapshot).
 - AI tools (`ai_search`, `search_network` free-text mode, `search_everyone`):
   20/min, 2000/day and 2 in flight **per grant owner**, plus a shared ceiling
   of 8 concurrent AI calls per runtime. These budgets are enforced on the
@@ -354,11 +356,16 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
 - **Request:** `{"issuer": "<https OIDC issuer>", "subject": "<exact opaque
   subject>"}` — the pair the caller verified itself. Unknown fields, non-https
   issuers or malformed subjects are `invalid_input`.
-- **Semantics (`ensureGrant(owner, { readOnly: true })`):** reuses the newest
-  live, non-OAuth **read-only** grant of any catalog version for that owner.
-  Settings auto-setup may reuse an opted-in write credential, but this endpoint
-  never returns it. Tokens are deterministically re-derived on reuse; other
-  live grants are never clobbered. With no eligible read grant, it mints the
+- **Settings auto-setup (`ensureGrant(owner)`):** reuses the newest live,
+  non-OAuth credential at its issued scope and version, including an opted-in
+  write credential. With none, it prepares the deterministic default read
+  grant unless that automatic grant was revoked. Regenerate issues a new
+  credential first, then revokes all other non-OAuth grants; connected apps
+  stay connected.
+- **Provisioning semantics (`ensureGrant(owner, { readOnly: true })`):**
+  reuses the newest live, non-OAuth **read-only** grant of any catalog version for that owner.
+  It never returns an opted-in write credential. Tokens are deterministically
+  re-derived on reuse; other live grants are never clobbered. With no eligible read grant, it mints the
   deterministic automatic grant at the current catalog version and default
   read scope (public access when enabled), unless that automatic grant was
   revoked. **Revoked stays revoked**: after the owner turns agent access off, provisioning answers `grant_revoked` until they
