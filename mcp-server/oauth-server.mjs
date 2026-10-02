@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { ACCOUNT_WRITE_SCOPE } from './account-grants.mjs'
 
 // OAuth 2.1 authorization server for the hosted MCP resource (/mcp), so MCP
 // clients such as Claude custom connectors and ChatGPT developer-mode
@@ -21,10 +22,15 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 //   record. It does not expire and every request re-checks the durable grant
 //   record, so "Disconnect" in Settings (or RFC 7009 revocation) is immediate.
 //   No refresh tokens are issued.
+// - Connection actions (the `connections` scope: send, accept, ignore and
+//   withdraw connection requests) are never granted by a scope request alone.
+//   The consent page offers them as an explicit choice that starts off, and
+//   only that choice issues the opt-in grant scope.
 
 export const OAUTH_SCOPE_DESCRIPTIONS = Object.freeze({
   network: 'Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile’s recorded paths, and (where available) your connection requests and notifications.',
   people: 'Search and read the published People index on Unlinked (public professional profiles only).',
+  connections: 'Send connection requests to members, and accept, ignore or withdraw your connection requests, under the same rules and daily limits as the site.',
 })
 
 const CODE_SECONDS = 60, CODE_CAPACITY = 1000
@@ -89,8 +95,9 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
   const metadataUrl = new URL(`/.well-known/oauth-protected-resource${resourcePath}`, base).href
   // Accepted spellings of this server's resource indicator (RFC 8707).
   const resourceAliases = new Set([resource, `${resource}/`, base.origin, `${base.origin}/`])
-  const scopesSupported = publicSearchEnabled ? ['network', 'people'] : ['network']
-  const defaultScopeText = scopesSupported.join(' ')
+  const scopesSupported = publicSearchEnabled ? ['network', 'people', 'connections'] : ['network']
+  // The challenge asks for read access only; `connections` is opt-in on consent.
+  const defaultScopeText = publicSearchEnabled ? 'network people' : 'network'
   const endpoint = path => new URL(path, base).href
   const issuedFor = new Map() // authorization code hash -> pending exchange
   const cimdCache = new Map()
@@ -152,8 +159,10 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
 
   // Maps requested scopes onto a catalog grant scope. `people` implies
   // `network` (there is no public-only grant scope). Unknown values such as
-  // "openid" or "offline_access" are ignored; nothing known means everything
-  // this server offers, which is what the consent screen then lists.
+  // "openid" or "offline_access" are ignored; nothing known means all read
+  // access this server offers, which is what the consent screen then lists.
+  // `connections` never changes the result here: it is granted only when the
+  // person opts in on the consent page (see approve).
   function grantScopeFor(requested) {
     const words = new Set(String(requested ?? '').split(' ').filter(Boolean))
     const people = publicSearchEnabled && words.has('people')
@@ -205,21 +214,26 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
       const forward = new URLSearchParams()
       for (const [key, value] of [['client_id', clientId], ['redirect_uri', redirectUri], ['state', state], ['response_type', 'code'], ['code_challenge', challenge], ['code_challenge_method', 'S256'], ['resource', requestedResource], ['scope', scopeParam]]) if (value !== undefined) forward.set(key, value)
       return { ok: true, request: Object.freeze({ clientId, clientName: client.clientName, app, loopback: policy.loopback, redirectUri, redirectProvided: redirectParam !== undefined, redirectHost: policy.host, state,
-        codeChallenge: challenge, resource: requestedResource ?? null, scope, scopeText, scopes: scopeText.split(' ').map(name => ({ name, description: OAUTH_SCOPE_DESCRIPTIONS[name] })), params: forward }) }
+        codeChallenge: challenge, resource: requestedResource ?? null, scope, scopeText, scopes: scopeText.split(' ').map(name => ({ name, description: OAUTH_SCOPE_DESCRIPTIONS[name] })),
+        // The opt-in builds on the People scope, so it is offered only with it.
+        connectionsAvailable: scope === 'owner_network_and_public', connectionsDescription: OAUTH_SCOPE_DESCRIPTIONS.connections, params: forward }) }
     } catch (error) {
       if (!(error instanceof OAuthError)) throw error
       return { ok: false, redirect: errorRedirect(redirectUri, error.code, error.description, state) }
     }
   }
 
-  function approve(request, owner) {
+  // `connections: true` is the person's explicit consent-page opt-in.
+  function approve(request, owner, { connections = false } = {}) {
     if (!owner || typeof owner.ownerId !== 'string' || typeof owner.userId !== 'string') throw new Error('oauth_owner_required')
+    if (typeof connections !== 'boolean' || (connections && request.connectionsAvailable !== true)) throw new Error('oauth_connections_unavailable')
+    const scope = connections ? ACCOUNT_WRITE_SCOPE : request.scope, scopeText = connections ? `${request.scopeText} connections` : request.scopeText
     const at = now()
     for (const [key, value] of issuedFor) if (value.expiresAt <= at) issuedFor.delete(key)
     if (issuedFor.size >= CODE_CAPACITY) throw new Error('oauth_authorization_capacity')
     const code = randomBytes(32).toString('base64url')
     issuedFor.set(sha256hex(code), { clientId: request.clientId, clientName: request.clientName, app: request.app, redirectUri: request.redirectUri, redirectProvided: request.redirectProvided, redirectHost: request.redirectHost,
-      codeChallenge: request.codeChallenge, resource: request.resource, scope: request.scope, scopeText: request.scopeText,
+      codeChallenge: request.codeChallenge, resource: request.resource, scope, scopeText,
       owner: { ownerId: owner.ownerId, userId: owner.userId }, expiresAt: at + CODE_SECONDS * 1000 })
     const target = new URL(request.redirectUri)
     target.searchParams.set('code', code)

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
-import { createAccountGrantService, CURRENT_ACCOUNT_GRANT_VERSION } from '../mcp-server/account-grants.mjs'
+import { createAccountGrantService, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE } from '../mcp-server/account-grants.mjs'
 import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
 
@@ -165,4 +165,31 @@ test('provisioning fails closed when the audit sink is down, and a mid-provision
   const revoked = await app.provision({ issuer: ISSUER, subject: 'subject-3' })
   assert.equal(revoked.status, 401)
   assert.equal((await revoked.json()).error.code, 'grant_revoked')
+})
+
+
+test('provisioning stays read-only after Settings opts into writes and respects automatic revocation', async t => {
+  const app = await launch(t)
+  const owner = { ownerId: 'scope-owner', userId: 'scope-user' }
+  app.f.register({ issuer: ISSUER, subject: 'scope-subject' }, owner)
+  const write = await app.grants.issueGrant(owner, undefined, { scope: ACCOUNT_WRITE_SCOPE })
+  assert.equal((await app.grants.ensureGrant(owner)).scope, ACCOUNT_WRITE_SCOPE)
+  const response = await app.provision({ issuer: ISSUER, subject: 'scope-subject' })
+  assert.equal(response.status, 200)
+  const read = await response.json()
+  assert.equal(read.scope, 'owner_network_and_public')
+  assert.notEqual(read.grantId, write.grantId)
+  const verified = await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${read.accessToken}` } })
+  assert.equal(verified.scope, 'owner_network_and_public')
+  assert.ok(!verified.tools.includes('unlinked_send_connection_request'))
+  const denied = await fetch(`${app.endpoint}/api/agent/v1/connection-requests/send`, {
+    method: 'POST', headers: { Authorization: `Bearer ${read.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: 'someone' }) })
+  assert.equal(denied.status, 403)
+  const again = await (await app.provision({ issuer: ISSUER, subject: 'scope-subject' })).json()
+  assert.equal(again.grantId, read.grantId)
+  await app.grants.revoke(owner, read.grantId)
+  const revoked = await app.provision({ issuer: ISSUER, subject: 'scope-subject' })
+  assert.equal(revoked.status, 401)
+  assert.equal((await revoked.json()).error.code, 'grant_revoked')
+  assert.equal((await app.grants.ensureGrant(owner)).grantId, write.grantId)
 })

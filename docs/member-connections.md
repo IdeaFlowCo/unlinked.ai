@@ -20,8 +20,9 @@ additive and idempotent; no existing data is touched.
 | `connectedKey` | `pairKey` once accepted (unique) |
 | `sender*`, `recipient*` | `ownerId`, `userId`, a plain display name, the public profile id |
 | `note` | Optional, one paragraph, up to 300 characters |
-| `status` | `pending`, `accepted`, `ignored`, `withdrawn` |
-| `createdAt`, `respondedAt`, `withdrawnAt` | Epoch milliseconds |
+| `status` | `pending`, `accepted`, `ignored`, `withdrawn`, `removed` |
+| `createdAt`, `respondedAt`, `withdrawnAt`, `removedAt` | Epoch milliseconds |
+| `removedBy` | `sender` or `recipient` for a removed request |
 
 Rules:
 
@@ -58,7 +59,7 @@ Rules:
 
 Storage: `UnlinkedNotification` nodes, unique `id` and `dedupeKey`. An event is
 written with `MERGE` on its dedupe key, so retries never notify twice. Nobody
-is notified about their own action. Each account keeps its newest 500.
+is notified about their own action. Each account keeps its newest 500. Retraction retains a dedupe-key tombstone, so delayed inserts cannot restore a withdrawn or removed request notification. Tombstones are excluded from feeds, counts and retention pruning; account deletion removes associated tombstones along with visible notifications.
 
 | Kind | Sent to | When |
 |---|---|---|
@@ -81,9 +82,10 @@ then set `emailedAt`. Nothing else needs to change.
 | Route | What it does |
 |---|---|
 | `GET /people/<id>` | Shows Connect / Pending + Withdraw / Accept + Ignore / Connected / This is you; signed-out visitors get "Sign in to connect" |
-| `POST /connections/request` | `profileId`, optional `note`. Redirects to the profile with `?connect=<code>` |
+| `POST /connections/request` | `profileId`, optional `note`, optional `next`. Returns to the profile with `?connect=<code>` or a validated network listing with `?notice=<code>` |
 | `POST /connections/respond` | `id`, `action=accept\|ignore`, optional `next` |
 | `POST /connections/withdraw` | `id`, optional `next` |
+| `POST /connections/remove` | `id`, optional `next`; confirmed bilateral removal as described below |
 | `GET /invitations` | My Network: Received (default) and Sent tabs, with a link to off-platform invites |
 | `GET /notifications` | The feed. Pending requests can be answered in place. Clears the bell |
 | `GET /notifications/<id>` | Marks the item read, then redirects to its target |
@@ -97,15 +99,17 @@ shows no icon.
 
 ## Agents
 
-Grant catalog version 3 adds two read-only tools,
-`unlinked_list_connection_requests` and `unlinked_list_notifications` (see
-`docs/agent-api.md`). Grants issued earlier keep their own tool list, so a
-member gets these tools after regenerating their agent setup in Settings.
-Agents cannot send, answer or withdraw requests.
+The [agent API contract](agent-api.md#catalog-v4-optional-connection-actions)
+owns the read tools, explicit opt-in write scope and grant compatibility.
 
 ## Not yet
 
 - Email or push delivery (the model is ready; mail is not configured).
-- Removing a single connection (account deletion removes all of them).
-- Connect buttons on People result rows (only on profile pages).
-- Write tools for agents.
+
+## Connection controls and removal
+
+People rows show Connect, Pending + Withdraw, Accept + Ignore, Connected, or Invite, with the same shared rules as profiles. `/network?connected=1&presence=member` (also via signed-in `/people`) lists only your connected real members, with member/shadow/all counts and both graph directions.
+
+Either participant can remove an accepted member request through `POST /connections/remove`, after the profile/row confirmation. The request becomes `removed`, releases its pair key and removes the agreed edge from both accounts; no notification is sent. A fresh request can reconnect them when no independent imported edge still connects their profiles. Accepted off-platform invite connections also offer removal (their link is revoked). Removal captures the pair’s active request and accepted invitation IDs, then claims the exact selected accepted agreement with a store compare-and-set before settling only those captured agreements. The claim atomically stores those IDs on the selected agreement; either participant can resume an incomplete removal after a store failure, using only its original IDs. Completion closes that retry authorization. A stale duplicate cannot touch a fresh reconnection. Settlement retracts obsolete request notifications and imposes no withdrawal cooldown. Pair reads include every active request and the latest withdrawal per sender regardless of removed history. Reconnecting requires a fresh request and acceptance. Imported observations and claimed profiles remain independent provenance and are preserved. A profile connected by an imported observation can therefore still show Connected and remain in the connections filter after removal; that observation does not offer Remove.
+
+Focused removal regressions run with `node --test tests/connection-removal-races.test.mjs`. To exercise both stores, point `UNLINKED_CONNECTION_TEST_HTTP` at a disposable Neo4j HTTP endpoint on `127.0.0.1` and set `UNLINKED_CONNECTION_TEST_DISPOSABLE=1`; authentication must be disabled. The integration fixtures replace only their synthetic removal accounts’ request/invitation records and exercise real Cypher, including a transaction holding the selected agreement lock.

@@ -5,6 +5,9 @@ import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { SEARCH_MODES } from '../src/utils/public-people/text-match.mjs'
+import { ConnectionError } from './member-connections.mjs'
+import { createConnectionActions } from './connection-actions.mjs'
+import { ACCOUNT_WRITE_SCOPE, CURRENT_ACCOUNT_GRANT_VERSION, missingAccountGrantTools, scopeCoversPublic } from './account-grants.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const LINKEDIN_PROFILE = /^https:\/\/www\.linkedin\.com\/in\/[\w%-]+$/
@@ -15,6 +18,8 @@ export const ACCOUNT_TOOL_ERROR_STATUS = Object.freeze({
   invalid_input: 400, cursor_invalid: 400, not_linked: 401, grant_revoked: 401,
   client_unauthorized: 403, scope_not_granted: 403, not_found: 404, degree_unproven: 409,
   result_too_large: 413, rate_limited: 429, upstream_unavailable: 503,
+  // Connection-request write tools (grant catalog version 4, opt-in scope).
+  not_a_member: 409, already_connected: 409, request_pending: 409, request_unavailable: 409, cooldown_active: 429,
 })
 
 export class AccountToolError extends Error {
@@ -49,6 +54,10 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   unlinked_search_everyone: { query: z.string().min(1).max(1024) },
   unlinked_list_connection_requests: { direction: z.enum(['received', 'sent']).optional() },
   unlinked_list_notifications: { limit: z.number().int().min(1).max(50).optional() },
+  unlinked_send_connection_request: { profileId: z.string().min(1).max(160), note: z.string().max(300).optional() },
+  unlinked_accept_connection_request: { id: z.string().min(1).max(64) },
+  unlinked_ignore_connection_request: { id: z.string().min(1).max(64) },
+  unlinked_withdraw_connection_request: { id: z.string().min(1).max(64) },
 })
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
@@ -56,12 +65,31 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=shadow keeps imported profiles not on Unlinked yet. Paginated with an opaque cursor, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Paginated, at most 50 per page, typed provenance per entry.',
   unlinked_get_profile: 'Read one published public profile by id with its public connections page. Returns typed not_found when no published profile has that id.',
-  unlinked_list_connection_requests: 'Read-only: list the owner’s open member-to-member connection requests. direction "received" (default) lists requests waiting for the owner’s answer; "sent" lists requests the owner sent that are still pending. Names, public profile ids, optional notes and times only. Answering or sending requests is not available to agents.',
+  unlinked_list_connection_requests: 'Read-only: list the owner’s open member-to-member connection requests. direction "received" (default) lists requests waiting for the owner’s answer; "sent" lists requests the owner sent that are still pending. Names, public profile ids, optional notes and times only. Grants with the opt-in connections scope can answer and send requests with the connection-request write tools.',
   unlinked_list_notifications: 'Read-only: list the owner’s newest in-app notifications (connection requests received or accepted, invites accepted, people they know joining) with unseen/unread counts. Reading here does not mark anything seen or read.',
+  unlinked_send_connection_request: 'Opt-in write tool. Send a connection request, as the owner, to the member behind a published profile id (presence member; imported shadows cannot be asked). Same rules and limits as pressing Connect on the site: one open request per pair, 50 new requests per day, a 21-day wait after withdrawing; asking someone who already asked the owner accepts their request. Optional note up to 300 characters. Returns status sent or accepted.',
+  unlinked_accept_connection_request: 'Opt-in write tool. Accept a connection request the owner received (id from unlinked_list_connection_requests direction received). Connects both accounts.',
+  unlinked_ignore_connection_request: 'Opt-in write tool. Ignore a connection request the owner received. Private: the sender is not told and still sees it as pending.',
+  unlinked_withdraw_connection_request: 'Opt-in write tool. Withdraw a still-open connection request the owner sent (id from unlinked_list_connection_requests direction sent). The recipient’s notification is removed; asking the same person again waits 21 days.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
 })
 
 const DETERMINISTIC_TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+export const WRITE_TOOLS = new Set(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
+// Request-model refusals, mapped onto the typed agent vocabulary.
+const CONNECTION_FAILURES = Object.freeze({
+  connection_not_member: ['not_a_member', 'That profile is not an Unlinked member yet (an imported profile), so it cannot be asked to connect.'],
+  connection_self: ['invalid_input', 'That is the owner’s own profile.'],
+  connection_exists: ['already_connected', 'The owner and this member are already connected.'],
+  connection_pending: ['request_pending', 'A request between the owner and this member is already open.'],
+  connection_cooldown: ['cooldown_active', 'The owner withdrew a request to this member recently; asking again waits 21 days.'],
+  connection_rate_limited: ['rate_limited', 'The owner has sent 50 connection requests in the last day; retry tomorrow.'],
+  connection_note_invalid: ['invalid_input', 'The note must be one paragraph of at most 300 characters.'],
+  connection_not_found: ['not_found', 'No connection request with that id belongs to the owner in that direction.'],
+  connection_unavailable: ['request_unavailable', 'That request is no longer open.'],
+  connection_profile_not_found: ['not_found', 'No published public profile has that id.'],
+})
+const connectionFailure = code => new AccountToolError(...(CONNECTION_FAILURES[code] ?? ['upstream_unavailable', 'The connection request could not be completed; retry.']))
 const iso = value => Number.isSafeInteger(value) ? new Date(value).toISOString() : null
 
 const opaqueCursor = (binding, offset) => Buffer.from(JSON.stringify({ binding, offset })).toString('base64url')
@@ -77,9 +105,12 @@ const cursorOffset = (cursor, binding, length) => {
 // One service instance backs both the hosted MCP tools and the HTTP agent API,
 // so rate budgets are shared. Every tool result is grant-scoped, public-or-own
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, limits = {} }) {
+export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
-  const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8 } = limits
+  const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
+  // Write tools use the same rules as the site's Connect button.
+  const connectionActions = memberConnections && typeof accountForProfile === 'function' && typeof readPublishedSnapshot === 'function'
+    ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
   // Budgets are per grant owner, so one agent cannot starve other accounts;
   // a shared in-flight ceiling still bounds total concurrent provider spend.
   const budgets = new Map()
@@ -88,8 +119,15 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     const now = Date.now(), day = Math.floor(now / 86400000)
     if (budgets.size > 5000) for (const [key, value] of budgets) if (value.aiDay !== day && now - value.window >= 60000 && !value.aiBusy) budgets.delete(key)
     let value = budgets.get(ownerId)
-    if (!value) { value = { window: now, deterministic: 0, aiWindow: now, ai: 0, aiDay: day, aiDayCount: 0, aiBusy: 0 }; budgets.set(ownerId, value) }
+    if (!value) { value = { window: now, deterministic: 0, writeWindow: now, write: 0, aiWindow: now, ai: 0, aiDay: day, aiDayCount: 0, aiBusy: 0 }; budgets.set(ownerId, value) }
     return value
+  }
+  // Writes have their own small per-minute budget on top of the daily
+  // request limit the request store enforces for site and agent alike.
+  const admitWrite = ownerId => {
+    const value = bucket(ownerId)
+    if (Date.now() - value.writeWindow >= 60000) { value.writeWindow = Date.now(); value.write = 0 }
+    if (++value.write > writePerMinute) throw new AccountToolError('rate_limited', 'Connection write budget is exhausted; retry within a minute.')
   }
   const admitDeterministic = ownerId => {
     const value = bucket(ownerId)
@@ -146,7 +184,28 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   }
 
   const owner = grant => ({ ownerId: grant.ownerId, userId: grant.userId })
+  const requireConnections = () => { if (!connectionActions) throw new AccountToolError('upstream_unavailable', 'Connection requests are not available on this runtime.') }
+  const answer = async (grant, id, work, status) => {
+    requireConnections()
+    try { await work(owner(grant), id) } catch (failure) { if (failure instanceof ConnectionError) throw connectionFailure(failure.code); throw failure }
+    return { kind: 'unlinked_connection_request_update', id, status, visibility: 'owner_private' }
+  }
   const tools = {
+    async unlinked_send_connection_request(grant, { profileId, note }) {
+      requireConnections()
+      let outcome
+      try { outcome = await connectionActions.send(owner(grant), { profileId, note }) }
+      catch (failure) {
+        if (failure instanceof ConnectionError) throw connectionFailure(failure.code)
+        if (failure instanceof PublicPeopleReaderError) throw failure.status === 400 ? new AccountToolError('invalid_input', 'The profile id is not valid.') : new AccountToolError('upstream_unavailable', 'The published People index is unavailable right now.')
+        throw failure
+      }
+      if (outcome.code !== 'sent' && outcome.code !== 'accepted') throw connectionFailure(outcome.code)
+      return { kind: 'unlinked_connection_request_sent', status: outcome.code, profileId: outcome.profileId, ...(outcome.request?.id ? { id: outcome.request.id } : {}), visibility: 'owner_private' }
+    },
+    async unlinked_accept_connection_request(grant, { id }) { return answer(grant, id, (member, value) => memberConnections.respond(member, value, 'accept'), 'accepted') },
+    async unlinked_ignore_connection_request(grant, { id }) { return answer(grant, id, (member, value) => memberConnections.respond(member, value, 'ignore'), 'ignored') },
+    async unlinked_withdraw_connection_request(grant, { id }) { return answer(grant, id, (member, value) => memberConnections.withdraw(member, value), 'withdrawn') },
     async unlinked_list_connection_requests(grant, { direction = 'received' }) {
       if (!memberConnections) throw new AccountToolError('upstream_unavailable', 'Connection requests are not available on this runtime.')
       const rows = direction === 'sent' ? await memberConnections.sent(owner(grant)) : await memberConnections.received(owner(grant))
@@ -159,13 +218,16 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       return { kind: 'unlinked_notifications', unseen: counts.unseen, unread: counts.unread, visibility: 'owner_private',
         notifications: items.map(value => ({ id: value.id, kind: value.kind, actorName: value.actorName, ...(value.actorProfileId ? { actorProfileId: value.actorProfileId } : {}), createdAt: iso(value.createdAt), read: value.read })) }
     },
-    async unlinked_whoami(grant, _input, _signal) {
+    async unlinked_whoami(grant) {
       const backend = await getBackend({ ownerId: grant.ownerId, userId: grant.userId })
       const importIds = typeof backend.listImportIds === 'function' ? await backend.listImportIds() : []
       let legacy = null
       if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
+      // Only a grant missing tools its scope now has is told to update.
+      const missing = missingAccountGrantTools(grant)
       return { kind: 'unlinked_whoami', ownerId: grant.ownerId,
-        grant: { scope: grant.scope, version: grant.version ?? 1, tools: [...grant.tools] },
+        grant: { scope: grant.scope, version: grant.version ?? 1, tools: [...grant.tools],
+          ...(missing.length ? { update: { currentVersion: CURRENT_ACCOUNT_GRANT_VERSION, missingTools: missing, how: 'This grant predates tools its scope now includes. The owner can regenerate the agent setup in Unlinked Settings, or disconnect and reconnect this app, to get them.' } } : {}) },
         importCount: Array.isArray(importIds) ? importIds.length : 0,
         legacyProfile: legacy ? { profileId: legacy.profileId, name: legacy.profile?.name ?? null, revision: legacy.revision } : null,
         publicIndexAvailable: typeof readPublishedSnapshot === 'function' }
@@ -226,7 +288,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     async unlinked_ai_search(grant, { query, scope, timeoutMs = 40000 }, signal) {
       // Default to the widest scope the grant actually covers, so the natural
       // single-argument call works on every grant that includes the tool.
-      scope ??= grant.scope === 'owner_network_and_public' ? 'everyone' : 'mine'
+      scope ??= scopeCoversPublic(grant.scope) ? 'everyone' : 'mine'
       if (typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'AI ranking is not configured.')
       const combined = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)])
       if (scope === 'mine') {
@@ -239,7 +301,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
             ...(match.fields?.position ? { headline: match.fields.position } : {}), ...(match.fields?.company ? { company: match.fields.company } : {}),
             reason: match.reason, visibility: 'owner_private' })) }
       }
-      if (grant.scope !== 'owner_network_and_public') throw new AccountToolError('scope_not_granted', 'This grant covers only the owner network; asking about everyone requires a public-scope grant.')
+      if (!scopeCoversPublic(grant.scope)) throw new AccountToolError('scope_not_granted', 'This grant covers only the owner network; asking about everyone requires a public-scope grant.')
       if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
       let result
       try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: combined }) }
@@ -273,7 +335,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       }
     },
     async unlinked_search_everyone(grant, { query }, signal) {
-      if (grant.scope !== 'owner_network_and_public') throw new AccountToolError('scope_not_granted', 'This grant covers only the owner network.')
+      if (!scopeCoversPublic(grant.scope)) throw new AccountToolError('scope_not_granted', 'This grant covers only the owner network.')
       if (typeof readPublishedSnapshot !== 'function' || typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'Public People search is not configured.')
       try { return await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal }) }
       catch (error) { throw askFailure(error, signal) }
@@ -295,13 +357,16 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     if (!grant || typeof grant.ownerId !== 'string' || typeof grant.userId !== 'string' || !Array.isArray(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant is no longer valid.')
     if (!Object.hasOwn(tools, name)) throw new AccountToolError('not_found', 'Unknown tool.')
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
+    if (WRITE_TOOLS.has(name) && grant.scope !== ACCOUNT_WRITE_SCOPE) throw new AccountToolError('scope_not_granted', 'Connection actions require an explicit opt-in grant.')
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
-    const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : admitAi(grant.ownerId)
+    const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
     try {
       if (typeof revalidate === 'function') await revalidate()
       const result = await tools[name](grant, parsed.data, signal)
-      if (typeof revalidate === 'function') await revalidate()
+      // A write has already happened by now; only reads are withheld when the
+      // grant was revoked mid-call, so a landed write is never reported as failed.
+      if (typeof revalidate === 'function' && !WRITE_TOOLS.has(name)) await revalidate()
       const text = JSON.stringify(result)
       if (Buffer.byteLength(text) > 1024 * 1024) throw new AccountToolError('result_too_large', 'The result exceeded 1 MiB; narrow the query or lower the page size.')
       return { result, text }

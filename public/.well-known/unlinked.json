@@ -16,7 +16,8 @@
       ],
       "scopes": [
         "network",
-        "people"
+        "people",
+        "connections"
       ],
       "note": "Paste https://www.unlinked.ai/mcp into a Claude or ChatGPT custom connector and sign in; each connection is a revocable account grant."
     }
@@ -48,7 +49,17 @@
       "unlinked_list_connection_requests",
       "unlinked_list_notifications"
     ],
-    "grantVersioning": "old grants keep exactly their issued tool list; new grants receive the current catalog version"
+    "grantVersioning": "old grants keep exactly their issued tool list; new grants receive the current catalog version",
+    "optionalWriteScope": {
+      "scope": "owner_network_and_public_and_write",
+      "default": false,
+      "tools": [
+        "unlinked_send_connection_request",
+        "unlinked_accept_connection_request",
+        "unlinked_ignore_connection_request",
+        "unlinked_withdraw_connection_request"
+      ]
+    }
   },
   "agentHttpApi": {
     "base": "https://www.unlinked.ai/api/agent/v1/",
@@ -56,14 +67,19 @@
     "contract": "docs/agent-api.md (repository)",
     "maxPageSize": 50,
     "errors": [
+      "already_connected",
       "client_unauthorized",
+      "cooldown_active",
       "cursor_invalid",
       "degree_unproven",
       "grant_revoked",
       "invalid_input",
+      "not_a_member",
       "not_found",
       "not_linked",
       "rate_limited",
+      "request_pending",
+      "request_unavailable",
       "result_too_large",
       "scope_not_granted",
       "upstream_unavailable"

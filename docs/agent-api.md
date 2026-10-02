@@ -28,15 +28,17 @@ grant is only valid on the origin that issued it.
 ## Authentication and linkage (fail closed)
 
 Every call requires `Authorization: Bearer <account grant token>` — the
-per-user, revocable, read-only grant issued in **Settings → Connect my agent**
+per-user, revocable grant (read-only by default) issued in **Settings → Connect my agent**
 on the runtime, or through the OAuth connector flow below. There is no anonymous access to any `/api/agent/v1/` route and
 no email-based linkage anywhere: the grant token *is* the account linkage, and
 `unlinked_whoami` returns the stable Unlinked `ownerId` so a consumer can
 verify linkage explicitly. Callers without a usable grant get typed
 `not_linked` — never empty results.
 
-Grant revocation is checked on **every** call, and re-checked after the tool
-body runs, so a revocation mid-call returns `grant_revoked` rather than data.
+Grant revocation is checked before **every** call and re-checked after reads,
+so a revocation during a read returns `grant_revoked` rather than data. Writes
+are checked before the action only: a completed action is not reported as a
+failure if the grant is revoked mid-call.
 `grant_revoked` is terminal — discard the token. A transient failure while
 verifying an otherwise valid token returns `upstream_unavailable` instead:
 retry with the same token.
@@ -108,8 +110,11 @@ Security decisions:
   fails `invalid_target`.
 - **Scopes**: `network` → grant scope `owner_network`; `people` (implies
   `network`) → `owner_network_and_public`. Unknown scopes (`openid`,
-  `offline_access`, `claudeai`, …) are ignored; none known means everything
-  offered. The token response states the granted `scope`.
+  `offline_access`, `claudeai`, …) are ignored; no recognized read scope means
+  all offered read access. Optional `connections` requires the separate
+  consent choice described [below](#catalog-v4-optional-connection-actions);
+  a scope request alone never enables writes. The token response states the
+  granted `scope`.
 - **Tokens are account grants.** The access token is an ordinary account grant
   (same JWT, same per-call revocation check, same tool catalog) whose durable
   record carries `connection: { kind: 'oauth', app, clientName, redirectHost,
@@ -137,15 +142,15 @@ the catalog entry for `(version, scope)` in
 |---|---|---|
 | 1 (pre-existing grants) | `unlinked_search_network` | + `unlinked_search_everyone` |
 | 2 | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
-| 3 (current issuance) | version 2 + `unlinked_list_connection_requests`, `unlinked_list_notifications` (read-only) | version 2 + the same two tools |
+| 3 | version 2 + `unlinked_list_connection_requests`, `unlinked_list_notifications` (read-only) | version 2 + the same two tools |
 
 - Old grants keep exactly their issued tools on both surfaces — MCP
   `tools/list` for a v1 grant still shows only the launch tools, and the HTTP
   API answers `scope_not_granted` for tools outside the grant.
-- Adding tools later = adding version 3 to the catalog and issuing new grants
-  with it. No existing record changes shape, no token is reissued, no
+- Adding tools later = adding a new sibling version to the catalog and issuing
+  new grants with it. No existing record changes shape, no token is reissued, no
   consumer breaks. This is the committed migration pattern.
-- Automatic grant provisioning (the in-flight profile-card/QR work) composes
+- Automatic grant provisioning composes
   with this: `issueGrant(owner)` always writes the current catalog version,
   and authentication tolerates every cataloged version side by side.
 
@@ -155,6 +160,9 @@ preserved exactly (names, stateless POST without initialize) and covered by
 test. Since the typed-failure fix (PR #53), the two launch tools also return
 the sanitized typed JSON failure shape below instead of their original
 free-text error sentences.
+
+Version 4 is current issuance: both read scopes retain their v3 tools; its
+separate opt-in scope is documented [below](#catalog-v4-optional-connection-actions).
 
 ## Typed errors
 
@@ -176,6 +184,11 @@ an extra sanitized `cause` identifier).
 | `result_too_large` | 413 | Result would exceed 1 MiB; narrow the query or page size. |
 | `rate_limited` | 429 | Budget exhausted; honor `Retry-After`. |
 | `upstream_unavailable` | 503 | Index/AI/backend unavailable or AI time budget exceeded. Retry. |
+| `not_a_member` | 409 | The target profile is not an Unlinked member. |
+| `already_connected` | 409 | The owner and target are already connected. |
+| `request_pending` | 409 | An open request already exists for the pair. |
+| `request_unavailable` | 409 | The requested state transition is no longer available. |
+| `cooldown_active` | 429 | The withdrawal cooldown has not elapsed. |
 
 This vocabulary may be extended, never renamed.
 
@@ -191,8 +204,8 @@ This vocabulary may be extended, never renamed.
 ## Rate limits and latency
 
 - Deterministic tools (`whoami`, `list_people`, `list_connections`,
-  `get_profile`): 120 requests/min **per grant owner**; expected well
-  under 1 s p95 at the current index size (~16k profiles, in-memory snapshot).
+  `get_profile`, `list_connection_requests`, `list_notifications`): 120
+  requests/min **per grant owner**; expected well under 1 s p95 at the current index size (~16k profiles, in-memory snapshot).
 - AI tools (`ai_search`, `search_network` free-text mode, `search_everyone`):
   20/min, 2000/day and 2 in flight **per grant owner**, plus a shared ceiling
   of 8 concurrent AI calls per runtime. These budgets are enforced on the
@@ -237,9 +250,11 @@ All JSON. GET parameters are query-string; POST bodies are
 `application/json` (≤ 8 KiB). Unknown or repeated parameters are `invalid_input`.
 
 ### `GET /api/agent/v1/whoami` ⇄ `unlinked_whoami`
-Response: `{ kind, ownerId, grant: { scope, version, tools }, importCount,
+Response: `{ kind, ownerId, grant: { scope, version, tools, update? }, importCount,
 legacyProfile: { profileId, name, revision } | null, publicIndexAvailable }`.
 `ownerId` is the stable identifier for fail-closed linkage verification.
+Optional `grant.update` is `{ currentVersion, missingTools, how }`; see the
+[update-hint policy](#catalog-v4-optional-connection-actions).
 
 ### `GET /api/agent/v1/people?q&mode&presence&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
@@ -268,8 +283,7 @@ Read-only, grant catalog version 3. `direction` `received` (default: requests
 waiting for the owner's answer) or `sent` (the owner's requests still pending;
 a request the recipient ignored still reads as pending, as it does in the app).
 Response: `{ kind, direction, total, requests: [{ id, direction, status, name,
-profileId?, note?, createdAt }], visibility: "owner_private" }`. Agents cannot
-send, answer or withdraw requests; that stays a signed-in browser action.
+profileId?, note?, createdAt }], visibility: "owner_private" }`. Sending, accepting, ignoring and withdrawing require the separate explicit opt-in connection scope in catalog v4.
 
 ### `GET /api/agent/v1/notifications?limit` ⇄ `unlinked_list_notifications`
 Read-only, grant catalog version 3. Newest first, `limit` 1–50 (default 20).
@@ -342,14 +356,19 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
 - **Request:** `{"issuer": "<https OIDC issuer>", "subject": "<exact opaque
   subject>"}` — the pair the caller verified itself. Unknown fields, non-https
   issuers or malformed subjects are `invalid_input`.
-- **Semantics (= Settings auto-setup `ensureGrant`):** reuses the newest live
-  grant of **any** catalog version for that owner (multiple live grants per
-  owner are expected and never clobbered — tokens are deterministically
-  re-derived from the durable record, nothing is minted on reuse); mints the
-  one deterministic automatic grant (current catalog version, read-only
-  `owner_network_and_public` scope) only when the owner has no live grants and
-  never revoked the automatic one. **Revoked stays revoked**: after the owner
-  turns agent access off, provisioning answers `grant_revoked` until they
+- **Settings auto-setup (`ensureGrant(owner)`):** reuses the newest live,
+  non-OAuth credential at its issued scope and version, including an opted-in
+  write credential. With none, it prepares the deterministic default read
+  grant unless that automatic grant was revoked. Regenerate issues a new
+  credential first, then revokes all other non-OAuth grants; connected apps
+  stay connected.
+- **Provisioning semantics (`ensureGrant(owner, { readOnly: true })`):**
+  reuses the newest live, non-OAuth **read-only** grant of any catalog version for that owner.
+  It never returns an opted-in write credential. Tokens are deterministically
+  re-derived on reuse; other live grants are never clobbered. With no eligible read grant, it mints the
+  deterministic automatic grant at the current catalog version and default
+  read scope (public access when enabled), unless that automatic grant was
+  revoked. **Revoked stays revoked**: after the owner turns agent access off, provisioning answers `grant_revoked` until they
   re-enable it in Settings.
 - **Response (200):** `{ kind: "unlinked_provision_grant", ownerId, grantId,
   created, version, scope, tools, accessToken }`. The token is verified
@@ -416,3 +435,34 @@ person. Until an expiring, deletion-propagating revision store exists, bulk
 needs are served by `list_people` pagination (50/page inside the 120/min
 budget covers the full ~16k-profile index in ~3 minutes, always at the live
 revision, which is tombstone-safe by construction).
+
+## Catalog v4: optional connection actions
+
+Versions 1–3 are immutable. Version 4 retains the v3 read lists and adds
+`owner_network_and_public_and_write`, never a default. Settings regeneration
+and OAuth consent offer an unchecked optional choice; the server validates
+`access=connections`, availability and duplicate/unknown fields. Requesting
+OAuth `connections` alone does not grant it. Defaults and existing grants keep
+read access only; opting out at regeneration restores a read-only credential.
+
+| MCP tool | HTTP POST route | JSON fields |
+|---|---|---|
+| `unlinked_send_connection_request` | `/api/agent/v1/connection-requests/send` | `profileId`, optional `note` |
+| `unlinked_accept_connection_request` | `/api/agent/v1/connection-requests/accept` | `id` |
+| `unlinked_ignore_connection_request` | `/api/agent/v1/connection-requests/ignore` | `id` |
+| `unlinked_withdraw_connection_request` | `/api/agent/v1/connection-requests/withdraw` | `id` |
+
+The [member connection rules](member-connections.md#connection-requests-mcp-servermember-connectionsmjs)
+authorize the account and target and own the crossed-request, private-ignore,
+daily-send and withdrawal-cooldown behavior.
+An additional shared MCP/HTTP budget allows 20 writes per owner per minute,
+independent of read/AI budgets. Failures use the [typed error vocabulary](#typed-errors).
+Send returns `{ kind: "unlinked_connection_request_sent", status: "sent"|"accepted",
+profileId, id?, visibility: "owner_private" }`; the other actions return
+`{ kind: "unlinked_connection_request_update", id, status, visibility: "owner_private" }`
+with status `accepted`, `ignored` or `withdrawn`. Removal remains browser-only.
+MCP annotations mark these as writes. Messaging and posting are never available.
+
+Settings and `whoami.grant.update` suggest regeneration/reconnection only when
+the grant lacks tools its own scope now provides. A v3 read grant has no nudge
+solely because v4 adds an opt-in scope. Missing grant records render safely.

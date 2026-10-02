@@ -24,9 +24,32 @@ export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
     owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
     owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
   }),
+  // Version 4 keeps the version 3 read-only lists and adds one opt-in scope
+  // whose grant can also send, accept, ignore and withdraw connection
+  // requests. It is never a default: only an explicit choice in Settings or
+  // on the OAuth consent page issues it.
+  4: Object.freeze({
+    owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
+    owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
+    owner_network_and_public_and_write: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
+      'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
+  }),
 })
-export const CURRENT_ACCOUNT_GRANT_VERSION = 3
+export const CURRENT_ACCOUNT_GRANT_VERSION = 4
 export const accountGrantTools = (version, scope) => ACCOUNT_GRANT_TOOL_VERSIONS[version]?.[scope] ?? null
+// The opt-in scope that adds connection-request write tools.
+export const ACCOUNT_WRITE_SCOPE = 'owner_network_and_public_and_write'
+export const ACCOUNT_WRITE_TOOLS = Object.freeze(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
+// Scopes that read the published People index.
+export const scopeCoversPublic = scope => scope === 'owner_network_and_public' || scope === ACCOUNT_WRITE_SCOPE
+// Tools the current catalog gives the same scope that this grant lacks. An
+// empty list means the grant is up to date, even when its catalog version is
+// older: a new version that only adds an opt-in scope outdates no one.
+export function missingAccountGrantTools(grant) {
+  const current = accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, grant?.scope)
+  if (!current || !Array.isArray(grant?.tools)) return []
+  return current.filter(name => !grant.tools.includes(name))
+}
 
 // Deterministic jti for the one automatically prepared grant per owner, so
 // provisioning is an idempotent compare-and-set and its tombstone is readable:
@@ -46,13 +69,16 @@ function validConnection(value) {
 
 export function createAccountGrantService({ issuer, signingKey, getBackend, publicSearchEnabled = false }) {
   if (new URL(issuer).protocol !== 'https:' || !(signingKey instanceof Uint8Array) || signingKey.length < 32 || typeof getBackend !== 'function') throw new Error('account_grant_configuration_required')
-  const grantableScopes = publicSearchEnabled ? ['owner_network', 'owner_network_and_public'] : ['owner_network']
+  // The write scope needs the People index (requests are sent to published
+  // profiles), so it exists only where public search does. It is grantable but
+  // never the default: every caller that wants it names it explicitly.
+  const grantableScopes = publicSearchEnabled ? ['owner_network', 'owner_network_and_public', ACCOUNT_WRITE_SCOPE] : ['owner_network']
   // HS256 signing is deterministic, so the bearer credential for an existing
   // grant is re-derived from its durable record; viewing setup mints nothing.
   const signGrant = (id, owner, jti, issuedAt) => new SignJWT({ grantId: id, ownerId: owner.ownerId, token_use: 'account_tools' })
     .setProtectedHeader({ alg: 'HS256', typ: 'at+jwt' }).setIssuer(issuer).setAudience(audience)
     .setSubject(owner.userId).setJti(jti).setIssuedAt(issuedAt).sign(signingKey)
-  // `options.scope` narrows the catalog scope (OAuth consent); `options.connection`
+  // `options.scope` selects the catalog scope (OAuth consent or Settings opt-in); `options.connection`
   // marks a grant issued to an OAuth-connected app (see mcp-server/oauth-server.mjs).
   // Connection grants are listed and revoked individually in Settings and are
   // never reused as the copyable Settings credential.
@@ -70,25 +96,29 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
         jti, tools, scope, issuedAt: now, ...(connection ? { connection } : {}) },
     })
     const accessToken = await signGrant(id, owner, jti, now)
-    return { accessToken, grantId: id }
+    return { accessToken, grantId: id, version: CURRENT_ACCOUNT_GRANT_VERSION, scope, tools }
   }
   // Prepare the account's setup without a click. Reuses any live grant
   // (whatever tool list its catalog version gives it — including pre-expansion
   // v1 grants) so repeated visits never mint duplicates and never clobber a
-  // manually created grant. Mints the one deterministic automatic grant only
-  // when the owner has no grants at all and has never revoked the automatic
-  // one; returns null once it is revoked.
-  const ensureGrant = async owner => {
+  // manually created grant. `readOnly` excludes opt-in write grants from reuse
+  // for server-to-server provisioning. Mints the deterministic read-only
+  // automatic grant when no eligible manual grant exists; its tombstone
+  // prevents automatic reissuance. OAuth grants are never reused.
+  const ensureGrant = async (owner, { readOnly = false } = {}) => {
     const backend = await getBackend(owner)
     const autoId = privateId(owner.ownerId, 'account-grant-v1', AUTO_JTI)
     const derive = record => record && !record.deleted && record.sourceOwnerId === owner.ownerId && record.payload?.kind === 'account_tool_grant' &&
       record.payload.ownerId === owner.ownerId && record.payload.userId === owner.userId && record.payload.issuer === issuer && record.payload.audience === audience &&
-      typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) && !record.payload.connection ? record : null
+      typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) && !record.payload.connection &&
+      (!readOnly || ['owner_network', 'owner_network_and_public'].includes(record.payload.scope)) ? record : null
     const ids = await backend.listAccountGrantIds()
     const records = []
     for (let start = 0; start < ids.length; start += 8) records.push(...(await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id)))).map(derive).filter(Boolean))
     const latest = records.sort((a, b) => (b.payload.issuedAt - a.payload.issuedAt) || a.sourceId.localeCompare(b.sourceId))[0]
-    if (latest) return { accessToken: await signGrant(latest.sourceId, owner, latest.payload.jti, latest.payload.issuedAt), grantId: latest.sourceId, created: false }
+    // The reused grant's own catalog entry, so Settings can tell an outdated setup.
+    const shape = record => ({ version: record.payload.version ?? 1, scope: record.payload.scope, tools: Array.isArray(record.payload.tools) ? [...record.payload.tools] : [] })
+    if (latest) return { accessToken: await signGrant(latest.sourceId, owner, latest.payload.jti, latest.payload.issuedAt), grantId: latest.sourceId, created: false, ...shape(latest) }
     const existing = await backend.readResource('import', autoId)
     if (existing?.deleted) return null // the owner revoked their agent access; it stays revoked
     try { return { ...(await issueGrant(owner, AUTO_JTI)), created: true } }
@@ -99,7 +129,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
       if (record?.deleted) return null
       const live = derive(record)
       if (!live) throw error
-      return { accessToken: await signGrant(autoId, owner, live.payload.jti, live.payload.issuedAt), grantId: autoId, created: false }
+      return { accessToken: await signGrant(autoId, owner, live.payload.jti, live.payload.issuedAt), grantId: autoId, created: false, ...shape(live) }
     }
   }
   // Distinguishes "no usable bearer identity" (not_linked) from "the identity
@@ -161,7 +191,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
       for (const record of records) {
         if (!record || record.deleted || record.sourceOwnerId !== owner.ownerId || record.payload?.kind !== 'account_tool_grant' || record.payload.userId !== owner.userId) continue
         const connection = record.payload.connection
-        out.push({ id: record.sourceId, issuedAt: record.payload.issuedAt, scope: record.payload.scope, ...(connection ? { connection: { app: connection.app, clientName: connection.clientName, redirectHost: connection.redirectHost } } : {}) })
+        out.push({ id: record.sourceId, issuedAt: record.payload.issuedAt, scope: record.payload.scope, version: record.payload.version ?? 1, tools: Array.isArray(record.payload.tools) ? [...record.payload.tools] : [], ...(connection ? { connection: { app: connection.app, clientName: connection.clientName, redirectHost: connection.redirectHost } } : {}) })
       }
     }
     return out.sort((a, b) => (b.issuedAt - a.issuedAt) || a.id.localeCompare(b.id))
