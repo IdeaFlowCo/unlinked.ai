@@ -329,7 +329,7 @@ test('everyone rows use only member fields and encoded original profile ids', ()
   const view = renderPeople({ ...account, everyone: [{ id, name: 'Maya Chen', headline: 'Climate lead', company: 'Harbor', location: 'Portland', listedBy: 8, isMember: true, mutuals: 'secret-mutuals', linkedinUrl: 'https://www.linkedin.com/in/maya', reason: 'secret-reason' }] })
   const group = view.content.match(/<section class="everyone-group"[^>]*>(.*?)<\/section>/s)[1]
   assert.match(group, /Everyone on Unlinked/)
-  assert.match(group, /class="initials avatar" style="background:#[0-9a-f]{6}" aria-hidden="true">MC/)
+  assert.match(group, /class="initials avatar tone-[0-5]" aria-hidden="true">MC/)
   assert.match(group, new RegExp(`href="/people/${id}">Maya Chen`))
   assert.match(group, /Climate lead · Harbor/)
   assert.match(group, /<p class="small">Portland<\/p>/)
@@ -468,7 +468,7 @@ test('fixture previews cover every requested screen and are reproducible without
     const own = first[files.findIndex(file => file.endsWith('/own-profile-importing.html'))]
     assert.equal((own.match(/<div class="xp">/g) || []).length, 4)
     assert.equal((own.match(/class="tag"/g) || []).length, 6)
-    assert.equal((own.split('<main')[1].match(/class="initials avatar"/g) || []).length, 8)
+    assert.equal((own.split('<main')[1].match(/class="initials avatar tone-[0-5]"/g) || []).length, 8)
     assert.match(own, /My connections · 1,005/)
     assert.match(own, /Westhaven University/)
     assert.match(own, /Importing · 41% · 412 of 1,005 records/)

@@ -11,6 +11,9 @@ import { createHash, randomUUID } from 'node:crypto'
 // recipient can still connect later; pressing Connect on the sender's profile
 // accepts the old request instead of creating a second one.
 //
+// Either member can later remove an accepted connection: it becomes `removed`
+// for both of them (nobody is told), and either can send a new request.
+//
 // Storage enforces the pair rules: `openKey` (set while pending or ignored) and
 // `connectedKey` (set once accepted) are the pair's key and unique, so two
 // racing requests or accepts between the same two accounts cannot both land.
@@ -18,7 +21,7 @@ import { createHash, randomUUID } from 'node:crypto'
 export const CONNECTION_REQUESTS_PER_DAY = 50
 export const RESEND_COOLDOWN_MS = 21 * 24 * 60 * 60 * 1000
 export const CONNECTION_NOTE_LIMIT = 300
-const STATUSES = ['pending', 'accepted', 'ignored', 'withdrawn']
+const STATUSES = ['pending', 'accepted', 'ignored', 'withdrawn', 'removed']
 const OPEN = ['pending', 'ignored']
 const DAY = 24 * 60 * 60 * 1000
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -129,7 +132,49 @@ export function createConnectionRequests({ store, notifications = null, now = Da
       const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
       if (!record || !same(senderOf(record), sender)) throw new ConnectionError('connection_not_found')
       if (!(await store.transition(id, OPEN, { status: 'withdrawn', withdrawnAt: now() }, ['openKey']))) throw new ConnectionError('connection_unavailable')
-      if (notifications) await quietly(() => notifications.retract(requestKey(id)))
+      if (notifications) await quietly(() => notifications.retract(requestKey(id), recipientOf(record)))
+    },
+    // Either member removes an accepted connection, for both of them. The
+    // record stays as `removed` (history, and the pair key is freed so either
+    // side can ask again); nobody is notified. Only the two members can do it,
+    // and anything else looks like an unknown id.
+    async remove(member, id, operation) {
+      owner(member)
+      const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
+      if (!record || (!same(senderOf(record), member) && !same(recipientOf(record), member))) throw new ConnectionError('connection_not_found')
+      if (!(await store.transition(id, ['accepted'], { status: 'removed', removedAt: now(), removedBy: same(senderOf(record), member) ? 'sender' : 'recipient', ...(operation ? { removalRequestIds: operation.requestIds, removalInvitationIds: operation.invitationIds, removalCompleted: false } : {}) }, ['connectedKey']))) throw new ConnectionError('connection_unavailable')
+    },
+    async resumeRemoval(member, id) {
+      owner(member)
+      const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
+      if (!record || (!same(senderOf(record), member) && !same(recipientOf(record), member)) || record.status !== 'removed' || record.removalCompleted !== false) return null
+      return { other: same(senderOf(record), member) ? recipientOf(record) : senderOf(record), requestIds: record.removalRequestIds, invitationIds: record.removalInvitationIds }
+    },
+    async completeRemoval(member, id) {
+      if (!(await service.resumeRemoval(member, id))) return
+      await store.transition(id, ['removed'], { removalCompleted: true }, [])
+    },
+    async captureRemovalPair(member, other) {
+      owner(member); owner(other)
+      if (same(member, other)) throw new ConnectionError('connection_self')
+      return (await store.listPair(pairKey(member, other))).filter(record => ['accepted', ...OPEN].includes(record.status)).map(record => record.id)
+    },
+    async settleRemovedPair(member, other, requestIds) {
+      owner(member); owner(other)
+      if (same(member, other)) throw new ConnectionError('connection_self')
+      const pair = pairKey(member, other)
+      for (const id of requestIds) {
+        const record = await store.get(id)
+        if (!record || record.pairKey !== pair) continue
+        if (record.status === 'removed') {
+          if (notifications) await notifications.retract(requestKey(record.id), recipientOf(record))
+          continue
+        }
+        if (!['accepted', ...OPEN].includes(record.status)) continue
+        const changed = await store.transition(record.id, ['accepted', ...OPEN],
+          { status: 'removed', removedAt: now(), removedBy: same(senderOf(record), member) ? 'sender' : 'recipient' }, ['openKey', 'connectedKey'])
+        if (changed && notifications) await notifications.retract(requestKey(record.id), recipientOf(record))
+      }
     },
     // Requests waiting for this member's answer (ignored ones are set aside).
     async received(member) {
@@ -188,7 +233,15 @@ export function createMemoryConnectionStore() {
       records.set(record.id, copy(record))
     },
     async get(id) { const value = records.get(id); return value ? copy(value) : null },
-    async listPair(pair) { return all().filter(record => record.pairKey === pair).map(copy) },
+    async listPair(pair) {
+      const values = all().filter(record => record.pairKey === pair)
+      const withdrawn = new Map()
+      for (const record of values.filter(record => record.status === 'withdrawn')) {
+        const sender = key(senderOf(record)), previous = withdrawn.get(sender)
+        if (!previous || (record.withdrawnAt ?? 0) > (previous.withdrawnAt ?? 0)) withdrawn.set(sender, record)
+      }
+      return [...values.filter(record => ['accepted', ...OPEN].includes(record.status)), ...withdrawn.values()].map(copy)
+    },
     async listByRecipient(member, statuses) { return all().filter(record => isRecipient(record, member) && statuses.includes(record.status)).map(copy) },
     async listBySender(member, statuses) { return all().filter(record => isSender(record, member) && statuses.includes(record.status)).map(copy) },
     async listAccepted(member) { return all().filter(record => record.status === 'accepted' && (!member || isSender(record, member) || isRecipient(record, member))).map(copy) },
@@ -209,7 +262,7 @@ export function createMemoryConnectionStore() {
   }
 }
 
-const RECORD_KEYS = ['id', 'pairKey', 'openKey', 'connectedKey', 'senderOwnerId', 'senderUserId', 'senderName', 'senderProfileId', 'recipientOwnerId', 'recipientUserId', 'recipientName', 'recipientProfileId', 'note', 'status', 'createdAt', 'respondedAt', 'withdrawnAt']
+const RECORD_KEYS = ['id', 'pairKey', 'openKey', 'connectedKey', 'senderOwnerId', 'senderUserId', 'senderName', 'senderProfileId', 'recipientOwnerId', 'recipientUserId', 'recipientName', 'recipientProfileId', 'note', 'status', 'createdAt', 'respondedAt', 'withdrawnAt', 'removedAt', 'removedBy', 'removalRequestIds', 'removalInvitationIds', 'removalCompleted']
 const fromNode = properties => {
   const value = {}
   for (const name of RECORD_KEYS) if (properties[name] !== undefined && properties[name] !== null) value[name] = typeof properties[name]?.toNumber === 'function' ? properties[name].toNumber() : properties[name]
@@ -242,7 +295,15 @@ export function createNeo4jConnectionStore(driver, database = 'neo4j') {
       const result = await read('MATCH (r:UnlinkedConnectionRequest {id: $id}) RETURN properties(r) AS r', { id })
       return result.records.length ? fromNode(result.records[0].get('r')) : null
     },
-    async listPair(pair) { return rows(await read('MATCH (r:UnlinkedConnectionRequest {pairKey: $pair}) RETURN properties(r) AS r ORDER BY r.createdAt LIMIT 500', { pair })) },
+    async listPair(pair) {
+      return rows(await read(`CALL {
+        MATCH (r:UnlinkedConnectionRequest {pairKey: $pair}) WHERE r.status IN ['pending', 'ignored', 'accepted'] RETURN r
+        UNION
+        MATCH (r:UnlinkedConnectionRequest {pairKey: $pair, status: 'withdrawn'})
+        WITH r ORDER BY coalesce(r.withdrawnAt, 0) DESC
+        WITH r.senderOwnerId AS senderOwnerId, r.senderUserId AS senderUserId, head(collect(r)) AS r RETURN r
+      } RETURN properties(r) AS r ORDER BY r.createdAt, r.id`, { pair }))
+    },
     async listByRecipient(member, statuses) {
       return rows(await read('MATCH (r:UnlinkedConnectionRequest {recipientOwnerId: $ownerId, recipientUserId: $userId}) WHERE r.status IN $statuses RETURN properties(r) AS r ORDER BY r.createdAt DESC LIMIT 1000', { ownerId: member.ownerId, userId: member.userId, statuses }))
     },
@@ -261,7 +322,7 @@ export function createNeo4jConnectionStore(driver, database = 'neo4j') {
     // Compare-and-set: only a request still in one of `from` changes.
     async transition(id, from, patch, remove) {
       try {
-        const result = await write(`MATCH (r:UnlinkedConnectionRequest {id: $id}) WHERE r.status IN $from SET r += $patch ${remove.length ? `REMOVE ${remove.map(name => `r.${name}`).join(', ')}` : ''} RETURN r.id AS id`,
+        const result = await write(`MATCH (r:UnlinkedConnectionRequest {id: $id}) SET r._transitionLock = coalesce(r._transitionLock, 0) + 1 WITH r WHERE r.status IN $from SET r += $patch ${remove.length ? `REMOVE ${remove.map(name => `r.${name}`).join(', ')}` : ''} RETURN r.id AS id`,
           { id, from, patch })
         return result.records.length === 1
       } catch (error) { if (conflict(error)) throw new Error('connection_conflict'); throw error }

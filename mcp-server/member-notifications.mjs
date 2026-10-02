@@ -69,7 +69,7 @@ export function createNotifications({ store, now = Date.now, keep = NOTIFICATION
     async markAllRead(member) { await store.markAllRead(owner(member), now()) },
     async markReadByKey(member, dedupeKey) { await store.markReadByKey(owner(member), dedupeKey, now()) },
     // The event no longer stands (a withdrawn request): it disappears.
-    async retract(dedupeKey) { await store.deleteByKey(dedupeKey) },
+    async retract(dedupeKey, recipient) { if (recipient) owner(recipient); await store.deleteByKey(dedupeKey, recipient) },
     // Account deletion: the account's own feed, and its name in anyone else's.
     async removeOwner(member) { return store.deleteOwner(owner(member)) },
   }
@@ -77,7 +77,7 @@ export function createNotifications({ store, now = Date.now, keep = NOTIFICATION
 
 export function createMemoryNotificationStore() {
   const records = new Map()
-  const mine = member => [...records.values()].filter(record => record.recipientOwnerId === member.ownerId && record.recipientUserId === member.userId)
+  const mine = member => [...records.values()].filter(record => record.recipientOwnerId === member.ownerId && record.recipientUserId === member.userId && record.retracted !== true)
   const newest = (a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1)
   return {
     records,
@@ -90,16 +90,23 @@ export function createMemoryNotificationStore() {
     async markSeen(member, at) { for (const value of mine(member)) value.seenAt ??= at },
     async markRead(member, id, at) {
       const value = records.get(id)
-      if (!value || value.recipientOwnerId !== member.ownerId || value.recipientUserId !== member.userId) return null
+      if (!value || value.retracted === true || value.recipientOwnerId !== member.ownerId || value.recipientUserId !== member.userId) return null
       value.readAt ??= at; value.seenAt ??= at
       return structuredClone(value)
     },
     async markAllRead(member, at) { for (const value of mine(member)) { value.readAt ??= at; value.seenAt ??= at } },
     async markReadByKey(member, dedupeKey, at) { for (const value of mine(member)) if (value.dedupeKey === dedupeKey) { value.readAt ??= at; value.seenAt ??= at } },
-    async deleteByKey(dedupeKey) { for (const [id, value] of records) if (value.dedupeKey === dedupeKey) records.delete(id) },
+    async deleteByKey(dedupeKey, recipient) {
+      const existing = [...records.entries()].find(([, value]) => value.dedupeKey === dedupeKey)
+      const value = existing?.[1] ?? {}
+      const tombstone = { dedupeKey, retracted: true }
+      for (const name of ['recipientOwnerId', 'recipientUserId', 'actorOwnerId', 'actorUserId']) if (value[name]) tombstone[name] = value[name]
+      if (!existing && recipient) Object.assign(tombstone, { recipientOwnerId: recipient.ownerId, recipientUserId: recipient.userId })
+      records.set(existing?.[0] ?? randomUUID(), tombstone)
+    },
     async deleteOwner(member) {
       let removed = 0
-      for (const [id, value] of records) if ((value.recipientOwnerId === member.ownerId && value.recipientUserId === member.userId) || (value.actorOwnerId === member.ownerId && value.actorUserId === member.userId)) { records.delete(id); removed++ }
+      for (const [id, value] of records) if ((value.recipientOwnerId === member.ownerId && value.recipientUserId === member.userId) || (value.actorOwnerId === member.ownerId && value.actorUserId === member.userId)) { records.delete(id); if (value.retracted !== true) removed++ }
       return removed
     },
     async prune(member, keep) { for (const value of mine(member).sort(newest).slice(keep)) records.delete(value.id) },
@@ -131,7 +138,7 @@ export function createNeo4jNotificationStore(driver, database = 'neo4j') {
     async insertOnce(record) {
       const { dedupeKey, ...rest } = record
       try {
-        const result = await write('MERGE (n:UnlinkedNotification {dedupeKey: $dedupeKey}) ON CREATE SET n += $rest, n._created = true WITH n, coalesce(n._created, false) AS created REMOVE n._created RETURN created', { dedupeKey, rest })
+        const result = await write('MERGE (n:UnlinkedNotification {dedupeKey: $dedupeKey}) ON CREATE SET n += $rest, n._created = true SET n._notificationLock = coalesce(n._notificationLock, 0) + 1 WITH n, coalesce(n._created, false) AND coalesce(n.retracted, false) = false AS created REMOVE n._created RETURN created', { dedupeKey, rest })
         return result.records[0]?.get('created') === true
       } catch (error) {
         // A concurrent MERGE of the same key loses on the constraint: same event.
@@ -140,29 +147,35 @@ export function createNeo4jNotificationStore(driver, database = 'neo4j') {
       }
     },
     async list(member, limit) {
-      const result = await read(`MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) RETURN properties(n) AS n ORDER BY n.createdAt DESC, n.id LIMIT ${count(limit)}`, recipient(member))
+      const result = await read(`MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) WHERE coalesce(n.retracted, false) = false RETURN properties(n) AS n ORDER BY n.createdAt DESC, n.id LIMIT ${count(limit)}`, recipient(member))
       return result.records.map(record => fromNode(record.get('n')))
     },
     async counts(member) {
-      const result = await read('MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) RETURN sum(CASE WHEN n.seenAt IS NULL THEN 1 ELSE 0 END) AS unseen, sum(CASE WHEN n.readAt IS NULL THEN 1 ELSE 0 END) AS unread', recipient(member))
+      const result = await read('MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) WHERE coalesce(n.retracted, false) = false RETURN sum(CASE WHEN n.seenAt IS NULL THEN 1 ELSE 0 END) AS unseen, sum(CASE WHEN n.readAt IS NULL THEN 1 ELSE 0 END) AS unread', recipient(member))
       const row = result.records[0]
       return { unseen: number(row?.get('unseen')), unread: number(row?.get('unread')) }
     },
-    async markSeen(member, at) { await write('MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) WHERE n.seenAt IS NULL SET n.seenAt = $at', { ...recipient(member), at }) },
+    async markSeen(member, at) { await write('MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) SET n._notificationLock = coalesce(n._notificationLock, 0) + 1 WITH n WHERE coalesce(n.retracted, false) = false AND n.seenAt IS NULL SET n.seenAt = $at', { ...recipient(member), at }) },
     async markRead(member, id, at) {
-      const result = await write('MATCH (n:UnlinkedNotification {id: $id, recipientOwnerId: $ownerId, recipientUserId: $userId}) SET n.readAt = coalesce(n.readAt, $at), n.seenAt = coalesce(n.seenAt, $at) RETURN properties(n) AS n', { ...recipient(member), id, at })
+      const result = await write('MATCH (n:UnlinkedNotification {id: $id, recipientOwnerId: $ownerId, recipientUserId: $userId}) SET n._notificationLock = coalesce(n._notificationLock, 0) + 1 WITH n WHERE coalesce(n.retracted, false) = false SET n.readAt = coalesce(n.readAt, $at), n.seenAt = coalesce(n.seenAt, $at) RETURN properties(n) AS n', { ...recipient(member), id, at })
       return result.records.length ? fromNode(result.records[0].get('n')) : null
     },
-    async markAllRead(member, at) { await write('MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) WHERE n.readAt IS NULL SET n.readAt = $at, n.seenAt = coalesce(n.seenAt, $at)', { ...recipient(member), at }) },
-    async markReadByKey(member, dedupeKey, at) { await write('MATCH (n:UnlinkedNotification {dedupeKey: $dedupeKey, recipientOwnerId: $ownerId, recipientUserId: $userId}) SET n.readAt = coalesce(n.readAt, $at), n.seenAt = coalesce(n.seenAt, $at)', { ...recipient(member), dedupeKey, at }) },
-    async deleteByKey(dedupeKey) { await write('MATCH (n:UnlinkedNotification {dedupeKey: $dedupeKey}) DETACH DELETE n', { dedupeKey }) },
+    async markAllRead(member, at) { await write('MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) SET n._notificationLock = coalesce(n._notificationLock, 0) + 1 WITH n WHERE coalesce(n.retracted, false) = false AND n.readAt IS NULL SET n.readAt = $at, n.seenAt = coalesce(n.seenAt, $at)', { ...recipient(member), at }) },
+    async markReadByKey(member, dedupeKey, at) { await write('MATCH (n:UnlinkedNotification {dedupeKey: $dedupeKey, recipientOwnerId: $ownerId, recipientUserId: $userId}) SET n._notificationLock = coalesce(n._notificationLock, 0) + 1 WITH n WHERE coalesce(n.retracted, false) = false SET n.readAt = coalesce(n.readAt, $at), n.seenAt = coalesce(n.seenAt, $at)', { ...recipient(member), dedupeKey, at }) },
+    async deleteByKey(dedupeKey, member) {
+      await write(`MERGE (n:UnlinkedNotification {dedupeKey: $dedupeKey})
+        ON CREATE SET n.recipientOwnerId = $ownerId, n.recipientUserId = $userId
+        SET n._notificationLock = coalesce(n._notificationLock, 0) + 1, n.retracted = true
+        REMOVE n.id, n.kind, n.actorName, n.actorProfileId, n.subjectId, n.createdAt, n.seenAt, n.readAt, n.emailedAt`,
+      { dedupeKey, ownerId: member?.ownerId ?? null, userId: member?.userId ?? null })
+    },
     async deleteOwner(member) {
       const result = await write(`MATCH (n:UnlinkedNotification) WHERE (n.recipientOwnerId = $ownerId AND n.recipientUserId = $userId) OR (n.actorOwnerId = $ownerId AND n.actorUserId = $userId)
         WITH n, n.id AS id DETACH DELETE n RETURN count(id) AS removed`, recipient(member))
       return number(result.records[0]?.get('removed'))
     },
     async prune(member, keep) {
-      await write(`MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) WITH n ORDER BY n.createdAt DESC, n.id SKIP ${count(keep)} DETACH DELETE n`, recipient(member))
+      await write(`MATCH (n:UnlinkedNotification {recipientOwnerId: $ownerId, recipientUserId: $userId}) WHERE coalesce(n.retracted, false) = false WITH n ORDER BY n.createdAt DESC, n.id SKIP ${count(keep)} SET n._notificationLock = coalesce(n._notificationLock, 0) + 1 WITH n WHERE coalesce(n.retracted, false) = false DETACH DELETE n`, recipient(member))
     },
   }
 }
