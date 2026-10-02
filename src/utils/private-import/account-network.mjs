@@ -41,6 +41,10 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       const current = await backend.readLegacyProfile()
       if (!current || current.receiptId !== legacy.receiptId || current.revision !== legacy.revision) throw Error('legacy_network_changed')
     }
+    if(typeof backend.readLegacyObservations==='function'){
+      const recovered=await backend.readLegacyObservations({signal,limit:observationLimit-assertions.length})
+      if(recovered){assertions.push(...recovered.assertions);indexed+=recovered.assertions.length}
+    }
     return { legacyProfileId: legacy?.profileId, id: networkId, ownerId: owner.ownerId, imports, indexed, assertions, consent: COMBINED_UPLOAD_CONSENT }
   }
   return { readNetwork, search: typeof complete === 'function' ? async ({ query, signal }) => {

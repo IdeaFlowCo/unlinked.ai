@@ -18,7 +18,8 @@
       1,
       2
     ],
-    "connectionAnchor": "explicitly confirmed recovered profile"
+    "connectionAnchor": "explicitly confirmed recovered profile",
+    "recoveredOriginals": "browser-only after explicit recovered-account confirmation"
   },
   "mcp": {
     "url": "https://www.unlinked.ai/mcp",

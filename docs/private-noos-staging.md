@@ -33,6 +33,7 @@ AI search uses the same live owner-scoped publication as MCP.
 Every connection is considered in contexts of at most 200 bounded name/company/position/date observations, followed by bounded reduction of ranked IDs.
 OpenAI requests use store:false, strict known-ID structured results and a 30-second provider timeout. Incomplete/refused responses and invalid results fail closed. Caller cancellation propagates through row reads and completion; the SSH completion bridge also bounds the local operation to 45 seconds.
 Returned identity, fields and provenance come from stored rows.
+Contact email addresses, phone numbers and private-note fields are excluded from provider context and from returned matches; stored rows remain the recovery/provenance source.
 Publication checks after delayed model work deny deleted/changed imports.
 This owner search is query-time AI ranking over a private observation index, with no shared people database or embedding completeness claim. Shared People search is a separate published professional projection with its own bounds.
 At the parser maximum many model calls/resource reads are required; the 1,001-contact receipt is the acceptance target, not a 100,000-record latency/cost claim.
@@ -48,7 +49,7 @@ Same-origin requests and CSRF protect mutations; one combined upload disclosure/
 Receipt/replay and one-action scoped setup forms are implemented. In open-account mode, upload records the combined disclosure by action rather than accepting a separate consent checkbox; the native multipart form contains only `csrf`, `archive` and the synthetic-only rehearsal confirmation when applicable.
 Browser responses use `Referrer-Policy: strict-origin`; invited landing pages additionally allow the exact HTTPS provider origin in CSP `form-action`, while all other forms stay self-only.
 Invited setup downloads a fifteen-minute search-only grant for exactly one import; raw archive access is excluded.
-Open-account setup issues a durable account-scoped bearer for `unlinked_search_network` and, when shared People is enabled, `unlinked_search_everyone`, covering all current and future owner imports plus the published professional index until revoked, with no raw archive, generic graph or caller-selected owner access. `unlinked_search_network` degree/cursor mode and signed `GET /api/my-connections` read recorded one/two-hop public paths only from an explicitly confirmed recovered profile and deny rather than infer a missing graph anchor. Older single-tool grants keep owner-network scope.
+Open-account setup issues a durable account-scoped bearer for `unlinked_search_network` and, when shared People is enabled, `unlinked_search_everyone`, covering all current and future owner imports, same-owner sanitized recovered Connections observations and the published professional index until revoked, with no raw archive, recovered-original, generic graph or caller-selected owner access. `unlinked_search_network` degree/cursor mode and signed `GET /api/my-connections` read recorded one/two-hop public paths only from an explicitly confirmed recovered profile and deny rather than infer a missing graph anchor. Older single-tool grants keep owner-network scope.
 Open-account upload can redirect to `/profile` after only durable staging; `/profile`, `/network` and `/settings` rediscover active job history on return, poll authenticated same-owner status, and show technical receipts under Settings.
 The separate signed tool audiences use durable owner-private Noos grant records and live publication/revocation checks. Invited grants use ephemeral signing keys that invalidate grants on restart; account grants derive a domain-separated key from the approved private graph secret, so unchanged secrets preserve grants and secret replacement revokes them.
 Operational bearers and provider ID tokens never become agent credentials.
@@ -65,6 +66,7 @@ Production provider granular delegation is not assumed or enabled.
 ZIP bytes remain private assets behind a replaceable Noos storage interface, not graph properties.
 The explicit operator-controlled filesystem root uses modes 700/600, owner-hashed directories, hash-addressed immutable writes, digest verification and no-follow reads.
 Raw recovery authorizes the historical owner before fetching one bounded blob, without graph fan-out.
+Recovered legacy Storage originals add a separate browser-only path after explicit recovered-account confirmation; the offline operator, manifest fence and Settings download boundary are documented in [Recovered legacy LinkedIn files](legacy-storage-recovery.md).
 Publication rollback retains private originals/receipts and denies agent tools.
 Physical retention/deletion, paired graph/blob backups, directory-fsync durability, restore rehearsal and historical writer fencing remain release/cutover gates.
 No production graph or historical personal data is used in tests.
