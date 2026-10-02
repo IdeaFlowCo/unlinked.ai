@@ -1,3 +1,4 @@
+import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -15,16 +16,17 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     if (!grant || !['owner_network','owner_network_and_public'].includes(grant.scope) || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(grant.scope === 'owner_network' ? ['unlinked_search_network'] : ['unlinked_search_network','unlinked_search_everyone'])) { response.writeHead(401).end(); return }
     const server = new McpServer({ name: 'unlinked-account-network', version: '1.0.0' })
     server.registerTool('unlinked_search_network', {
-      description: 'Search all currently published LinkedIn observations owned by your authenticated Unlinked account. Every result retains archive provenance. This does not claim unknown second-degree relationships or access other owners.',
-      inputSchema: { query: z.string().min(1).max(1024) },
-    }, async ({ query }) => {
+      description: 'Search all currently published LinkedIn observations owned by your authenticated Unlinked account. Every result retains archive provenance. With degree1/2 (or a second-degree query), read recorded public connection paths from your explicitly linked legacy profile. Unknown identity/relationship matches are not invented; no other owner/private fields are accessed.',
+      inputSchema: { query: z.string().min(1).max(1024), degree: z.union([z.literal(1), z.literal(2)]).optional(), cursor: z.string().max(2048).optional() },
+    }, async ({ query, degree, cursor }) => {
       const controller = new AbortController()
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
       try {
         const before = await authenticateGrant(request)
         if (!before || before.grantId !== grant.grantId || before.ownerId !== grant.ownerId || before.userId !== grant.userId) throw new Error('account_grant_revoked')
-        const result = await createAccountNetwork({ owner: grant, getBackend, complete }).search({ query, signal })
+        const connectionQuery = knownConnectionQuery(query, degree)
+        const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).search({ query, signal })
         const after = await authenticateGrant(request)
         if (!after || after.grantId !== grant.grantId || after.ownerId !== grant.ownerId || after.userId !== grant.userId) throw new Error('account_grant_revoked')
         const text = JSON.stringify(result)
