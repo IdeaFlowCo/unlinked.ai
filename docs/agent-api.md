@@ -51,7 +51,7 @@ the catalog entry for `(version, scope)` in
 | Version | `owner_network` scope | `owner_network_and_public` scope |
 |---|---|---|
 | 1 (pre-existing grants) | `unlinked_search_network` | + `unlinked_search_everyone` |
-| 2 (current issuance) | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ask` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ask` |
+| 2 (current issuance) | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
 
 - Old grants keep exactly their issued tools on both surfaces — MCP
   `tools/list` for a v1 grant still shows only the launch tools, and the HTTP
@@ -104,7 +104,7 @@ This vocabulary may be extended, never renamed.
 - Deterministic tools (`whoami`, `list_people`, `list_connections`,
   `get_profile`): 120 requests/min **per grant owner**; expected well
   under 1 s p95 at the current index size (~16k profiles, in-memory snapshot).
-- AI tools (`ask`, `search_network` free-text mode, `search_everyone`):
+- AI tools (`ai_search`, `search_network` free-text mode, `search_everyone`):
   20/min, 2000/day and 2 in flight **per grant owner**, plus a shared ceiling
   of 8 concurrent AI calls per runtime. These budgets are enforced on the
   HTTP API and on the new MCP tools; the two launch tools keep their
@@ -112,7 +112,7 @@ This vocabulary may be extended, never renamed.
   existing integrations). **Known conflict with a 10 s consumer
   timeout:** these call a provider with batched ranking rounds; worst case is
   bounded at 40 s and p95 is not guaranteed under 10 s. Mitigations the
-  contract commits to: `unlinked_ask` accepts `timeoutMs` (1000–40000) and
+  contract commits to: `unlinked_ai_search` accepts `timeoutMs` (1000–40000) and
   fails typed `upstream_unavailable` when the budget elapses, so a consumer
   wanting a hard 10 s SLA should send `timeoutMs: 9000` and fall back to the
   deterministic listings. Streamed/async AI results are not offered in v1.
@@ -170,7 +170,7 @@ Response: `{ kind, degree, revision, total, anchorId? (degree 2),
 connections: [{ id, name, headline?, company?, linkedinUrl?, provenance,
 visibility }], nextCursor? }`.
 
-### `POST /api/agent/v1/ask` `{ query, scope?, timeoutMs? }` ⇄ `unlinked_ask`
+### `POST /api/agent/v1/ai-search` `{ query, scope?, timeoutMs? }` ⇄ `unlinked_ai_search`
 Explicit AI tool. `scope: "mine"` ranks only the owner's imported network
 (works on every grant); `scope: "everyone"` ranks the published public index
 and requires the public scope, else `scope_not_granted`. When `scope` is
@@ -203,6 +203,12 @@ read, `whoami`/linkage verification and the typed error vocabulary). A
 Superconnector→Neo4j projection is also under design consideration. For
 cross-product person-identity resolution the contract therefore keeps stable
 identifiers first-class:
+
+**Reserved namespace:** `ask` / `asks` (tool names, endpoint segments and
+result `kind`s) is reserved for that future person-"asks" resource
+(user-authored intent posts on profiles). That is why the AI search tool is
+named `unlinked_ai_search` and lives at `/api/agent/v1/ai-search` — do not
+add AI-search aliases under an `ask` name.
 
 - `ownerId` (from `whoami`) is the stable, never-reused account identifier —
   the only linkage primitive. Consumers must key on it, not on names or email.

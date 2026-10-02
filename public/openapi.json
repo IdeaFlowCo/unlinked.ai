@@ -424,7 +424,7 @@
         }
       }
     },
-    "/api/agent/v1/ask": {
+    "/api/agent/v1/ai-search": {
       "post": {
         "summary": "Explicit AI people search: scope mine (own network) or everyone (public index, public-scope grant)",
         "security": [

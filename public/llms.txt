@@ -23,7 +23,7 @@ Contact emails, phone numbers and original archive bytes are excluded from agent
 
 ## Current authenticated MCP
 Streamable HTTP endpoint: https://www.unlinked.ai/mcp.
-Tools: unlinked_search_network(query, degree?=1|2, cursor?) and unlinked_search_everyone(query), plus for current grants unlinked_whoami(), unlinked_list_people(q?, mode?, cursor?, limit?), unlinked_list_connections(degree?=1|2, q?, cursor?, limit?), unlinked_get_profile(id, connectionsCursor?) and unlinked_ask(query, scope?=everyone|mine, timeoutMs?). Old grants retain exactly their original tool list and scope. Its durable account grant covers current/future owner imports, same-owner sanitized recovered Connections observations and the published professional index until revoked in Settings.
+Tools: unlinked_search_network(query, degree?=1|2, cursor?) and unlinked_search_everyone(query), plus for current grants unlinked_whoami(), unlinked_list_people(q?, mode?, cursor?, limit?), unlinked_list_connections(degree?=1|2, q?, cursor?, limit?), unlinked_get_profile(id, connectionsCursor?) and unlinked_ai_search(query, scope?=everyone|mine, timeoutMs?). Old grants retain exactly their original tool list and scope. Its durable account grant covers current/future owner imports, same-owner sanitized recovered Connections observations and the published professional index until revoked in Settings.
 The same tools are a grant-authenticated HTTP JSON API under /api/agent/v1/ with typed error codes, opaque cursors and max 50 rows per page; the versioned contract is docs/agent-api.md in the repository.
 Grant tokens are distinct from Ideaflow tokens and Noos operational credentials.
 Legacy Supabase routes and stdio tools are historical source references, not live bootstrap instructions.

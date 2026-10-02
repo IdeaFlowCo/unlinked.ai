@@ -9,7 +9,7 @@ import { ACCOUNT_TOOL_DESCRIPTIONS, ACCOUNT_TOOL_SCHEMAS, AccountToolError, crea
 
 // Tools beyond the two launch tools are registered from the shared service so
 // the MCP surface and the HTTP agent API (docs/agent-api.md) stay one contract.
-const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ask']
+const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search']
 
 export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service }) {
   const base = new URL(origin)

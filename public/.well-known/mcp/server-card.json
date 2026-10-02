@@ -1,7 +1,7 @@
 {
   "name": "unlinked",
   "version": "1.0.0",
-  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants. Current grants add whoami, deterministic paginated listings and an explicit AI ask tool; old grants keep exactly their issued tool list. The same tools are served as a grant-authenticated HTTP JSON API under /api/agent/v1/ (contract: docs/agent-api.md).",
+  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants. Current grants add whoami, deterministic paginated listings and an explicit AI search tool; old grants keep exactly their issued tool list. The same tools are served as a grant-authenticated HTTP JSON API under /api/agent/v1/ (contract: docs/agent-api.md).",
   "homepage": "https://www.unlinked.ai",
   "transports": {
     "streamable-http": {
@@ -151,7 +151,7 @@
       }
     },
     {
-      "name": "unlinked_ask",
+      "name": "unlinked_ai_search",
       "description": "Explicit AI tool. scope 'mine' ranks only your own imported network; scope 'everyone' ranks the published public index and requires a public-scope grant. Set timeoutMs to bound latency.",
       "inputSchema": {
         "type": "object",
