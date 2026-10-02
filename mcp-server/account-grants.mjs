@@ -3,16 +3,18 @@ import { SignJWT, jwtVerify } from 'jose'
 import { privateId } from '../src/utils/private-import/job.mjs'
 
 const audience = 'unlinked-account-tools-v1'
-const tools = ['unlinked_search_network']
-export function createAccountGrantService({ issuer, signingKey, getBackend }) {
+const privateTools = ['unlinked_search_network'], publicTools = [...privateTools, 'unlinked_search_everyone']
+export function createAccountGrantService({ issuer, signingKey, getBackend, publicSearchEnabled = false }) {
   if (new URL(issuer).protocol !== 'https:' || !(signingKey instanceof Uint8Array) || signingKey.length < 32 || typeof getBackend !== 'function') throw new Error('account_grant_configuration_required')
   const issueGrant = async owner => {
+    const tools = publicSearchEnabled ? publicTools : privateTools
+    const scope = publicSearchEnabled ? 'owner_network_and_public' : 'owner_network'
     const backend = await getBackend(owner), jti = randomBytes(32).toString('hex'), now = Math.floor(Date.now() / 1000)
     const id = privateId(owner.ownerId, 'account-grant-v1', jti)
     await backend.writeResource({ namespace: 'unlinked', type: 'import', sourceId: id, sourceOwnerId: owner.ownerId,
       sourceRevision: 1, expectedRevision: null, audience: 'owner', deleted: false,
       payload: { kind: 'account_tool_grant', version: 1, issuer, audience, userId: owner.userId, ownerId: owner.ownerId,
-        jti, tools, scope: 'owner_network', issuedAt: now },
+        jti, tools, scope, issuedAt: now },
     })
     const accessToken = await new SignJWT({ grantId: id, ownerId: owner.ownerId, token_use: 'account_tools' })
       .setProtectedHeader({ alg: 'HS256', typ: 'at+jwt' }).setIssuer(issuer).setAudience(audience)
@@ -30,8 +32,9 @@ export function createAccountGrantService({ issuer, signingKey, getBackend }) {
       const record = await backend.readResource('import', payload.grantId), grant = record?.payload
       if (!record || record.deleted || record.sourceOwnerId !== payload.ownerId || grant?.kind !== 'account_tool_grant' || grant.version !== 1 ||
           grant.ownerId !== payload.ownerId || grant.userId !== payload.sub || grant.jti !== payload.jti || grant.issuer !== issuer || grant.audience !== audience ||
-          grant.issuedAt !== payload.iat || grant.scope !== 'owner_network' || !Array.isArray(grant.tools) || grant.tools.length !== 1 || grant.tools[0] !== tools[0]) return null
-      return { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, tools: [...tools], scope: 'owner_network' }
+          grant.issuedAt !== payload.iat || !['owner_network','owner_network_and_public'].includes(grant.scope) || !Array.isArray(grant.tools) ||
+          JSON.stringify(grant.tools) !== JSON.stringify(grant.scope === 'owner_network' ? privateTools : publicTools)) return null
+      return { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, tools: [...grant.tools], scope: grant.scope }
     } catch { return null }
   }
   const revoke = async (owner, grantId) => {

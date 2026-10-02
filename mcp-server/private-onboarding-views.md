@@ -117,3 +117,5 @@ Generate fictional, static preview pages with
 `buildPreviews(outDir)` writes the same minimal title/content wrapper as the server,
 without a network connection or server. Preview generation does not install scripts;
 both optional enhancements remain separate for controller CSP integration.
+
+Global runtime integration supplies `anonymousPublic` to People for a native GET `/network?q=` search without session controls; `publicProfessionalSearch` controls the NEW upload action notice and Settings public/private explanation. Individual import summaries carry `visibility: public|private`; older private imports retain private wording. No renderer prop itself grants authority or publishes data.

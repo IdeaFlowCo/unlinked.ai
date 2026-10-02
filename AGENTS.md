@@ -94,3 +94,5 @@ When updating this file, preserve this bar for all agents and keep entries conci
 ## Canonical anonymous discovery
 
 `mcp-server/public-discovery.mjs` mounts exact GET/HEAD discovery/import/Meet routes before session resolution; its fixed asset map never exposes owner data or request-selected files.
+
+Shared public People/API/AI and backward-compatible account grant behavior are documented in `docs/shared-people-beta.md`; no raw private import or identity data is projected publicly.

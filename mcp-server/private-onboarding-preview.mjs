@@ -54,6 +54,7 @@ export async function buildPreviews(outDir) {
     ['people-welcome', renderPeople({ ...account, state: 'welcome', own: contacts, everyone })],
     ['people-empty', renderPeople({ ...account, own: [], everyone: [] })],
     ['people-no-match', renderPeople({ ...account, query: 'ocean logistics', own: [], everyone: [] })],
+    ['everyone-anonymous', renderPeople({ anonymousPublic: true, everyone, query: 'climate' })],
     ['everyone-default', renderPeople({ ...account, scope: 'everyone', everyone, nextCursor: 'fictional-page-2' })],
     ['people-both-groups', renderPeople({ ...account, scope: 'own', own: contacts.map((contact, index) => ({ ...contact, ...(index === 0 ? { reason: 'Worked together on community energy.' } : {}) })), everyone })],
     ['everyone-unavailable', renderPeople({ ...account, scope: 'everyone', everyone: [], state: 'unavailable' })],

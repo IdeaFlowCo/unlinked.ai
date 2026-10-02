@@ -1,7 +1,7 @@
 {
   "name": "unlinked",
   "version": "1.0.0",
-  "description": "Search your owner-scoped imported network until the explicit grant is revoked.",
+  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant.",
   "homepage": "https://www.unlinked.ai",
   "transports": {
     "streamable-http": {
@@ -15,6 +15,23 @@
   "tools": [
     {
       "name": "unlinked_search_network",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unlinked_search_everyone",
       "inputSchema": {
         "type": "object",
         "properties": {
