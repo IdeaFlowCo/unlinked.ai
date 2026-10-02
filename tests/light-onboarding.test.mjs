@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
 import { buildPreviews } from '../mcp-server/private-onboarding-preview.mjs'
+import { ONBOARDING_STYLE } from '../mcp-server/private-onboarding-style.mjs'
 
 const account = { accountLabel: 'Test person', csrf: 'csrf-value' }
 
@@ -587,4 +588,19 @@ test('an active import shows a header pill that leads to the profile; a finished
   assert.match(header({ status: 'indexing', processed: 412, total: 1005 }), /<a class="pill" href="\/profile"[^>]*>Importing · 41%<\/a>/)
   assert.match(header({ status: 'parsing', total: null }), /<a class="pill" href="\/profile"[^>]*>Importing…<\/a>/)
   for (const status of ['indexed', 'partial', 'failed', 'invented']) assert.doesNotMatch(header({ status, processed: 5, total: 5 }), /class="pill"/)
+})
+
+test('the stylesheet loads nothing the page policy forbids, and the search icon is an inline element', () => {
+  assert.doesNotMatch(ONBOARDING_STYLE, /url\(|@import|expression\(/i)
+  const header = renderLanding().content.match(/<header>(.*?)<\/header>/s)[1]
+  assert.match(header, /<svg class="search-icon"[^>]*aria-hidden="true">/)
+  assert.doesNotMatch(renderLanding().content, /<img\b|background-image|src=/)
+})
+
+test('a connections heading uses a given name, never a bare initial', () => {
+  const heading = name => renderPerson({ profile: { id: 'p', name, connections: [{ id: 'c', name: 'Theo Brooks' }] } }).content.match(/<aside>.*?<h3>(.*?)<\/h3>/s)[1]
+  assert.equal(heading('Maya Chen'), 'Maya’s connections · 1')
+  assert.equal(heading('A. Efe Zaladin'), 'Connections · 1')
+  assert.equal(heading('Al Green'), 'Connections · 1')
+  assert.equal(heading(''), 'Connections · 1')
 })

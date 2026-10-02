@@ -13,7 +13,9 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .logo{text-decoration:none;letter-spacing:-.04em;color:var(--brand)}
 .unlinked-onboarding .logo strong{font-size:21px;font-weight:700;color:var(--brand)}
 .unlinked-onboarding .header-search{position:relative;display:flex;flex:1;max-width:440px;margin-right:auto}
-.unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 46px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23667085' stroke-width='2'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='m11 11 4 4'/%3E%3C/svg%3E") no-repeat 14px 50%}
+.unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 46px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
+/* The icon is an element, not a data: background, so the page's default-src 'none' policy allows it. */
+.unlinked-onboarding .header-search .search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
 .unlinked-onboarding .header-search input[type=search]:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--tint)}
 .unlinked-onboarding .header-search button{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:34px;height:34px;min-height:0;padding:0;border:0;border-radius:50%;background:none;color:var(--brand-d);display:grid;place-items:center;cursor:pointer}
 .unlinked-onboarding .header-search button:hover{background:var(--tint)}
