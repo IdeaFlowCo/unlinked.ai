@@ -5,7 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { accountGrantTools } from './account-grants.mjs'
-import { ACCOUNT_TOOL_DESCRIPTIONS, ACCOUNT_TOOL_SCHEMAS, AccountToolError, createAccountToolService } from './account-tools.mjs'
+import { ACCOUNT_TOOL_DESCRIPTIONS, ACCOUNT_TOOL_SCHEMAS, AccountToolError, WRITE_TOOLS, createAccountToolService } from './account-tools.mjs'
 
 // Tool failures carry sanitized typed causes (code/message plus an internal
 // error identifier) so a provider or aggregation failure is distinguishable
@@ -34,7 +34,9 @@ export function typedToolFailure(error) {
 
 // Tools beyond the two launch tools are registered from the shared service so
 // the MCP surface and the HTTP agent API (docs/agent-api.md) stay one contract.
-const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']
+const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
+  // Registered only for grants whose opt-in scope includes them.
+  'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']
 
 export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
   const base = new URL(origin)
@@ -94,7 +96,9 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     }
     for (const name of SERVICE_TOOLS) {
       if (!grant.tools.includes(name)) continue
-      server.registerTool(name, { description: ACCOUNT_TOOL_DESCRIPTIONS[name], inputSchema: ACCOUNT_TOOL_SCHEMAS[name] }, async input => {
+      // Clients that ask before acting see which tools change something.
+      const annotations = WRITE_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
+      server.registerTool(name, { description: ACCOUNT_TOOL_DESCRIPTIONS[name], inputSchema: ACCOUNT_TOOL_SCHEMAS[name], annotations }, async input => {
         const controller = new AbortController()
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
         response.once('close', () => { if (!response.writableFinished) controller.abort() })

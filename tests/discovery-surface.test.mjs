@@ -44,7 +44,7 @@ test('public/.well-known/mcp/server-card.json describes canonical account MCP', 
   assert.ok(!card.transports?.stdio, 'canonical card must not advertise legacy stdio bootstrap');
 
   const toolNames = card.tools.map((t) => t.name);
-  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']);
+  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']);
   const searchTool = card.tools[0];
   assert.deepEqual(searchTool.inputSchema.required, ['query']);
   assert.equal(searchTool.inputSchema.additionalProperties, false);
@@ -97,7 +97,7 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.servers[0].url, 'https://www.unlinked.ai');
 
   const paths = Object.keys(spec.paths);
-  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/connection-requests', '/api/agent/v1/notifications', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone', '/api/agent/v1/provision-grant',
+  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/connection-requests', '/api/agent/v1/connection-requests/accept', '/api/agent/v1/connection-requests/ignore', '/api/agent/v1/connection-requests/send', '/api/agent/v1/connection-requests/withdraw', '/api/agent/v1/notifications', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone', '/api/agent/v1/provision-grant',
     '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server', '/oauth/authorize', '/oauth/token', '/oauth/register', '/oauth/revoke'];
 
   for (const p of expectedPaths) {

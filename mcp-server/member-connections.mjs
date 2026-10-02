@@ -11,6 +11,9 @@ import { createHash, randomUUID } from 'node:crypto'
 // recipient can still connect later; pressing Connect on the sender's profile
 // accepts the old request instead of creating a second one.
 //
+// Either member can later remove an accepted connection: it becomes `removed`
+// for both of them (nobody is told), and either can send a new request.
+//
 // Storage enforces the pair rules: `openKey` (set while pending or ignored) and
 // `connectedKey` (set once accepted) are the pair's key and unique, so two
 // racing requests or accepts between the same two accounts cannot both land.
@@ -18,7 +21,7 @@ import { createHash, randomUUID } from 'node:crypto'
 export const CONNECTION_REQUESTS_PER_DAY = 50
 export const RESEND_COOLDOWN_MS = 21 * 24 * 60 * 60 * 1000
 export const CONNECTION_NOTE_LIMIT = 300
-const STATUSES = ['pending', 'accepted', 'ignored', 'withdrawn']
+const STATUSES = ['pending', 'accepted', 'ignored', 'withdrawn', 'removed']
 const OPEN = ['pending', 'ignored']
 const DAY = 24 * 60 * 60 * 1000
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -131,6 +134,16 @@ export function createConnectionRequests({ store, notifications = null, now = Da
       if (!(await store.transition(id, OPEN, { status: 'withdrawn', withdrawnAt: now() }, ['openKey']))) throw new ConnectionError('connection_unavailable')
       if (notifications) await quietly(() => notifications.retract(requestKey(id)))
     },
+    // Either member removes an accepted connection, for both of them. The
+    // record stays as `removed` (history, and the pair key is freed so either
+    // side can ask again); nobody is notified. Only the two members can do it,
+    // and anything else looks like an unknown id.
+    async remove(member, id) {
+      owner(member)
+      const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
+      if (!record || (!same(senderOf(record), member) && !same(recipientOf(record), member))) throw new ConnectionError('connection_not_found')
+      if (!(await store.transition(id, ['accepted'], { status: 'removed', removedAt: now(), removedBy: same(senderOf(record), member) ? 'sender' : 'recipient' }, ['connectedKey']))) throw new ConnectionError('connection_unavailable')
+    },
     // Requests waiting for this member's answer (ignored ones are set aside).
     async received(member) {
       return (await store.listByRecipient(owner(member), ['pending'])).map(record => view(record, member)).sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1))
@@ -209,7 +222,7 @@ export function createMemoryConnectionStore() {
   }
 }
 
-const RECORD_KEYS = ['id', 'pairKey', 'openKey', 'connectedKey', 'senderOwnerId', 'senderUserId', 'senderName', 'senderProfileId', 'recipientOwnerId', 'recipientUserId', 'recipientName', 'recipientProfileId', 'note', 'status', 'createdAt', 'respondedAt', 'withdrawnAt']
+const RECORD_KEYS = ['id', 'pairKey', 'openKey', 'connectedKey', 'senderOwnerId', 'senderUserId', 'senderName', 'senderProfileId', 'recipientOwnerId', 'recipientUserId', 'recipientName', 'recipientProfileId', 'note', 'status', 'createdAt', 'respondedAt', 'withdrawnAt', 'removedAt', 'removedBy']
 const fromNode = properties => {
   const value = {}
   for (const name of RECORD_KEYS) if (properties[name] !== undefined && properties[name] !== null) value[name] = typeof properties[name]?.toNumber === 'function' ? properties[name].toNumber() : properties[name]

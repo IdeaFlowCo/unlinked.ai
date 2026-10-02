@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createConnectionRequests, createMemoryConnectionStore } from '../mcp-server/member-connections.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { startPrivatePilot } from '../mcp-server/private-pilot.mjs'
@@ -38,7 +39,7 @@ function store() {
   return { resources, getBackend: async owner => backend(owner), live: () => [...resources.values()].filter(x => !x.deleted && x.payload?.kind === 'account_tool_grant') }
 }
 
-async function pilot(t) {
+async function pilot(t, extra = {}) {
   const owner = { ownerId: 'oauth-owner', userId: 'oauth-user' }
   const graph = store(), auditEvents = []
   const port = await freePort()
@@ -48,7 +49,7 @@ async function pilot(t) {
       finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'oauth-subject', verifiedEmail: 'member@example.invalid' }) },
     resolveOwner: async () => owner, signup: async () => owner, accountGrantKey: randomBytes(32),
     getBackend: graph.getBackend, complete: async () => ({ matches: [] }), readPublishedSnapshot: async () => ({ people: [] }),
-    audit: async event => { auditEvents.push(event) } })
+    audit: async event => { auditEvents.push(event) }, ...extra })
   t.after(() => running.stop())
   const go = (path, init = {}) => fetch(endpoint + path, { redirect: 'manual', ...init })
   const signIn = async next => {
@@ -78,7 +79,7 @@ test('discovery metadata, CORS and the /mcp challenge point clients at sign-in',
     const response = await p.go(path)
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('access-control-allow-origin'), '*')
-    assert.deepEqual(await response.json(), { resource: `${p.baseUrl}/mcp`, authorization_servers: [p.baseUrl], scopes_supported: ['network', 'people'],
+    assert.deepEqual(await response.json(), { resource: `${p.baseUrl}/mcp`, authorization_servers: [p.baseUrl], scopes_supported: ['network', 'people', 'connections'],
       bearer_methods_supported: ['header'], resource_name: 'Unlinked', resource_documentation: `${p.baseUrl}/agents` })
   }
   const as = await (await p.go('/.well-known/oauth-authorization-server')).json()
@@ -375,4 +376,30 @@ test('redirect policy table', () => {
   assert.equal(redirectPolicy('https://claude.com/api/mcp/auth_callback').app, 'Claude')
   assert.equal(redirectPolicy('https://chatgpt.com/connector_platform_oauth_redirect').app, 'ChatGPT')
   for (const uri of ['https://chatgpt.com/connector/oauth/AbC_123-x', 'http://[::1]:9000/cb', 'https://chatgpt.com/connector/oauth/../../x', 'https://chatgpt.com/other', 'http://localhost:6274/cb#frag', 'http://LOCALHOST/cb', 'https://localhost/cb', 'http://127.0.0.2/cb', 'http://localhost/a b']) assert.equal(redirectPolicy(uri), null, uri)
+})
+
+
+test('OAuth writes require explicit unchecked consent and survive token exchange; requested scope alone grants reads', async t => {
+  const p = await pilot(t, { memberConnections: createConnectionRequests({store:createMemoryConnectionStore()}), accountForProfile: async () => null, readPublishedSnapshot: async () => ({state:'published',complete:true,revision:'empty',profiles:[],connections:[]}) })
+  const client = await (await p.register({redirect_uris:[CLAUDE]})).json()
+  const {cookie}=await p.signIn()
+  const query=authorizeQuery(client.client_id,{resource:p.baseUrl+'/mcp',scope:'network people connections'})
+  const consent=await (await p.go('/oauth/authorize?'+query,{headers:{Cookie:cookie}})).text()
+  assert.match(consent, /<input type="checkbox" name="access" value="connections">/)
+  const approve=async access=>p.go('/oauth/authorize',{method:'POST',headers:{Cookie:cookie,Origin:p.baseUrl,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams([['csrf',csrfFrom(consent)],['decision','allow'],...hiddenParams(consent),...access])})
+  for(const access of [[],[['access','connections']]]) {
+    const approved=await approve(access); assert.equal(approved.status,303)
+    const code=new URL(approved.headers.get('location')).searchParams.get('code')
+    const token=await (await p.token({grant_type:'authorization_code',code,client_id:client.client_id,redirect_uri:CLAUDE,code_verifier:'v'.repeat(64)})).json()
+    assert.equal(token.scope,access.length?'network people connections':'network people')
+    const tools=await mcpTools(p.endpoint,token.access_token)
+    assert.equal(tools.includes('unlinked_send_connection_request'),Boolean(access.length))
+    const r=await p.go('/api/agent/v1/connection-requests/send',{method:'POST',headers:{Authorization:'Bearer '+token.access_token,'Content-Type':'application/json'},body:JSON.stringify({profileId:'unknown'})})
+    assert.equal(r.status,access.length?404:403)
+  }
+  assert.equal((await approve([['access','write']])).status,400)
+  assert.equal((await approve([['access','connections'],['access','read']])).status,400)
+  const narrow=hiddenParams(consent);narrow.set('scope','network')
+  const denied=await p.go('/oauth/authorize',{method:'POST',headers:{Cookie:cookie,Origin:p.baseUrl,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams([['csrf',csrfFrom(consent)],['decision','allow'],...narrow,['access','connections']])})
+  assert.equal(denied.status,400)
 })

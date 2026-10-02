@@ -101,11 +101,15 @@ Grant catalog version 3 adds two read-only tools,
 `unlinked_list_connection_requests` and `unlinked_list_notifications` (see
 `docs/agent-api.md`). Grants issued earlier keep their own tool list, so a
 member gets these tools after regenerating their agent setup in Settings.
-Agents cannot send, answer or withdraw requests.
+Version 4 retains those reads and adds explicitly opted-in write tools. See `docs/agent-api.md`.
 
 ## Not yet
 
 - Email or push delivery (the model is ready; mail is not configured).
-- Removing a single connection (account deletion removes all of them).
-- Connect buttons on People result rows (only on profile pages).
-- Write tools for agents.
+
+
+## Follow-ups
+
+People rows show Connect, Pending + Withdraw, Accept + Ignore, Connected, or Invite, with the same shared rules as profiles. `/network?connected=1&presence=member` (also via signed-in `/people`) lists only your connected real members, with member/shadow/all counts and both graph directions.
+
+Either participant can remove an accepted member request through `POST /connections/remove` (`id`, `next`, CSRF), after the profile/row confirmation. The request becomes `removed`, releases its pair key and removes the agreed edge from both accounts; no notification is sent. A new request can reconnect them. Accepted off-platform invite connections also offer removal (their link is revoked). Imported observations and claimed profiles remain independent provenance and are preserved.
