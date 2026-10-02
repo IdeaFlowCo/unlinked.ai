@@ -70,27 +70,35 @@ export function createConnectionActions({ memberConnections, accountForProfile, 
     }
   }
   async function remove(owner, id) {
-    const [requests, invitations] = await Promise.all([
-      memberConnections.connections(owner),
-      memberInvitations ? memberInvitations.connections(owner) : [],
-    ])
     const isInvite = typeof id === 'string' && id.startsWith('invite:')
-    const selected = isInvite ? invitations.find(value => `invite:${value.invitationId}` === id) : requests.find(value => value.requestId === id)
-    if (!selected) throw new ConnectionError('connection_not_found')
-    const requestIds = await memberConnections.captureRemovalPair(owner, selected.other)
-    const pairedInvitations = invitations.filter(value => sameAccount(value.other, selected.other))
-    const removeInvite = async invitationId => {
-      try { await memberInvitations.remove(owner, invitationId) }
+    const selectedId = isInvite ? id.slice(7) : id
+    const selectedService = isInvite ? memberInvitations : memberConnections
+    const removeInvite = async (invitationId, operation) => {
+      try { await memberInvitations.remove(owner, invitationId, operation) }
       catch (error) { if (error instanceof InvitationError) throw new ConnectionError(error.code === 'invitation_not_found' ? 'connection_not_found' : 'connection_unavailable'); throw error }
     }
-    if (isInvite) await removeInvite(selected.invitationId)
-    else await memberConnections.remove(owner, selected.requestId)
-    await memberConnections.settleRemovedPair(owner, selected.other, requestIds)
-    for (const invitation of pairedInvitations) {
-      if (isInvite && invitation.invitationId === selected.invitationId) continue
-      try { await removeInvite(invitation.invitationId) }
+    let operation = await selectedService?.resumeRemoval(owner, selectedId)
+    if (!operation) {
+      const [requests, invitations] = await Promise.all([
+        memberConnections.connections(owner),
+        memberInvitations ? memberInvitations.connections(owner) : [],
+      ])
+      const selected = isInvite ? invitations.find(value => value.invitationId === selectedId) : requests.find(value => value.requestId === selectedId)
+      if (!selected) throw new ConnectionError('connection_not_found')
+      operation = { other: selected.other,
+        requestIds: await memberConnections.captureRemovalPair(owner, selected.other),
+        invitationIds: invitations.filter(value => sameAccount(value.other, selected.other)).map(value => value.invitationId) }
+      if (isInvite) await removeInvite(selectedId, operation)
+      else await memberConnections.remove(owner, selectedId, operation)
+    }
+    await memberConnections.settleRemovedPair(owner, operation.other, operation.requestIds)
+    for (const invitationId of operation.invitationIds) {
+      if (isInvite && invitationId === selectedId) continue
+      try { await removeInvite(invitationId) }
       catch (error) { if (!(error instanceof ConnectionError) || !['connection_not_found', 'connection_unavailable'].includes(error.code)) throw error }
     }
+    await selectedService.completeRemoval(owner, selectedId)
   }
+
   return { relations, relationTo, send, remove }
 }
