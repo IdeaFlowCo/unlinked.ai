@@ -31,32 +31,40 @@ export function createQueryMatcher(query, mode = 'best') {
   if (!typed.length) return null
   if (mode === 'exact') {
     const phrase = ` ${typed.join(' ')} `
-    return { mode, terms: typed, test: ({ text = [], name = [] }) => { const all = ` ${text.join(' ')} `.includes(phrase); return { matched: all ? typed.length : 0, all, inName: all && ` ${name.join(' ')} `.includes(phrase) ? 1 : 0 } } }
+    return { mode, terms: [typed.join(' ')], test: ({ text = [], name = [] }) => { const all = ` ${text.join(' ')} `.includes(phrase); return { matched: all ? 1 : 0, all, inName: all && ` ${name.join(' ')} `.includes(phrase) ? 1 : 0, hits: [all] } } }
   }
   const meaningful = typed.filter(word => !STOP.has(word))
   const terms = [...new Set(meaningful.length ? meaningful : typed)].slice(0, 32)
   const forms = terms.map(wordForms)
   return { mode, terms, test: ({ text = [], name = [] }) => {
     let matched = 0, inName = 0
-    for (const candidates of forms) {
+    const hits = forms.map(candidates => {
       // A name can be typed part-way (“zalad”); other text needs a whole short word (“vc”, “ai”).
-      const named = hit(candidates, name, 2)
-      if (named || hit(candidates, text, 4)) matched++
+      const named = hit(candidates, name, 2), found = named || hit(candidates, text, 4)
+      if (found) matched++
       if (named) inName++
-    }
-    return { matched, all: matched === terms.length, inName }
+      return found
+    })
+    return { matched, all: matched === terms.length, inName, hits }
   } }
 }
 
-// Rank rows for a matcher. When any row has every word, only those are kept.
-export function rankMatches(rows, matcher, tokens, tie = () => 0) {
-  const scored = []
+// Rank rows for a matcher. When any row has every word, only those are kept,
+// unless `keepPartial` asks for the rest after them. Among partial matches a
+// rarer word counts for more, so “game” outranks “partner” when few people have it.
+export function rankMatches(rows, matcher, tokens, { tie = () => 0, keepPartial = false } = {}) {
+  const scored = [], frequency = matcher.terms.map(() => 0)
   for (const row of rows) {
     const result = matcher.test(tokens(row))
-    if (result.matched) scored.push({ row, ...result })
+    if (!result.matched) continue
+    result.hits.forEach((found, index) => { if (found) frequency[index]++ })
+    scored.push({ row, ...result })
   }
+  const weight = frequency.map(count => count ? Math.log(1 + scored.length / count) : 0)
+  for (const value of scored) value.score = value.hits.reduce((sum, found, index) => sum + (found ? weight[index] : 0), 0)
+  const order = (a, b) => Number(b.all) - Number(a.all) || b.score - a.score || b.inName - a.inName || tie(a.row, b.row)
   const complete = scored.filter(value => value.all)
-  const kept = complete.length ? complete : scored
-  kept.sort((a, b) => b.matched - a.matched || b.inName - a.inName || tie(a.row, b.row))
-  return { rows: kept.map(value => value.row), match: !scored.length ? 'none' : complete.length ? 'all' : 'some' }
+  const kept = complete.length && !keepPartial ? complete : scored
+  kept.sort(order)
+  return { rows: kept.map(value => value.row), match: !scored.length ? 'none' : complete.length ? 'all' : 'some', matched: scored.length, complete: complete.length }
 }

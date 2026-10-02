@@ -59,6 +59,10 @@ results show a small POST `/search-account` form carrying `csrf` and the hidden 
 submit button per available scope (`everyone` when public search is on, `own` when `own` is
 defined). Defined empty `own` with a query is a no-match result; without a query it shows the
 import prompt, which links to `/import`.
+`anonymousAi: true` with a query and no session shows one Ask AI button posting the hidden `query`
+to `/ask`. `aiMatches` renders an AI picks group above the lists, each row with its escaped `reason`,
+followed by `aiNote` and a sentence saying what OpenAI received; `aiError` replaces the picks with an alert.
+Plain list rows never show a reason.
 
 For the current controller, legacy `contacts` and `searchResults` remain supported.
 When `own` is undefined and either legacy prop is supplied, own rows come from

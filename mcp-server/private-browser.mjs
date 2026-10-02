@@ -88,6 +88,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
   let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
+  // Visitors can ask the AI about the public list. Each ask is a paid model call, so it is
+  // bounded per minute, per day and in flight, for the whole site rather than per visitor.
+  const ASK_PER_MINUTE = 12, ASK_PER_DAY = 1500, ASK_IN_FLIGHT = 2
+  let askMinute = Date.now(), askMinuteCount = 0, askDay = Math.floor(Date.now() / 86400000), askDayCount = 0, askBusy = 0
+  const publicAi = typeof complete === 'function' && typeof readPublishedSnapshot === 'function'
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
@@ -165,12 +170,39 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', result = await publicReader.list({ query, mode, cursor: url.searchParams.get('cursor') ?? undefined })
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
-          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, query, mode, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
+          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
           response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' })); return
         } finally { publicBusy-- }
+      }
+      if (request.method === 'POST' && url.pathname === '/ask' && !viewer) {
+        if (!publicAi) { response.writeHead(404).end(); return }
+        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        const query = input.get('query') ?? ''
+        if (input.getAll('query').length !== 1 || !query.trim() || query.length > 200 || [...input.keys()].some(key => key !== 'query')) throw new Error('public_ask_input_invalid')
+        // The ordinary list for the same words stays on the page beside the AI picks.
+        let listed = {}
+        try { const result = await publicReader.list({ query }); listed = { everyone: result.profiles, match: result.match, nextCursor: result.nextCursor } } catch { /* The AI picks stand alone when the list cannot be read. */ }
+        const page = extra => renderPeople({ query, state: 'ready', anonymousAi: true, ...listed, ...extra })
+        const now = Date.now(), day = Math.floor(now / 86400000)
+        if (now - askMinute >= 60000) { askMinute = now; askMinuteCount = 0 }
+        if (day !== askDay) { askDay = day; askDayCount = 0 }
+        if (askMinuteCount >= ASK_PER_MINUTE || askDayCount >= ASK_PER_DAY || askBusy >= ASK_IN_FLIGHT) {
+          response.setHeader('Retry-After', '60')
+          journey(response, page({ aiError: 'AI search is busy right now. Try again in a minute; the regular results are below.' }), null, '', 429); return
+        }
+        askMinuteCount++; askDayCount++; askBusy++
+        try {
+          const controller = new AbortController()
+          response.once('close', () => { if (!response.writableFinished) controller.abort() })
+          const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
+          journey(response, page({ aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }))
+        } catch {
+          journey(response, page({ aiError: 'AI search could not finish. Try again; the regular results are below.' }), null, '', 503)
+        } finally { askBusy-- }
+        return
       }
       const inviteMatch = url.pathname.match(/^\/invite\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && inviteMatch && invitationMode) {
@@ -398,8 +430,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
             const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
             const own = network.imports.length || network.legacyProfileId ? network.assertions.filter(row => row.category === 'connections').slice(0, 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })) : undefined
-            const view = renderPeople({ ...props, scope, everyone: result.matches, own, query: input.get('query'), state: 'ready', searchResults: result.matches })
-            extend(view, `<p class="dir small">${result.considered} public profiles considered; ${result.modelCandidates} matching candidates ranked with AI.</p>`)
+            const view = renderPeople({ ...props, scope, aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.`, own, query: input.get('query'), state: 'ready' })
             journey(response, view, props.importJob); return
           }
           const result = await createAccountNetwork({ owner: session.owner, getBackend, complete }).search({ query: input.get('query'), signal: controller.signal })

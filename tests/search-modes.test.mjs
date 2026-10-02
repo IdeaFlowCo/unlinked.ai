@@ -127,3 +127,46 @@ test('the site and API accept mode, reject unknown or repeated modes, and search
   assert.equal(member.status, 200); assert.match(await member.text(), /<input type="hidden" name="mode" value="exact">/)
   assert.equal((await request('/network?q=game&mode=fuzzy', { headers: { Cookie: session } })).status, 400)
 })
+
+test('a visitor can ask the AI about the public list; picks carry reasons, the list stays below, and nothing private is involved', async t => {
+  let handler, models = 0, backendReads = 0, fail = false
+  const server = createServer((req, res) => void handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'private_live', login: { begin: async () => {}, finish: async () => {} }, resolveOwner: async () => null,
+    getBackend: async () => { backendReads++; throw new Error('private read forbidden') }, readPublishedSnapshot: async () => snapshot(),
+    complete: async ({ input, candidateIds }) => { models++; if (fail) throw new Error('provider down'); const names = JSON.parse(input).observations.map(value => value.fields.name); return { matches: [{ id: candidateIds[names.indexOf('Cy Vance')], reason: 'Invests in <games>' }] } } })
+  const ask = (body, headers = {}) => fetch(endpoint + '/ask', { method: 'POST', redirect: 'manual', headers: { Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded', ...headers }, body: new URLSearchParams(body) })
+  const results = await (await fetch(endpoint + '/network?q=game+investors')).text()
+  assert.match(results, /<form class="ask-ai actions" method="post" action="\/ask"><input type="hidden" name="query" value="game investors">/)
+  assert.doesNotMatch(results, /name="csrf"|\/search-account/)
+  const answered = await ask({ query: 'game investors' }); assert.equal(answered.status, 200)
+  const page = await answered.text()
+  assert.match(page, /<h2>AI picks<\/h2>.*href="\/people\/cy">Cy Vance.*<p class="reason">Invests in &lt;games&gt;<\/p>/s)
+  assert.match(page, /7 public profiles considered; \d+ ranked with AI\./)
+  assert.match(page, /OpenAI received your words and a limited set of public names, headlines and roles\./)
+  assert.match(page, /class="everyone-group".*Eli Park/s)
+  assert.equal(models, 1); assert.equal(backendReads, 0)
+  assert.equal((await ask({ query: 'x' }, { Origin: 'https://evil.invalid' })).status, 403)
+  for (const body of [{}, { query: ' ' }, { query: 'x'.repeat(201) }, { query: 'x', scope: 'own' }, [['query', 'a'], ['query', 'b']]]) assert.equal((await ask(body)).status, 400)
+  assert.equal(models, 1)
+  fail = true
+  const failed = await ask({ query: 'game investors' }); assert.equal(failed.status, 503)
+  assert.match(await failed.text(), /AI search could not finish\. Try again; the regular results are below\..*class="everyone-group"/s)
+  fail = false
+  // The site-wide budget: twelve asks a minute, then a polite refusal that still shows the list.
+  let limited
+  for (let index = 0; index < 14 && !limited; index++) { const response = await ask({ query: 'game investors' }); if (response.status === 429) limited = response }
+  assert.ok(limited); assert.equal(limited.headers.get('retry-after'), '60')
+  assert.match(await limited.text(), /AI search is busy right now\./)
+  assert.ok(models <= 12)
+})
+
+test('partial matches put the rarer word first, and a site without a model offers no AI button', async t => {
+  const rare = await reader().list({ query: 'riot investor' })
+  assert.equal(rare.profiles[0].id, 'ben')
+  assert.doesNotMatch(renderPeople({ everyone: [], query: 'x' }).content, /action="\/ask"/)
+  assert.match(renderPeople({ everyone: [], query: 'x', anonymousAi: true }).content, /action="\/ask"/)
+  assert.doesNotMatch(renderPeople({ everyone: [], anonymousAi: true }).content, /action="\/ask"/)
+  assert.doesNotMatch(renderPeople({ csrf: 'c', everyone: [], query: 'x', anonymousAi: true }).content, /action="\/ask"/)
+})
