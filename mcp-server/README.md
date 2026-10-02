@@ -6,9 +6,9 @@ A [Model Context Protocol](https://modelcontextprotocol.io) adapter for the hist
 
 ## Current availability
 
-Current private sign-in, archive upload, own-network search, and hosted Agent setup are in the open-beta app linked from `/agents`. The setup examples below are preserved as historical implementation notes for the legacy stdio server, recovery and local development.
+Current sign-in, archive upload, own-network search, and hosted Agent setup run in the canonical beta at https://www.unlinked.ai. `/agents` and the machine discovery files describe that Streamable HTTP account MCP setup. The setup examples below are preserved as historical implementation notes for the legacy stdio server, recovery and local development.
 
-The default-off private runtime also contains a hosted account MCP handler for the private pilot. That handler uses a separate bearer audience, exposes only `unlinked_search_network`, searches all current owner imports plus future imports until revoked, and is documented in `../deploy/private-pilot/ACCOUNT-LAUNCH.md`; it is not the public stdio server below.
+The standalone runtime's hosted account MCP handler uses a separate bearer audience, exposes only `unlinked_search_network`, searches all current owner imports plus future imports until revoked, and is documented in `../deploy/private-pilot/ACCOUNT-LAUNCH.md`; it is not the legacy stdio server below.
 
 ## Historical setup reference
 
@@ -68,7 +68,7 @@ For the historical API, set the API key one of two ways (checked in this order):
    { "apiKey": "ul_your_key_here", "baseUrl": "https://www.unlinked.ai" }
    ```
 
-The server will fail tool calls with a clear error message if neither is set. A configured legacy client is not proof of access; current beta setup is confirmed by a successful scoped tool call from the beta app's Agent setup.
+The server will fail tool calls with a clear error message if neither is set. A configured legacy client is not proof of access; current setup is confirmed by a successful scoped `unlinked_search_network` call against `https://www.unlinked.ai/mcp` using the standalone runtime's account grant.
 
 ## Environment Variables
 
