@@ -86,3 +86,39 @@ for (const count of [181, 4001]) test(`${count} long-field connections with an e
   assert.ok(result.matches.some(match => match.assertionId === assertions.at(-1).id))
   assert.equal(result.indexed, count)
 })
+
+test('a round ranks groups concurrently (bounded), retries one transient provider failure, and does not retry hard errors', async () => {
+  const assertions = Array.from({ length: 801 }, (_, i) => ({ ...publication.assertions[0], id: i.toString(16).padStart(64, '0') }))
+  const indexed = { ...publication, indexed: 801, assertions }
+  // Hold every provider call open until three are in flight: a serial
+  // implementation would deadlock here, so completion proves concurrency.
+  let inFlight = 0, maxInFlight = 0, release
+  const gate = new Promise(resolve => { release = resolve })
+  const complete = async ({ candidateIds }) => {
+    inFlight++; maxInFlight = Math.max(maxInFlight, inFlight)
+    if (inFlight >= 3) release()
+    await gate
+    inFlight--
+    return { matches: candidateIds.includes(assertions.at(-1).id) ? [{ id: assertions.at(-1).id, reason: 'Last contact' }] : [] }
+  }
+  const result = await createPrivateSearch({ readImport: async () => indexed, complete })({ importId: id, query: 'last contact' })
+  assert.ok(maxInFlight >= 3)
+  assert.ok(maxInFlight <= 4)
+  assert.equal(result.matches[0].assertionId, assertions.at(-1).id)
+
+  // One transient provider failure (timeout/429/5xx) is retried once in place.
+  let failed = false, ranks = 0
+  const flaky = async () => {
+    ranks++
+    if (!failed) { failed = true; throw new Error('private_search_provider_http_429') }
+    return { matches: [] }
+  }
+  const retried = await createPrivateSearch({ readImport: async () => indexed, complete: flaky })({ importId: id, query: 'retry once' })
+  assert.deepEqual(retried.matches, [])
+  assert.equal(ranks, 6) // five groups of ≤200 plus exactly one retry
+
+  // Hard provider failures are not retried and fail the search fast.
+  let hard = 0
+  await assert.rejects(createPrivateSearch({ readImport: async () => indexed, complete: async () => { hard++; throw new Error('private_search_provider_refused') } })({ importId: id, query: 'hard' }), /provider_refused/)
+  assert.ok(hard >= 1 && hard <= 4)
+})
