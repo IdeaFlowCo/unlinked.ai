@@ -60,12 +60,12 @@ test('explicit DTO whitelist excludes contact details, notes, source archive and
   assert.deepEqual(detail.profile.skills, ['Research'])
 })
 
-test('unknown public profile is null for HTTP404, empty published snapshot is ready, connections remain directed', async () => {
+test('unknown public profile is null for HTTP404, empty published snapshot is ready, connections show from both ends', async () => {
   const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => published(), pageSize: 1 })
   assert.equal(await reader.profile({ id: 'unknown' }), null)
   const first = await reader.profile({ id: 'z' });assert.deepEqual(first.profile.connections.map(p => p.id), ['a'])
   const second = await reader.profile({ id: 'z', cursor: first.profile.nextConnectionsCursor });assert.deepEqual(second.profile.connections.map(p => p.id), ['b'])
-  assert.deepEqual((await reader.profile({ id: 'a' })).profile.connections, [])
+  assert.deepEqual((await reader.profile({ id: 'a' })).profile.connections.map(p => p.id), ['z'])
   assert.deepEqual(await createPublicPeopleReader({ readPublishedSnapshot: async () => ({ ...published(), profiles: [], connections: [] }) }).list(), { profiles: [] })
 })
 
@@ -137,4 +137,10 @@ test('malformed input cannot become authority or oversized backend query', async
   await assert.rejects(reader.list({ cursor: 'broken!' }), invalid)
   assert.equal(reads, 0)
   assert.throws(() => createPublicPeopleReader({ pageSize: 101 }), /configuration_invalid/)
+})
+
+test('a connection listed by both people appears once on each profile', async () => {
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => ({ ...published(), connections: [{ fromId: 'z', toId: 'a' }, { fromId: 'a', toId: 'z' }, { fromId: 'b', toId: 'a' }] }) })
+  assert.deepEqual((await reader.profile({ id: 'a' })).profile.connections.map(p => p.id), ['b', 'z'])
+  assert.deepEqual((await reader.profile({ id: 'z' })).profile.connections.map(p => p.id), ['a'])
 })
