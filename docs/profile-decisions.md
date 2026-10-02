@@ -34,3 +34,21 @@ Merge only on identity evidence (same LinkedIn member, or research that settles
 it), never on a shared name alone. The 2026-10-02 decisions and their evidence
 are in the Unlinked overlay design folder (`duplicate-evidence-review` and
 `shared-names-review`).
+
+## Automatic merges: imported copies of legacy people
+
+A member's public-consent import mints a `public-<row>` person for every
+connection row. When that row's LinkedIn address (the private observation
+subject) is the address of a recovered legacy profile, per the private slug
+index that find-me uses, the composition adds an automatic merge
+`url:<publicId>` folding the copy into the legacy profile
+(`src/utils/public-people/url-identity.mjs`). The importer's edge then points
+at the legacy profile, and the copy's address answers 301.
+
+- Same LinkedIn address is the only evidence used. Names never are.
+- An explicit operator decision about the same imported person wins.
+  Survivors follow explicit merges.
+- Each import's rows are read once per published dataset revision and cached.
+  If the read fails, the snapshot still builds, without automatic merges.
+- 2026-10-02: the 72 copies that already existed were merged explicitly by the
+  operator with the same rule. New imports are handled automatically.
