@@ -78,7 +78,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   const signGrant = (id, owner, jti, issuedAt) => new SignJWT({ grantId: id, ownerId: owner.ownerId, token_use: 'account_tools' })
     .setProtectedHeader({ alg: 'HS256', typ: 'at+jwt' }).setIssuer(issuer).setAudience(audience)
     .setSubject(owner.userId).setJti(jti).setIssuedAt(issuedAt).sign(signingKey)
-  // `options.scope` narrows the catalog scope (OAuth consent); `options.connection`
+  // `options.scope` selects the catalog scope (OAuth consent or Settings opt-in); `options.connection`
   // marks a grant issued to an OAuth-connected app (see mcp-server/oauth-server.mjs).
   // Connection grants are listed and revoked individually in Settings and are
   // never reused as the copyable Settings credential.
