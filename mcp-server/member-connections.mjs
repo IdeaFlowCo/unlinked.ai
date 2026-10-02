@@ -144,6 +144,19 @@ export function createConnectionRequests({ store, notifications = null, now = Da
       if (!record || (!same(senderOf(record), member) && !same(recipientOf(record), member))) throw new ConnectionError('connection_not_found')
       if (!(await store.transition(id, ['accepted'], { status: 'removed', removedAt: now(), removedBy: same(senderOf(record), member) ? 'sender' : 'recipient' }, ['connectedKey']))) throw new ConnectionError('connection_unavailable')
     },
+    // Internal pair lifecycle operation: connection-actions first authorizes a
+    // selected accepted request/invitation involving this member. Removing that
+    // agreement also settles obsolete requests, without the withdrawal cooldown.
+    async settleRemovedPair(member, other) {
+      owner(member); owner(other)
+      if (same(member, other)) throw new ConnectionError('connection_self')
+      for (const record of await store.listPair(pairKey(member, other))) {
+        if (!['accepted', ...OPEN].includes(record.status)) continue
+        const changed = await store.transition(record.id, ['accepted', ...OPEN],
+          { status: 'removed', removedAt: now(), removedBy: same(senderOf(record), member) ? 'sender' : 'recipient' }, ['openKey', 'connectedKey'])
+        if (changed && OPEN.includes(record.status) && notifications) await quietly(() => notifications.retract(requestKey(record.id)))
+      }
+    },
     // Requests waiting for this member's answer (ignored ones are set aside).
     async received(member) {
       return (await store.listByRecipient(owner(member), ['pending'])).map(record => view(record, member)).sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1))

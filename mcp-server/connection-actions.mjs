@@ -35,9 +35,9 @@ export function createConnectionActions({ memberConnections, accountForProfile, 
       if (!account) return
       if (sameAccount(owner, account)) { out.set(id, { state: 'self' }); return }
       const between = await memberConnections.between(owner, account)
-      if (between.state !== 'none') { out.set(id, between); return }
+      if (between.state === 'connected') { out.set(id, between); return }
       const invitation = invited.find(value => sameAccount(value.other, account))
-      out.set(id, invitation ? { state: 'connected', requestId: `invite:${invitation.invitationId}` } : linked.has(id) ? { state: 'connected' } : { state: 'none' })
+      out.set(id, invitation ? { state: 'connected', requestId: `invite:${invitation.invitationId}` } : linked.has(id) ? { state: 'connected' } : between)
     }))
     return out
   }
@@ -77,9 +77,9 @@ export function createConnectionActions({ memberConnections, accountForProfile, 
     const isInvite = typeof id === 'string' && id.startsWith('invite:')
     const selected = isInvite ? invitations.find(value => `invite:${value.invitationId}` === id) : requests.find(value => value.requestId === id)
     if (!selected) throw new ConnectionError('connection_not_found')
-    for (const request of requests.filter(value => sameAccount(value.other, selected.other))) {
-      await memberConnections.remove(owner, request.requestId)
-    }
+    // The selected accepted agreement authorizes settling every request for
+    // this pair, including older pending/ignored requests from before an invite.
+    await memberConnections.settleRemovedPair(owner, selected.other)
     for (const invitation of invitations.filter(value => sameAccount(value.other, selected.other))) {
       try { await memberInvitations.remove(owner, invitation.invitationId) }
       catch (error) { if (error instanceof InvitationError) throw new ConnectionError(error.code === 'invitation_not_found' ? 'connection_not_found' : 'connection_unavailable'); throw error }
