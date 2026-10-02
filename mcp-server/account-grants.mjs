@@ -51,15 +51,19 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
       if (verified.protectedHeader.typ !== 'at+jwt' || payload.aud !== audience || payload.token_use !== 'account_tools' || !Number.isSafeInteger(payload.iat) ||
           typeof payload.ownerId !== 'string' || typeof payload.sub !== 'string' || typeof payload.jti !== 'string' || payload.grantId !== privateId(payload.ownerId, 'account-grant-v1', payload.jti)) return { error: 'not_linked' }
     } catch { return { error: 'not_linked' } }
+    // Infrastructure failures while reading the durable record are retryable
+    // and must not tell a holder of a still-valid token that it was revoked.
+    let record
     try {
       const backend = await getBackend({ ownerId: payload.ownerId, userId: payload.sub })
-      const record = await backend.readResource('import', payload.grantId), grant = record?.payload
-      const tools = grant?.kind === 'account_tool_grant' ? accountGrantTools(grant.version, grant.scope) : null
-      if (!record || record.deleted || record.sourceOwnerId !== payload.ownerId || grant?.kind !== 'account_tool_grant' || !tools ||
-          grant.ownerId !== payload.ownerId || grant.userId !== payload.sub || grant.jti !== payload.jti || grant.issuer !== issuer || grant.audience !== audience ||
-          grant.issuedAt !== payload.iat || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(tools)) return { error: 'grant_revoked' }
-      return { grant: { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, tools: [...grant.tools], scope: grant.scope, version: grant.version } }
-    } catch { return { error: 'grant_revoked' } }
+      record = await backend.readResource('import', payload.grantId)
+    } catch { return { error: 'upstream_unavailable' } }
+    const grant = record?.payload
+    const tools = grant?.kind === 'account_tool_grant' ? accountGrantTools(grant.version, grant.scope) : null
+    if (!record || record.deleted || record.sourceOwnerId !== payload.ownerId || grant?.kind !== 'account_tool_grant' || !tools ||
+        grant.ownerId !== payload.ownerId || grant.userId !== payload.sub || grant.jti !== payload.jti || grant.issuer !== issuer || grant.audience !== audience ||
+        grant.issuedAt !== payload.iat || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(tools)) return { error: 'grant_revoked' }
+    return { grant: { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, tools: [...grant.tools], scope: grant.scope, version: grant.version } }
   }
   const authenticateGrant = async request => (await authenticateGrantDetailed(request)).grant ?? null
   const revoke = async (owner, grantId) => {

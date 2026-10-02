@@ -50,18 +50,25 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
-      const profileMatch = request.method === 'GET' && url.pathname.match(/^\/api\/agent\/v1\/people\/([^/]+)$/)
-      const route = profileMatch ? { tool: 'unlinked_get_profile', query: ['connectionsCursor'] } : ROUTES[`${request.method} /api/agent/v1/${url.pathname.slice('/api/agent/v1/'.length)}`]
+      const detailMatch = url.pathname.match(/^\/api\/agent\/v1\/people\/([^/]+)$/)
+      const profileMatch = request.method === 'GET' && detailMatch
+      const suffix = url.pathname.slice('/api/agent/v1/'.length)
+      const route = profileMatch ? { tool: 'unlinked_get_profile', query: ['connectionsCursor'] } : ROUTES[`${request.method} /api/agent/v1/${suffix}`]
       if (!url.pathname.startsWith('/api/agent/v1/') || !route) {
+        const allowed = detailMatch ? 'GET' : ['GET', 'POST'].map(method => ROUTES[`${method} /api/agent/v1/${suffix}`] ? method : null).filter(Boolean).join(', ')
+        if (allowed) { response.writeHead(405, { Allow: allowed }).end(); return }
         if (!['GET', 'POST'].includes(request.method)) { response.writeHead(405, { Allow: 'GET, POST' }).end(); return }
         failure(response, new AccountToolError('not_found', 'Unknown agent API route. See docs/agent-api.md for the v1 contract.')); return
       }
       const detailed = await authenticateGrantDetailed(request)
       if (!detailed.grant) {
-        failure(response, new AccountToolError(detailed.error === 'grant_revoked' ? 'grant_revoked' : 'not_linked',
-          detailed.error === 'grant_revoked'
-            ? 'The grant was revoked or its account was deleted; sign in at /settings and create a new agent grant.'
-            : 'No linked Unlinked account: supply a valid account-grant bearer token issued at /settings. Linkage is never established by email matching.'))
+        const messages = {
+          grant_revoked: 'The grant was revoked or its account was deleted; sign in at /settings and create a new agent grant.',
+          upstream_unavailable: 'The grant could not be verified right now; retry with the same token.',
+          not_linked: 'No linked Unlinked account: supply a valid account-grant bearer token issued at /settings. Linkage is never established by email matching.',
+        }
+        const code = Object.hasOwn(messages, detailed.error) ? detailed.error : 'not_linked'
+        failure(response, new AccountToolError(code, messages[code]))
         return
       }
       const grant = detailed.grant
@@ -91,7 +98,11 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       const controller = new AbortController()
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)])
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
+      // The pre-call check already happened just above; revalidate only after
+      // the tool body, so a mid-call revocation still never returns data.
+      let checked = false
       const revalidate = async () => {
+        if (!checked) { checked = true; return }
         const current = await authenticateGrant(request)
         if (!current || current.grantId !== grant.grantId || current.ownerId !== grant.ownerId || current.userId !== grant.userId || JSON.stringify(current.tools) !== JSON.stringify(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant was revoked; sign in and create a new agent grant.')
       }

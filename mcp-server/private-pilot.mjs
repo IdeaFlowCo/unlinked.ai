@@ -31,7 +31,8 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
   })
   const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin }) : null
   const server = createServer((request, response) => {
-    const pathname = new URL(request.url, base).pathname
+    let pathname
+    try { pathname = new URL(request.url, base).pathname } catch { response.writeHead(400).end(); return }
     void (pathname === '/mcp' ? mcp(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(() => {
       if (!response.headersSent) response.writeHead(503).end()
       else response.end()
