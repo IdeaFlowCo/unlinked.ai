@@ -450,6 +450,74 @@
         }
       }
     },
+    "/api/agent/v1/connection-requests": {
+      "get": {
+        "summary": "Read-only: the owner's open connection requests (direction=received|sent)",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "received",
+                "sent"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Requests with names, public profile ids, optional notes and ISO times; owner_private"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked (typed error body)"
+          },
+          "403": {
+            "description": "scope_not_granted for grants issued before catalog version 3"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/notifications": {
+      "get": {
+        "summary": "Read-only: the owner's newest in-app notifications with unseen/unread counts",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notifications (kind, actor name/profile id, ISO time, read); reading marks nothing"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked (typed error body)"
+          },
+          "403": {
+            "description": "scope_not_granted for grants issued before catalog version 3"
+          }
+        }
+      }
+    },
     "/api/agent/v1/ai-search": {
       "post": {
         "summary": "Explicit AI people search: scope mine (own network) or everyone (public index, public-scope grant)",
@@ -640,7 +708,7 @@
         },
         "responses": {
           "200": {
-            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } \u2014 token only in this response body, never logged"
+            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } — token only in this response body, never logged"
           },
           "400": {
             "description": "invalid_input"
@@ -658,7 +726,7 @@
             "description": "rate_limited (per-client budget; Retry-After)"
           },
           "503": {
-            "description": "upstream_unavailable (including an unavailable audit sink \u2014 provisioning fails closed rather than going unaudited)"
+            "description": "upstream_unavailable (including an unavailable audit sink — provisioning fails closed rather than going unaudited)"
           }
         }
       }
