@@ -58,7 +58,25 @@ Each optional import `sha256` value is escaped and shown only inside its `<detai
 alongside the existing `accepted`, `indexed`, `filename`, `status` and `id` fields.
 Join offers Google and email buttons, both forwarding to `/login`. Skip goes to
 `/profile`; Looks good goes to `/network`. My profile navigation also uses `/profile`.
+Signed-out Join and Bring-export show a quiet LinkedIn export request link under
+their buttons, with the Connections/complete-archive wait-time line. Bring-export
+retains its expandable instructions and includes that outbound link only once.
 Route destinations and post-upload profile navigation are wired by the default-off private browser handler when open-account signup is enabled. Other hosts must keep the same owner/session boundaries if they reuse the renderers.
+
+`renderOwnProfile` also accepts optional `linkedinLookup: {action: '/find-me'}` and
+`lookupResult: {status: 'none' | 'found', profileName, headline, listedBy, claimAction}`.
+These controls remain unwired until the runtime supplies the routes and props; no
+lookup or claim UI appears when both props are absent. A valid lookup action adds
+a separate optional form below the profile panel, posting `csrf` and one
+`linkedinUrl` field. A `found` result with a valid claim action adds the “Is this
+you?” card, escaped name/headline, integer member count, and a separate native
+POST confirmation with `csrf`; Not me returns to `/profile`. `none` adds no card.
+Actions must be root-relative routes on the current host; external/protocol-relative
+URLs, backslashes, whitespace/control characters and fragments are rejected, and
+valid actions are HTML escaped. No extra JavaScript or auto-claim behavior is added.
+The runtime must authorize the lookup result and validate CSRF/confirmation and
+ownership before any claim. A supplied LinkedIn address is a lookup hint, never
+proof of ownership or a LinkedIn import. No runtime/auth/job handlers change here.
 
 Generate fictional, static preview pages with
 `node mcp-server/private-onboarding-preview.mjs /tmp/unlinked-ui-previews`.
