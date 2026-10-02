@@ -28,6 +28,11 @@ export function projectPublicMemberImport({ job, assertions }) {
   return { state:'published',complete:true,revision:'member-public-v1:'+job.id,profiles:[own,...people],connections }
 }
 
+// Operator-published refresh of legacy rows (stale headlines, missing history).
+// Keyed by existing legacy profile id; never adds people or edges, and a linked
+// member's own upload still wins over it.
+export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
+
 // Private-process-only bridge. Discovery returns bound IDs, then each source
 // is read again through the existing owner-authorized immutable publication.
 // Old/private/synthetic consent is excluded; tombstones/owner revocation remove
@@ -41,6 +46,13 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
     if (!Array.isArray(items) || items.length > 1000) throw Error('public_member_import_limit')
     const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision], linkedChecks = [], overlays = new Map()
+    const enrichment = await publicPeople.read(ENRICHMENT_DATASET)
+    if (enrichment) {
+      if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(ENRICHMENT_DATASET + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length) throw Error('public_enrichment_invalid')
+      const positions = new Map(profiles.map((value, index) => [value.id, index]))
+      for (const row of enrichment.profiles) { const index = positions.get(row.id); if (index !== undefined) profiles[index] = row }
+      revisions.push(enrichment.revision)
+    }
     for (const item of items) {
       const backend = await getBackend(item.owner), resource = await backend.readResource('import',item.id)
       if (!resource || resource.deleted || resource.sourceOwnerId !== item.owner.ownerId || resource.sourceRevision !== item.revision || resource.payload?.ownerId !== item.owner.ownerId || resource.payload.id !== item.id || !permitted(resource.payload)) throw Error('public_member_source_changed')
