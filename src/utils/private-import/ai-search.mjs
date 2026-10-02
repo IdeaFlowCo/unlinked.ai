@@ -3,6 +3,8 @@ import { digest } from './archive.mjs'
 
 const MAX_INPUT_BYTES = 256 * 1024
 const allowedFields = ['first name', 'last name', 'company', 'position', 'connected on']
+const CONCURRENT_RANKS = 4
+const TRANSIENT_PROVIDER_FAILURE = /^private_search_provider_http_(?:429|5\d\d)$/
 
 // Query-time AI ranking over the live, explicitly granted import. No vector
 // index, shared people database or ownership inferred from archive fields.
@@ -21,11 +23,11 @@ export function createPrivateSearch({ readImport, complete }) {
     const rows = new Map(publication.assertions.map(row => [row.id, row]))
     const byId = new Map(candidates.map(row => [row.id, row]))
     const eligible = new Set(candidates.map(row => row.id)), seen = new Set()
-    async function rank(observations) {
-      signal?.throwIfAborted()
+    async function rank(observations, rankSignal = signal) {
+      rankSignal?.throwIfAborted()
       const input = JSON.stringify({ query: query.trim(), observations })
       if (Buffer.byteLength(input) > MAX_INPUT_BYTES) throw new Error('private_search_context_limit')
-      const answer = await complete({ input, candidateIds: observations.map(row => row.id), signal })
+      const answer = await complete({ input, candidateIds: observations.map(row => row.id), signal: rankSignal })
       if (!answer || !Array.isArray(answer.matches) || answer.matches.length > 10) throw new Error('private_search_invalid_result')
       const local = new Set(observations.map(row => row.id)), unique = new Set()
       for (const match of answer.matches) {
@@ -39,7 +41,7 @@ export function createPrivateSearch({ readImport, complete }) {
     const envelopeBytes = Buffer.byteLength(JSON.stringify({ query: query.trim(), observations: [] }))
     let round = candidates, winners
     do {
-      winners = []
+      const groups = []
       for (let start = 0; start < round.length;) {
         const group = []; let bytes = envelopeBytes
         while (start < round.length && group.length < 200) {
@@ -50,8 +52,35 @@ export function createPrivateSearch({ readImport, complete }) {
           }
           group.push(round[start++]); bytes += rowBytes
         }
-        winners.push(...await rank(group))
+        groups.push(group)
       }
+      // A round's groups rank with bounded concurrency so a large owner network
+      // (thousands of connections, dozens of provider calls) answers inside a
+      // client timeout instead of serially accumulating ~5s per call. Group
+      // order, exhaustive consideration and result semantics are unchanged;
+      // one transient provider failure (timeout/429/5xx) per group is retried
+      // once, and the first hard failure cancels the round's other calls.
+      const failed = new AbortController()
+      const roundSignal = signal ? AbortSignal.any([signal, failed.signal]) : failed.signal
+      const results = new Array(groups.length)
+      let nextGroup = 0
+      const worker = async () => {
+        for (;;) {
+          const index = nextGroup++
+          if (index >= groups.length) return
+          try { results[index] = await rank(groups[index], roundSignal) }
+          catch (error) {
+            if (roundSignal.aborted || !TRANSIENT_PROVIDER_FAILURE.test(String(error?.message)) && error?.name !== 'TimeoutError') throw error
+            // Brief jittered pause so the one retry does not land straight
+            // back in the rate window that produced the 429/5xx.
+            await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1500))
+            results[index] = await rank(groups[index], roundSignal)
+          }
+        }
+      }
+      try { await Promise.all(Array.from({ length: Math.min(CONCURRENT_RANKS, groups.length) }, worker)) }
+      catch (error) { failed.abort(); throw error }
+      winners = results.flat()
       if (winners.length <= 10) break
       round = winners.map(match => ({ ...byId.get(match.id), priorReason: match.reason }))
     } while (round.length)
