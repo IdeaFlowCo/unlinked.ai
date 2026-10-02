@@ -10,6 +10,6 @@ export function classifyMeetCode(value) {
   const openChat = parseOpenChatCard(value)
   if (openChat) return { kind: 'openchat', href: openChatCardUrl(openChat), label: `OpenChat card on ${new URL(openChat.origin).host}` }
   const unlinked = parseUnlinkedCard(value)
-  if (unlinked) return { kind: 'unlinked', href: unlinkedProfilePath(unlinked), label: 'Unlinked profile' }
+  if (unlinked) return { kind: 'unlinked', href: unlinkedProfilePath(unlinked), label: unlinked.contact ? 'Unlinked contact card' : 'Unlinked profile' }
   return null
 }

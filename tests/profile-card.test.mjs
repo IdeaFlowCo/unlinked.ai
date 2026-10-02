@@ -159,7 +159,7 @@ test('the search bar QR button opens a scan sheet: Scan for anyone, My card for 
   assert.match(html, /aria-controls="panel-card" aria-selected="true">My card/)
   assert.match(html, /id="panel-card" aria-labelledby="tab-card">/)
   assert.match(html, /<svg[^>]*aria-label="QR code opening /)
-  assert.match(html, /<h2>Card Owner<\/h2>/)
+  assert.match(html, /<h2 class="bc-name">Card Owner<\/h2>/)
   assert.match(html, /href="\/card">Open full card<\/a><a class="button sec sm" href="\/profile">View profile/)
   assert.match(html, /<details class="me">/)
   assert.doesNotMatch(html, /Sign in to show your card/)
