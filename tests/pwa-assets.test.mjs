@@ -16,6 +16,11 @@ test('manifest, icons and offline page satisfy installability and reference only
   assert.equal(manifest.scope, '/')
   assert.equal(manifest.display, 'standalone')
   assert.equal(manifest.theme_color, '#4349c4')
+  
+  assert.equal(manifest.shortcuts.length, 2)
+  assert.equal(manifest.shortcuts[0].url, '/card')
+  assert.equal(manifest.shortcuts[1].url, '/scan')
+
   const sizes = manifest.icons.map(icon => icon.sizes).sort()
   assert.deepEqual(sizes, ['192x192', '512x512', '512x512'])
   assert.ok(manifest.icons.some(icon => icon.purpose === 'maskable'))
@@ -120,6 +125,9 @@ test('journey pages carry the manifest, worker registration and the extended-but
   assert.match(html, /<link rel="manifest" href="\/manifest.webmanifest">/)
   assert.match(html, /<link rel="apple-touch-icon" href="\/app-icon-192.png">/)
   assert.match(html, /<meta name="theme-color" content="#4349c4">/)
+  assert.match(html, /<meta name="apple-mobile-web-app-capable" content="yes">/)
+  assert.match(html, /<meta name="apple-mobile-web-app-status-bar-style" content="default">/)
+  assert.match(html, /viewport-fit=cover/)
   assert.match(html, /navigator\.serviceWorker\.register\('\/sw\.js'\)/)
   // The registration script runs under the page nonce, not an unsafe allowance.
   const nonce = html.match(/<script nonce="([^"]+)">/)[1]
