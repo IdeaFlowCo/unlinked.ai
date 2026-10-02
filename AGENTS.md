@@ -111,4 +111,4 @@ MCP clients connect with OAuth ("paste the URL and sign in"): `mcp-server/oauth-
 
 The immutable private legacy Storage recovery, owner confirmation/download boundary and offline operator are documented in `docs/legacy-storage-recovery.md`; originals are excluded from agent grants and public projections.
 
-Grant catalog v4 adds connection request writes only with explicit `owner_network_and_public_and_write` opt-in (Settings or OAuth consent). Defaults stay read-only. Shared action rules: `mcp-server/connection-actions.mjs`; agent write routes and limits: `docs/agent-api.md`. Settings/whoami nudge only for missing tools in the grant’s own scope.
+Shared browser/agent connection authorization is in `mcp-server/connection-actions.mjs`; opt-in writes and grant update hints are documented in `docs/agent-api.md`.

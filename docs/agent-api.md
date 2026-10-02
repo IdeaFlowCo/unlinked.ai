@@ -108,8 +108,11 @@ Security decisions:
   fails `invalid_target`.
 - **Scopes**: `network` → grant scope `owner_network`; `people` (implies
   `network`) → `owner_network_and_public`. Unknown scopes (`openid`,
-  `offline_access`, `claudeai`, …) are ignored; none known means everything
-  offered. The token response states the granted `scope`.
+  `offline_access`, `claudeai`, …) are ignored; no recognized read scope means
+  all offered read access. Optional `connections` requires the separate
+  consent choice described [below](#catalog-v4-optional-connection-actions);
+  a scope request alone never enables writes. The token response states the
+  granted `scope`.
 - **Tokens are account grants.** The access token is an ordinary account grant
   (same JWT, same per-call revocation check, same tool catalog) whose durable
   record carries `connection: { kind: 'oauth', app, clientName, redirectHost,
@@ -142,10 +145,10 @@ the catalog entry for `(version, scope)` in
 - Old grants keep exactly their issued tools on both surfaces — MCP
   `tools/list` for a v1 grant still shows only the launch tools, and the HTTP
   API answers `scope_not_granted` for tools outside the grant.
-- Adding tools later = adding version 3 to the catalog and issuing new grants
-  with it. No existing record changes shape, no token is reissued, no
+- Adding tools later = adding a new sibling version to the catalog and issuing
+  new grants with it. No existing record changes shape, no token is reissued, no
   consumer breaks. This is the committed migration pattern.
-- Automatic grant provisioning (the in-flight profile-card/QR work) composes
+- Automatic grant provisioning composes
   with this: `issueGrant(owner)` always writes the current catalog version,
   and authentication tolerates every cataloged version side by side.
 
@@ -155,6 +158,9 @@ preserved exactly (names, stateless POST without initialize) and covered by
 test. Since the typed-failure fix (PR #53), the two launch tools also return
 the sanitized typed JSON failure shape below instead of their original
 free-text error sentences.
+
+Version 4 is current issuance: both read scopes retain their v3 tools; its
+separate opt-in scope is documented [below](#catalog-v4-optional-connection-actions).
 
 ## Typed errors
 
@@ -176,6 +182,11 @@ an extra sanitized `cause` identifier).
 | `result_too_large` | 413 | Result would exceed 1 MiB; narrow the query or page size. |
 | `rate_limited` | 429 | Budget exhausted; honor `Retry-After`. |
 | `upstream_unavailable` | 503 | Index/AI/backend unavailable or AI time budget exceeded. Retry. |
+| `not_a_member` | 409 | The target profile is not an Unlinked member. |
+| `already_connected` | 409 | The owner and target are already connected. |
+| `request_pending` | 409 | An open request already exists for the pair. |
+| `request_unavailable` | 409 | The requested state transition is no longer available. |
+| `cooldown_active` | 429 | The withdrawal cooldown has not elapsed. |
 
 This vocabulary may be extended, never renamed.
 
@@ -237,9 +248,11 @@ All JSON. GET parameters are query-string; POST bodies are
 `application/json` (≤ 8 KiB). Unknown or repeated parameters are `invalid_input`.
 
 ### `GET /api/agent/v1/whoami` ⇄ `unlinked_whoami`
-Response: `{ kind, ownerId, grant: { scope, version, tools }, importCount,
+Response: `{ kind, ownerId, grant: { scope, version, tools, update? }, importCount,
 legacyProfile: { profileId, name, revision } | null, publicIndexAvailable }`.
 `ownerId` is the stable identifier for fail-closed linkage verification.
+Optional `grant.update` is `{ currentVersion, missingTools, how }`; see the
+[update-hint policy](#catalog-v4-optional-connection-actions).
 
 ### `GET /api/agent/v1/people?q&mode&presence&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
@@ -341,14 +354,14 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
 - **Request:** `{"issuer": "<https OIDC issuer>", "subject": "<exact opaque
   subject>"}` — the pair the caller verified itself. Unknown fields, non-https
   issuers or malformed subjects are `invalid_input`.
-- **Semantics (= Settings auto-setup `ensureGrant`):** reuses the newest live
-  grant of **any** catalog version for that owner (multiple live grants per
-  owner are expected and never clobbered — tokens are deterministically
-  re-derived from the durable record, nothing is minted on reuse); mints the
-  one deterministic automatic grant (current catalog version, read-only
-  `owner_network_and_public` scope) only when the owner has no live grants and
-  never revoked the automatic one. **Revoked stays revoked**: after the owner
-  turns agent access off, provisioning answers `grant_revoked` until they
+- **Semantics (`ensureGrant(owner, { readOnly: true })`):** reuses the newest
+  live, non-OAuth **read-only** grant of any catalog version for that owner.
+  Settings auto-setup may reuse an opted-in write credential, but this endpoint
+  never returns it. Tokens are deterministically re-derived on reuse; other
+  live grants are never clobbered. With no eligible read grant, it mints the
+  deterministic automatic grant at the current catalog version and default
+  read scope (public access when enabled), unless that automatic grant was
+  revoked. **Revoked stays revoked**: after the owner turns agent access off, provisioning answers `grant_revoked` until they
   re-enable it in Settings.
 - **Response (200):** `{ kind: "unlinked_provision_grant", ownerId, grantId,
   created, version, scope, tools, accessToken }`. The token is verified
@@ -416,7 +429,6 @@ needs are served by `list_people` pagination (50/page inside the 120/min
 budget covers the full ~16k-profile index in ~3 minutes, always at the live
 revision, which is tombstone-safe by construction).
 
-
 ## Catalog v4: optional connection actions
 
 Versions 1–3 are immutable. Version 4 retains the v3 read lists and adds
@@ -433,11 +445,15 @@ read access only; opting out at regeneration restores a read-only credential.
 | `unlinked_ignore_connection_request` | `/api/agent/v1/connection-requests/ignore` | `id` |
 | `unlinked_withdraw_connection_request` | `/api/agent/v1/connection-requests/withdraw` | `id` |
 
-Shared browser rules authorize the account and target, crossed requests accept,
-ignore stays private, 50 sends per rolling day and 21 days after withdrawal.
+The [member connection rules](member-connections.md#connection-requests-mcp-servermember-connectionsmjs)
+authorize the account and target and own the crossed-request, private-ignore,
+daily-send and withdrawal-cooldown behavior.
 An additional shared MCP/HTTP budget allows 20 writes per owner per minute,
-independent of read/AI budgets. Typed failures include `not_a_member`,
-`already_connected`, `request_pending`, `request_unavailable`, `cooldown_active`.
+independent of read/AI budgets. Failures use the [typed error vocabulary](#typed-errors).
+Send returns `{ kind: "unlinked_connection_request_sent", status: "sent"|"accepted",
+profileId, id?, visibility: "owner_private" }`; the other actions return
+`{ kind: "unlinked_connection_request_update", id, status, visibility: "owner_private" }`
+with status `accepted`, `ignored` or `withdrawn`. Removal remains browser-only.
 MCP annotations mark these as writes. Messaging and posting are never available.
 
 Settings and `whoami.grant.update` suggest regeneration/reconnection only when
