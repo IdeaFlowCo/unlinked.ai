@@ -102,7 +102,7 @@
     },
     "/api/my-connections": {
       "get": {
-        "summary": "Read recorded directed1/2-hop public paths from the signed member\u2019s explicitly confirmed legacy profile",
+        "summary": "Read recorded directed 1/2-hop public paths from the signed member's explicitly confirmed legacy profile",
         "security": [
           {
             "browserSession": []
@@ -140,7 +140,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Owner-anchored bounded profiles/paths,total,nextCursor,source revision"
+            "description": "Owner-anchored bounded profiles, paths, total, nextCursor and source revision"
+          },
+          "400": {
+            "description": "Invalid degree, query or cursor"
           },
           "401": {
             "description": "Sign-in required"

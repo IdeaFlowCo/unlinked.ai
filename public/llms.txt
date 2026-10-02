@@ -23,7 +23,7 @@ Contact emails, phone numbers and original archive bytes are excluded from agent
 
 ## Current authenticated MCP
 Streamable HTTP endpoint: https://www.unlinked.ai/mcp.
-Tools: unlinked_search_network(query) and unlinked_search_everyone(query). Old single-tool grants retain their original scope. Its durable account grant covers current and future owner imports until revoked in Settings.
+Tools: unlinked_search_network(query, degree?=1|2, cursor?) and unlinked_search_everyone(query). Old single-tool grants retain their original scope. Its durable account grant covers current and future owner imports until revoked in Settings.
 Grant tokens are distinct from Ideaflow tokens and Noos operational credentials.
 Legacy Supabase routes and stdio tools are historical source references, not live bootstrap instructions.
 
