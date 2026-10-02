@@ -31,6 +31,7 @@ function fixture(owner) {
       readResource: async (_type, id) => { const value = resources.get(id); return value?.sourceOwnerId === caller.ownerId ? structuredClone(value) : null },
       writeResource: async value => { resources.set(value.sourceId, structuredClone(value)) },
       listImportIds: async () => [importId],
+      listAccountGrantIds: async () => [...resources.values()].filter(x => x.sourceOwnerId === caller.ownerId && !x.deleted && x.payload?.kind === 'account_tool_grant').map(x => x.sourceId).sort(),
     }
   }
   return { resources, getBackend }
