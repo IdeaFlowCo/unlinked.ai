@@ -97,7 +97,8 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.servers[0].url, 'https://www.unlinked.ai');
 
   const paths = Object.keys(spec.paths);
-  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone', '/api/agent/v1/provision-grant'];
+  const expectedPaths = ['/login', '/mcp', '/api/people', '/api/people/{id}', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone', '/api/agent/v1/provision-grant',
+    '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server', '/oauth/authorize', '/oauth/token', '/oauth/register', '/oauth/revoke'];
 
   for (const p of expectedPaths) {
     assert.ok(paths.includes(p), `Expected openapi.json to include path ${p}`);
@@ -107,7 +108,11 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.ok(!paths.includes('/api/cron/embed'), 'cron/embed must NOT be in openapi.json');
   assert.equal(spec.paths['/login'].get.responses['303'].description, 'Redirect to verified provider');
   assert.equal(spec.paths['/mcp'].post.summary, 'Streamable HTTP MCP, account-scoped bearer');
-  assert.deepEqual(spec.paths['/mcp'].post.security, [{ accountGrant: [] }]);
+  assert.deepEqual(spec.paths['/mcp'].post.security, [{ accountGrant: [] }, { connectorOAuth: ['network', 'people'] }]);
+  const oauth = spec.components.securitySchemes.connectorOAuth.flows.authorizationCode;
+  assert.equal(oauth.authorizationUrl, 'https://www.unlinked.ai/oauth/authorize');
+  assert.equal(oauth.tokenUrl, 'https://www.unlinked.ai/oauth/token');
+  assert.deepEqual(Object.keys(oauth.scopes), ['network', 'people']);
   assert.equal(spec.paths['/mcp'].post.responses['401'].description, 'Missing, invalid or revoked account grant');
   assert.deepEqual(spec.paths['/api/legacy-files'].get.security, [{ browserSession: [] }]);
   assert.deepEqual(spec.paths['/legacy-files/{objectId}'].get.security, [{ browserSession: [] }]);

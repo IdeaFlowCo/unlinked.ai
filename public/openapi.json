@@ -27,6 +27,12 @@
         "security": [
           {
             "accountGrant": []
+          },
+          {
+            "connectorOAuth": [
+              "network",
+              "people"
+            ]
           }
         ],
         "responses": {
@@ -34,7 +40,15 @@
             "description": "MCP protocol response"
           },
           "401": {
-            "description": "Missing, invalid or revoked account grant"
+            "description": "Missing, invalid or revoked account grant",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "Bearer challenge with resource_metadata pointing at /.well-known/oauth-protected-resource/mcp (RFC 9728)",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
@@ -640,7 +654,7 @@
         },
         "responses": {
           "200": {
-            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } \u2014 token only in this response body, never logged"
+            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } — token only in this response body, never logged"
           },
           "400": {
             "description": "invalid_input"
@@ -658,7 +672,207 @@
             "description": "rate_limited (per-client budget; Retry-After)"
           },
           "503": {
-            "description": "upstream_unavailable (including an unavailable audit sink \u2014 provisioning fails closed rather than going unaudited)"
+            "description": "upstream_unavailable (including an unavailable audit sink — provisioning fails closed rather than going unaudited)"
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-protected-resource/mcp": {
+      "get": {
+        "summary": "OAuth protected resource metadata for /mcp (RFC 9728); also served at /.well-known/oauth-protected-resource",
+        "responses": {
+          "200": {
+            "description": "resource, authorization_servers, scopes_supported, bearer_methods_supported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "summary": "OAuth authorization server metadata (RFC 8414)",
+        "responses": {
+          "200": {
+            "description": "Authorization server metadata, including client_id_metadata_document_supported and authorization_response_iss_parameter_supported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize": {
+      "get": {
+        "summary": "Authorization endpoint: signs the person in with Ideaflow ID if needed and shows consent. Requires response_type=code, PKCE S256 and a registered connector-callback or loopback redirect_uri.",
+        "responses": {
+          "200": {
+            "description": "Consent page"
+          },
+          "303": {
+            "description": "Redirect to sign-in, or to the client with code, state and iss (or an error)"
+          },
+          "400": {
+            "description": "Unknown client or unregistered redirect URI (never redirected)"
+          }
+        }
+      }
+    },
+    "/oauth/token": {
+      "post": {
+        "summary": "Token endpoint (authorization_code only; public clients)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "grant_type",
+                  "code",
+                  "code_verifier",
+                  "client_id",
+                  "redirect_uri"
+                ],
+                "properties": {
+                  "grant_type": {
+                    "type": "string",
+                    "enum": [
+                      "authorization_code"
+                    ]
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "code_verifier": {
+                    "type": "string"
+                  },
+                  "client_id": {
+                    "type": "string"
+                  },
+                  "redirect_uri": {
+                    "type": "string"
+                  },
+                  "resource": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "access_token, token_type Bearer, scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OAuth error (invalid_grant, invalid_target, unsupported_grant_type, ...)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/register": {
+      "post": {
+        "summary": "Dynamic client registration (RFC 7591); public clients only, redirect URIs limited to Claude/ChatGPT connector callbacks and loopback",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "redirect_uris"
+                ],
+                "properties": {
+                  "redirect_uris": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "client_name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered client with token_endpoint_auth_method none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_redirect_uri or invalid_client_metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/revoke": {
+      "post": {
+        "summary": "Token revocation (RFC 7009) for the client the token was issued to",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token",
+                  "client_id"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "client_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked, or nothing to revoke"
           }
         }
       }
@@ -679,6 +893,20 @@
         "type": "http",
         "scheme": "basic",
         "description": "Allow-listed confidential client id + secret (client_secret_basic); timing-safe verification"
+      },
+      "connectorOAuth": {
+        "type": "oauth2",
+        "description": "OAuth 2.1 authorization code with PKCE S256 for MCP connectors (public clients). The issued access token is an account grant: it does not expire and is revocable in Settings or at /oauth/revoke.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://www.unlinked.ai/oauth/authorize",
+            "tokenUrl": "https://www.unlinked.ai/oauth/token",
+            "scopes": {
+              "network": "Search your own network and read who you are on Unlinked",
+              "people": "Search and read the published People index (implies network)"
+            }
+          }
+        }
       }
     }
   }
