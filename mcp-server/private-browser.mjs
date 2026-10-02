@@ -138,11 +138,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // Live header counts (My Network, the bell) for this response, when the
   // request is a signed-in page view; read once per request.
   const responseAlerts = new WeakMap()
+  // Both counts in parallel, each bounded: a slow graph costs a badge, never the page.
+  const bounded = (work, fallback) => Promise.race([Promise.resolve().then(work).catch(() => fallback), new Promise(resolve => setTimeout(resolve, 800, fallback).unref?.())])
   const readAlerts = async owner => {
-    const alerts = {}
-    if (memberConnections) alerts.network = await memberConnections.pendingCount(owner).catch(() => 0)
-    if (notifications) alerts.notifications = await notifications.counts(owner).then(value => value.unseen, () => 0)
-    return memberConnections || notifications ? alerts : null
+    if (!memberConnections && !notifications) return null
+    const [network, unseen] = await Promise.all([memberConnections ? bounded(() => memberConnections.pendingCount(owner), 0) : undefined, notifications ? bounded(() => notifications.counts(owner).then(value => value.unseen), 0) : undefined])
+    return { ...(memberConnections ? { network } : {}), ...(notifications ? { notifications: unseen } : {}) }
   }
   const pageView = pathname => !pathname.startsWith('/api/') && !pathname.startsWith('/public-assets/') && !pathname.startsWith('/legacy-files/') && !/^\/notifications\/[^/]+$/.test(pathname) &&
     !/^\/imports\/[a-f0-9]{64}\/status$/.test(pathname) && !/\.[a-z]+$/i.test(pathname) && !['/login', '/logout', '/export', '/auth/callback/ideaflow'].includes(pathname)
@@ -787,10 +788,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const grantIds = await backend.listAccountGrantIds()
         // Invitations hold names the owner typed: they go with the account.
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
+        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)
-        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds })
         // Best effort beyond the graph: the legacy claim and the stored archive bytes.
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})

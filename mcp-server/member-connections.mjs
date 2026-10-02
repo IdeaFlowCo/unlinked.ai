@@ -42,7 +42,8 @@ const recipientOf = record => ({ ownerId: record.recipientOwnerId, userId: recor
 export function connectionName(value) {
   if (typeof value !== 'string') return null
   const name = value.normalize('NFKC').replace(/\s+/g, ' ').trim()
-  return name && [...name].length <= 120 && !/[\u0000-\u001f\u007f<>@]/.test(name) ? name : null
+  // Opaque identifiers (an OIDC subject standing in for a name) are not names either.
+  return name && [...name].length <= 120 && !/[\u0000-\u001f\u007f<>@]/.test(name) && !/^[0-9a-f-]{20,}$/i.test(name) && !/^[A-Za-z0-9_|:.-]{24,}$/.test(name) ? name : null
 }
 // An optional short note: single paragraph, no control characters.
 export function connectionNote(value) {
@@ -66,7 +67,7 @@ export function createConnectionRequests({ store, notifications = null, now = Da
     const status = !received && record.status === 'ignored' ? 'pending' : record.status
     return { id: record.id, direction: received ? 'received' : 'sent', status, name: received ? record.senderName : record.recipientName,
       ...((received ? record.senderProfileId : record.recipientProfileId) ? { profileId: received ? record.senderProfileId : record.recipientProfileId } : {}),
-      ...(record.note ? { note: record.note } : {}), createdAt: record.createdAt, ...(record.respondedAt ? { respondedAt: record.respondedAt } : {}) }
+      ...(record.note ? { note: record.note } : {}), createdAt: record.createdAt, ...(record.respondedAt && status !== 'pending' ? { respondedAt: record.respondedAt } : {}) }
   }
   const service = {
     async send({ sender, senderName, senderProfileId, recipient, recipientName, recipientProfileId, note }) {
@@ -248,9 +249,14 @@ export function createNeo4jConnectionStore(driver, database = 'neo4j') {
     async listBySender(member, statuses) {
       return rows(await read('MATCH (r:UnlinkedConnectionRequest {senderOwnerId: $ownerId, senderUserId: $userId}) WHERE r.status IN $statuses RETURN properties(r) AS r ORDER BY r.createdAt DESC LIMIT 1000', { ownerId: member.ownerId, userId: member.userId, statuses }))
     },
+    // One member's side uses the sender/recipient indexes; only the whole-graph build scans.
     async listAccepted(member) {
-      return rows(await read(`MATCH (r:UnlinkedConnectionRequest {status: 'accepted'}) WHERE $ownerId IS NULL OR (r.senderOwnerId = $ownerId AND r.senderUserId = $userId) OR (r.recipientOwnerId = $ownerId AND r.recipientUserId = $userId)
-        RETURN properties(r) AS r ORDER BY r.respondedAt, r.id LIMIT 100000`, { ownerId: member?.ownerId ?? null, userId: member?.userId ?? null }))
+      if (!member) return rows(await read(`MATCH (r:UnlinkedConnectionRequest {status: 'accepted'}) RETURN properties(r) AS r ORDER BY r.respondedAt, r.id LIMIT 100000`, {}))
+      return rows(await read(`CALL {
+          MATCH (r:UnlinkedConnectionRequest {senderOwnerId: $ownerId, senderUserId: $userId, status: 'accepted'}) RETURN r
+          UNION
+          MATCH (r:UnlinkedConnectionRequest {recipientOwnerId: $ownerId, recipientUserId: $userId, status: 'accepted'}) RETURN r
+        } RETURN properties(r) AS r ORDER BY r.respondedAt, r.id LIMIT 100000`, { ownerId: member.ownerId, userId: member.userId }))
     },
     // Compare-and-set: only a request still in one of `from` changes.
     async transition(id, from, patch, remove) {
