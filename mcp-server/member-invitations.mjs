@@ -163,7 +163,7 @@ export function createNeo4jInvitationStore(driver, database = 'neo4j') {
     },
     // Compare-and-set: only a record still in `from` (and unexpired, when asked) changes.
     async transition(tokenHash, from, patch, unexpiredAt) {
-      const result = await write(`MATCH (i:UnlinkedMemberInvitation {tokenHash: $tokenHash}) WHERE i.status = $from AND ($unexpiredAt IS NULL OR i.expiresAt IS NULL OR i.expiresAt > $unexpiredAt)
+      const result = await write(`MATCH (i:UnlinkedMemberInvitation {tokenHash: $tokenHash}) SET i._transitionLock = coalesce(i._transitionLock, 0) + 1 WITH i WHERE i.status = $from AND ($unexpiredAt IS NULL OR i.expiresAt IS NULL OR i.expiresAt > $unexpiredAt)
         SET i += $patch RETURN i.id AS id`, { tokenHash, from, patch, unexpiredAt })
       return result.records.length === 1
     },
