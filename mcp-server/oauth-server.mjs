@@ -128,6 +128,8 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
     if (url.protocol !== 'https:' || !CIMD_HOSTS.has(url.hostname) || url.port || url.username || url.password || url.search || url.hash || url.href !== clientId || url.pathname === '/') return null
     const cached = cimdCache.get(clientId)
     if (cached && cached.expiresAt > now()) { if (cached.client) return cached.client; throw new OAuthError('invalid_client', 'The client metadata document could not be read; retry shortly.') }
+    // Bounds outbound fetches if someone cycles through many allow-listed URLs.
+    if (!withinBudget('cimd', 60)) throw new OAuthError('invalid_client', 'The client metadata document could not be read right now; retry in a minute.')
     let client = null
     try {
       const response = await fetchImpl(clientId, { redirect: 'error', signal: AbortSignal.timeout(5000), headers: { accept: 'application/json' } })
@@ -259,7 +261,8 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
   }
 
   async function register(request, response) {
-    if (!withinBudget('register', 60)) throw new OAuthError('temporarily_unavailable', 'Too many registrations; retry in a minute.', 429)
+    // Registration is stateless and cheap; the budget only bounds abuse.
+    if (!withinBudget('register', 600)) throw new OAuthError('temporarily_unavailable', 'Too many registrations; retry in a minute.', 429)
     if (!/^application\/json(?:\s*;.*)?$/i.test(request.headers['content-type'] ?? '')) throw new OAuthError('invalid_client_metadata', 'Send the client metadata as application/json.')
     let metadata
     try { metadata = JSON.parse(await readBody(request, 16384)) } catch (error) { if (error instanceof OAuthError) throw error; throw new OAuthError('invalid_client_metadata', 'The client metadata is not valid JSON.') }
@@ -274,6 +277,7 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
     const issuedAt = Math.floor(now() / 1000)
     const redirectUris = [...new Set(uris)]
     const clientId = mintClientId({ n: clientName, r: redirectUris, t: issuedAt })
+    if (!registeredClient(clientId)) throw new OAuthError('invalid_client_metadata', 'The registration is too large; register fewer or shorter redirect URIs.')
     // Every client is public: whatever authentication method was requested,
     // the registration answers "none" and issues no secret (RFC 7591 3.2.1).
     json(response, 201, { client_id: clientId, client_id_issued_at: issuedAt, ...(clientName ? { client_name: clientName } : {}), redirect_uris: redirectUris,
@@ -281,7 +285,7 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
   }
 
   async function token(request, response) {
-    if (!withinBudget('token', 300)) throw new OAuthError('temporarily_unavailable', 'Too many token requests; retry in a minute.', 429)
+    // No global budget: only a consented, single-use code leads to a write.
     const params = await formBody(request)
     const grantType = single(params, 'grant_type')
     if (grantType !== 'authorization_code') throw new OAuthError('unsupported_grant_type', 'Only the authorization_code grant is supported; tokens do not expire, so no refresh is needed.')
@@ -308,7 +312,7 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
   }
 
   async function revoke(request, response) {
-    if (!withinBudget('revoke', 120)) throw new OAuthError('temporarily_unavailable', 'Too many revocation requests; retry in a minute.', 429)
+    if (!withinBudget('revoke', 600)) throw new OAuthError('temporarily_unavailable', 'Too many revocation requests; retry in a minute.', 429)
     const params = await formBody(request)
     const value = single(params, 'token'), clientId = clientIdFrom(request, params)
     if (!value) throw new OAuthError('invalid_request', 'token is required.')
