@@ -70,10 +70,20 @@ export function createConnectionActions({ memberConnections, accountForProfile, 
     }
   }
   async function remove(owner, id) {
-    if (typeof id === 'string' && id.startsWith('invite:') && memberInvitations) {
-      try { await memberInvitations.remove(owner, id.slice(7)) }
+    const [requests, invitations] = await Promise.all([
+      memberConnections.connections(owner),
+      memberInvitations ? memberInvitations.connections(owner) : [],
+    ])
+    const isInvite = typeof id === 'string' && id.startsWith('invite:')
+    const selected = isInvite ? invitations.find(value => `invite:${value.invitationId}` === id) : requests.find(value => value.requestId === id)
+    if (!selected) throw new ConnectionError('connection_not_found')
+    for (const request of requests.filter(value => sameAccount(value.other, selected.other))) {
+      await memberConnections.remove(owner, request.requestId)
+    }
+    for (const invitation of invitations.filter(value => sameAccount(value.other, selected.other))) {
+      try { await memberInvitations.remove(owner, invitation.invitationId) }
       catch (error) { if (error instanceof InvitationError) throw new ConnectionError(error.code === 'invitation_not_found' ? 'connection_not_found' : 'connection_unavailable'); throw error }
-    } else await memberConnections.remove(owner, id)
+    }
   }
   return { relations, relationTo, send, remove }
 }

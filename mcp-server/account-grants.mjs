@@ -104,12 +104,13 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   // manually created grant. Mints the one deterministic automatic grant only
   // when the owner has no grants at all and has never revoked the automatic
   // one; returns null once it is revoked.
-  const ensureGrant = async owner => {
+  const ensureGrant = async (owner, { readOnly = false } = {}) => {
     const backend = await getBackend(owner)
     const autoId = privateId(owner.ownerId, 'account-grant-v1', AUTO_JTI)
     const derive = record => record && !record.deleted && record.sourceOwnerId === owner.ownerId && record.payload?.kind === 'account_tool_grant' &&
       record.payload.ownerId === owner.ownerId && record.payload.userId === owner.userId && record.payload.issuer === issuer && record.payload.audience === audience &&
-      typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) && !record.payload.connection ? record : null
+      typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) && !record.payload.connection &&
+      (!readOnly || ['owner_network', 'owner_network_and_public'].includes(record.payload.scope)) ? record : null
     const ids = await backend.listAccountGrantIds()
     const records = []
     for (let start = 0; start < ids.length; start += 8) records.push(...(await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id)))).map(derive).filter(Boolean))

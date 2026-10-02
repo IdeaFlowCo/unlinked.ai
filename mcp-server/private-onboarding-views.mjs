@@ -358,9 +358,10 @@ export function renderPeople({ accountLabel, displayName, csrf, query = '', mode
   const exact = mode === 'exact', kept = presence === 'member' || presence === 'shadow' ? presence : undefined
   const controls = value => value.connect ? `<div class="connection-actions">${connectControl({ connect: value.connect, csrf, id: value.id, name: value.name, next: returnTo, row: true })}</div>` : ''
   const row = (value, render) => render(value).replace('</div></article>', `${controls(value)}</div></article>`)
-  const searched = `q=${encodeURIComponent(raw(query))}${kept ? `&presence=${kept}` : ''}`
+  const filters = [kept ? `presence=${kept}` : '', connectedView ? 'connected=1' : ''].filter(Boolean).join('&')
+  const searched = `q=${encodeURIComponent(raw(query))}${filters ? `&${filters}` : ''}`
   // Two ways to read the same words: forgiving by default, literal on request.
-  const modes = raw(query) ? `<p class="small modes">${exact ? `<a href="${html(`/network?${searched}`)}">Best match</a> · <b aria-current="true">Exact words</b>` : `<b aria-current="true">Best match</b> · <a href="${html(`/network?${searched}&mode=exact`)}">Exact words</a>`} · <a href="${kept ? `/network?presence=${kept}` : '/network'}">Clear search</a></p>${!exact && match === 'some' ? '<p class="notice">No one has every word. Showing people who match some of them.</p>' : ''}` : ''
+  const modes = raw(query) ? `<p class="small modes">${exact ? `<a href="${html(`/network?${searched}`)}">Best match</a> · <b aria-current="true">Exact words</b>` : `<b aria-current="true">Best match</b> · <a href="${html(`/network?${searched}&mode=exact`)}">Exact words</a>`} · <a href="${html(filters ? `/network?${filters}` : '/network')}">Clear search</a></p>${!exact && match === 'some' ? '<p class="notice">No one has every word. Showing people who match some of them.</p>' : ''}` : ''
   const legacy = own === undefined && (contacts !== undefined || searchResults !== undefined)
   const canSearchEveryone = publicProfessionalSearch ?? (everyone !== undefined || legacy)
   if (legacy) own = list(searchResults !== undefined ? searchResults : contacts)

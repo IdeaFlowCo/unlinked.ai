@@ -158,3 +158,58 @@ test('write relationship checks fail closed when imported graph or invite eviden
   await assert.rejects(actions.send(a,{profileId:'b'}),/invite_unavailable/)
   assert.equal((await requests.sent(a)).length,0)
 })
+
+
+test('removing either agreement kind ends all accepted agreements for only that pair', async () => {
+  for (const selectedKind of ['invite', 'request']) {
+    const invites = createMemberInvitations({ store: createMemoryInvitationStore() })
+    const requests = createConnectionRequests({ store: createMemoryConnectionStore() })
+    const sent = await requests.send({ sender: a, recipient: b })
+    await requests.respond(b, sent.request.id, 'accept')
+    const links = []
+    for (const [inviter, invitee] of [[a, b], [b, a], [a, c]]) {
+      const link = await invites.create({ inviter, inviterName: 'Member', inviteeName: 'Other' })
+      await invites.respond(link.token, invitee, 'accept', 'Other')
+      links.push(link)
+    }
+    const actions = createConnectionActions({ memberConnections: requests, memberInvitations: invites,
+      accountForProfile: async id => ({ a, b, c })[id],
+      readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'r', profiles: profiles.slice(0, 3), members: ['a', 'b', 'c'], connections: [] }) })
+    const id = selectedKind === 'invite' ? `invite:${links[0].invitation.id}` : sent.request.id
+    await assert.rejects(actions.remove(c, id), { code: 'connection_not_found' })
+    assert.equal((await requests.between(a, b)).state, 'connected')
+    assert.equal((await invites.connections(b)).length, 2)
+    await actions.remove(b, id)
+    assert.deepEqual(await requests.connections(a), [])
+    assert.deepEqual(await requests.connections(b), [])
+    assert.deepEqual(await invites.connections(b), [])
+    assert.deepEqual((await invites.connections(a)).map(value => value.other), [c])
+    assert.equal((await invites.open(links[0].token)).status, 'revoked')
+    assert.equal((await invites.open(links[1].token)).status, 'revoked')
+    assert.equal((await invites.open(links[2].token)).status, 'accepted')
+    assert.equal((await actions.relationTo(a, 'b')).state, 'none')
+    assert.equal((await actions.relationTo(b, 'a')).state, 'none')
+    const reconnected = await actions.send(b, { profileId: 'a' })
+    assert.equal(reconnected.code, 'sent')
+    assert.notEqual(reconnected.request.id, sent.request.id)
+  }
+})
+
+test('connected directory navigation retains its filter through modes, clear and pagination', () => {
+  for (const mode of ['best', 'exact']) {
+    const output = renderPeople({ connectedView: { rows: [], total: 0, nextPage: 2 }, presence: 'member', query: 'Alice', mode }).content
+    const links = [...output.matchAll(/<a[^>]*href="([^"]+)"[^>]*>(Best match|Exact words|Clear search|Show more)<\/a>/g)]
+    assert.equal(links.length, 3)
+    for (const [, href, label] of links) {
+      const url = new URL(href.replaceAll('&amp;', '&'), 'https://unlinked.invalid')
+      assert.equal(url.searchParams.get('connected'), '1', label)
+      assert.equal(url.searchParams.get('presence'), 'member', label)
+      assert.equal(url.searchParams.get('q'), label === 'Clear search' ? null : 'Alice', label)
+      if (label === 'Exact words') assert.equal(url.searchParams.get('mode'), 'exact')
+      if (label === 'Best match') assert.equal(url.searchParams.get('mode'), null)
+    }
+  }
+  const output = renderPeople({ connectedView: { rows: [], total: 0, nextPage: 2 } }).content
+  const href = output.match(/href="([^"]+)">Show more/)[1]
+  assert.equal(new URL(href.replaceAll('&amp;', '&'), 'https://unlinked.invalid').searchParams.get('connected'), '1')
+})
