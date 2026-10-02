@@ -2,11 +2,12 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 // Member-delivered invitations for people who are not on Unlinked yet.
 // The platform never sends them: the inviter copies the link and passes it on.
-// Only a hash of the token is stored. A token is single-use, expires, and on
-// its own binds nothing: accepting needs a signed-in account and an explicit
-// click, and records only that this account accepted this invitation.
+// Only a hash of the token is stored. A token is single-use and on its own binds
+// nothing: accepting needs a signed-in account and an explicit click. An accepted
+// invitation connects the two accounts. Links do not expire unless a TTL is set,
+// and there is no cap; unusually heavy use is reported for review instead.
 
-export const INVITATION_TTL_MS = 14 * 24 * 60 * 60 * 1000
+export const HEAVY_INVITES_PER_DAY = 50
 export const INVITATION_TOKEN = /^[A-Za-z0-9_-]{43}$/
 const STATUSES = ['pending', 'accepted', 'declined', 'revoked']
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -27,21 +28,23 @@ export function invitationName(value) {
   return name
 }
 
-export function createMemberInvitations({ store, now = Date.now, ttlMs = INVITATION_TTL_MS, maxPending = 100, maxPerDay = 50 } = {}) {
-  if (!store || ['insert', 'get', 'listByInviter', 'transition', 'countByInviter', 'deleteByInviter'].some(key => typeof store[key] !== 'function')) throw new Error('invitation_store_required')
+export function createMemberInvitations({ store, now = Date.now, ttlMs = null, onHeavyUse = () => {} } = {}) {
+  if (!store || ['insert', 'get', 'listByInviter', 'listAccepted', 'transition', 'countByInviter', 'deleteByInviter'].some(key => typeof store[key] !== 'function')) throw new Error('invitation_store_required')
   // An expired invitation reads as expired; the stored status stays pending.
-  const status = record => record.status === 'pending' && record.expiresAt <= now() ? 'expired' : record.status
-  const view = record => ({ id: record.id, inviteeName: record.inviteeName, status: status(record), createdAt: record.createdAt, expiresAt: record.expiresAt, ...(record.respondedAt ? { respondedAt: record.respondedAt } : {}) })
+  const expired = record => record.expiresAt != null && record.expiresAt <= now()
+  const status = record => record.status === 'pending' && expired(record) ? 'expired' : record.status
+  const view = record => ({ id: record.id, inviteeName: record.inviteeName, status: status(record), createdAt: record.createdAt, ...(record.expiresAt != null ? { expiresAt: record.expiresAt } : {}), ...(record.respondedAt ? { respondedAt: record.respondedAt } : {}), ...(record.status === 'accepted' && record.responderName ? { responderName: record.responderName } : {}) })
   const byToken = async token => typeof token === 'string' && INVITATION_TOKEN.test(token) ? store.get(hash(token)) : null
   return {
     async create({ inviter, inviterName, inviteeName }) {
       owner(inviter)
       const record = { id: randomUUID(), inviterOwnerId: inviter.ownerId, inviterUserId: inviter.userId, inviterName: invitationName(inviterName), inviteeName: invitationName(inviteeName), status: 'pending', createdAt: now() }
-      record.expiresAt = record.createdAt + ttlMs
-      const counts = await store.countByInviter(inviter, { since: record.createdAt - 24 * 60 * 60 * 1000, now: record.createdAt })
-      if (counts.recent >= maxPerDay || counts.pending >= maxPending) throw new InvitationError('invitation_limit')
+      record.expiresAt = Number.isSafeInteger(ttlMs) && ttlMs > 0 ? record.createdAt + ttlMs : null
       const token = randomBytes(32).toString('base64url')
       await store.insert({ ...record, tokenHash: hash(token) })
+      // No cap: every 50th invite in a day is reported so heavy use is visible.
+      const { recent } = await store.countByInviter(inviter, { since: record.createdAt - 24 * 60 * 60 * 1000, now: record.createdAt })
+      if (recent >= HEAVY_INVITES_PER_DAY && recent % HEAVY_INVITES_PER_DAY === 0) await Promise.resolve(onHeavyUse({ event: 'member_invites_heavy_use', ownerHash: hash(inviter.ownerId), invitesInDay: recent })).catch(() => {})
       return { token, invitation: view(record) }
     },
     async list(inviter) {
@@ -50,9 +53,9 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = INVITAT
     // What the link's page may show: who invited whom, and whether it still works.
     async open(token) {
       const record = await byToken(token)
-      return record ? { inviterName: record.inviterName, inviteeName: record.inviteeName, status: status(record), expiresAt: record.expiresAt } : null
+      return record ? { inviterName: record.inviterName, inviteeName: record.inviteeName, status: status(record), ...(record.expiresAt != null ? { expiresAt: record.expiresAt } : {}) } : null
     },
-    async respond(token, invitee, action) {
+    async respond(token, invitee, action, responderName) {
       owner(invitee)
       if (!['accept', 'decline'].includes(action)) throw new InvitationError('invitation_action_invalid')
       const record = await byToken(token)
@@ -60,7 +63,7 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = INVITAT
       if (record.inviterOwnerId === invitee.ownerId) throw new InvitationError('invitation_own')
       if (status(record) !== 'pending') throw new InvitationError('invitation_unavailable')
       const next = action === 'accept' ? 'accepted' : 'declined'
-      const changed = await store.transition(record.tokenHash, 'pending', { status: next, respondedAt: now(), responderOwnerId: invitee.ownerId, responderUserId: invitee.userId }, now())
+      const changed = await store.transition(record.tokenHash, 'pending', { status: next, respondedAt: now(), responderOwnerId: invitee.ownerId, responderUserId: invitee.userId, ...(next === 'accepted' && responderName ? { responderName: invitationName(responderName) } : {}) }, now())
       if (!changed) throw new InvitationError('invitation_unavailable')
       return { status: next, inviterName: record.inviterName }
     },
@@ -70,8 +73,18 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = INVITAT
       const record = (await store.listByInviter(inviter)).find(value => value.id === id)
       if (!record || !(await store.transition(record.tokenHash, 'pending', { status: 'revoked', respondedAt: now() }, null))) throw new InvitationError('invitation_unavailable')
     },
-    // Account deletion removes every invitation the owner created.
-    async removeOwner(inviter) { return store.deleteByInviter(owner(inviter)) },
+    // The accounts an owner is connected to through accepted invitations, either way round.
+    async connections(member) {
+      owner(member)
+      return (await store.listAccepted(member)).map(record => record.inviterOwnerId === member.ownerId && record.inviterUserId === member.userId
+        ? { invitationId: record.id, other: { ownerId: record.responderOwnerId, userId: record.responderUserId }, name: record.responderName ?? record.inviteeName }
+        : { invitationId: record.id, other: { ownerId: record.inviterOwnerId, userId: record.inviterUserId }, name: record.inviterName })
+    },
+    // Every accepted invitation, for the shared public graph.
+    async accepted() { return (await store.listAccepted(null)).map(record => ({ invitationId: record.id, inviter: { ownerId: record.inviterOwnerId, userId: record.inviterUserId }, invitee: { ownerId: record.responderOwnerId, userId: record.responderUserId } })) },
+    // Account deletion removes every invitation the owner created, and stops
+    // invitations it accepted from connecting it to anyone.
+    async removeOwner(member) { return store.deleteByInviter(owner(member)) },
   }
 }
 
@@ -84,20 +97,25 @@ export function createMemoryInvitationStore() {
     async insert(record) { if (records.has(record.tokenHash)) throw new Error('invitation_conflict'); records.set(record.tokenHash, structuredClone(record)) },
     async get(tokenHash) { const value = records.get(tokenHash); return value ? structuredClone(value) : null },
     async listByInviter(inviter) { return mine(inviter).map(value => structuredClone(value)) },
+    async listAccepted(member) { return [...records.values()].filter(value => value.status === 'accepted' && (!member || (value.inviterOwnerId === member.ownerId && value.inviterUserId === member.userId) || (value.responderOwnerId === member.ownerId && value.responderUserId === member.userId))).map(value => structuredClone(value)) },
     async transition(tokenHash, from, patch, unexpiredAt) {
       const value = records.get(tokenHash)
-      if (!value || value.status !== from || (unexpiredAt !== null && value.expiresAt <= unexpiredAt)) return false
+      if (!value || value.status !== from || (unexpiredAt !== null && value.expiresAt != null && value.expiresAt <= unexpiredAt)) return false
       Object.assign(value, patch); return true
     },
     async countByInviter(inviter, { since, now }) {
       const values = mine(inviter)
-      return { recent: values.filter(value => value.createdAt > since).length, pending: values.filter(value => value.status === 'pending' && value.expiresAt > now).length }
+      return { recent: values.filter(value => value.createdAt > since).length, pending: values.filter(value => value.status === 'pending' && (value.expiresAt == null || value.expiresAt > now)).length }
     },
-    async deleteByInviter(inviter) { const values = mine(inviter); for (const value of values) records.delete(value.tokenHash); return values.length },
+    async deleteByInviter(member) {
+      const values = mine(member); for (const value of values) records.delete(value.tokenHash)
+      for (const value of records.values()) if (value.responderOwnerId === member.ownerId && value.responderUserId === member.userId) value.status = 'revoked'
+      return values.length
+    },
   }
 }
 
-const RECORD_KEYS = ['id', 'tokenHash', 'inviterOwnerId', 'inviterUserId', 'inviterName', 'inviteeName', 'status', 'createdAt', 'expiresAt', 'respondedAt', 'responderOwnerId', 'responderUserId']
+const RECORD_KEYS = ['id', 'tokenHash', 'inviterOwnerId', 'inviterUserId', 'inviterName', 'inviteeName', 'status', 'createdAt', 'expiresAt', 'respondedAt', 'responderOwnerId', 'responderUserId', 'responderName']
 const fromNode = properties => {
   const value = {}
   for (const key of RECORD_KEYS) if (properties[key] !== undefined && properties[key] !== null) value[key] = typeof properties[key]?.toNumber === 'function' ? properties[key].toNumber() : properties[key]
@@ -119,23 +137,30 @@ export function createNeo4jInvitationStore(driver, database = 'neo4j') {
       return result.records.length ? fromNode(result.records[0].get('i')) : null
     },
     async listByInviter(inviter) {
-      const result = await read('MATCH (i:UnlinkedMemberInvitation {inviterOwnerId: $ownerId, inviterUserId: $userId}) RETURN properties(i) AS i ORDER BY i.createdAt DESC LIMIT 1000', inviter)
+      const result = await read('MATCH (i:UnlinkedMemberInvitation {inviterOwnerId: $ownerId, inviterUserId: $userId}) RETURN properties(i) AS i ORDER BY i.createdAt DESC LIMIT 10000', { ownerId: inviter.ownerId, userId: inviter.userId })
+      return result.records.map(record => fromNode(record.get('i')))
+    },
+    async listAccepted(member) {
+      const result = await read(`MATCH (i:UnlinkedMemberInvitation {status: 'accepted'}) WHERE $ownerId IS NULL OR (i.inviterOwnerId = $ownerId AND i.inviterUserId = $userId) OR (i.responderOwnerId = $ownerId AND i.responderUserId = $userId)
+        RETURN properties(i) AS i ORDER BY i.respondedAt LIMIT 100000`, { ownerId: member?.ownerId ?? null, userId: member?.userId ?? null })
       return result.records.map(record => fromNode(record.get('i')))
     },
     // Compare-and-set: only a record still in `from` (and unexpired, when asked) changes.
     async transition(tokenHash, from, patch, unexpiredAt) {
-      const result = await write(`MATCH (i:UnlinkedMemberInvitation {tokenHash: $tokenHash}) WHERE i.status = $from AND ($unexpiredAt IS NULL OR i.expiresAt > $unexpiredAt)
+      const result = await write(`MATCH (i:UnlinkedMemberInvitation {tokenHash: $tokenHash}) WHERE i.status = $from AND ($unexpiredAt IS NULL OR i.expiresAt IS NULL OR i.expiresAt > $unexpiredAt)
         SET i += $patch RETURN i.id AS id`, { tokenHash, from, patch, unexpiredAt })
       return result.records.length === 1
     },
     async countByInviter(inviter, { since, now }) {
       const result = await read(`MATCH (i:UnlinkedMemberInvitation {inviterOwnerId: $ownerId, inviterUserId: $userId})
-        RETURN sum(CASE WHEN i.createdAt > $since THEN 1 ELSE 0 END) AS recent, sum(CASE WHEN i.status = 'pending' AND i.expiresAt > $now THEN 1 ELSE 0 END) AS pending`, { ...inviter, since, now })
+        RETURN sum(CASE WHEN i.createdAt > $since THEN 1 ELSE 0 END) AS recent, sum(CASE WHEN i.status = 'pending' AND (i.expiresAt IS NULL OR i.expiresAt > $now) THEN 1 ELSE 0 END) AS pending`, { ownerId: inviter.ownerId, userId: inviter.userId, since, now })
       const record = result.records[0]
       const number = value => typeof value?.toNumber === 'function' ? value.toNumber() : Number(value ?? 0)
       return { recent: number(record?.get('recent')), pending: number(record?.get('pending')) }
     },
-    async deleteByInviter(inviter) {
+    async deleteByInviter(member) {
+      const inviter = { ownerId: member.ownerId, userId: member.userId }
+      await write(`MATCH (i:UnlinkedMemberInvitation {responderOwnerId: $ownerId, responderUserId: $userId}) SET i.status = 'revoked'`, inviter)
       const result = await write('MATCH (i:UnlinkedMemberInvitation {inviterOwnerId: $ownerId, inviterUserId: $userId}) WITH i, i.id AS id DETACH DELETE i RETURN count(id) AS removed', inviter)
       const removed = result.records[0]?.get('removed')
       return typeof removed?.toNumber === 'function' ? removed.toNumber() : Number(removed ?? 0)

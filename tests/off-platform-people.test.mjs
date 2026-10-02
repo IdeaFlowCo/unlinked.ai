@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { createMemberInvitations, createMemoryInvitationStore, createNeo4jInvitationStore, InvitationError } from '../mcp-server/member-invitations.mjs'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
+import { parseArchive } from '../src/utils/private-import/archive.mjs'
 
 const inviter = { ownerId: 'inviter-owner', userId: 'inviter-user' }, invitee = { ownerId: 'invitee-owner', userId: 'invitee-user' }
 const code = expected => error => error instanceof InvitationError && error.code === expected
@@ -30,19 +31,39 @@ test('an invite stores only its hash, works once, expires, and never lets the in
   await assert.rejects(invites.respond(later.token, invitee, 'join'), code('invitation_action_invalid'))
 })
 
-test('only the inviter revokes a pending invite; names are plain; limits and account removal hold', async () => {
-  const store = createMemoryInvitationStore(), invites = createMemberInvitations({ store, maxPerDay: 2, maxPending: 5 })
+test('only the inviter revokes a pending invite; names are plain; heavy use is reported, never capped; links do not expire', async () => {
+  let clock = 1_000_000
+  const reports = [], store = createMemoryInvitationStore(), invites = createMemberInvitations({ store, now: () => clock, onHeavyUse: event => { reports.push(event) } })
   const first = await invites.create({ inviter, inviterName: 'Jacob', inviteeName: 'Ada' })
+  assert.equal(first.invitation.expiresAt, undefined)
   await assert.rejects(invites.revoke(invitee, first.invitation.id), code('invitation_unavailable'))
   await invites.revoke(inviter, first.invitation.id)
   assert.equal((await invites.open(first.token)).status, 'revoked')
   await assert.rejects(invites.revoke(inviter, first.invitation.id), code('invitation_unavailable'))
   for (const name of ['<script>', 'Ada\u0000', '', ' ', 'x'.repeat(121), 42]) await assert.rejects(invites.create({ inviter, inviterName: 'Jacob', inviteeName: name }), code('invitation_name_invalid'))
-  await invites.create({ inviter, inviterName: 'Jacob', inviteeName: 'Grace' })
-  await assert.rejects(invites.create({ inviter, inviterName: 'Jacob', inviteeName: 'Third' }), code('invitation_limit'))
-  await invites.create({ inviter: invitee, inviterName: 'Other', inviteeName: 'Someone' })
-  assert.equal(await invites.removeOwner(inviter), 2); assert.equal(store.records.size, 1)
-  assert.deepEqual(await invites.list(inviter), [])
+  for (let index = 1; index < 105; index++) await invites.create({ inviter, inviterName: 'Jacob', inviteeName: `Person ${index}` })
+  assert.deepEqual(reports.map(value => value.invitesInDay), [50, 100]); assert.equal(reports[0].event, 'member_invites_heavy_use'); assert.match(reports[0].ownerHash, /^[a-f0-9]{64}$/)
+  clock += 400 * 24 * 60 * 60 * 1000
+  const late = await invites.create({ inviter, inviterName: 'Jacob', inviteeName: 'Late' })
+  clock += 400 * 24 * 60 * 60 * 1000
+  assert.equal((await invites.open(late.token)).status, 'pending')
+})
+
+test('an accepted invite connects both accounts, and deleting either account ends it', async () => {
+  const store = createMemoryInvitationStore(), invites = createMemberInvitations({ store })
+  const { token } = await invites.create({ inviter, inviterName: 'Jacob Cole', inviteeName: 'Ada' })
+  assert.deepEqual(await invites.connections(inviter), [])
+  await invites.respond(token, invitee, 'accept', 'Ada Lovelace')
+  const [mine] = await invites.connections(inviter), [theirs] = await invites.connections(invitee)
+  assert.deepEqual([mine.other, mine.name], [invitee, 'Ada Lovelace']); assert.deepEqual([theirs.other, theirs.name], [inviter, 'Jacob Cole'])
+  assert.deepEqual((await invites.accepted()).map(value => [value.inviter, value.invitee]), [[inviter, invitee]])
+  assert.equal((await invites.list(inviter))[0].responderName, 'Ada Lovelace')
+  await invites.removeOwner(invitee)
+  assert.deepEqual(await invites.connections(inviter), []); assert.deepEqual(await invites.accepted(), [])
+  const again = await invites.create({ inviter, inviterName: 'Jacob Cole', inviteeName: 'Ada' })
+  await invites.respond(again.token, invitee, 'accept', 'Ada Lovelace')
+  await invites.removeOwner(inviter)
+  assert.deepEqual(await invites.connections(invitee), [])
 })
 
 test('the graph store receives only the token hash and answers with compare-and-set', async () => {
@@ -54,7 +75,7 @@ test('the graph store receives only the token hash and answers with compare-and-
   const insert = calls.find(call => /CREATE \(i:UnlinkedMemberInvitation\)/.test(call.query))
   assert.match(insert.params.record.tokenHash, /^[a-f0-9]{64}$/); assert.ok(!JSON.stringify(calls).includes(token))
   const transition = await createNeo4jInvitationStore(driver).transition('h'.repeat(64), 'pending', { status: 'accepted' }, 5)
-  assert.equal(transition, true); assert.match(calls.at(-1).query, /WHERE i\.status = \$from AND \(\$unexpiredAt IS NULL OR i\.expiresAt > \$unexpiredAt\)/)
+  assert.equal(transition, true); assert.match(calls.at(-1).query, /WHERE i\.status = \$from AND \(\$unexpiredAt IS NULL OR i\.expiresAt IS NULL OR i\.expiresAt > \$unexpiredAt\)/)
 })
 
 // Two accounts on one handler: whoever the identity provider returns next signs in.
@@ -117,18 +138,27 @@ test('adding a person stages a private one-row import that Settings labels and t
   const jacob = await signIn('inviter-subject'), csrf = await csrfOf(jacob.cookie)
   const bad = await post('/people/add', jacob.cookie, { csrf, firstName: 'Ada', lastName: 'Lovelace', linkedinUrl: 'https://example.com/ada', company: '', position: '' })
   assert.equal(bad.status, 400); assert.match(await bad.text(), /Use a LinkedIn profile address/); assert.equal(jobs.size, 0)
-  assert.equal((await post('/people/add', jacob.cookie, { csrf, firstName: 'Ada', lastName: '', linkedinUrl: 'linkedin.com/in/ada' })).status, 400)
+  assert.equal((await post('/people/add', jacob.cookie, { csrf, firstName: '', lastName: 'Lovelace', linkedinUrl: '' })).status, 400)
   const added = await post('/people/add', jacob.cookie, { csrf, firstName: 'Ada', lastName: 'Love"lace', linkedinUrl: 'linkedin.com/in/ada-lovelace/', company: 'Analytical, Inc.', position: 'Engineer' })
   assert.equal(added.status, 303); assert.equal(added.headers.get('location'), '/network?added=1')
   assert.match(await (await request('/network?added=1', { headers: { Cookie: jacob.cookie } })).text(), /Added to your people\./)
   const [job] = jobs.values()
-  assert.deepEqual(job.consent, COMBINED_UPLOAD_CONSENT); assert.equal(job.filename, 'Connections.csv')
+  assert.deepEqual(job.consent, COMBINED_UPLOAD_CONSENT); assert.equal(job.filename, 'Added people.csv')
   assert.deepEqual(job.origin, { kind: 'added-person', label: 'Ada Love"lace' })
   const csv = memoryJobs.assets.get(job.archiveSha256).toString('utf8')
   assert.equal(csv, 'First Name,Last Name,URL,Email Address,Company,Position,Connected On\n"Ada","Love""lace","https://www.linkedin.com/in/ada-lovelace","","Analytical, Inc.","Engineer",""\n')
   const settings = await (await request('/settings', { headers: { Cookie: jacob.cookie } })).text()
   assert.match(settings, /Added by you: Ada Love&quot;lace/)
   assert.doesNotMatch(settings, /class="import-status"/)
+  // A name alone is enough; the parser gives the row a stable private subject.
+  const nameOnly = await post('/people/add', jacob.cookie, { csrf, firstName: 'Grace', lastName: '', linkedinUrl: '' })
+  assert.equal(nameOnly.status, 303)
+  const graceJob = [...jobs.values()].find(value => value.origin.label === 'Grace')
+  const parsed = parseArchive(memoryJobs.assets.get(graceJob.archiveSha256), graceJob.filename).sources[0]
+  assert.equal(parsed.accepted.length, 1); assert.match(parsed.accepted[0].subject, /^unlinked:added-person:[a-f0-9]{64}$/)
+  assert.equal(parseArchive(memoryJobs.assets.get(job.archiveSha256), job.filename).sources[0].accepted[0].subject, 'https://www.linkedin.com/in/ada-lovelace')
+  // LinkedIn's own Connections.csv still requires the address.
+  assert.equal(parseArchive(Buffer.from('First Name,Last Name,URL\nGrace,Hopper,\n'), 'Connections.csv').sources[0].accepted.length, 0)
   // No invites configured: the routes do not exist.
   assert.equal((await request('/invites', { headers: { Cookie: jacob.cookie } })).status, 404)
 })
