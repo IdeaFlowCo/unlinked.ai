@@ -91,6 +91,9 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .phead>.small{margin:0 24px;display:block}
 .unlinked-onboarding .phead .actions{margin:16px 24px 0}
 .unlinked-onboarding .phead .notice{margin:16px 24px 0}
+.unlinked-onboarding .qr{margin:18px 24px 0;max-width:260px;background:#fff}
+.unlinked-onboarding .qr svg{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:var(--r)}
+.unlinked-onboarding .qr-url{margin:10px 24px 0;overflow-wrap:anywhere}
 .unlinked-onboarding .sec h3{margin:0 0 12px;font-size:17px}
 .unlinked-onboarding .sec>p{margin:0}
 .unlinked-onboarding .sec>p+p,.unlinked-onboarding .sec>pre+p{margin-top:10px}

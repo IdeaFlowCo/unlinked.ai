@@ -1,12 +1,14 @@
 import jsQR from 'jsqr'
 import { parseOpenChatCard } from './openchat-card.js'
 
-/** One camera visit. The owner must call stop on exit. */
+/** One camera visit. The owner must call stop on exit. `parse` validates a raw
+ * QR value into the object handed to onCard; it defaults to OpenChat cards. */
 export class BrowserCardScanner {
-  constructor(host, { onCard, onUnsupportedCode }) {
+  constructor(host, { onCard, onUnsupportedCode, parse = parseOpenChatCard }) {
     this.host = host
     this.onCard = onCard
     this.onUnsupportedCode = onUnsupportedCode
+    this.parse = parse
     this.stream = null
     this.video = null
     this.frame = null
@@ -27,7 +29,7 @@ export class BrowserCardScanner {
     video.autoplay = true
     video.muted = true
     video.playsInline = true
-    video.setAttribute('aria-label', 'Camera preview for scanning an OpenChat card')
+    video.setAttribute('aria-label', 'Camera preview for scanning a card')
     video.srcObject = stream
     this.video = video
     this.host.appendChild(video)
@@ -63,7 +65,7 @@ export class BrowserCardScanner {
 
   acceptValue(value) {
     if (this.stopped || this.navigated) return
-    const card = parseOpenChatCard(value)
+    const card = this.parse(value)
     if (card) {
       this.navigated = true
       this.stop()

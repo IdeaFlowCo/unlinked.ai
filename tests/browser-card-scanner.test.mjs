@@ -37,6 +37,23 @@ test('camera starts on demand, rejects unrelated QR values, and opens one card',
   assert.equal(setup.removals, 1)
 })
 
+test('a custom parser (the Meet classifier) gates which QR values reach the owner callback', async t => {
+  const { classifyMeetCode } = await import('../src/utils/meet-scan.js')
+  const setup = fixture(t)
+  const offered = []
+  let unsupported = 0
+  const scanner = new BrowserCardScanner(setup.host, { parse: classifyMeetCode, onCard: code => offered.push(code), onUnsupportedCode: () => unsupported++ })
+  await scanner.start()
+  scanner.acceptValue('https://evil.test/people/abc')
+  scanner.acceptValue('tel:+15551234567')
+  assert.equal(unsupported, 2)
+  assert.deepEqual(offered, [])
+  scanner.acceptValue('https://www.unlinked.ai/people/c2d609ce-fa01-4a8f-8dcc-710292e4a56c')
+  scanner.acceptValue('https://www.unlinked.ai/people/other')
+  assert.deepEqual(offered, [{ kind: 'unlinked', href: '/people/c2d609ce-fa01-4a8f-8dcc-710292e4a56c', label: 'Unlinked profile' }])
+  assert.equal(setup.stops, 1)
+})
+
 test('scanner keeps a new-host QR on its original host', async t => {
   const setup = fixture(t)
   const opened = []
