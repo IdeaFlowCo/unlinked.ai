@@ -1,11 +1,13 @@
 import { readFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
+import { createRequire } from 'node:module'
 
 const root = new URL('../', import.meta.url)
+const requireFromRoot = createRequire(new URL('package.json', root))
 const assets = new Map([
   ['/public-assets/openchat-card.js', ['src/utils/openchat-card.js', 'text/javascript']],
   ['/public-assets/browser-card-scanner.js', ['src/utils/browser-card-scanner.js', 'text/javascript']],
-  ['/public-assets/jsqr.js', ['node_modules/jsqr/dist/jsQR.js', 'text/javascript']],
+  ['/public-assets/jsqr.js', [() => requireFromRoot.resolve('jsqr/dist/jsQR.js'), 'text/javascript']],
   ['/llms.txt', ['public/llms.txt', 'text/plain']],
   ['/AGENTS.md', ['public/AGENTS.md', 'text/plain']],
   ['/openapi.json', ['public/openapi.json', 'application/json']],
@@ -25,7 +27,8 @@ export async function servePublicDiscovery(request, response, pathname) {
   let type, content
   if (assets.has(pathname)) {
     const [file, mime] = assets.get(pathname)
-    type = mime; content = await readFile(new URL(file, root))
+    const assetPath = typeof file === 'function' ? file() : new URL(file, root)
+    type = mime; content = await readFile(assetPath)
     if (pathname === '/public-assets/browser-card-scanner.js') content = content.toString().replace("from 'jsqr'", "from '/public-assets/jsqr-module.mjs'")
   } else if (pathname === '/public-assets/jsqr-module.mjs') { type = 'text/javascript'; content = 'export default globalThis.jsQR;' }
   else {
