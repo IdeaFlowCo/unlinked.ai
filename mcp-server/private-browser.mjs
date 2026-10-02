@@ -1,5 +1,7 @@
+import { createPublicPeopleReader, PublicPeopleReaderError } from '../src/utils/public-people/reader.mjs'
+import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { isPublicDiscoveryPath, servePublicDiscovery } from './public-discovery.mjs'
-import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
+import { COMBINED_UPLOAD_CONSENT, PUBLIC_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import * as oidc from 'openid-client'
 import { ingestArchive } from '../src/utils/private-import/job.mjs'
@@ -37,7 +39,7 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
       // Prototype policy accepts the authenticated IdP email for display, even
       // without email_verified. Owner authority remains exact signed issuer/sub.
       // No access/ID token reaches an agent, cookie or imported source record.
-      return { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), verifiedEmail: typeof claims.email === 'string' ? claims.email : null }
+      return { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), verifiedEmail: typeof claims.email === 'string' ? claims.email : null, displayName: typeof claims.name === 'string' && claims.name.length <= 256 ? claims.name : null }
     },
   }
 }
@@ -60,7 +62,7 @@ function page(response, title, content, status = 200) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, getBackend, complete, issueGrant, issueAccountGrant, revokeAccountGrant, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, revokeAccountGrant, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -75,6 +77,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   }
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map()
   let uploadBusy = false
+  const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
+  let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
@@ -112,7 +116,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     purge(sessions)
     if (sessions.size >= 100) throw new Error('private_login_capacity')
     const sessionId = token()
-    sessions.set(sessionId, { owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + 15 * 60000 })
+    sessions.set(sessionId, { owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel: identity.verifiedEmail ?? identity.subject, displayName: identity.displayName ?? identity.verifiedEmail ?? identity.subject, csrf: token(), expiresAt: Date.now() + 15 * 60000 })
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, 900)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     redirect(response, '/')
@@ -129,6 +133,32 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
       if (await servePublicDiscovery(request, response, url.pathname)) return
+      const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
+      const publicProfile = url.pathname.match(/^\/people\/([^/]+)$/)
+      if (request.method === 'GET' && (url.pathname === '/api/people' || publicDetail || publicProfile || url.pathname === '/people' || (url.pathname === '/network' && !sessionFor(request)))) {
+        if (Date.now() - publicWindow >= 60000) { publicWindow = Date.now(); publicRequests = 0 }
+        if (++publicRequests > 120 || publicBusy >= 2) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        publicBusy++
+        try {
+          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          if (publicDetail || publicProfile) {
+            let id
+            try { id = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
+            const result = await publicReader.profile({ id, cursor: url.searchParams.get('cursor') ?? undefined })
+            if (!result) { response.writeHead(404).end(); return }
+            if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
+            const profile = result.profile
+            render(response, profile.name, `<p><a href="/network">Everyone on Unlinked</a> · <a href="/login">Sign in</a></p><p>${html(profile.headline ?? '')}</p><p>${html(profile.about ?? '')}</p>${profile.positions.map(value => `<article><h2>${html(value.title)}</h2><p>${html(value.company)}</p><p>${html(value.description ?? '')}</p></article>`).join('')}<p>${profile.skills.map(html).join(' · ')}</p><h2>Connections</h2>${profile.connections.map(value => `<p><a href="/people/${encodeURIComponent(value.id)}">${html(value.name)}</a></p>`).join('')}`); return
+          }
+          const query = url.searchParams.get('q') ?? '', result = await publicReader.list({ query, cursor: url.searchParams.get('cursor') ?? undefined })
+          if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
+          const view = renderPeople({ scope: 'everyone', everyone: result.profiles, anonymousPublic: true, query, nextCursor: result.nextCursor, state: 'ready' })
+          journey(response, view); return
+        } catch (error) {
+          const status = error instanceof PublicPeopleReaderError ? error.status : 503
+          response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' })); return
+        } finally { publicBusy-- }
+      }
       const inviteMatch = url.pathname.match(/^\/invite\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && inviteMatch && invitationMode) {
         purge(invitations)
@@ -226,9 +256,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const jobProps = jobs => {
         const ordered = [...jobs].sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0))
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
-        return { accountLabel: session.accountLabel, csrf: session.csrf, importJob: active ? importJobStatus(active.payload) : undefined }
+        return { accountLabel: session.accountLabel, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
-      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed }))
+      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts.accepted, indexed: payload.counts.indexed, visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
       const statusMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/status$/)
       if (request.method === 'GET' && statusMatch) {
         const resource = await backend.readResource('import', statusMatch[1])
@@ -246,6 +276,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const jobs = await jobResources(), props = jobProps(jobs)
         if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
         const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs: profileJobs(jobs), backend }))
+        if (!profile.name) profile.name = session.displayName
         journey(response, renderOwnProfile({ ...props, profile, imports: summaries(jobs) }), props.importJob); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/network') {
@@ -257,7 +288,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
         const props = jobProps(await jobResources()), contacts = rows.slice(index * 100, (index + 1) * 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url }))
-        const view = renderPeople({ ...props, contacts, query: filter })
+        let everyone = [], nextCursor, state = 'ready'
+        try { const result = await publicReader.list({ query: filter, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor }
+        catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
+        const scope = url.searchParams.get('scope') ?? 'everyone'
+        if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
+        const view = renderPeople({ ...props, scope, own: network.imports.length ? contacts : undefined, everyone, nextCursor, state, ...(!readPublishedSnapshot ? {contacts} : {}), query: filter })
         if (rows.length > (index + 1) * 100) view.content += `<a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}">Next contacts</a>`
         journey(response, view, props.importJob)
         return
@@ -279,9 +315,20 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           if (input.getAll('query').length !== 1) throw new Error('private_search_query_limit')
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
+          if (input.getAll('scope').length > 2 || input.getAll('scope').some(value => !['everyone','own'].includes(value))) throw new Error('shared_search_scope_invalid')
+          const scope = input.getAll('scope').at(-1) ?? (readPublishedSnapshot ? 'everyone' : 'own')
+          if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
+          if (scope === 'everyone') {
+            const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
+            const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
+            const own = network.imports.length ? network.assertions.filter(row => row.category === 'connections').slice(0, 100).map(row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })) : undefined
+            const view = renderPeople({ ...props, scope, everyone: result.matches, own, query: input.get('query'), state: 'ready', searchResults: result.matches })
+            view.content += `<p>${result.considered} public profiles considered; ${result.modelCandidates} matching candidates ranked with AI.</p>`
+            journey(response, view, props.importJob); return
+          }
           const result = await createAccountNetwork({ owner: session.owner, getBackend, complete }).search({ query: input.get('query'), signal: controller.signal })
           const props = jobProps(await jobResources())
-          const view = renderPeople({ ...props, query: input.get('query'), searchResults: result.matches.map(match => ({ name: [match.fields['first name'], match.fields['last name']].filter(Boolean).join(' '), headline: match.fields.position, company: match.fields.company, linkedinUrl: match.fields.url, reason: match.reason })) })
+          const view = renderPeople({ ...props, scope: 'own', query: input.get('query'), searchResults: result.matches.map(match => ({ name: [match.fields['first name'], match.fields['last name']].filter(Boolean).join(' '), headline: match.fields.position, company: match.fields.company, linkedinUrl: match.fields.url, reason: match.reason })) })
           view.content += `<p>${result.considered} connection observations searched across your own files.</p>`
           journey(response, view, props.importJob); return
         }
@@ -301,7 +348,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (dataMode === 'synthetic' && (form.getAll('syntheticConsent').length !== 1 || form.get('syntheticConsent') !== 'yes')) throw new Error('synthetic_archive_only')
         const file = form.get('archive')
         if (!file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name)) throw new Error('private_archive_filename_invalid')
-        const receipt = await (backgroundImports ? stageArchive : ingestArchive)({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+        const receipt = await (backgroundImports ? stageArchive : ingestArchive)({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: dataMode === 'private_live' && readPublishedSnapshot ? PUBLIC_UPLOAD_CONSENT : COMBINED_UPLOAD_CONSENT })
         redirect(response, signup ? '/profile' : `/imports/${receipt.id}`); return
         } finally { uploadBusy = false }
       }

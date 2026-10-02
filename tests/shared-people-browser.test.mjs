@@ -1,0 +1,54 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
+import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+
+const profile = (id, name) => ({ id, name, headline: 'Engineer', positions: [{ title: 'Engineer', company: 'Test Company' }], education: [], skills: [] })
+test('anonymous People reads only public professional snapshot; no-import member searches Everyone with CSRF and exact owner', async t => {
+  let handler, backendReads = 0, models = 0
+  const owner = { ownerId: 'test-owner', userId: 'test-user' }
+  const data = { state: 'published', complete: true, revision: 'public-test-v1', profiles: [profile('first', 'A First'), profile('last', 'Z Last')], connections: [{ fromId: 'first', toId: 'last' }] }
+  const server = createServer((req,res) => void handler(req,res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'synthetic', login: {
+    begin: async () => ({ location: 'https://test.invalid/login', transaction: { state: 'state' } }),
+    finish: async () => ({ issuer: 'https://test.invalid', subject: 'verified-subject', verifiedEmail: 'test@example.invalid', displayName: 'Verified Person' }),
+  }, resolveOwner: async identity => identity.subject === 'verified-subject' ? owner : null,
+  signup: async () => owner, issueAccountGrant: async () => ({ accessToken: 'test-grant' }), revokeAccountGrant: async () => {},
+  getBackend: async value => { assert.deepEqual(value, owner); backendReads++; return { adapter: {}, listImportIds: async () => [], listImportJobIds: async () => [], readResource: async () => null } },
+  readPublishedSnapshot: async () => data,
+  complete: async ({ candidateIds, input }) => { models++; assert.ok(!input.includes('test@example')); return { matches: [{ id: candidateIds[0], reason: 'Name matches' }] } },
+  })
+  const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
+  const list = await request('/api/people?q=Last'); assert.equal(list.status,200)
+  assert.deepEqual((await list.json()).profiles.map(p => p.id), ['last'])
+  const detail = await request('/api/people/first'); assert.equal(detail.status,200); assert.equal((await detail.json()).profile.connections[0].id,'last')
+  assert.equal((await request('/api/people/missing')).status,404)
+  assert.equal((await request('/api/people?q=x&q=y')).status,400)
+  assert.equal((await request('/people/last')).status,200)
+  const publicPage = await request('/network'); assert.equal(publicPage.status,200); const publicHTML = await publicPage.text(); assert.match(publicHTML,/method="get" action="\/network"/); assert.doesNotMatch(publicHTML,/name="csrf"|\/search-account|Signed in as/)
+  assert.equal(backendReads,0)
+  assert.equal((await request('/settings')).status,401)
+  const anonymousSearch = await request('/search-account', { method:'POST', headers: { Origin:baseUrl, 'Content-Type':'application/x-www-form-urlencoded' }, body:'query=Last&scope=everyone' })
+  assert.equal(anonymousSearch.status,401); assert.equal(models,0)
+  const start = await request('/login'), loginCookie = start.headers.getSetCookie()[0].split(';')[0]
+  const callback = await request('/auth/callback/ideaflow?code=test&state=state',{headers:{Cookie:loginCookie}})
+  assert.equal(callback.status,303)
+  const session = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const ownProfile = await request('/profile',{headers:{Cookie:session}}); assert.equal(ownProfile.status,200); assert.match(await ownProfile.text(), /Verified Person/)
+  const people = await request('/network',{headers:{Cookie:session}}); assert.equal(people.status,200)
+  const page = await people.text(), csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
+  const submit = body => request('/search-account', {method:'POST',headers:{Cookie:session,Origin:baseUrl,'Content-Type':'application/x-www-form-urlencoded'},body})
+  assert.equal((await submit('query=Last&scope=everyone&csrf=wrong')).status,400)
+  const searched = await submit(new URLSearchParams({query:'Last',scope:'everyone',csrf})); assert.equal(searched.status,200); assert.match(await searched.text(),/2 public profiles considered/); assert.equal(models,1)
+  const toggled=await submit(new URLSearchParams([['query','Last'],['scope','everyone'],['scope','own'],['csrf',csrf]])); assert.equal(toggled.status,200); assert.equal(models,1)
+})
+
+test('anonymous unavailable projection returns503, never empty or owner-private fallback', async t => {
+  let handler
+  const server = createServer((req,res) => void handler(req,res)); await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve)); t.after(()=>new Promise(resolve=>server.close(resolve)))
+  const endpoint=`http://127.0.0.1:${server.address().port}`
+  handler=createPrivateBrowserHandler({baseUrl:endpoint.replace('http:','https:'), login:{begin:async()=>{},finish:async()=>{}},resolveOwner:async()=>null,getBackend:async()=>{throw Error('private read forbidden')}})
+  const response=await fetch(endpoint+'/api/people');assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'public_people_unavailable'})
+})
