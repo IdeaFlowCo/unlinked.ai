@@ -111,8 +111,10 @@ export function createMemoryNotificationStore() {
     },
     async prune(member, keep) { for (const value of mine(member).sort(newest).slice(keep)) records.delete(value.id) },
     // Email delivery: records not yet emailed, created in (since, before], unclaimed or with a stale claim.
-    async pendingEmail({ since, before, staleClaimBefore, limit }) {
-      return [...records.values()].filter(value => value.retracted !== true && value.id && value.emailedAt == null && value.createdAt > since && value.createdAt <= before && (value.emailClaim == null || value.emailClaimAt < staleClaimBefore))
+    // `exclude` lists recipients ("ownerId\u0000userId") held by their window or backoff.
+    async pendingEmail({ since, before, staleClaimBefore, limit, exclude = [] }) {
+      const held = new Set(exclude)
+      return [...records.values()].filter(value => value.retracted !== true && value.id && value.emailedAt == null && value.createdAt > since && value.createdAt <= before && (value.emailClaim == null || value.emailClaimAt < staleClaimBefore) && !held.has(`${value.recipientOwnerId}\u0000${value.recipientUserId}`))
         .sort((a, b) => a.createdAt - b.createdAt).slice(0, limit).map(value => structuredClone(value))
     },
     async claimEmail(ids, { claim, at, staleClaimBefore }) {
@@ -206,9 +208,10 @@ export function createNeo4jNotificationStore(driver, database = 'neo4j') {
     },
     // Email delivery (mcp-server/member-email.mjs). Every write takes the
     // record's lock first and re-checks, so a claim and emailedAt land once.
-    async pendingEmail({ since, before, staleClaimBefore, limit }) {
+    async pendingEmail({ since, before, staleClaimBefore, limit, exclude = [] }) {
       const result = await read(`MATCH (n:UnlinkedNotification) WHERE n.createdAt > $since AND n.createdAt <= $before AND n.emailedAt IS NULL AND n.id IS NOT NULL AND coalesce(n.retracted, false) = false
-        AND (n.emailClaim IS NULL OR n.emailClaimAt < $staleClaimBefore) RETURN properties(n) AS n ORDER BY n.createdAt LIMIT ${count(limit)}`, { since, before, staleClaimBefore })
+        AND (n.emailClaim IS NULL OR n.emailClaimAt < $staleClaimBefore) AND NOT (n.recipientOwnerId + $separator + n.recipientUserId) IN $exclude
+        RETURN properties(n) AS n ORDER BY n.createdAt LIMIT ${count(limit)}`, { since, before, staleClaimBefore, exclude, separator: '\u0000' })
       return result.records.map(record => fromNode(record.get('n')))
     },
     async claimEmail(ids, { claim, at, staleClaimBefore }) {

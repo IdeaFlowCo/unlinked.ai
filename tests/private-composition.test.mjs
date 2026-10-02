@@ -194,7 +194,7 @@ test('email delivery is wired only with its store; no key or the off flag sends 
   const plain = await createPrivatePilotDependencies(options)
   assert.equal(plain.memberEmail, undefined)
   await plain.close()
-  for (const [emailEnv, sending] of [[{}, false], [{ RESEND_API_KEY: 'synthetic-resend-key', UNLINKED_EMAIL_ENABLED: '0' }, false], [{ RESEND_API_KEY: 'synthetic-resend-key' }, true]]) {
+  for (const [emailEnv, sending] of [[{ UNLINKED_EMAIL_SECRET: 'cd'.repeat(32) }, false], [{ RESEND_API_KEY: 'synthetic-resend-key', UNLINKED_EMAIL_SECRET: 'cd'.repeat(32), UNLINKED_EMAIL_ENABLED: '0' }, false], [{ RESEND_API_KEY: 'synthetic-resend-key', UNLINKED_EMAIL_SECRET: 'cd'.repeat(32) }, true]]) {
     const { options: next } = await fixture(t)
     const transports = []
     const dependencies = await createPrivatePilotDependencies({ ...next, emailEnv,
@@ -207,5 +207,18 @@ test('email delivery is wired only with its store; no key or the off flag sends 
     await dependencies.close()
     assert.equal(dependencies.memberEmail.start(), sending, 'close stopped the timer')
     await dependencies.memberEmail.stop()
+  }
+})
+
+test('a missing or short UNLINKED_EMAIL_SECRET disables email with one non-secret log line', async t => {
+  for (const secret of [undefined, 'ab'.repeat(16)]) {
+    const { options } = await fixture(t)
+    const lines = []
+    const dependencies = await createPrivatePilotDependencies({ ...options, emailEnv: { RESEND_API_KEY: 'synthetic-resend-key', ...(secret ? { UNLINKED_EMAIL_SECRET: secret } : {}) }, emailLog: line => lines.push(line),
+      modules: { ...options.modules, createEmailStore: () => createMemoryEmailStore(), createNotificationStore: () => ({ ...createMemoryNotificationStore(), initialize: async () => {} }) },
+      emailTransportFactory: () => { throw new Error('no transport without a secret') } })
+    assert.equal(dependencies.memberEmail, undefined)
+    assert.deepEqual(lines, ['unlinked_email_disabled: UNLINKED_EMAIL_SECRET is missing or shorter than 32 bytes'])
+    await dependencies.close()
   }
 })

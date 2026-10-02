@@ -113,4 +113,4 @@ The immutable private legacy Storage recovery, owner confirmation/download bound
 
 Shared browser/agent connection authorization is in `mcp-server/connection-actions.mjs`; opt-in writes and grant update hints are documented in `docs/agent-api.md`.
 
-Invite and notification emails (Resend over `fetch`, `mcp-server/member-email.mjs`) are documented in `docs/email.md`: env `RESEND_API_KEY`, `UNLINKED_EMAIL_FROM`, `UNLINKED_EMAIL_ENABLED` (off with `false`/`0`). Never log or render an email address other than the signed-in member's own, a token or the key; `POST /email/unsubscribe` is the only POST exempt from the same-origin check.
+Invite and notification emails (Resend over `fetch`, `mcp-server/member-email.mjs`) are documented in `docs/email.md`: env `RESEND_API_KEY`, `UNLINKED_EMAIL_SECRET` (required, ≥32 bytes), `UNLINKED_EMAIL_FROM`, `UNLINKED_INVITE_EMAILS_PER_DAY`, `UNLINKED_EMAIL_ENABLED` (off with `false`/`0`). Invite caps are reserved atomically (`reserveInvite`). Never log or render an email address other than the signed-in member's own, a token or the key; `POST /email/unsubscribe` is the only POST exempt from the same-origin check.
