@@ -49,6 +49,7 @@ test('service worker precaches only the fixed public shell and never caches at r
     self: { addEventListener: (name, fn) => { listeners[name] = fn }, skipWaiting: async () => {}, clients: { claim: async () => {} }, location: { origin: 'https://www.unlinked.ai' } },
     caches: { open: async () => cache, match: async key => cacheStore.get(key), keys: async () => ['unlinked-public-shell-v0', 'unlinked-public-shell-v1'], delete: async key => { assert.notEqual(key, 'unlinked-public-shell-v1'); return true } },
     fetch: async request => { if (context.networkDown) throw new TypeError('offline'); return `network:${request.url ?? request}` },
+    Response: { error: () => 'response-error' },
     URL, console,
   }
   vm.createContext(context)
@@ -78,6 +79,9 @@ test('service worker precaches only the fixed public shell and never caches at r
   context.networkDown = true
   assert.equal(await dispatch({ method: 'GET', url: 'https://www.unlinked.ai/settings', mode: 'navigate' }), 'cached:/offline.html')
   assert.equal(cacheStore.size, sizeBefore)
+  // An evicted precache degrades to a plain network error, never a broken undefined response.
+  cacheStore.delete('/offline.html')
+  assert.equal(await dispatch({ method: 'GET', url: 'https://www.unlinked.ai/settings', mode: 'navigate' }), 'response-error')
 })
 
 test('journey pages carry the manifest, worker registration and the extended-but-strict CSP', async t => {
@@ -88,6 +92,10 @@ test('journey pages carry the manifest, worker registration and the extended-but
   handler = createPrivateBrowserHandler({ baseUrl: `https://127.0.0.1:${server.address().port}`,
     login: { begin: async () => ({ location: 'https://x.invalid', transaction: {} }), finish: async () => ({}) },
     resolveOwner: async () => null, getBackend: async () => { throw new Error('unexpected') } })
+  // The worker script itself is never HTTP-cacheable, so VERSION bumps reach clients.
+  const worker = await fetch(`${endpoint}/sw.js`)
+  assert.equal(worker.status, 200)
+  assert.equal(worker.headers.get('cache-control'), 'no-store')
   const page = await fetch(endpoint)
   const csp = page.headers.get('content-security-policy')
   assert.match(csp, /default-src 'none'/)

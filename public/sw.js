@@ -8,8 +8,9 @@
  * nothing personal behind in any cache, and nothing can leak across users.
  *
  * Updates: bump VERSION whenever a listed asset changes; the old cache is
- * deleted on activate and /sw.js itself is served no-store, so clients pick
- * up new releases on their next load.
+ * deleted on activate, and the runtime serves /sw.js (like every response)
+ * with Cache-Control: no-store — asserted in tests/pwa-assets.test.mjs — so
+ * clients pick up new releases on their next load.
  */
 const VERSION = 'unlinked-public-shell-v1'
 const PUBLIC_SHELL = [
@@ -40,9 +41,10 @@ self.addEventListener('fetch', event => {
     return
   }
   // Navigations go to the network untouched; only a network failure shows the
-  // static offline page. Nothing from the live response is ever cached.
+  // static offline page. Nothing from the live response is ever cached. If the
+  // browser evicted the precache, fall back to a plain network error.
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(() => caches.match('/offline.html')))
+    event.respondWith(fetch(request).catch(() => caches.match('/offline.html').then(hit => hit || Response.error())))
   }
   // Every other request (APIs, fonts, downloads) is left entirely to the network.
 })

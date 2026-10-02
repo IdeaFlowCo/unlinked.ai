@@ -41,17 +41,20 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
       typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) ? record : null
     const ids = await backend.listAccountGrantIds()
     const records = []
-    for (const id of ids) { const record = derive(await backend.readResource('import', id)); if (record) records.push(record) }
+    for (let start = 0; start < ids.length; start += 8) records.push(...(await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id)))).map(derive).filter(Boolean))
     const latest = records.sort((a, b) => (b.payload.issuedAt - a.payload.issuedAt) || a.sourceId.localeCompare(b.sourceId))[0]
     if (latest) return { accessToken: await signGrant(latest.sourceId, owner, latest.payload.jti, latest.payload.issuedAt), grantId: latest.sourceId, created: false }
     const existing = await backend.readResource('import', autoId)
-    if (existing?.deleted) return null // the owner revoked the automatic setup; it stays revoked
+    if (existing?.deleted) return null // the owner revoked their agent access; it stays revoked
     try { return { ...(await issueGrant(owner, AUTO_JTI)), created: true } }
     catch (error) {
-      // A concurrent visit may have provisioned first; the durable record wins.
-      const record = derive(await backend.readResource('import', autoId))
-      if (!record) throw error
-      return { accessToken: await signGrant(autoId, owner, record.payload.jti, record.payload.issuedAt), grantId: autoId, created: false }
+      // A concurrent visit may have provisioned — or revoked — first; the
+      // durable record wins either way.
+      const record = await backend.readResource('import', autoId)
+      if (record?.deleted) return null
+      const live = derive(record)
+      if (!live) throw error
+      return { accessToken: await signGrant(autoId, owner, live.payload.jti, live.payload.issuedAt), grantId: autoId, created: false }
     }
   }
   const authenticateGrant = async request => {
@@ -75,6 +78,16 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const backend = await getBackend(owner), record = await backend.readResource('import', grantId)
     if (!record || record.deleted || record.sourceOwnerId !== owner.ownerId || record.payload?.kind !== 'account_tool_grant' || record.payload.userId !== owner.userId) throw new Error('account_grant_not_found')
     await backend.writeResource({ ...record, sourceRevision: record.sourceRevision + 1, expectedRevision: record.sourceRevision, deleted: true, payload: null })
+    // Revoking the last live grant is a durable "agent access off" decision,
+    // even when that grant predates automatic provisioning. Record it as the
+    // automatic grant's tombstone so ensureGrant never quietly re-enables
+    // access on the next page view. Best-effort: a racing provision keeps a
+    // live grant, which is the correct outcome for that race.
+    const autoId = privateId(owner.ownerId, 'account-grant-v1', AUTO_JTI)
+    if (grantId !== autoId && !(await backend.listAccountGrantIds()).length && !(await backend.readResource('import', autoId))) {
+      await backend.writeResource({ namespace: 'unlinked', type: 'import', sourceId: autoId, sourceOwnerId: owner.ownerId,
+        sourceRevision: 1, expectedRevision: null, audience: 'owner', deleted: true, payload: null }).catch(() => {})
+    }
   }
   return { issueGrant, ensureGrant, authenticateGrant, revoke }
 }

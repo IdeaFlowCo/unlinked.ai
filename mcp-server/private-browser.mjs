@@ -401,19 +401,24 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (!profile.name && legacy) Object.assign(profile, legacy.profile)
         if (!profile.name) profile.name = session.displayName
         // The QR target is the owner's already-public profile URL: the linked
-        // legacy profile id when one is confirmed, else the newest published
-        // public import. It is verified against today's published snapshot, so
-        // the code never encodes a private or dead target, and scanning it
-        // grants nothing beyond what any visitor can already read.
-        let publicId = legacy?.profileId ?? null
-        if (!publicId) {
-          const published = jobs.filter(job => ['indexed', 'partial'].includes(job.payload.status) && job.payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && job.payload.consent.publicProfessionalSearch === true)
-            .sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0) || b.sourceId.localeCompare(a.sourceId))
-          if (published[0]) publicId = 'member-import-' + published[0].sourceId
-        }
+        // legacy profile id when one is confirmed, else the newest public-
+        // consent import that is actually in today's published snapshot (a
+        // newer partial or not-yet-projected import never hides an older live
+        // one). The code never encodes a private or dead target, and scanning
+        // it grants nothing beyond what any visitor can already read.
+        const candidates = legacy?.profileId ? [legacy.profileId] : []
+        candidates.push(...jobs.filter(job => ['indexed', 'partial'].includes(job.payload.status) && job.payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && job.payload.consent.publicProfessionalSearch === true)
+          .sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0) || b.sourceId.localeCompare(a.sourceId))
+          .map(job => 'member-import-' + job.sourceId))
+        // Full RFC 3986 escaping so the target always matches the card grammar
+        // that /meet scanning accepts (encodeURIComponent leaves !'()* alone).
+        const profileHref = id => `/people/${encodeURIComponent(id).replace(/[!'()*]/g, character => '%' + character.charCodeAt(0).toString(16).toUpperCase())}`
         let cardUrl = null
-        if (publicId && typeof readPublishedSnapshot === 'function') {
-          try { if (await publicReader.profile({ id: publicId })) cardUrl = new URL(`/people/${encodeURIComponent(publicId)}`, base).href } catch { /* The card still renders while the index is unavailable. */ }
+        if (typeof readPublishedSnapshot === 'function') {
+          for (const id of candidates.slice(0, 8)) {
+            try { if (await publicReader.profile({ id })) { cardUrl = new URL(profileHref(id), base).href; break } }
+            catch { break /* The card still renders while the index is unavailable. */ }
+          }
         }
         journey(response, renderCard({ ...props, profile, cardUrl, qr: cardUrl ? qrSvg(cardUrl, { label: `QR code opening ${cardUrl}` }) : null }), props.importJob); return
       }
@@ -518,10 +523,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return
         }
-        // Regenerate: revoke every live grant, then mint one fresh grant, so the
-        // old bearer credential stops working the moment the new one exists.
-        for (const grantId of await backend.listAccountGrantIds()) await revokeAccountGrant(session.owner, grantId)
-        const { accessToken } = await issueAccountGrant(session.owner)
+        // Regenerate: mint the replacement first — a failure leaves the
+        // existing setup intact — then revoke every other live grant so old
+        // bearer credentials die as soon as the new one exists.
+        const { accessToken, grantId: replacement } = await issueAccountGrant(session.owner)
+        for (const grantId of await backend.listAccountGrantIds()) if (grantId !== replacement) await revokeAccountGrant(session.owner, grantId)
         const configuration = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
         const jobs = await jobResources(), props = jobProps(jobs)
         const grants = await backend.listAccountGrantIds()
