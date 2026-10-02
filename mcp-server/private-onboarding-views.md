@@ -27,11 +27,32 @@ access fails, and leaves a readonly, selectable textarea and instructions withou
 Signed-out Join shows only the logo and outbound Meet link in its header. Member
 navigation uses the same session CSRF presence as header search and sign-out.
 People has one search input, in the shared header: POST `/search-account` with
-`csrf` and `query`. It retains the escaped current query; there is no separate
-in-page search or GET `/network?q` filter form. Empty `contacts` shows the import
-prompt regardless of query. Nonempty `contacts` with a query and empty results
-shows the no-match message; callers retain existing contacts alongside searchResults
-to distinguish those states. No renderer props or server actions were added.
+`csrf`, `query` and hidden `scope`. It retains the escaped current query; there is
+no separate in-page search or GET filter form. The People contract is:
+`scope: 'everyone' | 'own'`, `everyone: [{id, name, headline?, company?, location?}]`,
+optional `own` containing the existing own-contact DTOs (including reason), optional
+string `nextCursor`, and `state: 'ready' | 'unavailable'` plus existing welcome/error.
+No other member fields are inferred or read. The runtime supplies original profile
+UUIDs and authorized member DTOs, not contacts relabeled as public members.
+
+Undefined `own` means no imports: no own group or scope toggles, and scope is forced
+to everyone. Defined `own` renders People you know before Everyone on Unlinked,
+with native Everyone/My people submit buttons and the selected hidden scope. Toggle
+buttons bypass required-query validation to support browsing without a query. A
+clicked toggle adds a second scope value after the hidden one; the controller must
+use the last submitted scope value. With the exact contract, defined empty `own`
+with a query is a no-match result; without a query it shows the import prompt.
+This uses the supplied import-presence signal, not mixed import record totals.
+
+Everyone rows show only initials, linked name (`/people/{encodeURIComponent(id)}`),
+headline/company and optional location. No LinkedIn link, listed-by/member flags,
+reason or mutual counts appear in that group. Unavailable shows “Member search is
+on its way.” and no rows; ready empty lists distinguish no query from no match.
+Error retains the existing failure alert rather than claiming either list is empty.
+`nextCursor` supplies a native Show more GET link to `/network?cursor=...`, with
+encoded `q` before cursor when query is nonempty. No scope or other fields are
+added to that pagination URL. Friends remain unavailable (“Friends come soon.”).
+The controller owner integrates this contract and routes; no runtime changes occur here.
 Every signed renderer accepts optional `importJob` containing `id`, `status`, `profileReady`, `processed`, `total`, `statusUrl`, and optional `errorMessage`.
 Statuses are `uploaded`, `parsing`, `indexing`, `indexed`, `partial`, and `failed`.
 Processed counts and import accepted/indexed totals include Profile and Skills rows
@@ -51,7 +72,8 @@ The upload notice says profile and connections join the member's own network and
 searchable by them and any connected agent; contact details stay private. Settings
 explains private retention and bounded OpenAI query-time processing in plain words.
 
-Profile editing, shared-member discovery, friends, permanent removal, and data export remain explicitly unavailable.
+Profile editing, friends, permanent removal, and data export remain explicitly unavailable.
+The Everyone group renders only the member availability and DTOs supplied by the runtime.
 Agent setup and revocation use the existing `/setup-account` and `/revoke-account` server actions.
 Technical import details remain under Settings.
 Each optional import `sha256` value is escaped and shown only inside its `<details>`,

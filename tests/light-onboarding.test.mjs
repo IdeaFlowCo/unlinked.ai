@@ -26,7 +26,7 @@ test('all raw profile, contact, account, error and configuration values are esca
   const views = [
     renderBringArchive({ ...account, accountLabel: attack, state: 'error', errorMessage: attack }),
     renderOwnProfile({ ...account, profile: { name: attack, headline: attack, skills: [attack], positions: [{ title: attack, company: attack }], education: [{ institution: attack }] }, contacts: [{ name: attack, linkedinUrl: 'javascript:alert(1)' }] }),
-    renderPeople({ ...account, query: attack, contacts: [{ name: attack, reason: attack }] }),
+    renderPeople({ ...account, query: attack, own: [{ name: attack, reason: attack }] }),
     renderSettings({ ...account, agentConfiguration: attack, imports: [{ id: '..', filename: attack, status: attack }], grants: [{ id: attack }] }),
   ]
   for (const view of views) {
@@ -116,7 +116,7 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   assert.equal(own.title, "Here's your profile")
   assert.match(own.content, /Built from your file\. Fix anything later\./)
   assert.match(own.content, /class="button" href="\/network">Looks good<\/a>/)
-  const people = renderPeople({ ...account, state: 'welcome' })
+  const people = renderPeople({ ...account, state: 'welcome', own: [] })
   assert.match(people.content, /You're in\. The people you know, ready to search\./)
   assert.match(people.content, /placeholder="Search people, roles, companies"/)
   for (const view of [renderJoin({ ...account, signedIn: true }), archive, own, people, renderSettings(account), renderImporting(account)]) {
@@ -136,7 +136,7 @@ test('the accepted member journey uses light copy and the shared navigation', ()
 
 test('People has one shared header search, preserving its action, fields and escaped query', () => {
   const query = '<"climate&>'
-  for (const props of [{}, { state: 'welcome', contacts: [{ name: 'Avery Lee' }] }, { query, contacts: [], searchResults: [] }, { state: 'error' }]) {
+  for (const props of [{}, { state: 'welcome', own: [{ name: 'Avery Lee' }] }, { query, own: [] }, { state: 'error' }]) {
     const view = renderPeople({ ...account, ...props })
     const forms = [...view.content.matchAll(/<form\b[^>]*action="\/search-account"[^>]*>.*?<\/form>/gs)]
     assert.equal(forms.length, 1)
@@ -153,23 +153,22 @@ test('People has one shared header search, preserving its action, fields and esc
   }
 })
 
-test('People distinguishes an empty network from a query with no matches', () => {
-  for (const query of ['', 'climate']) {
-    for (const searchResults of [undefined, []]) {
-      const view = renderPeople({ ...account, query, contacts: [], searchResults })
-      assert.match(view.content, /Bring your LinkedIn export to see your people\./)
-      assert.match(view.content, /href="\/">Add a file →/)
-      assert.doesNotMatch(view.content, /No people matched/)
-      assert.match(view.content, /Friends and member search come soon\./)
-    }
-  }
-  const contacts = [{ name: 'Avery Lee' }]
-  const noMatch = renderPeople({ ...account, contacts, query: 'ocean logistics', searchResults: [] })
+test('People distinguishes empty own browsing, own no-match results and absent imports', () => {
+  const empty = renderPeople({ ...account, own: [], query: '' })
+  assert.match(empty.content, /Bring your LinkedIn export to see your people\./)
+  assert.match(empty.content, /href="\/">Add a file →/)
+  assert.doesNotMatch(empty.content, /No people matched/)
+  const noMatch = renderPeople({ ...account, own: [], query: 'ocean logistics' })
   assert.match(noMatch.content, /No people matched\. Try another name or company\./)
   assert.doesNotMatch(noMatch.content, /Bring your LinkedIn export/)
-  assert.match(noMatch.content, /Friends and member search come soon\./)
-  assert.match(renderPeople({ ...account, contacts }).content, /Avery Lee/)
-  assert.doesNotMatch(renderPeople({ ...account, contacts }).content, /No people matched|Bring your LinkedIn export/)
+  assert.match(noMatch.content, /Friends come soon\./)
+  for (const query of ['', 'climate']) {
+    const absent = renderPeople({ ...account, query })
+    assert.doesNotMatch(absent.content, /People you know|Bring your LinkedIn export|No people matched/)
+  }
+  const contacts = [{ name: 'Avery Lee' }]
+  assert.match(renderPeople({ ...account, own: contacts }).content, /Avery Lee/)
+  assert.doesNotMatch(renderPeople({ ...account, own: contacts }).content, /No people matched|Bring your LinkedIn export/)
 })
 
 test('signed-out Join header keeps logo and Meet without member navigation or session controls', () => {
@@ -240,6 +239,78 @@ test('lookup and claim forms reject actions that could send CSRF tokens off-host
   assert.match(view.content, /action="\/find-me\?from=&quot;profile&quot;&amp;mode=lookup"/)
 })
 
+test('People header defaults to everyone without own and offers native scope toggles with own', () => {
+  const defaultHeader = renderPeople({ ...account, scope: 'own', everyone: [] }).content.match(/<header>(.*?)<\/header>/s)[1]
+  assert.match(defaultHeader, /type="hidden" name="scope" value="everyone"/)
+  assert.doesNotMatch(defaultHeader, /name="scope" value="own"|class="scope-controls"/)
+  for (const scope of ['everyone', 'own']) {
+    const header = renderPeople({ ...account, scope, everyone: [], own: [] }).content.match(/<header>(.*?)<\/header>/s)[1]
+    assert.match(header, new RegExp(`type="hidden" name="scope" value="${scope}"`))
+    assert.match(header, /method="post" action="\/search-account" role="search"/)
+    assert.match(header, /name="csrf" value="csrf-value"/)
+    assert.match(header, /name="query" type="search"/)
+    assert.match(header, /type="submit" name="scope" value="everyone"[^>]*formnovalidate>Everyone/)
+    assert.match(header, /type="submit" name="scope" value="own"[^>]*formnovalidate>My people/)
+    assert.match(header, new RegExp(`name="scope" value="${scope}" aria-pressed="true"`))
+    assert.equal([...header.matchAll(/<input\b[^>]*type="search"/g)].length, 1)
+    assert.doesNotMatch(header, /<script|onclick=|onsubmit=/)
+  }
+})
+
+test('everyone rows use only member fields and encoded original profile ids', () => {
+  const id = '123e4567-e89b-42d3-a456-426614174000'
+  const view = renderPeople({ ...account, everyone: [{ id, name: 'Maya Chen', headline: 'Climate lead', company: 'Harbor', location: 'Portland', listedBy: 8, isMember: true, mutuals: 'secret-mutuals', linkedinUrl: 'https://www.linkedin.com/in/maya', reason: 'secret-reason' }] })
+  const group = view.content.match(/<section class="everyone-group"[^>]*>(.*?)<\/section>/s)[1]
+  assert.match(group, /Everyone on Unlinked/)
+  assert.match(group, /class="initials" aria-hidden="true">MC/)
+  assert.match(group, new RegExp(`href="/people/${id}">Maya Chen`))
+  assert.match(group, /Climate lead · Harbor/)
+  assert.match(group, /<p class="small">Portland<\/p>/)
+  assert.doesNotMatch(group, /Listed by|isMember|secret-mutuals|secret-reason|LinkedIn|linkedin\.com/)
+  assert.doesNotMatch(view.content, /People you know|class="own-group"/)
+
+  const attack = '<script>alert("bad")</script>'
+  const escaped = renderPeople({ ...account, everyone: [{ id: 'uuid/"<&', name: attack, headline: attack, company: attack, location: attack }] }).content
+  assert.match(escaped, /href="\/people\/uuid%2F%22%3C%26"/)
+  assert.match(escaped, /&lt;script&gt;alert\(&quot;bad&quot;\)&lt;\/script&gt;/)
+  assert.doesNotMatch(escaped, /<script>|onclick=/)
+  assert.match(renderPeople({ ...account, everyone: [{ id, name: 'Maya Chen' }] }).content, /Maya Chen/)
+})
+
+test('People renders own contacts and reasons before everyone without inventing membership', () => {
+  const view = renderPeople({ ...account, own: [{ name: 'Avery Lee', reason: 'Worked together & introduced partners', linkedinUrl: 'https://www.linkedin.com/in/avery' }], everyone: [{ id: '123e4567-e89b-42d3-a456-426614174000', name: 'Maya Chen' }] })
+  assert.ok(view.content.indexOf('People you know') < view.content.indexOf('Everyone on Unlinked'))
+  const ownGroup = view.content.match(/<section class="own-group"[^>]*>(.*?)<\/section>/s)[1]
+  assert.match(ownGroup, /Avery Lee/)
+  assert.match(ownGroup, /Worked together &amp; introduced partners/)
+  assert.match(ownGroup, /LinkedIn profile ↗/)
+  assert.doesNotMatch(ownGroup, /href="\/people\//)
+  assert.match(view.content, /Friends come soon\./)
+  assert.doesNotMatch(view.content, /Friends and member search come soon/)
+})
+
+test('everyone unavailable, empty browse and empty search have distinct copy', () => {
+  const cases = [
+    [{ state: 'unavailable', query: 'climate', everyone: [{ id: 'ignored', name: 'Hidden stale member' }] }, 'Member search is on its way.'],
+    [{ state: 'ready', query: 'climate', everyone: [] }, 'No one on Unlinked matched that yet.'],
+    [{ state: 'ready', query: '', everyone: [] }, 'No members to show yet.'],
+  ]
+  for (const [props, message] of cases) {
+    const group = renderPeople({ ...account, ...props }).content.match(/<section class="everyone-group"[^>]*>(.*?)<\/section>/s)[1]
+    assert.ok(group.includes(message))
+    assert.doesNotMatch(group, /<article|Hidden stale member/)
+    for (const other of cases.map(([, copy]) => copy).filter(copy => copy !== message)) assert.ok(!group.includes(other))
+  }
+})
+
+test('Show more is a native GET link with encoded query and cursor, omitting empty q', () => {
+  const view = renderPeople({ ...account, query: 'climate & energy', nextCursor: 'page/2?after=Sam+Rivera&x="<' })
+  assert.match(view.content, /href="\/network\?q=climate%20%26%20energy&amp;cursor=page%2F2%3Fafter%3DSam%2BRivera%26x%3D%22%3C">Show more<\/a>/)
+  assert.match(renderPeople({ ...account, query: '', nextCursor: 'next/2' }).content, /href="\/network\?cursor=next%2F2">Show more<\/a>/)
+  assert.doesNotMatch(renderPeople(account).content, /Show more/)
+  assert.doesNotMatch(renderPeople({ ...account, nextCursor: '' }).content, /Show more/)
+})
+
 test('member copy avoids forbidden technical and legacy words outside Settings details', () => {
   const imports = [{ id: 'fixture', filename: 'Fictional.zip', accepted: 1005, indexed: 1005, status: 'indexed', sha256: 'a'.repeat(64) }]
   const views = [renderJoin(), renderBringArchive(account), renderBringArchive({ ...account, state: 'error' }), renderImporting(account), renderOwnProfile(account), renderPeople(account), renderSettings({ ...account, imports })]
@@ -257,15 +328,15 @@ test('member copy avoids forbidden technical and legacy words outside Settings d
 
 test('only HTTPS LinkedIn profile links are exposed, with safe outbound attributes', () => {
   for (const url of ['javascript:alert(1)', 'http://www.linkedin.com/in/test', 'https://linkedin.com.evil.test/in/test', 'https://attacker@linkedin.com/in/test', 'https://evil.test/']) {
-    assert.doesNotMatch(renderPeople({ ...account, contacts: [{ name: 'Test', linkedinUrl: url }] }).content, /LinkedIn profile ↗/)
+    assert.doesNotMatch(renderPeople({ ...account, own: [{ name: 'Test', linkedinUrl: url }] }).content, /LinkedIn profile ↗/)
   }
-  const view = renderPeople({ ...account, contacts: [{ name: 'Test', linkedinUrl: 'https://www.linkedin.com/in/test?q=a&b=c' }] })
+  const view = renderPeople({ ...account, own: [{ name: 'Test', linkedinUrl: 'https://www.linkedin.com/in/test?q=a&b=c' }] })
   assert.match(view.content, /href="https:\/\/www.linkedin.com\/in\/test\?q=a&amp;b=c" target="_blank" rel="noopener noreferrer"/)
 })
 
 test('unimplemented editing, public discovery and removal are stated truthfully', () => {
   assert.match(renderOwnProfile(account).content, /Editing comes soon/)
-  assert.match(renderPeople(account).content, /Friends and member search come soon/)
+  assert.match(renderPeople(account).content, /Friends come soon/)
   assert.match(renderSettings(account).content, /Permanent removal and data export are not available/)
   assert.match(renderPeople({ ...account, state: 'error' }).content, /does not mean your network is empty/)
   assert.match(renderJoin().content, /href="\/login"/)
@@ -313,7 +384,7 @@ test('fixture previews cover every requested screen and are reproducible without
   const directory = await mkdtemp(join(tmpdir(), 'unlinked-onboarding-test-'))
   try {
     const files = await buildPreviews(directory)
-    assert.equal(files.length, 11)
+    assert.equal(files.length, 15)
     const first = await Promise.all(files.map(file => readFile(file, 'utf8')))
     await buildPreviews(directory)
     const second = await Promise.all(files.map(file => readFile(file, 'utf8')))
@@ -338,6 +409,12 @@ test('fixture previews cover every requested screen and are reproducible without
     }
     assert.match(first[files.findIndex(file => file.endsWith('/people-empty.html'))], /Bring your LinkedIn export to see your people\./)
     assert.match(first[files.findIndex(file => file.endsWith('/people-no-match.html'))], /No people matched\. Try another name or company\./)
+    const everyoneDefault = first[files.findIndex(file => file.endsWith('/everyone-default.html'))]
+    assert.match(everyoneDefault, /href="\/people\/00000000-0000-4000-8000-000000000001"/)
+    assert.doesNotMatch(everyoneDefault, /class="own-group"|class="scope-controls"/)
+    assert.match(first[files.findIndex(file => file.endsWith('/people-both-groups.html'))], /name="scope" value="own" aria-pressed="true"/)
+    assert.match(first[files.findIndex(file => file.endsWith('/everyone-unavailable.html'))], /Member search is on its way\./)
+    assert.match(first[files.findIndex(file => file.endsWith('/everyone-no-match.html'))], /No one on Unlinked matched that yet\./)
     const joinHeader = first[files.findIndex(file => file.endsWith('/join.html'))].match(/<header>(.*?)<\/header>/s)[1]
     assert.doesNotMatch(joinHeader, /href="\/(?:network|profile|settings)"/)
     const lookup = first[files.findIndex(file => file.endsWith('/own-profile-lookup-found.html'))]
