@@ -246,7 +246,7 @@ test('views: escaped names, inline answers, header badges only for configured fe
   // Profiles: each relation renders its control.
   const profile = { id: 'ada', name: 'Ada Lovelace', presence: 'member', positions: [], connections: [] }
   const control = connect => renderPerson({ csrf: 'tok', profile, connect }).content
-  assert.match(control({ state: 'none' }), /<form class="connect" method="post" action="\/connections\/request">.*?name="profileId" value="ada">.*?Connect<\/button><details><summary>Add a note<\/summary>.*?A short note for Ada/)
+  assert.match(control({ state: 'none' }), /<form id="connect-form" class="connect" method="post" action="\/connections\/request">.*?name="profileId" value="ada">.*?Connect<\/button><\/form>.*?<details class="connect-note"><summary>Add a note<\/summary>.*?A short note for Ada.*?name="note" form="connect-form"/)
   assert.match(control({ state: 'outgoing', requestId: 'r9' }), /Pending<\/span><form method="post" action="\/connections\/withdraw">.*?value="r9"><input type="hidden" name="next" value="\/people\/ada">.*?Withdraw/)
   assert.match(control({ state: 'incoming', requestId: 'r9', note: 'Hello <b>' }), /Ada wants to connect with you\. <q>Hello &lt;b&gt;<\/q>.*?Accept invitation/)
   assert.match(control({ state: 'connected' }), /✓ Connected/); assert.match(control({ state: 'self' }), /This is you/)
@@ -371,4 +371,28 @@ test('end to end: withdraw from Sent, ignore privately, and account deletion cle
   assert.equal(deleted.status, 200)
   assert.deepEqual(await memberConnections.sent(grace), [])
   assert.equal((await notifications.list(ada)).some(value => value.actorName === 'Grace Hopper'), false)
+})
+
+test('agent tools (grant v3) read pending requests and notifications without changing them; older grants lack them', async () => {
+  const { createAccountToolService } = await import('../mcp-server/account-tools.mjs')
+  const { ACCOUNT_GRANT_TOOL_VERSIONS } = await import('../mcp-server/account-grants.mjs')
+  const { requests, notifications } = setup()
+  const sent = await send(requests, jacob, ada, { note: 'Hello' })
+  const service = createAccountToolService({ getBackend: async () => ({}), memberConnections: requests, notifications })
+  const grant = (member, version) => ({ ...member, grantId: 'g'.repeat(64), scope: 'owner_network_and_public', version, tools: [...ACCOUNT_GRANT_TOOL_VERSIONS[version].owner_network_and_public] })
+  const received = (await service.call({ grant: grant(ada, 3), name: 'unlinked_list_connection_requests', input: {} })).result
+  assert.deepEqual(received.requests.map(value => [value.id, value.direction, value.status, value.name, value.profileId, value.note]), [[sent.request.id, 'received', 'pending', 'Jacob Cole', 'jacob-owner-profile', 'Hello']])
+  assert.equal(received.visibility, 'owner_private'); assert.match(received.requests[0].createdAt, /^\d{4}-\d\d-\d\dT/)
+  assert.equal((await service.call({ grant: grant(jacob, 3), name: 'unlinked_list_connection_requests', input: { direction: 'sent' } })).result.total, 1)
+  assert.equal((await service.call({ grant: grant(jacob, 3), name: 'unlinked_list_connection_requests', input: {} })).result.total, 0)
+  const feed = (await service.call({ grant: grant(ada, 3), name: 'unlinked_list_notifications', input: { limit: 5 } })).result
+  assert.deepEqual([feed.unseen, feed.unread, feed.notifications[0].kind, feed.notifications[0].read], [1, 1, 'connection_request_received', false])
+  // Reading through an agent leaves the bell as it was.
+  assert.deepEqual(await notifications.counts(ada), { unseen: 1, unread: 1 })
+  await assert.rejects(service.call({ grant: grant(ada, 2), name: 'unlinked_list_notifications', input: {} }), { code: 'scope_not_granted' })
+  await assert.rejects(service.call({ grant: grant(ada, 3), name: 'unlinked_list_connection_requests', input: { direction: 'all' } }), { code: 'invalid_input' })
+  const bare = createAccountToolService({ getBackend: async () => ({}) })
+  await assert.rejects(bare.call({ grant: grant(ada, 3), name: 'unlinked_list_notifications', input: {} }), { code: 'upstream_unavailable' })
+  assert.ok(ACCOUNT_GRANT_TOOL_VERSIONS[3].owner_network.includes('unlinked_list_notifications'))
+  assert.ok(!ACCOUNT_GRANT_TOOL_VERSIONS[2].owner_network_and_public.includes('unlinked_list_notifications'))
 })

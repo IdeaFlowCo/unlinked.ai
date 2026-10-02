@@ -183,9 +183,9 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .state-pill{display:inline-flex;align-items:center;min-height:38px;padding:8px 14px;border:1px solid var(--line2);border-radius:99px;background:#fff;font-size:14px;font-weight:600;color:var(--muted)}
 .unlinked-onboarding .state-pill.ok{color:#1f6b45;border-color:#a8d5bd;background:#f0f9f4}
 .unlinked-onboarding .actions form{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0}
-.unlinked-onboarding form.connect details{flex-basis:100%;margin:2px 0 0}
-.unlinked-onboarding form.connect summary{min-height:0;padding:4px 0;font-size:14px;color:var(--brand-d)}
-.unlinked-onboarding form.connect textarea,.unlinked-onboarding .req-note{font:15px/1.5 "Public Sans",system-ui,sans-serif}
+.unlinked-onboarding .connect-note{margin:10px 24px 0}
+.unlinked-onboarding .connect-note summary{min-height:0;padding:4px 0;font-size:14px;color:var(--brand-d)}
+.unlinked-onboarding .connect-note textarea,.unlinked-onboarding .req-note{font:15px/1.5 "Public Sans",system-ui,sans-serif}
 .unlinked-onboarding .invite-note q,.unlinked-onboarding .req-note q{color:var(--fg)}
 .unlinked-onboarding .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 4px;font-size:15px}
 .unlinked-onboarding .subtabs a{padding:8px 14px;border-radius:99px;border:1px solid var(--line2);background:#fff;color:var(--fg);text-decoration:none}
@@ -201,7 +201,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .empty{margin:6px 0}
 .unlinked-onboarding .notes-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .unlinked-onboarding .notes-top .hq{margin-bottom:12px}
-.unlinked-onboarding .notes .card{padding:6px 0}
+.unlinked-onboarding .notes .card{padding:0;overflow:hidden}
+.unlinked-onboarding .notes .card .empty{padding:18px 22px}
 .unlinked-onboarding .note{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:12px 22px;border-top:1px solid var(--line)}
 .unlinked-onboarding .note.unread{background:#f3f4fd;box-shadow:inset 3px 0 0 var(--brand)}
 .unlinked-onboarding .note-open{display:flex;gap:14px;align-items:center;flex:1 1 280px;min-width:0;color:var(--fg);text-decoration:none}
