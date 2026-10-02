@@ -16,11 +16,12 @@ import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { stageArchive, importJobStatus, importErrorMessage, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
+import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
 import { ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { companyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
@@ -91,7 +92,7 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -99,6 +100,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   if (memberInvitations !== undefined && ['create', 'list', 'open', 'respond', 'revoke', 'removeOwner'].some(key => typeof memberInvitations[key] !== 'function')) throw new Error('member_invitation_configuration_required')
   if (memberConnections !== undefined && (['send', 'respond', 'withdraw', 'received', 'sent', 'pendingCount', 'between', 'removeOwner'].some(key => typeof memberConnections[key] !== 'function') || typeof accountForProfile !== 'function')) throw new Error('member_connection_configuration_required')
   if (notifications !== undefined && ['list', 'counts', 'markSeen', 'open', 'markAllRead', 'removeOwner'].some(key => typeof notifications[key] !== 'function')) throw new Error('notification_configuration_required')
+  if (memberEmail !== undefined && (typeof memberEmail.sending !== 'boolean' || ['rememberAddress', 'settings', 'savePreferences', 'sendInvite', 'inspectUnsubscribe', 'unsubscribe', 'exportOwner', 'removeOwner'].some(key => typeof memberEmail[key] !== 'function'))) throw new Error('member_email_configuration_required')
   if (contactCards !== undefined && ['read', 'save', 'rotate', 'syncIdentity', 'open', 'exportOwner', 'removeOwner'].some(key => typeof contactCards[key] !== 'function')) throw new Error('contact_card_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
@@ -114,13 +116,13 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map()
-  let invitationWindow = 0, invitationRequests = 0, contactWindow = 0, contactRequests = 0
+  let invitationWindow = 0, invitationRequests = 0, contactWindow = 0, contactRequests = 0, unsubscribeWindow = 0, unsubscribeRequests = 0
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
   // Pages a sign-in may return to. Everything else lands on the home route.
   // An OAuth connector authorization request returns to its own validated
   // consent page (the query is re-validated there, never trusted).
-  const returnPath = value => typeof value === 'string' && (/^\/(?:profile|card|settings|import|network|invites|invitations|notifications|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
@@ -241,6 +243,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     // formula so a later seeded row for the same address collides cleanly.
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
     const accountLabel = identity.verifiedEmail ?? identity.subject
+    // The sign-in address, kept privately for notification emails and invite Reply-To while email is on.
+    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner }), false)
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
@@ -333,6 +337,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // Settings grant listing: labels for OAuth-connected apps when available.
   const grantList = async (owner, backend) => typeof listAccountGrants === 'function' ? await listAccountGrants(owner) : (await backend.listAccountGrantIds()).map(id => ({ id }))
   const connector = oauth && mcpEndpoint ? { url: mcpEndpoint } : undefined
+  // The invite form says where replies go: the member's own verified address.
+  const inviteEmailProps = async owner => memberEmail?.sending ? { emailInvites: true, replyAddress: (await bounded(() => memberEmail.settings(owner), null))?.address ?? null } : { emailInvites: false }
   let lastPrune = Date.now()
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -341,7 +347,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
     if (request.headers.host !== base.host) { response.writeHead(403).end(); return }
     if (!['GET', 'POST'].includes(request.method) && !(request.method === 'HEAD' && isPublicDiscoveryPath(new URL(request.url, base).pathname))) { response.writeHead(405).end(); return }
-    if (request.method === 'POST' && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
+    // RFC 8058 one-click unsubscribe is posted by mail providers, without this
+    // origin; its signed token is the whole authority and it only turns email off.
+    const oneClick = request.method === 'POST' && memberEmail && new URL(request.url, base).pathname === '/email/unsubscribe'
+    if (request.method === 'POST' && !oneClick && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
@@ -387,6 +396,25 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         response.setHeader('Referrer-Policy', 'no-referrer')
         const invitation = await memberInvitations.open(invitationLink[1])
         journey(response, renderInviteLanding({ ...chrome, token: invitationLink[1], invitation }), null, '', invitation ? 200 : 404); return
+      }
+      // Unsubscribe links from emails: no sign-in. GET only shows a confirm
+      // button (link scanners must not unsubscribe anyone); POST, from that
+      // button or a mail provider's one-click, turns the email off.
+      if (memberEmail && url.pathname === '/email/unsubscribe' && ['GET', 'POST'].includes(request.method)) {
+        if (Date.now() - unsubscribeWindow >= 60000) { unsubscribeWindow = Date.now(); unsubscribeRequests = 0 }
+        if (++unsubscribeRequests > 600) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        response.setHeader('Referrer-Policy', 'no-referrer')
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        let token = url.searchParams.getAll('t').length === 1 ? url.searchParams.get('t') : null
+        if (request.method === 'POST') {
+          const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+          if ([...input.keys()].some(key => !['t', 'List-Unsubscribe'].includes(key)) || input.getAll('t').length > 1) throw new Error('email_unsubscribe_invalid')
+          if (input.get('t')) token = input.get('t')
+          const done = await memberEmail.unsubscribe(token)
+          journey(response, renderEmailUnsubscribe({ ...chrome, state: done ? 'done' : 'invalid', scope: done?.scope, kinds: done?.kinds }), null, '', done ? 200 : 400); return
+        }
+        const value = memberEmail.inspectUnsubscribe(token)
+        journey(response, renderEmailUnsubscribe({ ...chrome, state: value ? 'confirm' : 'invalid', token, scope: value?.scope, kinds: value?.kinds }), null, '', value ? 200 : 400); return
       }
       // A member's contact card, opened by the link or QR code they handed over.
       // Not indexed and never cached. The token is the only way in, and a reset
@@ -822,23 +850,30 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       }
       if (signup && memberInvitations && request.method === 'GET' && url.pathname === '/invites') {
         const props = jobProps(await jobResources())
-        journey(response, renderInvites({ ...props, origin: base.origin, invitations: await memberInvitations.list(session.owner) }), props.importJob); return
+        journey(response, renderInvites({ ...props, origin: base.origin, ...await inviteEmailProps(session.owner), invitations: await memberInvitations.list(session.owner) }), props.importJob); return
       }
       if (signup && memberInvitations && request.method === 'POST' && ['/invites', '/invites/revoke'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
         const field = url.pathname === '/invites' ? 'inviteeName' : 'id'
-        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll(field).length !== 1 || [...input.keys()].some(key => ![ 'csrf', field ].includes(key))) throw new Error('private_browser_csrf')
+        // The invitee's address is optional, used once to send, and never stored or shown again.
+        const allowed = field === 'inviteeName' && memberEmail?.sending ? ['csrf', field, 'inviteeEmail'] : ['csrf', field]
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll(field).length !== 1 || input.getAll('inviteeEmail').length > 1 || [...input.keys()].some(key => !allowed.includes(key))) throw new Error('private_browser_csrf')
         const props = jobProps(await jobResources())
-        let created, error
+        const inviteeEmail = (input.get('inviteeEmail') ?? '').trim()
+        let created, error, emailed
         try {
-          if (field === 'inviteeName') created = await memberInvitations.create({ inviter: session.owner, inviterName: session.displayName || session.accountLabel, inviteeName: input.get('inviteeName') })
+          if (field === 'inviteeName' && inviteeEmail && !emailAddress(inviteeEmail)) error = 'That email address does not look right. Nothing was created.'
+          else if (field === 'inviteeName') {
+            created = await memberInvitations.create({ inviter: session.owner, inviterName: session.displayName || session.accountLabel, inviteeName: input.get('inviteeName') })
+            if (inviteeEmail) emailed = await memberEmail.sendInvite({ inviter: session.owner, inviterName: session.displayName, inviteeName: created.invitation.inviteeName, address: inviteeEmail, token: created.token, invitationId: created.invitation.id }).catch(() => ({ sent: false, reason: 'failed' }))
+          }
           else await memberInvitations.revoke(session.owner, input.get('id'))
         } catch (failure) {
           if (!(failure instanceof InvitationError)) throw failure
           error = { invitation_name_invalid: 'Use a plain name of up to 120 characters.', invitation_unavailable: 'That invite can no longer be revoked.', invitation_not_found: 'That invite can no longer be revoked.' }[failure.code] ?? 'That did not work. Try again.'
         }
         response.setHeader('Cache-Control', 'no-store')
-        journey(response, renderInvites({ ...props, origin: base.origin, created, error, invitations: await memberInvitations.list(session.owner) }), props.importJob, '', error ? 400 : 200); return
+        journey(response, renderInvites({ ...props, origin: base.origin, created, error, emailed, ...await inviteEmailProps(session.owner), invitations: await memberInvitations.list(session.owner) }), props.importJob, '', error ? 400 : 200); return
       }
       // Member-to-member connection requests.
       if (signup && memberConnections && request.method === 'POST' && ['/connections/request', '/connections/respond', '/connections/withdraw', '/connections/remove'].includes(url.pathname)) {
@@ -973,11 +1008,20 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const setups = ensured ? agentClientSetups({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const grants = await grantList(session.owner, backend)
         const jobs = await jobResources(), props = jobProps(jobs)
-        const view=renderSettings({ ...props, grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable })
+        // Email choices appear only while email is on; a slow read costs the section, never the page.
+        const email = memberEmail?.sending ? await bounded(() => memberEmail.settings(session.owner), null) : null
+        const view=renderSettings({ ...props, grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+          ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
         return
+      }
+      if (signup && memberEmail && request.method === 'POST' && url.pathname === '/settings/email') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => !['csrf', 'kinds'].includes(key)) || input.getAll('kinds').some(kind => !Object.hasOwn(EMAIL_PREFERENCES, kind))) throw new Error('private_browser_csrf')
+        await memberEmail.savePreferences(session.owner, input.getAll('kinds'))
+        redirect(response, '/settings?email=saved#email'); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/export') {
         const jobs = await jobResources()
@@ -987,6 +1031,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         data.account.displayName = session.displayName
         // The contact card's details belong to the export; its link does not.
         if (contactCards) data.contactCard = await contactCards.exportOwner(session.owner).catch(() => null)
+        if (memberEmail) data.email = await memberEmail.exportOwner(session.owner).catch(() => null)
         await recordAudit({ event: 'account_data_exported', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="unlinked-export-${new Date().toISOString().slice(0, 10)}.json"` })
         response.end(JSON.stringify(data, null, 2)); return
@@ -1009,6 +1054,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)
+        // The stored sign-in address, email choices and invite-send counters.
+        if (memberEmail) await memberEmail.removeOwner(session.owner)
         // Best effort beyond the graph: the legacy claim and the stored archive bytes.
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})
