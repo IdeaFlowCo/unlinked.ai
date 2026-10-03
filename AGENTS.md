@@ -103,6 +103,8 @@ The provenance-backed one/two-hop reader, signed HTTP API and account MCP degree
 
 Shared public People/API/AI and backward-compatible account grant behavior are documented in `docs/shared-people-beta.md`; no raw private import or identity data is projected publicly.
 
+Company page facts (`/companies/<name>`) are the static list in `mcp-server/company-metadata.mjs` overlaid by the operator-published graph dataset `curated-companies-v1` (own labels, revoke-based rollback, static fallback on read errors); schema, publisher and rollback are in `docs/company-facts.md`.
+
 Member-to-member connection requests (Connect, `/invitations`) and the per-account notification feed (`/notifications`, header bell and My Network badges filled per request via `fillNavAlerts`) are documented in `docs/member-connections.md`; graph labels `UnlinkedConnectionRequest` and `UnlinkedNotification`.
 
 The versioned agent tool contract — hosted MCP tools plus the grant-authenticated HTTP JSON API under `/api/agent/v1/` (`mcp-server/account-tools.mjs`, `account-api.mjs`), typed error codes, grant-scope version catalog and old-grant compatibility — is `docs/agent-api.md`. Grant tool lists are versioned in `ACCOUNT_GRANT_TOOL_VERSIONS` (`mcp-server/account-grants.mjs`): add a new version to add tools; never mutate an existing version's list.
