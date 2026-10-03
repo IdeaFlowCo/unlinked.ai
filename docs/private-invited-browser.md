@@ -5,7 +5,7 @@ The runtime is separate from the deployed legacy Unlinked app.
 
 An operator creates one expiring invitation using the Noos `unlinked-invite.mjs` CLI and keeps its mode-600 recovery bundle.
 The guest opens the bundle's `/invite/<token>` URL and chooses **Continue with Ideaflow**.
-That action records an expiring, one-use browser intent and starts fresh Ideaflow authentication with code, PKCE, state, nonce and `prompt=login`.
+That action records an expiring, one-use browser intent and starts Ideaflow authentication with code, PKCE, state, nonce and the account chooser (`prompt=select_account`).
 After signed ID-token verification against the configured issuer/client/JWKS, Unlinked renders the verified issuer/subject or authenticated IdP email for explicit confirmation before the trusted backend claims the invitation and reads back the same owner and private Noos principal.
 The guest can restart authentication to use another account or cancel before any owner is created.
 An email address never selects, links or creates an owner.
@@ -32,7 +32,7 @@ Exclude `/invite/` request paths from proxy access logs and retain the operator 
 Private ingress and the browser handler use `Referrer-Policy: strict-origin`: navigation keeps the Origin header for the CSRF gate while exposing only the HTTPS origin, not the invitation path or query, as a referrer. Non-invitation forms keep `form-action 'self'`.
 
 Expired/replayed browser intent, invalid state/nonce/signature/client, unknown ordinary sign-in, rejected/revoked invitation and owner-readback conflict issue no session.
-Reopening the original invitation starts fresh authentication and can recover a lost claim response through Noos's exact-subject idempotent replay.
+Reopening the original invitation starts a new authentication and can recover a lost claim response through Noos's exact-subject idempotent replay.
 The graph's permanent revocation fence controls claims and subsequent resource/tool access.
 Browser memory loss requires sign-in again; the owner mapping and archive receipts remain durable in Noos.
 

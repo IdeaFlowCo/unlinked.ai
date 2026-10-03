@@ -52,6 +52,10 @@ Claude custom connectors (claude.ai, Desktop, mobile), Claude Code, ChatGPT
 developer-mode connectors, MCP Inspector — need only the URL
 `https://www.unlinked.ai/mcp`. Unlinked is its own authorization server
 (`mcp-server/oauth-server.mjs`); Ideaflow ID is used only to sign the person in.
+That sign-in is the ordinary web sign-in (silent SSO, no forced password; see
+`docs/ideaflow-sign-in.md`). The consent page names the signed-in account and
+offers "Not you? Switch account", which returns to the same request; the
+consent decision is the confirmation for the grant.
 
 | Endpoint | Purpose |
 | --- | --- |

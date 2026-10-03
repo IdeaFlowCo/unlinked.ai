@@ -65,7 +65,7 @@ async function pilot(t, extra = {}) {
 const authorizeQuery = (clientId, extra = {}) => new URLSearchParams({ client_id: clientId, redirect_uri: CLAUDE, response_type: 'code', state: 'st-1',
   code_challenge: b64sha('v'.repeat(64)), code_challenge_method: 'S256', resource: 'RESOURCE', scope: 'network people', ...extra })
 const csrfFrom = text => text.match(/name="csrf" value="([^"]+)"/)[1]
-const hiddenParams = text => new URLSearchParams([...text.matchAll(/<input type="hidden" name="([a-z_]+)" value="([^"]*)">/g)].filter(m => m[1] !== 'csrf').map(m => [m[1], m[2].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')]))
+const hiddenParams = text => new URLSearchParams([...text.matchAll(/<input type="hidden" name="([a-z_]+)" value="([^"]*)">/g)].filter(m => !['csrf', 'next'].includes(m[1])).map(m => [m[1], m[2].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')]))
 
 async function mcpTools(endpoint, accessToken) {
   const client = new Client({ name: 'oauth-test', version: '1.0.0' })
@@ -139,6 +139,40 @@ test('dynamic registration accepts only connector callbacks and loopback, always
   const forged = await p.go(`/oauth/authorize?${authorizeQuery(client.client_id.replace(payload, forgedPayload), { redirect_uri: 'http://127.0.0.1/steal' })}`)
   assert.equal(forged.status, 400)
   assert.equal(forged.headers.get('location'), null)
+})
+
+test('connector sign-in uses silent SSO, and consent offers Switch account back to the same request', async t => {
+  const begins = []
+  const p = await pilot(t, { login: { authorizationOrigin: 'https://synthetic-idp.invalid',
+    begin: async (options = {}) => { begins.push(options); return { location: `https://synthetic-idp.invalid/authorize${options.prompt ? `?prompt=${options.prompt}` : ''}`, transaction: { state: 'synthetic-state' } } },
+    finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'oauth-subject', verifiedEmail: 'member@example.invalid' }) } })
+  const client = await (await p.register({ client_name: 'Claude', redirect_uris: [CLAUDE] })).json()
+  const query = authorizeQuery(client.client_id, { resource: `${p.baseUrl}/mcp` })
+  const next = new URL((await p.go(`/oauth/authorize?${query}`)).headers.get('location'), p.endpoint).searchParams.get('next')
+  const { cookie, location } = await p.signIn(next)
+  assert.equal(location, `/oauth/authorize?${query}`)
+  // No forced password: the consent screen below is the confirmation for this grant.
+  assert.deepEqual(begins, [{}])
+
+  const consent = await p.go(location, { headers: { Cookie: cookie } })
+  const csp = consent.headers.get('content-security-policy'), text = await consent.text()
+  assert.match(text, /Signed in as <b>member@example\.invalid<\/b>/)
+  assert.match(csp, /form-action 'self' https:\/\/synthetic-idp\.invalid https:;/)
+  const form = text.match(/<form class="switch-account" method="post" action="\/switch-account">(.*?)<\/form>/s)[1]
+  assert.match(form, />Not you\? Switch account<\/button>$/)
+  const switchNext = form.match(/name="next" value="([^"]+)"/)[1].replace(/&amp;/g, '&')
+  // The same (re-validated, normalized) authorization request, nothing else.
+  assert.ok(switchNext.startsWith('/oauth/authorize?'))
+  const sorted = value => [...new URLSearchParams(value)].sort(([a], [b]) => a.localeCompare(b))
+  assert.deepEqual(sorted(switchNext.slice('/oauth/authorize?'.length)), sorted(query))
+  const switched = await p.go('/switch-account', { method: 'POST', headers: { Cookie: cookie, Origin: p.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: csrfFrom(text), next: switchNext }) })
+  assert.equal(switched.status, 303)
+  assert.equal(switched.headers.get('location'), `/login?next=${encodeURIComponent(switchNext)}`)
+  const marker = switched.headers.getSetCookie().find(value => value.startsWith('__Host-ul-signed-out=1')).split(';')[0]
+  await p.go(switched.headers.get('location'), { headers: { Cookie: marker } })
+  assert.deepEqual(begins.at(-1), { prompt: 'select_account' })
+  // The old session no longer reaches consent.
+  assert.equal((await p.go(location, { headers: { Cookie: cookie } })).status, 303)
 })
 
 test('sign-in, consent, PKCE code exchange, scoped tools, Settings listing and revocation', async t => {
