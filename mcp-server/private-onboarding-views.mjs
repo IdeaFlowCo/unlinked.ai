@@ -319,7 +319,7 @@ export function renderInviteLanding({ accountLabel, displayName, csrf, token, in
 }
 
 export function renderFindMe({ accountLabel, displayName, csrf, importJob, lookupResult, notice } = {}) {
-  return base('Find your profile', `<section class="narrow"><h1 class="hq">Find yourself on Unlinked</h1><p class="lead">Paste your LinkedIn address. Claim your original Unlinked profile, or start with your public LinkedIn profile. Your export can fill in the rest later.</p>${notice ? `<p class="notice">${html(notice)}</p>` : ''}${profileLookup({ linkedinLookup: { action: '/find-me' }, lookupResult, csrf })}${lookupResult?.status === 'none' ? `<p class="notice" role="status">${html(lookupResult.notice ?? 'Nothing unclaimed matched. You can continue — your LinkedIn export builds your profile either way.')}</p>` : ''}<p class="small"><a href="/">Skip for now →</a></p></section>`, { accountLabel, displayName, csrf, importJob })
+  return base('Find your profile', `<section class="narrow"><h1 class="hq">Find yourself on Unlinked</h1><p class="lead">Paste your LinkedIn address. Claim your original Unlinked profile, or start with your public LinkedIn profile. Your export can fill in the rest later.</p>${notice ? `<p class="notice">${html(notice)}</p>` : ''}${profileLookup({ linkedinLookup: { action: '/find-me' }, lookupResult, csrf })}${lookupResult?.status === 'none' ? `<p class="notice" role="status">${html(lookupResult.notice ?? 'Nothing unclaimed matched. You can continue — your LinkedIn export builds your profile either way.')}</p>` : ''}<p class="small"><a href="/profile">Skip for now →</a></p></section>`, { accountLabel, displayName, csrf, importJob })
 }
 
 // Anyone's profile, readable with or without a session: who they are and who they know.
