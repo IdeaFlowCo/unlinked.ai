@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
+import { EXPORT_DELAY_MS, EXPORT_ORIGIN } from './export-onboarding.mjs'
 import { NOTIFICATION_KINDS } from './member-notifications.mjs'
 import { HEAVY_INVITES_PER_DAY } from './member-invitations.mjs'
 
@@ -17,6 +18,7 @@ export const UNSUBSCRIBE_TTL_MS = 365 * 24 * 60 * 60 * 1000
 export const NOTIFICATION_EMAIL_WINDOW_MS = 15 * 60 * 1000
 // Settings labels, one per notification kind. Defaults come from NOTIFICATION_KINDS[kind].email.
 export const EMAIL_PREFERENCES = Object.freeze({
+  export_reminder: 'One reminder to upload your LinkedIn export, 2 days after signup',
   connection_request_received: 'Someone asks to connect with you',
   connection_request_accepted: 'Someone accepts your connection request',
   invite_accepted: 'Someone accepts your invite and joins',
@@ -223,7 +225,7 @@ const owner = value => {
   if (!value || typeof value.ownerId !== 'string' || !value.ownerId || typeof value.userId !== 'string' || !value.userId) throw new Error('email_owner_required')
   return value
 }
-const defaults = () => Object.fromEntries(Object.keys(EMAIL_PREFERENCES).map(kind => [kind, NOTIFICATION_KINDS[kind]?.email === true]))
+const defaults = () => Object.fromEntries(Object.keys(EMAIL_PREFERENCES).map(kind => [kind, kind === 'export_reminder' || NOTIFICATION_KINDS[kind]?.email === true]))
 const preferencesOf = record => {
   const value = { ...defaults() }
   let saved = {}
@@ -236,7 +238,7 @@ const preferencesOf = record => {
 // `secret` keys the unsubscribe MAC and the address hashes. `transport` is
 // Resend in production and a fake in tests. Without `config.enabled` nothing
 // is ever sent and no address is recorded.
-export function createMemberEmail({ config, transport, store, notificationStore, secret, origin, now = Date.now, onError = () => {},
+export function createMemberEmail({ config, transport, store, notificationStore, hasCompletedImport, secret, origin, now = Date.now, onError = () => {},
   windowMs = NOTIFICATION_EMAIL_WINDOW_MS, minAgeMs = 60 * 1000, maxAgeMs = DAY, claimMs = 10 * 60 * 1000, recipientsPerRun = 100,
   siteInvitesPerDay = config?.invitesPerDay ?? DEFAULT_SITE_INVITE_EMAILS_PER_DAY }) {
   if (!store || ['initialize', 'getRecipient', 'setAddress', 'noteNewAccount', 'setPreferences', 'unsubscribe', 'markNotified', 'setRetry', 'heldRecipients', 'deleteOwner', 'isSuppressed', 'suppress', 'reserveInvite', 'releaseSend'].some(name => typeof store[name] !== 'function')) throw new Error('email_store_required')
@@ -251,7 +253,7 @@ export function createMemberEmail({ config, transport, store, notificationStore,
   const unsubscribeUrl = token => `${base.origin}/email/unsubscribe?t=${token}`
   const report = event => { try { void Promise.resolve(onError(event)).catch(() => {}) } catch { /* reporting never fails delivery */ } }
   const code = error => error instanceof EmailError ? error.code : 'email_error'
-  let timer = null, running = null
+  let timer = null, running = null, reminderRunning = null
   // Provider-wide pause (429, 5xx, rejected key), shared by invites and the mailer.
   let pausedUntil = 0, pauseAttempts = 0
   const pause = (error, at) => { pausedUntil = at + (error.retryAfterMs ?? backoffMs(pauseAttempts)); pauseAttempts++ }
@@ -265,9 +267,9 @@ export function createMemberEmail({ config, transport, store, notificationStore,
     // ever emailed or used as Reply-To), and when a brand-new account began.
     async rememberAddress(member, { address, verified, newAccount = false }) {
       owner(member)
-      if (!sending) return false
       const key = accountKey(member), at = now()
       if (newAccount) await store.noteNewAccount(member, key, at)
+      if (!sending) return false
       const value = emailAddress(address)
       if (!value) return false
       await store.setAddress(member, key, { address: value, verified: verified === true, at })
@@ -284,6 +286,18 @@ export function createMemberEmail({ config, transport, store, notificationStore,
       const value = Object.fromEntries(Object.keys(EMAIL_PREFERENCES).map(kind => [kind, list.includes(kind)]))
       await store.setPreferences(member, accountKey(member), JSON.stringify(value), now())
       return value
+    },
+    async setExportReminder(member, enabled) {
+      owner(member)
+      if (typeof enabled !== 'boolean') throw new EmailError('email_preference_invalid')
+      // Use the same locked single-kind update as unsubscribe; preserve other choices.
+      await store.setExportReminder(accountKey(member), enabled, now())
+    },
+    runExportReminders() {
+      if (!sending || !hasCompletedImport) return Promise.resolve({ sent: 0, skipped: 0, failed: 0 })
+      if (reminderRunning) return reminderRunning
+      reminderRunning = deliverExportReminders().finally(() => { reminderRunning = null })
+      return reminderRunning
     },
     // Sends the invite link the member just created. The raw link exists only
     // here; the invitee's address is used once and never stored (only a keyed
@@ -336,18 +350,49 @@ export function createMemberEmail({ config, transport, store, notificationStore,
     },
     // In-process timer; never awaited by startup, never throws out of a tick.
     start({ intervalMs = 60 * 1000 } = {}) {
-      if (!sending || !notificationStore || timer) return false
-      timer = setInterval(() => { service.runNotifications().catch(error => report({ event: 'email_notifications_failed', code: error?.code ?? 'email_mailer_error' })) }, intervalMs)
+      if (!sending || (!notificationStore && !hasCompletedImport) || timer) return false
+      timer = setInterval(() => { service.runNotifications().catch(error => report({ event: 'email_notifications_failed', code: error?.code ?? 'email_mailer_error' })); service.runExportReminders().catch(error => report({ event: 'email_export_reminders_failed', code: error?.code ?? 'email_mailer_error' })) }, intervalMs)
       timer.unref?.()
       return true
     },
-    async stop() { if (timer) clearInterval(timer); timer = null; await running?.catch(() => {}) },
+    async stop() { if (timer) clearInterval(timer); timer = null; await Promise.allSettled([running, reminderRunning]) },
     async exportOwner(member) {
       const value = await service.settings(member)
       return { address: value.address, preferences: value.preferences }
     },
     // Account deletion: the stored address, preferences and invite-send counters.
     async removeOwner(member) { await store.deleteOwner(accountKey(owner(member))) },
+  }
+
+  async function deliverExportReminders() {
+    const at = now(), result = { sent: 0, skipped: 0, failed: 0 }
+    if (pausedUntil > at) return { ...result, paused: true }
+    const candidates = await store.dueExportReminders({ at, limit: Math.min(recipientsPerRun, 100) })
+    for (const candidate of candidates) {
+      try {
+        const member = { ownerId: candidate.ownerId, userId: candidate.userId }
+        // A failed backend read leaves eligibility undecided, and never sends.
+        const completed = await hasCompletedImport(member)
+        // Lock and re-read preferences before claiming, in case of an unsubscribe.
+        const recipient = await store.claimExportReminder(candidate.accountKey, at)
+        if (!recipient) continue
+        if (completed || !recipient.verified || !emailAddress(recipient.address) || !preferencesOf(recipient).export_reminder) {
+          await store.finishExportReminder(candidate.accountKey, 'skipped', at); result.skipped++; continue
+        }
+        const link = unsubscribeUrl(tokens.issue({ scope: 'member', subject: candidate.accountKey, kinds: ['export_reminder'] }))
+        const text = `Your LinkedIn file may be ready. Check LinkedIn’s email and download the ZIP before the link expires (72 hours after arrival).\n\nUpload your file: ${EXPORT_ORIGIN}/import\n\nLink expired? Request again: https://www.linkedin.com/mypreferences/d/download-my-data\n\nTurn off this reminder: ${link}`
+        // Durable claim is never released: at most one attempt, including an
+        // ambiguous provider timeout or a process crash after provider acceptance.
+        await transport.send(message({ subject: 'Ready to bring your LinkedIn network to Unlinked?', text, html: `<p>Your LinkedIn file may be ready. Check LinkedIn’s email and download the ZIP before the link expires (72 hours after arrival).</p><p><a href="${EXPORT_ORIGIN}/import">Upload your LinkedIn file</a></p><p><a href="https://www.linkedin.com/mypreferences/d/download-my-data">Link expired? Request again</a></p><p><a href="${html(link)}">Turn off this reminder</a></p>`, to: recipient.address, from: service.from, unsubscribeUrl: link, idempotencyKey: `unlinked-export-reminder-${candidate.accountKey}` }))
+        await store.finishExportReminder(candidate.accountKey, 'sent', at)
+        pauseAttempts = 0; result.sent++
+      } catch (error) {
+        result.failed++
+        report({ event: 'email_export_reminder_failed', code: code(error) })
+        if (globalFailure(error)) { pause(error, now()); return { ...result, paused: true } }
+      }
+    }
+    return result
   }
 
   async function deliverNotifications() {
@@ -424,7 +469,7 @@ export function createMemoryEmailStore() {
     async initialize() {},
     async getRecipient(key) { const value = recipients.get(key); return value ? structuredClone(value) : null },
     async setAddress(member, key, { address, verified, at }) { Object.assign(record(member, key), { address, verified, updatedAt: at }) },
-    async noteNewAccount(member, key, at) { const value = record(member, key); value.accountCreatedAt ??= at },
+    async noteNewAccount(member, key, at) { const value = record(member, key); if (value.accountCreatedAt == null) { value.accountCreatedAt = at; value.exportReminderDueAt = at + EXPORT_DELAY_MS } },
     async setPreferences(member, key, preferences, at) { Object.assign(record(member, key), { preferences, updatedAt: at }) },
     async unsubscribe(key, kinds, at) {
       const value = recipients.get(key)
@@ -433,6 +478,20 @@ export function createMemoryEmailStore() {
       for (const kind of kinds) preferences[kind] = false
       Object.assign(value, { preferences: JSON.stringify(preferences), updatedAt: at })
     },
+    async setExportReminder(key, enabled, at) {
+      const value = recipients.get(key)
+      if (value) Object.assign(value, { preferences: JSON.stringify({ ...preferencesOf(value), export_reminder: enabled }), updatedAt: at })
+    },
+    async dueExportReminders({ at, limit }) {
+      return [...recipients.values()].filter(value => value.exportReminderDueAt != null && value.exportReminderDueAt <= at && value.exportReminderClaimedAt == null).sort((a, b) => a.accountCreatedAt - b.accountCreatedAt).slice(0, limit).map(value => structuredClone(value))
+    },
+    async claimExportReminder(key, at) {
+      const value = recipients.get(key)
+      if (!value || value.exportReminderDueAt == null || value.exportReminderDueAt > at || value.exportReminderClaimedAt != null) return null
+      value.exportReminderClaimedAt = at
+      return structuredClone(value)
+    },
+    async finishExportReminder(key, outcome, at) { Object.assign(recipients.get(key) ?? {}, { exportReminderOutcome: outcome, exportReminderAt: at }) },
     async markNotified(key, at) { const value = recipients.get(key); if (value) { value.lastNotifiedAt = at; delete value.retryAfter; delete value.retryAttempts } },
     async setRetry(key, { retryAfter, attempts }) { const value = recipients.get(key); if (value) Object.assign(value, { retryAfter, retryAttempts: attempts }) },
     async heldRecipients({ notifiedSince, now, limit }) {
@@ -455,7 +514,7 @@ export function createMemoryEmailStore() {
 }
 
 const number = value => typeof value?.toNumber === 'function' ? value.toNumber() : value
-const RECIPIENT_KEYS = ['accountKey', 'ownerId', 'userId', 'address', 'verified', 'preferences', 'lastNotifiedAt', 'retryAfter', 'retryAttempts', 'accountCreatedAt', 'updatedAt']
+const RECIPIENT_KEYS = ['accountKey', 'ownerId', 'userId', 'address', 'verified', 'preferences', 'lastNotifiedAt', 'retryAfter', 'retryAttempts', 'accountCreatedAt', 'exportReminderDueAt', 'exportReminderClaimedAt', 'exportReminderOutcome', 'exportReminderAt', 'updatedAt']
 // UnlinkedEmailRecipient / UnlinkedEmailSuppression / UnlinkedEmailSend /
 // UnlinkedEmailInviteLock nodes; initialize() only adds their own constraints and indexes.
 export function createNeo4jEmailStore(driver, database = 'neo4j') {
@@ -466,6 +525,7 @@ export function createNeo4jEmailStore(driver, database = 'neo4j') {
     async initialize() {
       await write('CREATE CONSTRAINT unlinked_email_recipient_key IF NOT EXISTS FOR (e:UnlinkedEmailRecipient) REQUIRE e.accountKey IS UNIQUE', {})
       await write('CREATE INDEX unlinked_email_recipient_notified IF NOT EXISTS FOR (e:UnlinkedEmailRecipient) ON (e.lastNotifiedAt)', {})
+      await write('CREATE INDEX unlinked_email_export_reminder_due IF NOT EXISTS FOR (e:UnlinkedEmailRecipient) ON (e.exportReminderDueAt)', {})
       await write('CREATE INDEX unlinked_email_recipient_retry IF NOT EXISTS FOR (e:UnlinkedEmailRecipient) ON (e.retryAfter)', {})
       await write('CREATE CONSTRAINT unlinked_email_suppression_hash IF NOT EXISTS FOR (e:UnlinkedEmailSuppression) REQUIRE e.recipientHash IS UNIQUE', {})
       await write('CREATE CONSTRAINT unlinked_email_send_id IF NOT EXISTS FOR (e:UnlinkedEmailSend) REQUIRE e.id IS UNIQUE', {})
@@ -485,7 +545,7 @@ export function createNeo4jEmailStore(driver, database = 'neo4j') {
       await write(`${setRecipient}, e.address = $address, e.verified = $verified, e.updatedAt = $at`, { key, ownerId: member.ownerId, userId: member.userId, address, verified, at })
     },
     async noteNewAccount(member, key, at) {
-      await write(`${setRecipient}, e.accountCreatedAt = coalesce(e.accountCreatedAt, $at)`, { key, ownerId: member.ownerId, userId: member.userId, at })
+      await write(`${setRecipient}, e.exportReminderDueAt = CASE WHEN e.accountCreatedAt IS NULL THEN $dueAt ELSE e.exportReminderDueAt END, e.accountCreatedAt = coalesce(e.accountCreatedAt, $at)`, { key, ownerId: member.ownerId, userId: member.userId, at, dueAt: at + EXPORT_DELAY_MS })
     },
     async setPreferences(member, key, preferences, at) {
       await write(`${setRecipient}, e.preferences = $preferences, e.updatedAt = $at`, { key, ownerId: member.ownerId, userId: member.userId, preferences, at })
@@ -502,6 +562,29 @@ export function createNeo4jEmailStore(driver, database = 'neo4j') {
         })
       } finally { await session.close() }
     },
+    async setExportReminder(key, enabled, at) {
+      const session = driver.session({ database })
+      try { await session.executeWrite(async tx => {
+        const result = await tx.run('MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e._emailLock = coalesce(e._emailLock, 0) + 1 RETURN e.preferences AS preferences', { key })
+        if (!result.records.length) return
+        const preferences = { ...preferencesOf({ preferences: result.records[0].get('preferences') }), export_reminder: enabled }
+        await tx.run('MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e.preferences = $preferences, e.updatedAt = $at', { key, preferences: JSON.stringify(preferences), at })
+      }) } finally { await session.close() }
+    },
+    async dueExportReminders({ at, limit }) {
+      const result = await read(`MATCH (e:UnlinkedEmailRecipient) WHERE e.exportReminderDueAt <= $dueAt AND e.exportReminderClaimedAt IS NULL RETURN properties(e) AS e ORDER BY e.exportReminderDueAt LIMIT ${Math.min(Math.max(Number(limit) | 0, 1), 100)}`, { dueAt: at })
+      return result.records.map(record => Object.fromEntries(Object.entries(record.get('e')).map(([key, value]) => [key, number(value)])))
+    },
+    async claimExportReminder(key, at) {
+      const session = driver.session({ database })
+      try { return await session.executeWrite(async tx => {
+        // Acquire the recipient lock BEFORE inspecting the marker/preferences.
+        await tx.run('MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e._emailLock = coalesce(e._emailLock, 0) + 1', { key })
+        const result = await tx.run('MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) WHERE e.exportReminderDueAt <= $dueAt AND e.exportReminderClaimedAt IS NULL SET e.exportReminderClaimedAt = $at RETURN properties(e) AS e', { key, at, dueAt: at })
+        return result.records.length ? Object.fromEntries(Object.entries(result.records[0].get('e')).map(([name, value]) => [name, number(value)])) : null
+      }) } finally { await session.close() }
+    },
+    async finishExportReminder(key, outcome, at) { await write('MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e.exportReminderOutcome = $outcome, e.exportReminderAt = $at', { key, outcome, at }) },
     async markNotified(key, at) { await write('MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e.lastNotifiedAt = $at REMOVE e.retryAfter, e.retryAttempts', { key, at }) },
     async setRetry(key, { retryAfter, attempts }) { await write('MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e.retryAfter = $retryAfter, e.retryAttempts = $attempts', { key, retryAfter, attempts }) },
     async heldRecipients({ notifiedSince, now, limit }) {
