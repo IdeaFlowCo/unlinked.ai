@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 const text = z.string().max(20000)
-export const summarySchema = z.object({ id: z.string().min(1).max(160).refine(id => id !== '.' && id !== '..'), name: text.min(1), headline: text.optional(), location: text.optional() })
+export const summarySchema = z.object({ id: z.string().min(1).max(160).refine(id => id !== '.' && id !== '..'), name: text.min(1), headline: text.optional(), location: text.optional(), detailLevel: z.enum(['basic', 'detailed']).optional() })
 export const listingSchema = z.object({ profiles: z.array(summarySchema).max(100), nextCursor: z.string().max(2048).optional() })
 export const detailSchema = z.object({ profile: summarySchema.extend({
   about: text.optional(),

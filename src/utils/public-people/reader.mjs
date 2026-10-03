@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 
 export class PublicPeopleReaderError extends Error {
@@ -112,6 +113,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         })
         detail.skills = array(input.skills, 500).map(skill => text(skill, true))
         const company = text(input.company)
+        summary.detailLevel = profileDetailLevel(detail)
+        detail.detailLevel = summary.detailLevel
         summaries.set(input.id, summary); details.set(input.id, detail)
         // Everything searchable is already public on the profile page.
         tokens.set(input.id, { name: words(summary.name), text: words([summary.name, summary.headline, company, detail.about, ...detail.positions.flatMap(position => [position.title, position.company, position.description]), ...detail.education.flatMap(school => [school.institution, school.degree]), ...detail.skills].filter(Boolean).join(' ')) })
@@ -187,15 +190,20 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       return { ...page(ranked.rows, decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
     },
     async profile(request = {}) {
-      const { id, cursor, signal } = requestValue(request)
-      if (!idValid(id)) invalid()
-      const scope = `connections:${id}`, decodedCursor = cursorValue(cursor, scope)
+      const { id, cursor, signal, query = '', sort = 'name' } = requestValue(request)
+      if (!idValid(id) || !['name', 'detail'].includes(sort)) invalid()
+      const search = queryValue(query)
+      const scope = `connections:${id}${sort === 'name' && !search ? '' : `:${sort}:${search}`}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
       if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
       if (data.aliases.has(id)) return { moved: data.aliases.get(id) }
       if (!data.details.has(id)) return null
-      const connections = page(data.ordered.filter(person => data.connected.get(id).has(person.id)), decodedCursor, scope, data.revision)
-      return { profile: { ...data.details.get(id), connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
+      let rows = data.ordered.filter(person => person.id !== id && data.connected.get(id).has(person.id))
+      const connectionCount = rows.length
+      if (search) { const matcher = createQueryMatcher(search, 'best'); rows = matcher ? rows.filter(person => matcher.test(data.tokens.get(person.id)).all) : [] }
+      if (sort === 'detail') rows.sort((a, b) => Number(b.detailLevel === 'detailed') - Number(a.detailLevel === 'detailed'))
+      const connections = page(rows, decodedCursor, scope, data.revision)
+      return { profile: { ...data.details.get(id), connectionCount, connectionsTotal: rows.length, connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
     // The public summaries for known IDs, so a private row can link to the
     // matching public profile only when one is published.

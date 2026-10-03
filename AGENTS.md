@@ -122,3 +122,7 @@ Invite and notification emails (Resend over `fetch`, `mcp-server/member-email.mj
 Operator-published profile photos (offline `mcp-server/publish-profile-photos.mjs`, read-only store `mcp-server/profile-photos.mjs`) live under `assets/profile-photos.public/` and are served same-origin at `GET/HEAD /people/<id>/photo`; views take `photo` only in the exact `PHOTO_URL` grammar and fall back to initials. Layout, publish/revoke host commands, the `hidden` precedence hook and the ingress Cache-Control map: `docs/profile-photos.md`.
 
 The optional operator-configured signup profile lookup (default off; a private host adapter behind the contract in `mcp-server/signup-profile-lookup.mjs`), its durable quota/cache/confirmed source store and later export precedence are documented in `docs/signup-profile-lookup.md`; keep find-me provenance separate from recovered legacy claims and keep adapter specifics out of this repository.
+
+## Connection browsing and page depth
+
+Public People summaries expose detailLevel (basic or detailed), derived from visible content independently of membership. Profile pages link to /people/{id}/connections for search and richer-first or alphabetical browsing of published connections. See docs/connection-browsing.md in source.
