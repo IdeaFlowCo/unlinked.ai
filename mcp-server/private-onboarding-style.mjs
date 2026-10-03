@@ -201,6 +201,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .bc-main{min-width:0;padding:26px 26px 22px}
 .unlinked-onboarding .bc-id{display:grid;grid-template-columns:64px 1fr;gap:16px;align-items:center}
 .unlinked-onboarding .bc-av{display:grid;place-items:center;width:64px;height:64px;border-radius:50%;background:var(--brand);color:#fff;font-size:22px;font-weight:600}
+.unlinked-onboarding img.photo{object-fit:cover;padding:0;background:var(--tint)}
 .unlinked-onboarding .bcard .bc-name{font:600 24px/1.15 "Public Sans",system-ui,sans-serif;letter-spacing:-.01em;margin:0}
 .unlinked-onboarding .bc-hl{margin:4px 0 0;font-size:16px;line-height:1.35}
 .unlinked-onboarding .bc-id .small{margin:2px 0 0}

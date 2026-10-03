@@ -28,6 +28,7 @@ import { ContactCardError, renderContactVcard } from './contact-card.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { renderScan, fillMeHeadline, TOP_BAR_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError } from './private-onboarding-views.mjs'
 import { MEET_SCRIPT } from './public-discovery.mjs'
+import { PHOTO_ID } from './profile-photos.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -92,7 +93,7 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts() }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -107,6 +108,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   if (oauth !== undefined && (typeof signup !== 'function' || typeof oauth.readAuthorization !== 'function' || typeof oauth.approve !== 'function' || typeof oauth.deny !== 'function')) throw new Error('oauth_connector_configuration_required')
   if (listAccountGrants !== undefined && typeof listAccountGrants !== 'function') throw new Error('account_signup_configuration_required')
   if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
+  if (profilePhotos !== undefined && ['refresh', 'urlFor', 'read'].some(key => typeof profilePhotos?.[key] !== 'function')) throw new Error('profile_photo_configuration_required')
   if (selfClaims !== undefined && (typeof selfClaims.lookupSlug !== 'function' || typeof selfClaims.lookupName !== 'function' || typeof selfClaims.claimable !== 'function' || typeof selfClaims.claim !== 'function')) throw new Error('self_claims_configuration_required')
   const invitationMode = typeof claimInvitation === 'function' && typeof signup !== 'function'
   const authorizationOrigin = login.authorizationOrigin ?? null
@@ -125,7 +127,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const returnPath = value => typeof value === 'string' && (/^\/(?:profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
-  const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
+  // Operator-published photos (docs/profile-photos.md): public summaries carry a
+  // same-origin photo URL when one is published; views fall back to initials.
+  const photoFor = profilePhotos ? id => profilePhotos.urlFor(id) : undefined
+  const publicReader = createPublicPeopleReader({ readPublishedSnapshot, photoFor })
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
@@ -140,12 +145,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const matches = await publishedPeopleFor(rows, { publicTarget: row => usableTarget(publicTarget(row)), lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : null, lookup: ids => reader.lookup({ ids }) })
       return plainRows.map((value, index) => {
         const match = matches[index]
-        return match ? { ...value, id: match.id, ...(match.presence ? { presence: match.presence, connectionCount: match.connectionCount } : {}) } : value
+        return match ? { ...value, id: match.id, ...(match.photo ? { photo: match.photo } : {}), ...(match.presence ? { presence: match.presence, connectionCount: match.connectionCount } : {}) } : value
       })
     } catch { return plainRows }
   }
   // One reader per page view: every read of the index on that page shares one build.
-  const pageReader = () => createPublicPeopleReader({ readPublishedSnapshot, reuse: true })
+  const pageReader = () => createPublicPeopleReader({ readPublishedSnapshot, reuse: true, photoFor })
   // The published profiles an account is connected to, once each: its own
   // network rows that link to a public profile (imported connections,
   // accepted invites and connection requests) plus everyone the public graph
@@ -163,6 +168,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
   let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
+  // Photos are many small reads per page, so they have their own site-wide bound.
+  let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
+  const PHOTO_PER_MINUTE = 6000, PHOTO_IN_FLIGHT = 32
+  const photoPath = pathname => profilePhotos ? pathname.match(/^\/people\/([^/]+)\/photo$/) : null
   // Visitors can ask the AI about the public list. Each ask is a paid model call, so it is
   // bounded per minute, per day and in flight, for the whole site rather than per visitor.
   const ASK_PER_MINUTE = 12, ASK_PER_DAY = 1500, ASK_IN_FLIGHT = 2
@@ -346,7 +355,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     response.setHeader('X-Content-Type-Options', 'nosniff')
     response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
     if (request.headers.host !== base.host) { response.writeHead(403).end(); return }
-    if (!['GET', 'POST'].includes(request.method) && !(request.method === 'HEAD' && isPublicDiscoveryPath(new URL(request.url, base).pathname))) { response.writeHead(405).end(); return }
+    if (!['GET', 'POST'].includes(request.method) && !(request.method === 'HEAD' && (isPublicDiscoveryPath(new URL(request.url, base).pathname) || photoPath(new URL(request.url, base).pathname)))) { response.writeHead(405).end(); return }
     // RFC 8058 one-click unsubscribe is posted by mail providers, without this
     // origin; its signed token is the whole authority and it only turns email off.
     const oneClick = request.method === 'POST' && memberEmail && new URL(request.url, base).pathname === '/email/unsubscribe'
@@ -354,6 +363,30 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      // A published profile photo: public like the profile itself, no session,
+      // served before any session or graph work. Only exact legacy ids in the
+      // live photo set answer; everything else is 404.
+      const photo = ['GET', 'HEAD'].includes(request.method) ? photoPath(url.pathname) : null
+      if (photo) {
+        if (Date.now() - photoWindow >= 60000) { photoWindow = Date.now(); photoRequests = 0 }
+        if (++photoRequests > PHOTO_PER_MINUTE || photoBusy >= PHOTO_IN_FLIGHT) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        photoBusy++
+        try {
+          const found = PHOTO_ID.test(photo[1]) ? await profilePhotos.read(photo[1]) : null
+          if (!found) { response.writeHead(404).end(); return }
+          const etag = `"${found.sha256}"`
+          // The page links carry ?v=<content hash>, so that exact URL never changes.
+          const versioned = url.searchParams.get('v') === found.sha256.slice(0, 16) && [...url.searchParams.keys()].length === 1
+          response.setHeader('Cache-Control', versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=300')
+          response.setHeader('ETag', etag)
+          response.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+          if (request.headers['if-none-match'] === etag) { response.writeHead(304).end(); return }
+          response.writeHead(200, { 'Content-Type': found.type, 'Content-Length': found.bytes.length })
+          response.end(request.method === 'HEAD' ? undefined : found.bytes); return
+        } finally { photoBusy-- }
+      }
+      // Page views read the photo set's pointer at most every 30 seconds.
+      if (profilePhotos && request.method === 'GET') await profilePhotos.refresh().catch(() => {})
 
       if (sessionStore) {
         const sid = cookies(request)['__Host-ul-session']
@@ -755,6 +788,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           contacts = await contactRows(connections.slice(0, 10))
         } catch { /* The profile stands on its own while the network is still being read. */ }
         await warming
+        // The photo published for this member's public profile, when there is one.
+        if (profilePhotos && typeof ownProfileId === 'function') {
+          const mine = await ownProfileId(session.owner).catch(() => null)
+          const photo = mine ? profilePhotos.urlFor(mine) : null
+          if (photo) profile.photo = photo
+        }
         journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
       // The member's own card identity and the public profile URL its QR opens.
@@ -780,7 +819,16 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         let cardUrl = null, indexRead = true
         if (typeof readPublishedSnapshot === 'function') {
           for (const id of candidates.slice(0, 8)) {
-            try { const found = await publicReader.profile({ id }); if (found) { cardUrl = new URL(profileHref(found.moved ?? id), base).href; break } }
+            try {
+              const found = await publicReader.profile({ id })
+              if (found) {
+                cardUrl = new URL(profileHref(found.moved ?? id), base).href
+                // The card shows the public profile's published photo, if any.
+                const photo = profilePhotos?.urlFor(found.moved ?? id)
+                if (photo) profile.photo = photo
+                break
+              }
+            }
             catch { indexRead = false; break /* The card still renders while the index is unavailable. */ }
           }
         }
