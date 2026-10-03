@@ -51,6 +51,16 @@ test('real Neo4j: concurrent durable quotas, retry cap, cache, confirmation and 
   assert.equal(stored.get('s').source, 'self-asserted-public-linkedin-v1')
   await run('MATCH (b:OperationalOwner {sourceOwnerId:$ownerId}) SET b.active=false', owner)
   assert.equal(await fresh.read(owner), null); assert.ok(!(await fresh.list()).some(row => row.profile.id === receipt.profileId))
+  await run('MATCH (b:OperationalOwner {sourceOwnerId:$ownerId}) SET b.active=true', owner)
+  await fresh.removeOwner(owner)
+  assert.equal(await fresh.read(owner), null)
+  assert.ok(!(await fresh.list()).some(row => row.profile.id === receipt.profileId))
+  const quota = (await run('MATCH (a:UnlinkedSignupLookup {key:$key}) RETURN properties(a) AS a', { key: keys[0] })).records[0].get('a')
+  assert.deepEqual(Object.keys(quota).sort(), ['attempts', 'key', 'succeeded'])
+  assert.equal(Number(quota.attempts), 3); assert.equal(quota.succeeded, true)
+  assert.equal((await fresh.lookup({ owner, address: 'https://linkedin.com/in/' + slug })).code, 'account_limit')
+  await assert.rejects(fresh.confirm({ owner, slug }), /self_claim_conflict/)
+  assert.equal(await fresh.read(other), null)
   // Failures consume the three-attempt account budget permanently, including next day.
   const failKey = 'fail-' + tag; keys.push(failKey)
   for (let i = 0; i < 3; i++) {
@@ -61,6 +71,8 @@ test('real Neo4j: concurrent durable quotas, retry cap, cache, confirmation and 
   }
   time += 86400000
   assert.equal((await store.reserve({ key: failKey, slug: 'failure-' + slug, attempt: randomUUID(), now: time, day: Math.floor(time / 86400000), dailyCap: 10, pacingMs: 4000, timeoutMs: 12000 })).code, 'account_limit')
+  await store.removeOwner(owner)
+  assert.equal((await fresh.lookup({ owner, address: 'https://linkedin.com/in/another' })).code, 'account_limit')
   const capKey = 'cap-' + tag; keys.push(capKey)
   assert.equal((await store.reserve({ key: capKey, slug: 'cap-' + slug, attempt: randomUUID(), now: time, day: Math.floor(time / 86400000), dailyCap: 0, pacingMs: 4000, timeoutMs: 12000 })).code, 'daily_cap')
 })

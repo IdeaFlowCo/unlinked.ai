@@ -775,6 +775,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         let legacy = null
         if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
         if (!profile.name && legacy) Object.assign(profile, legacy.profile)
+        const source = signupLinkedin ? await signupLinkedin.read(session.owner) : null
+        if (!profile.name && source) Object.assign(profile, source.profile)
         if (!profile.name) profile.name = session.displayName
         // The QR target is the owner's already-public profile URL: the linked
         // legacy profile id when one is confirmed, else the newest public-
@@ -783,6 +785,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         // one). The code never encodes a private or dead target, and scanning
         // it grants nothing beyond what any visitor can already read.
         const candidates = legacy?.profileId ? [legacy.profileId] : []
+        if (source?.profile.id) candidates.push(source.profile.id)
         candidates.push(...jobs.filter(job => ['indexed', 'partial'].includes(job.payload.status) && job.payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && job.payload.consent.publicProfessionalSearch === true)
           .sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0) || b.sourceId.localeCompare(a.sourceId))
           .map(job => 'member-import-' + job.sourceId))
@@ -1039,7 +1042,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (signup && request.method === 'GET' && url.pathname === '/export') {
         const jobs = await jobResources()
         const grants = await backend.listAccountGrantIds()
-        const data = await exportAccountData({ owner: session.owner, backend, jobs, grants })
+        const data = await exportAccountData({ owner: session.owner, backend, jobs, grants, signupLinkedin })
         data.account.accountLabel = session.accountLabel
         data.account.displayName = session.displayName
         // The contact card's details belong to the export; its link does not.
@@ -1063,7 +1066,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
-        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds })
+        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLinkedin })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)

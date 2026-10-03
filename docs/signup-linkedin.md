@@ -64,6 +64,15 @@ remain immutable. Retraction of an import restores the signup source; owner
 revocation excludes both from the live public index. A final source read fence
 checks active source receipts before returning the combined snapshot.
 
+The member card uses this source for identity when no import or legacy profile
+is available. Its QR target must resolve in the published People snapshot.
+Download everything includes the confirmed source and receipt, explicitly labeled
+as public LinkedIn data confirmed by self-assertion. Account deletion erases the
+confirmed source and retained account lookup profile, invalidates unfinished
+lookups, and keeps only the hashed account key, attempt count and success flag.
+That quota state prevents deletion or a new session from bypassing the lookup
+budget; a deleted successful lookup cannot be recovered through the slug cache.
+
 ## Verification
 
 `npm test` runs mocked Unipile reads and executable HTTP/card/projection tests,

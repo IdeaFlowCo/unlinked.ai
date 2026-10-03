@@ -12,7 +12,7 @@ const snapshot = { state: 'published', complete: true, revision: 'public-v1', pr
   { id: 'dup-2', name: 'Casey Doe', positions: [], education: [], skills: [] },
 ], connections: [{ fromId: 'p-x', toId: 'p-jl' }] }
 
-async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null, signupLinkedin } = {}) {
+async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null, signupLinkedin, published = true } = {}) {
   const calls = { lookups: [], names: [], claims: [], audits: [] }
   let provisioned = false, handler
   const selfClaims = {
@@ -33,8 +33,8 @@ async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl'
     signup: async () => { provisioned = true; return { ownerId: 'owner-a', userId: 'user-a' } },
     issueAccountGrant: async () => ({ token: 'grant' }), revokeAccountGrant: async () => {},
     selfClaims, signupLinkedin,
-    getBackend: async () => ({ adapter: true, readResource: async () => null, listImportIds: async () => [], readLegacyProfile: async () => null }),
-    readPublishedSnapshot: async () => { const sources = signupLinkedin ? await signupLinkedin.list() : []; return { ...snapshot, profiles: [...snapshot.profiles, ...sources.map(row => row.profile)], members: sources.map(row => row.profile.id) } },
+    getBackend: async () => ({ adapter: true, readResource: async () => null, listImportIds: async () => [], listAccountGrantIds: async () => [], readLegacyProfile: async () => null }),
+    readPublishedSnapshot: async () => { const sources = signupLinkedin ? await signupLinkedin.list() : []; return { ...snapshot, profiles: [...snapshot.profiles, ...(published ? sources.map(row => row.profile) : [])], members: sources.map(row => row.profile.id) } },
     complete: async () => ({ matches: [] }),
     audit: async event => { calls.audits.push(event) },
   })
@@ -166,4 +166,43 @@ test('provider failure yields friendly name-only fallback without a confirmation
   const page = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
   assert.ok(page.includes('continue with your name')); assert.ok(!page.includes('name="candidate"')); assert.ok(!page.includes('raw secret'))
   assert.ok((await (await f.signed('/profile')).text()).includes('New Member'))
+})
+
+
+test('confirmed signup source supplies export, verified card target and owner deletion', async t => {
+  const service = signupService(async () => Response.json({ first_name: 'Public', last_name: 'Identity', headline: 'Builder', location: 'Austin' }))
+  const owner = { ownerId: 'owner-a', userId: 'user-a' }
+  await service.lookup({ owner, address: 'https://linkedin.com/in/public-identity' })
+  await service.confirm({ owner, slug: 'public-identity' })
+  const f = await start(t, { displayName: 'Login Name', signupLinkedin: service })
+  const [source] = await service.list()
+  const card = await (await f.signed('/card')).text()
+  assert.ok(card.includes('Public Identity')); assert.ok(card.includes('Builder')); assert.ok(card.includes('Austin'))
+  assert.ok(card.includes('/people/' + source.profile.id)); assert.ok(card.includes('<svg'))
+  const hidden = await start(t, { displayName: 'Login Name', signupLinkedin: service, published: false })
+  const unpublishedCard = await (await hidden.signed('/card')).text()
+  assert.ok(unpublishedCard.includes('Public Identity')); assert.ok(!unpublishedCard.includes('/people/' + source.profile.id))
+  const exported = await f.signed('/export')
+  assert.equal(exported.status, 200)
+  const data = await exported.json()
+  assert.deepEqual(data.imports, [])
+  assert.equal(data.signupProfile.profile.name, 'Public Identity')
+  assert.equal(data.signupProfile.receiptId, source.receiptId)
+  assert.deepEqual(data.signupProfile.provenance, { source: 'public-linkedin', selfAsserted: true, confirmation: 'self-asserted-public-linkedin-v1' })
+  const refused = await f.post('/delete-account', { csrf: f.csrf, confirm: 'delete' })
+  assert.equal(refused.status, 400); assert.ok(await service.read(owner))
+  const deleted = await f.post('/delete-account', { csrf: f.csrf, confirm: 'delete everything' })
+  assert.equal(deleted.status, 200)
+  assert.equal(await service.read(owner), null); assert.deepEqual(await service.list(), [])
+  assert.equal((await f.request('/people/' + source.profile.id)).status, 404)
+  const again = await start(t, { displayName: 'Login Name', signupLinkedin: service })
+  assert.ok(!(await (await again.signed('/profile')).text()).includes('Public Identity'))
+  assert.equal((await service.lookup({ owner, address: 'https://linkedin.com/in/public-identity' })).code, 'account_limit')
+})
+
+test('account deletion fails closed if signup source cleanup fails', async t => {
+  const service = signupService(async () => Response.json({ first_name: 'Public', last_name: 'Identity' }))
+  const f = await start(t, { displayName: 'Login Name', signupLinkedin: { ...service, removeOwner: async () => { throw Error('storage_unavailable') } } })
+  assert.equal((await f.post('/delete-account', { csrf: f.csrf, confirm: 'delete everything' })).status, 400)
+  assert.equal((await f.signed('/profile')).status, 200)
 })

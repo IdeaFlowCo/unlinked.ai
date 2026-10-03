@@ -97,6 +97,7 @@ export function createSignupLinkedin({ store, config = unipileConfig(), fetchImp
     },
     read: owner => store.read(owner),
     list: () => store.list(),
+    removeOwner: owner => store.removeOwner(owner),
   }
 }
 
@@ -104,6 +105,7 @@ export function createSignupLinkedin({ store, config = unipileConfig(), fetchImp
 export function signupReservation({ account, gate, cached }, args) {
   const num = value => Number(value?.toNumber?.() ?? value ?? 0)
   if (account.json) return account.slug === args.slug ? { profile: JSON.parse(account.json) } : { code: 'account_limit' }
+  if (account.succeeded) return { code: 'account_limit' }
   if (num(account.pendingUntil) > args.now) return { code: 'paced' }
   if (cached) return { profile: JSON.parse(cached) }
   if (num(account.attempts) >= 3) return { code: 'account_limit' }
@@ -134,7 +136,7 @@ export function createNeo4jSignupLinkedinStore(driver, database = 'neo4j', gateI
       const row = result.records[0]
       const decision = signupReservation({ account: row.get('a'), gate: row.get('g'), cached: row.get('cached') }, args)
       if (decision.profile) {
-        await t.run('MATCH (a:UnlinkedSignupLookup {key:$key}) SET a.slug=$slug, a.json=$json', { key: args.key, slug: args.slug, json: JSON.stringify(decision.profile) })
+        await t.run('MATCH (a:UnlinkedSignupLookup {key:$key}) SET a.slug=$slug, a.json=$json, a.succeeded=true', { key: args.key, slug: args.slug, json: JSON.stringify(decision.profile) })
         return decision
       }
       if (!decision.allowed) return decision
@@ -148,7 +150,7 @@ export function createNeo4jSignupLinkedinStore(driver, database = 'neo4j', gateI
       return tx('executeWrite', async t => {
         await t.run("MATCH (g:UnlinkedSignupGate {id:$gateId}) SET g._lock=true REMOVE g._lock")
         const result = await t.run(`MATCH (a:UnlinkedSignupLookup {key:$key, attempt:$attempt, slug:$slug})
-          SET a.pendingUntil=0, a.failure=$code ${profile ? ', a.json=$json' : ''} RETURN a.key AS key`, { key, slug, attempt, code: code ?? null, json: profile ? JSON.stringify(profile) : null })
+          SET a.pendingUntil=0, a.failure=$code ${profile ? ', a.json=$json, a.succeeded=true' : ''} RETURN a.key AS key`, { key, slug, attempt, code: code ?? null, json: profile ? JSON.stringify(profile) : null })
         if (!result.records.length) return false
         await t.run("MATCH (g:UnlinkedSignupGate {id:$gateId, attempt:$attempt}) SET g.pendingUntil=0, g.nextAt=$nextAt", { attempt, nextAt: now + pacingMs })
         if (profile) await t.run('MERGE (c:UnlinkedSignupCache {slug:$slug}) SET c.json=$json', { slug, json: JSON.stringify(profile) })
@@ -156,14 +158,26 @@ export function createNeo4jSignupLinkedinStore(driver, database = 'neo4j', gateI
       })
     },
     async confirm({ key, owner, slug, profileId, receiptId, now }) {
-      const result = await write(`MATCH (a:UnlinkedSignupLookup {key:$key, slug:$slug}) WHERE a.json IS NOT NULL
+      const result = await tx('executeWrite', async t => {
+        await t.run("MERGE (g:UnlinkedSignupGate {id:$gateId}) SET g._lock=true REMOVE g._lock")
+        return t.run(`MATCH (a:UnlinkedSignupLookup {key:$key, slug:$slug}) WHERE a.json IS NOT NULL
         MATCH (b:OperationalOwner {namespace:'unlinked', sourceOwnerId:$ownerId, userId:$userId}) WHERE coalesce(b.active,true)=true
         OPTIONAL MATCH (l:UnlinkedLegacyAccount {ownerId:$ownerId})
         WITH a, b, l WHERE l IS NULL
         MERGE (s:UnlinkedSignupProfile {key:$key}) ON CREATE SET s.ownerId=$ownerId, s.userId=$userId, s.profileId=$profileId, s.slug=$slug,
           s.profileJson=a.json, s.receiptId=$receiptId, s.confirmedAt=$now, s.source='self-asserted-public-linkedin-v1'
         RETURN s.profileId AS id`, { key, ...owner, slug, profileId, receiptId, now })
+      })
       return result.records.length === 1
+    },
+    async removeOwner(owner) {
+      await tx('executeWrite', async t => {
+        await t.run("MERGE (g:UnlinkedSignupGate {id:$gateId}) SET g._lock=true REMOVE g._lock")
+        await t.run(`MATCH (s:UnlinkedSignupProfile {key:$key, ownerId:$ownerId, userId:$userId}) DETACH DELETE s`, { key: ownerKey(owner), ...owner })
+        await t.run(`MATCH (a:UnlinkedSignupLookup {key:$key})
+          WITH a, {key:a.key, attempts:coalesce(a.attempts,0), succeeded:coalesce(a.succeeded,false) OR a.json IS NOT NULL} AS quota
+          SET a = quota`, { key: ownerKey(owner) })
+      })
     },
     async read(owner) {
       return tx('executeRead', async t => {

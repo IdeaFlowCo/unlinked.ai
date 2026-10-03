@@ -113,3 +113,68 @@ test('confirmed source appears in public People immediately; newer member export
   imports = []; assert.equal((await reader.profile({ id: profileId })).profile.headline, 'Engineer')
   f.store.setActive(false); assert.equal(await reader.profile({ id: profileId }), null)
 })
+
+
+test('deletion erases account profile state, preserves successful quota and fences other owners', async () => {
+  const f = fixture(), other = { ownerId: 'owner-b', userId: 'user-b' }
+  await f.lookup(); await f.service.confirm({ owner, slug: 'ceyda-kıran' })
+  await f.lookup('ceyda-kıran', other); await f.service.confirm({ owner: other, slug: 'ceyda-kıran' })
+  await f.service.removeOwner(owner); await f.service.removeOwner(owner)
+  assert.equal(await f.service.read(owner), null)
+  assert.equal((await f.service.list()).length, 1); assert.ok(await f.service.read(other))
+  const key = signupProfileId(owner).slice('member-linkedin-'.length)
+  assert.deepEqual(f.store.accounts.get(key), { attempts: 1, succeeded: true })
+  f.advance(86400000)
+  const fresh = createSignupLinkedin({ store: f.store, config: unipileConfig(env), fetchImpl: async () => { throw Error('must not fetch') } })
+  for (const slug of ['ceyda-kıran', 'another']) assert.equal((await fresh.lookup({ owner, address: 'https://linkedin.com/in/' + slug })).code, 'account_limit')
+  await assert.rejects(fresh.confirm({ owner, slug: 'ceyda-kıran' }), /self_claim_conflict/)
+  assert.equal(f.calls.length, 1)
+})
+
+test('deleting an unfinished lookup prevents late completion from restoring retained profile data', async () => {
+  let release
+  const f = fixture({ fetchImpl: () => new Promise(resolve => { release = () => resolve(Response.json(payload)) }) })
+  const pending = f.lookup()
+  await new Promise(resolve => setImmediate(resolve))
+  await f.service.removeOwner(owner)
+  release(); assert.equal((await pending).code, 'storage_unavailable')
+  assert.deepEqual([...f.store.accounts.values()], [{ attempts: 1, succeeded: false }])
+  assert.deepEqual(await f.service.list(), [])
+})
+
+test('legacy slug index normalizes once across concurrent and repeated encoded lookups', async () => {
+  let loads = 0, iterations = 0
+  const index = new Map([['ceyda-k%c4%b1ran', 'legacy-ceyda'], ['OTHER', 'legacy-other']])
+  index[Symbol.iterator] = function* () { iterations++; yield* Map.prototype[Symbol.iterator].call(this) }
+  const claims = createSelfClaims({ driver: {}, publicPeople: { read: async () => ({ profiles: [{ id: 'legacy-ceyda', name: 'Ceyda Kıran' }] }) },
+    slugIndex: async () => { loads++; return index } })
+  assert.deepEqual(await Promise.all(['ceyda-kıran', 'ceyda-k%C4%B1ran', 'OTHER'].map(claims.lookupSlug)), ['legacy-ceyda', 'legacy-ceyda', 'legacy-other'])
+  for (let i = 0; i < 100; i++) assert.equal(await claims.lookupSlug('ceyda-kıran'), 'legacy-ceyda')
+  assert.equal(await claims.lookupSlug('unknown'), null)
+  assert.equal(await claims.lookupName('  Ceyda Kıran  '), 'legacy-ceyda')
+  assert.equal(loads, 1); assert.equal(iterations, 1)
+})
+
+test('legacy slug index retries failed initialization', async () => {
+  let loads = 0
+  const claims = createSelfClaims({ driver: {}, publicPeople: { read: async () => null }, slugIndex: async () => {
+    if (++loads === 1) throw Error('temporarily unavailable')
+    return new Map([['encoded-%c4%b1', 'legacy-id']])
+  } })
+  assert.equal(await claims.lookupSlug('encoded-ı'), null)
+  assert.equal(await claims.lookupSlug('encoded-ı'), 'legacy-id')
+  assert.equal(await claims.lookupSlug('encoded-%C4%B1'), 'legacy-id')
+  assert.equal(loads, 2)
+})
+
+
+test('deletion retains failed-attempt budgets across account sessions', async () => {
+  const f = fixture({ fetchImpl: async () => new Response('', { status: 503 }) })
+  for (let i = 0; i < 3; i++) {
+    assert.equal((await f.lookup()).code, 'provider_unavailable')
+    await f.service.removeOwner(owner)
+    f.advance(86400000)
+  }
+  assert.deepEqual([...f.store.accounts.values()], [{ attempts: 3, succeeded: false }])
+  assert.equal((await f.lookup()).code, 'account_limit'); assert.equal(f.calls.length, 3)
+})

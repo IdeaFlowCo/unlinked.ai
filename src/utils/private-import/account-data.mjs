@@ -7,7 +7,7 @@ const RECEIPT_PROBE_LIMIT = 600
 
 // The whole account in one reviewable JSON document. Reads use the same
 // owner-fenced readers as the pages; nothing bypasses tombstones or consent.
-export async function exportAccountData({ owner, backend, jobs, grants = [], signal }) {
+export async function exportAccountData({ owner, backend, jobs, grants = [], signupLinkedin, signal }) {
   const imports = []
   for (const resource of jobs) {
     signal?.throwIfAborted()
@@ -37,8 +37,11 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
       if (recovered?.assertions?.length) legacy = { ...(legacy ?? {}), recoveredObservations: recovered.assertions }
     }
   } catch { legacy = { ...(legacy ?? {}), error: 'legacy_records_unavailable' } }
+  const confirmed = signupLinkedin ? await signupLinkedin.read(owner) : null
+  const signupProfile = confirmed ? { profile: confirmed.profile, receiptId: confirmed.receiptId,
+    provenance: { source: 'public-linkedin', selfAsserted: true, confirmation: 'self-asserted-public-linkedin-v1' } } : null
   return { format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
-    account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy }
+    account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy, signupProfile }
 }
 
 // Permanently tombstones every resource the account produced: assertions,
@@ -46,7 +49,8 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
 // agent grants. Tombstones erase the stored payloads and can never be revived.
 // Content is erased first and each job last, so an interrupted run stays
 // discoverable through the job listing and can simply be run again.
-export async function deleteAccountData({ owner, backend, jobs, grantIds = [], signal }) {
+export async function deleteAccountData({ owner, backend, jobs, grantIds = [], signupLinkedin, signal }) {
+  if (signupLinkedin) await signupLinkedin.removeOwner(owner)
   const ownerId = owner.ownerId
   const writeBatch = typeof backend.writeBatch === 'function'
     ? items => backend.writeBatch(items)
