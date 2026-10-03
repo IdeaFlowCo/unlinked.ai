@@ -51,6 +51,9 @@ test('company view escapes everything, shows facts when given, links members and
   for (const copy of ['Play seriously', 'A games company.', '8,343 employees on LinkedIn', 'Founded 2006', 'LinkedIn page ↗', 'No one on Unlinked lists this company yet.']) assert.ok(rich.content.includes(copy), copy)
   assert.ok(rich.content.includes('href="/companies/Riot%20Games?cursor=cursor%2Fnext"'))
   assert.ok(!renderCompany({ name: 'X', facts: { ...facts, linkedinUrl: 'https://evil.test/' }, people: [], total: 0 }).content.includes('evil.test'))
+  // CC BY 4.0 attribution shows wherever facts are shown, and only then.
+  assert.ok(rich.content.includes('People Data Labs') && rich.content.includes('CC BY 4.0'))
+  assert.ok(!plain.content.includes('People Data Labs'))
 })
 
 test('profile experience links each company name to its company page', () => {
