@@ -40,7 +40,7 @@ At the parser maximum many model calls/resource reads are required; the 1,001-co
 
 The isolated OIDC browser factory uses confidential code flow, client_secret_basic, PKCE S256, nonce/state and signed ID tokens. Invited-owner mode uses fresh-provider authentication with `prompt=login` and explicit in-browser account confirmation before invitation claim. Open-account mode resolves the exact issuer/subject to an existing owner or calls the trusted signup capability to create one; authenticated email is display-only for ownership and never merges owners.
 The optional recovered-account capability is narrower: after issuer/subject ownership is resolved, server-held signed Ideaflow email evidence may identify one hash-only legacy manifest row and ask the browser once to confirm reuse of that old profile.
-Typed email, uploaded archive fields, URLs and profile IDs have no authority, and revocation/source loss removes the legacy own-network rows and public member overlay.
+Typed email, uploaded archive fields, URLs and profile IDs never establish account ownership. Explicit profile self-assertion and legacy upgrades follow the [signup profile source contract](signup-linkedin.md); revocation/source loss removes the legacy own-network rows and public member overlay.
 Only verified issuer plus opaque subject enters the trusted immutable existing/new owner mapping. Provider display name may be used as a fallback label/profile display value, but never as ownership authority.
 Archive email/profile fields never select or rebind ownership.
 Unknown/conflicting ownership fails closed before upload.

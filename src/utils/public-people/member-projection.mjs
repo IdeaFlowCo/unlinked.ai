@@ -112,8 +112,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       if (profiles.length > 20000 || connections.length > 100000) throw Error('shared_public_capacity_limit')
     }
     if (identity(await discover()) !== identity(items)) throw Error('public_member_source_changed')
-    // One account, one profile: when an account without a claimed legacy profile
-    // published several imports, the newest stands for it and the others fold in.
+    // Without a legacy or signup identity, the newest import stands for the
+    // account and the others fold in, preserving one public profile per account.
     const ownerMerges = [...signupMerges]
     for (const list of ownerImports.values()) {
       if (list.length < 2) continue

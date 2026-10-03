@@ -15,6 +15,8 @@ same-origin images, so this flow uses initials and does not retain remote or
 a self-asserted public professional profile. No key or raw provider response is
 logged, audited, sent to the browser or saved to the graph. Provider responses
 are streamed with a 1 MiB limit; only bounded professional fields are mapped.
+Confirmation or skipping the lookup returns to `/profile`; no export-waiting
+step is part of this flow.
 
 ## Runtime configuration
 
