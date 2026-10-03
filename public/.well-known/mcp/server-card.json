@@ -174,7 +174,7 @@
     },
     {
       "name": "unlinked_ai_search",
-      "description": "Explicit AI tool. scope 'mine' ranks only your own imported network; scope 'everyone' ranks the published public index and requires a public-scope grant. Set timeoutMs to bound latency.",
+      "description": "Explicit AI tool. scope 'mine' ranks only your own imported network; scope 'everyone' ranks the published public index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and give short conversational reasons stating unknown sector focus. Set timeoutMs to bound latency.",
       "inputSchema": {
         "type": "object",
         "properties": {

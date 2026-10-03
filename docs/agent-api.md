@@ -301,6 +301,29 @@ public-scope grants, `mine` on owner-network grants).
 Response (`mine`): `{ kind, scope, mode, considered, indexed, matches: [{
 assertionId, sourceId, rowId, name, headline?, company?, reason,
 visibility: "owner_private" }] }`.
+Owner ranking treats a requested role as a constraint, rather than inferring it
+from a domain match. For common explicit single-role requests (investor,
+engineer/developer, recruiter, designer, founder, CEO), a local title-evidence
+guard runs before model top-ten selection; domain-only records are omitted.
+Investor evidence includes explicit investing titles or partner/principal/associate/
+managing-director titles at an investment-named company. Founder/CEO titles
+alone, including at a venture-named company, do not establish an investor role.
+Ambiguous titles can therefore be omitted even when the person invests in real life.
+Compound/exclusion queries and other roles remain semantic model ranking.
+Reasons are conversational model-written one-liners grounded only in supplied
+title/company/headline evidence, aiming for 140 characters or fewer. Unknown
+sector focus is stated plainly (for example, “gaming focus isn't shown in their
+title, worth asking”), without inventing a sector from a brand name. A cheap
+local post-check uses the bounded title/company template only when a reason is
+empty/whitespace or contains a whole-word hedge: likely, possibly, probably,
+perhaps, maybe, potentially or potential (case-insensitive). Good model reasons
+are preserved verbatim; the existing 512-character hard bound remains unchanged.
+The post-check adds no model calls. No related-people
+bucket is added, and existing grants, tool versions and response keys are unchanged.
+`considered` still counts all owner connections evaluated, including local role
+exclusions. The guard adds no model calls and retains four-way bounded ranking,
+the existing retry policy, context bounds and final live consistency read.
+
 Response (`everyone`): `{ kind, scope, mode, revision, considered,
 lexicalMatches, modelCandidates, matches: [{ id, name, headline?, location?,
 company?, reason }], visibility: "public" }`.
