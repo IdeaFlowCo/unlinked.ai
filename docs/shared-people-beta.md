@@ -6,7 +6,7 @@ Public reads are bounded to two concurrent requests and 120 requests per process
 
 The offline publisher accepts only the checksummed recovered DB backup (16,296 profiles and 16,603 directed edges), retains a private provenance manifest, and never creates an account binding.
 Original auth/storage backup and 81-account email evidence remain separate; the recovered-account operator seeds only a hash-only 81-row manifest after the exact public source is published.
-Signed Ideaflow email evidence can produce a one-time browser confirmation for the matching legacy profile, but typed/uploaded email and profile URLs never bind a member.
+Signed Ideaflow email evidence can produce a one-time browser confirmation for the matching legacy profile; typed/uploaded email and profile URLs never establish account ownership. Explicit profile self-assertion and legacy upgrades follow the [signup profile source contract](signup-linkedin.md).
 
 A member with no imports can POST `/search-account` with query, CSRF and `scope=everyone`; owner-private search remains `scope=own`. The header search on every page is a plain GET to `/network?q=`, for visitors and members alike; the AI-ranked POST is offered as buttons on a member's results. Profile pages at `/people/{id}` use the member layout for visitors and members.
 Everyone retrieval evaluates all public profiles lexically and passes at most 200 matching professional candidates to OpenAI for ranking.
@@ -20,8 +20,7 @@ Old private-v1 imports and explicit synthetic mode remain excluded from shared p
 The trusted process discovers only active bound owner publications, then reads each new source through the existing owner-authorized immutable reader before publishing a separate professional projection.
 Every shared read rejoins the live source/active owner, so deleted or revoked imports cannot remain discoverable through retained public chunks.
 No public route exposes generic graph access.
-When a confirmed member also has a recovered legacy profile, shared publication reuses that existing legacy profile ID and overlays the member's uploaded professional profile only while the link and source are still live.
-Legacy-directed source edges are canonicalized with member upload edges so revoking the link removes the overlay and returns the recovered public profile.
+Member identity, live import overlays and source precedence follow the [profile source contract](signup-linkedin.md#public-projection-and-export-precedence).
 
 New account grants include `unlinked_search_everyone` and `unlinked_search_network`; `unlinked_search_network` degree/cursor mode and signed `GET /api/my-connections` read recorded one/two-hop paths from the current complete public snapshot only after an explicitly confirmed recovered-profile anchor. Old single-tool grants keep their exact original scope.
 Stored grant and owner binding are checked before and after model work; revocation remains durable.

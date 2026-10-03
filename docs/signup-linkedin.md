@@ -38,7 +38,8 @@ notice; the member can continue with today's name-only profile and add an export
 They may retry manually, with at most three provider attempts per Unlinked
 account (one attempt plus two retries). After one success, that account can
 re-display that same result but cannot look up a different profile. Normalized
-slug results are cached across accounts and require no further provider view.
+slug results are cached across accounts and require no further provider view,
+provided no other active account has confirmed that slug.
 
 Neo4j stores quota reservations (`UnlinkedSignupGate`, `UnlinkedSignupLookup`),
 whitelisted profile caches (`UnlinkedSignupCache`), and confirmed self-asserted
@@ -73,6 +74,8 @@ Server-side account resolution recognizes confirmed legacy profiles, active
 signup sources and public-consent member imports. An account's public identity
 id is its confirmed legacy id, otherwise its active signup id, otherwise its
 newest live public-consent import id; shadows do not confer account authority.
+The signup source reader is bounded to 1,000 active profiles; exceeding that
+limit fails the shared read explicitly rather than truncating publication.
 
 A later public-consent LinkedIn export from that same owner/user supersedes the
 signup profile, using the newest valid profile-bearing import. It keeps the
@@ -81,6 +84,9 @@ ids onto it, avoiding duplicate member profiles. Unchanged import snapshots
 remain immutable. Retraction of an import restores the signup source; owner
 revocation excludes both from the live public index. A final source read fence
 checks active source receipts before returning the combined snapshot.
+For a confirmed legacy identity, imports instead overlay the existing legacy
+id and canonicalize their edges onto it while the link and import remain live;
+revoking the link removes that overlay and restores the recovered public profile.
 
 The browser `/profile` page and member card display the available uploaded
 profile first, then a live confirmed legacy profile, then the active signup

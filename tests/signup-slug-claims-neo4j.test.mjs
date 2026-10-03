@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createLegacyProfileBoundary } from '../mcp-server/profile-source-boundary.mjs'
 import { createNeo4jSignupLinkedinStore, createSignupLinkedin, signupProfileId, unipileConfig } from '../mcp-server/signup-linkedin.mjs'
 
@@ -65,12 +67,16 @@ test('real Neo4j: unique active slug fences concurrent accounts, releases on del
   const winner = results.findIndex(row => row.status === 'fulfilled'), loser = 1 - winner
   const claimed = async () => (await run('MATCH (s:UnlinkedSignupProfile {activeSlug:$slug}) RETURN s.ownerId AS ownerId', { slug })).records.map(row => row.get('ownerId'))
   assert.deepEqual(await claimed(), [owners[winner].ownerId])
+  const evidence = { provider: 'mocked Unipile', database: 'disposable loopback Neo4j',
+    concurrentConfirmations: results.map(row => row.status === 'fulfilled' ? { status: 'confirmed', receipt: row.value } : { status: 'refused', reason: row.reason.message }),
+    activeOwnersAfterRace: await claimed() }
   assert.equal((await lookup(owners[loser])).code, 'slug_claimed')
   await assert.rejects(services[loser].confirm({ owner: owners[loser], slug }), /self_claim_conflict/)
   // Same-owner reconfirmation is idempotent; it does not create a second row.
   await services[winner].confirm({ owner: owners[winner], slug })
   await services[winner].removeOwner(owners[winner])
   assert.deepEqual(await claimed(), [])
+  evidence.activeOwnersAfterDelete = await claimed()
   assert.equal((await lookup(owners[loser])).status, 'found')
   await services[loser].confirm({ owner: owners[loser], slug })
   const boundary = createLegacyProfileBoundary(driver)
@@ -81,9 +87,11 @@ test('real Neo4j: unique active slug fences concurrent accounts, releases on del
   assert.deepEqual(await claimed(), [])
   const retired = await services[loser].readForExport(owners[loser])
   assert.equal(retired.retired, true); assert.equal(retired.retiredByProfileId, legacyId)
+  evidence.legacyUpgrade = { activeSlugOwners: await claimed(), retainedAuditSource: retired }
   assert.equal((await lookup(owners[2])).status, 'found')
   await services[0].confirm({ owner: owners[2], slug })
   assert.deepEqual(await claimed(), [owners[2].ownerId]); assert.equal(reads, 1)
+  evidence.activeOwnersAfterReclaim = await claimed()
   // A direct durable write also cannot bypass uniqueness.
   await assert.rejects(run('CREATE (:UnlinkedSignupProfile {key:$key,activeSlug:$slug})', { key: 'duplicate-' + tag, slug }), error => error.code === 'Neo.ClientError.Schema.ConstraintValidationFailed')
   // Sources created before this change acquire the claim on initialization;
@@ -103,4 +111,10 @@ test('real Neo4j: unique active slug fences concurrent accounts, releases on del
   assert.equal((await services[0].readForExport(owners[2])).retired, true)
   await assert.rejects(services[0].confirm({ owner: owners[2], slug }), /self_claim_conflict/)
   assert.deepEqual(await claimed(), [owners[3].ownerId]); assert.equal(reads, 1)
+  evidence.inactiveOwnerReactivation = { retiredSource: await services[0].readForExport(owners[2]), publicSource: await services[0].read(owners[2]), activeSlugOwners: await claimed() }
+  evidence.providerReads = reads
+  if (process.env.UNLINKED_TEST_EVIDENCE_DIR) {
+    await mkdir(process.env.UNLINKED_TEST_EVIDENCE_DIR, { recursive: true })
+    await writeFile(join(process.env.UNLINKED_TEST_EVIDENCE_DIR, 'slug-claim-durable-state.json'), JSON.stringify(evidence, null, 2))
+  }
 })

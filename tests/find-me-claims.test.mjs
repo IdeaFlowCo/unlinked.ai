@@ -208,6 +208,7 @@ test('a slug confirmed by another account suppresses its cached card and stale c
   const stale = await b.post('/claim-me', { csrf: b.csrf, candidate: candidate(bCard) })
   assert.equal(stale.status, 200); assert.ok((await stale.text()).includes('can’t be claimed'))
   const refused = await preview(b)
+  await evidence('claimed-slug-fallback.html', refused)
   assert.ok(refused.includes('continue with your name')); assert.ok(refused.includes('export later'))
   assert.ok(!refused.includes('name="candidate"')); assert.ok(!refused.includes("Yes, that's me"))
   assert.equal(reads, 1); assert.equal((await service.list()).length, 1)
@@ -215,6 +216,14 @@ test('a slug confirmed by another account suppresses its cached card and stale c
   assert.deepEqual(audits.map(row => row.reason), ['self_claim_conflict', 'slug_claimed'])
   assert.ok(audits.every(row => /^[a-f0-9]{64}$/.test(row.ownerHash)))
   assert.ok(!JSON.stringify(audits).includes(slug)); assert.ok(!JSON.stringify(audits).includes('Public Person'))
+  await evidence('slug-conflict-http-journey.json', JSON.stringify({
+    provider: 'mocked Unipile', providerReads: reads,
+    firstConfirmation: { status: first.status, location: first.headers.get('location') },
+    competingStaleConfirmation: { status: stale.status, outcome: 'refused' },
+    subsequentLookup: { outcome: 'continue with your name and add your export', confirmationCardOffered: false },
+    activePublicProfiles: (await service.list()).length,
+    refusalAudit: audits,
+  }, null, 2))
 })
 
 
