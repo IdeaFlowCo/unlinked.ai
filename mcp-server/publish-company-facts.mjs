@@ -10,7 +10,7 @@ const ROOT = '/srv/unlinked-private-guest-pilot-20261001'
 // Receipt names carry a random suffix so two operations in one millisecond never collide.
 const hash = value => createHash('sha256').update(value).digest('hex')
 
-// Rows come from a reviewed offline fetch (for example Unipile company reads).
+// Rows come from a reviewed offline operator source.
 // The same whitelist runs again in the store and in the runtime reader, so a
 // bad rows file fails here in plan mode instead of at the graph.
 export function prepareCompanyFacts(bytes) {

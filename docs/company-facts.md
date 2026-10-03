@@ -7,8 +7,8 @@ layers, merged by `createCompanyFacts` in `mcp-server/company-metadata.mjs`:
 1. **Static list**: the reviewed rows committed in `company-metadata.mjs`
    (fetched once from LinkedIn on 2026-10-02). This is the floor and the
    fallback.
-2. **Graph dataset `curated-companies-v1`**: operator-published rows (for
-   example from the scheduled Unipile company fetch). This layer is publishable
+2. **Graph dataset `curated-companies-v1`**: operator-published rows from an
+   offline operator source. This layer is publishable
    data, so updating it needs no code rollout.
 
 Names and aliases match by normalized key, so `Smartcar, Inc.` and
