@@ -1,6 +1,5 @@
-// Reviewed company facts. The static list below was fetched once from LinkedIn
-// company profiles via the operator's provider workspace on 2026-10-02 and is
-// the floor: the operator-published graph dataset `curated-companies-v1`
+// Reviewed company facts. The static list below was reviewed by the operator
+// on 2026-10-02 and is the floor: the operator-published graph dataset `curated-companies-v1`
 // (docs/company-facts.md, mcp-server/publish-company-facts.mjs) is merged over
 // it at runtime. The runtime never calls an external API for these; absent
 // companies simply show the people list alone.
