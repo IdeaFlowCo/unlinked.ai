@@ -42,7 +42,21 @@ slug results are cached across accounts and require no further provider view.
 
 Neo4j stores quota reservations (`UnlinkedSignupGate`, `UnlinkedSignupLookup`),
 whitelisted profile caches (`UnlinkedSignupCache`), and confirmed self-asserted
-sources (`UnlinkedSignupProfile`). Unique constraints and a locked singleton
+sources (`UnlinkedSignupProfile`). A unique nullable `activeSlug` claim prevents
+two accounts from confirming the same normalized LinkedIn slug. Lookup refuses
+another active account’s confirmed slug before serving the cache and rechecks
+when a provider response completes. Stale cards still fail at the durable
+confirmation transaction. Refusal audit records contain an owner hash and typed
+reason, never the slug or profile data. Legacy slug matches continue to bypass
+the provider, including claimed legacy profiles.
+
+Deletion releases the claim by deleting the source; a legacy upgrade clears
+`activeSlug` within the retirement transaction while retaining the record.
+Inactive owner sources are retired when their claim is cleared, preventing later
+binding reactivation from publishing an identity now claimed by someone else.
+Startup backfills existing active sources under the uniqueness constraint;
+conflicting preexisting active claims fail closed rather than choosing a winner.
+Unique constraints and a locked singleton
 serialize reservations across processes and restarts; in-flight leases prevent
 concurrent reads, and pacing continues for at least the configured interval
 following completion. Attempts are reserved before fetch, including failed or
@@ -108,6 +122,7 @@ The retained signup record carries `retired`, retirement time, legacy profile
 and receipt ids, and an explicit upgrade reason for audit/undo. It never enters
 the public projection again; the owner’s account export includes the retired
 source with that status. No signup fields merge onto the legacy profile.
+The retirement clears the unique slug claim, so another eligible account can claim it.
 Subsequent signup confirmation fails while the legacy claim exists. Undo is an
 operator concern; this slice does not add an undo action or automatically revive
 a retired source. Account deletion removes active and retired signup records.
@@ -115,3 +130,9 @@ a retired source. Account deletion removes active and retired signup records.
 The tests include two authenticated sessions holding different candidates,
 concurrent legacy and signup confirmation, and a disposable real-Neo4j HTTP
 race with rollback fault injection at both confirmation and retirement.
+
+`tests/signup-slug-claims-neo4j.test.mjs` uses the same disposable loopback
+contract to race two accounts with distinct reservation gates, proving the
+unique constraint as well as normal transaction locking. It checks second
+confirmation rejection, delete/legacy release, initialization backfill and
+constraint enforcement against direct duplicate writes.

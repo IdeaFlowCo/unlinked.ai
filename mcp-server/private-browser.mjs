@@ -663,6 +663,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
               location: result.profile.location, positions: result.profile.positions, education: result.profile.education,
               claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token }); return
           }
+          await recordAudit({ event: 'public_linkedin_profile_lookup_refused', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), reason: result.code })
           page({ status: 'none', notice: signupLookupNotice(result.code) }); return
         }
         page({ status: 'none' }); return
@@ -680,6 +681,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           redirect(response, '/profile'); return
         } catch (error) {
           if (error.message !== 'self_claim_conflict') throw error
+          await recordAudit({ event: 'profile_self_claim_refused', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), reason: 'self_claim_conflict' })
           if (session.selfClaim) session.selfClaim.candidate = null
           journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, notice: 'That profile can’t be claimed right now. If it’s yours, contact us.' })); return
         }

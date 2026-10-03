@@ -128,7 +128,8 @@ test('confirmed source appears in public People immediately; newer member export
 test('deletion erases account profile state, preserves successful quota and fences other owners', async () => {
   const f = fixture(), other = { ownerId: 'owner-b', userId: 'user-b' }
   await f.lookup(); await f.service.confirm({ owner, slug: 'ceyda-kıran' })
-  await f.lookup('ceyda-kıran', other); await f.service.confirm({ owner: other, slug: 'ceyda-kıran' })
+  f.advance(4000)
+  await f.lookup('another-person', other); await f.service.confirm({ owner: other, slug: 'another-person' })
   await f.service.removeOwner(owner); await f.service.removeOwner(owner)
   assert.equal(await f.service.read(owner), null)
   assert.equal((await f.service.list()).length, 1); assert.ok(await f.service.read(other))
@@ -138,7 +139,51 @@ test('deletion erases account profile state, preserves successful quota and fenc
   const fresh = createSignupLinkedin({ store: f.store, config: unipileConfig(env), fetchImpl: async () => { throw Error('must not fetch') } })
   for (const slug of ['ceyda-kıran', 'another']) assert.equal((await fresh.lookup({ owner, address: 'https://linkedin.com/in/' + slug })).code, 'account_limit')
   await assert.rejects(fresh.confirm({ owner, slug: 'ceyda-kıran' }), /self_claim_conflict/)
+  assert.equal(f.calls.length, 2)
+})
+
+test('one active account owns a slug: cached and stale candidates refuse, deletion releases it without resetting quotas', async () => {
+  const f = fixture(), other = { ownerId: 'owner-b', userId: 'user-b' }, slug = 'ceyda-kıran'
+  await f.lookup(slug); await f.lookup(slug, other)
+  await f.service.confirm({ owner, slug })
+  assert.equal((await f.lookup(slug, other)).code, 'slug_claimed')
+  await assert.rejects(f.service.confirm({ owner: other, slug }), /self_claim_conflict/)
+  assert.equal((await f.service.list()).length, 1); assert.equal(f.calls.length, 1)
+  await f.service.removeOwner(owner)
+  assert.equal((await f.lookup(slug, other)).status, 'found')
+  await f.service.confirm({ owner: other, slug })
+  assert.equal((await f.service.list())[0].profile.id, signupProfileId(other))
   assert.equal(f.calls.length, 1)
+})
+
+test('a slug claimed while a provider read is in flight suppresses its completed card and retains the lookup budget', async () => {
+  let reads = 0, release
+  const f = fixture({ fetchImpl: async () => ++reads === 1 ? Response.json(payload) : new Promise(resolve => { release = () => resolve(Response.json(payload)) }) })
+  const other = { ownerId: 'owner-b', userId: 'user-b' }, slug = 'ceyda-kıran'
+  await f.lookup(slug, other)
+  f.store.cache.clear(); f.advance(4000)
+  const pending = f.lookup(slug)
+  await new Promise(resolve => setImmediate(resolve))
+  await f.service.confirm({ owner: other, slug })
+  release(); assert.equal((await pending).code, 'slug_claimed')
+  await assert.rejects(f.service.confirm({ owner, slug }), /self_claim_conflict/)
+  await f.service.removeOwner(other)
+  assert.equal((await f.lookup('different')).code, 'account_limit')
+  assert.equal(f.calls.length, 2)
+})
+
+test('inactive owners release a slug while active owners and retired owners cannot reconfirm over its new holder', async () => {
+  const f = fixture(), other = { ownerId: 'owner-b', userId: 'user-b' }, slug = 'ceyda-kıran'
+  await f.lookup(); await f.service.confirm({ owner, slug })
+  f.store.setOwnerActive(owner, false)
+  await f.lookup(slug, other); await f.service.confirm({ owner: other, slug })
+  await assert.rejects(f.service.confirm({ owner, slug }), /self_claim_conflict/)
+  const source = [...f.store.sources.values()].find(row => row.owner.ownerId === other.ownerId)
+  source.retired = true
+  f.store.setOwnerActive(owner, true)
+  await assert.rejects(f.service.confirm({ owner, slug }), /self_claim_conflict/)
+  await assert.rejects(f.service.confirm({ owner: other, slug }), /self_claim_conflict/)
+  assert.equal((await f.service.list()).length, 0)
 })
 
 test('deleting an unfinished lookup prevents late completion from restoring retained profile data', async () => {

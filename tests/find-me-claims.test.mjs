@@ -23,7 +23,7 @@ const snapshot = { state: 'published', complete: true, revision: 'public-v1', pr
   { id: 'dup-2', name: 'Casey Doe', positions: [], education: [], skills: [] },
 ], connections: [{ fromId: 'p-x', toId: 'p-jl' }] }
 
-async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null, claimAction, signupLinkedin, published = true } = {}) {
+async function start(t, { displayName = 'Joshua Langsam', owner = { ownerId: 'owner-a', userId: 'user-a' }, claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null, claimAction, signupLinkedin, published = true } = {}) {
   const calls = { lookups: [], names: [], claims: [], audits: [] }
   let provisioned = false, handler
   const selfClaims = {
@@ -40,8 +40,8 @@ async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl'
   handler = createPrivateBrowserHandler({
     baseUrl: origin,
     login: { begin: async () => ({ location: 'https://idp.invalid/login', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://idp.invalid', subject: 'subject-a', clientId: 'client', verifiedAt: Date.now(), displayName }) },
-    resolveOwner: async () => provisioned ? { ownerId: 'owner-a', userId: 'user-a' } : null,
-    signup: async () => { provisioned = true; return { ownerId: 'owner-a', userId: 'user-a' } },
+    resolveOwner: async () => provisioned ? owner : null,
+    signup: async () => { provisioned = true; return owner },
     issueAccountGrant: async () => ({ token: 'grant' }), revokeAccountGrant: async () => {},
     selfClaims, signupLinkedin,
     getBackend: async () => ({ adapter: true, readResource: async () => null, listImportIds: async () => [], listAccountGrantIds: async () => [], readLegacyProfile: async () => null }),
@@ -193,6 +193,28 @@ test('provider failure yields friendly name-only fallback without a confirmation
   assert.equal((await f.signed(next.headers.get('location'))).status, 200)
   const profile = await f.signed('/profile')
   assert.equal(profile.status, 200); assert.ok((await profile.text()).includes('New Member'))
+})
+
+test('a slug confirmed by another account suppresses its cached card and stale confirmation, auditing only a reason', async t => {
+  let reads = 0
+  const service = signupService(async () => { reads++; return Response.json({ first_name: 'Public', last_name: 'Person' }) })
+  const a = await start(t, { displayName: 'New Member', signupLinkedin: service })
+  const b = await start(t, { displayName: 'Another Member', owner: { ownerId: 'owner-b', userId: 'user-b' }, signupLinkedin: service })
+  const slug = 'one-public-person', preview = async f => (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/' + slug })).text()
+  const aCard = await preview(a), bCard = await preview(b)
+  const candidate = card => card.match(/name="candidate" value="([^"]+)"/)[1]
+  const first = await a.post('/claim-me', { csrf: a.csrf, candidate: candidate(aCard) })
+  assert.equal(first.status, 303); assert.equal(first.headers.get('location'), '/while-you-wait')
+  const stale = await b.post('/claim-me', { csrf: b.csrf, candidate: candidate(bCard) })
+  assert.equal(stale.status, 200); assert.ok((await stale.text()).includes('can’t be claimed'))
+  const refused = await preview(b)
+  assert.ok(refused.includes('continue with your name')); assert.ok(refused.includes('export later'))
+  assert.ok(!refused.includes('name="candidate"')); assert.ok(!refused.includes("Yes, that's me"))
+  assert.equal(reads, 1); assert.equal((await service.list()).length, 1)
+  const audits = b.calls.audits.filter(row => row.event.endsWith('_refused'))
+  assert.deepEqual(audits.map(row => row.reason), ['self_claim_conflict', 'slug_claimed'])
+  assert.ok(audits.every(row => /^[a-f0-9]{64}$/.test(row.ownerHash)))
+  assert.ok(!JSON.stringify(audits).includes(slug)); assert.ok(!JSON.stringify(audits).includes('Public Person'))
 })
 
 

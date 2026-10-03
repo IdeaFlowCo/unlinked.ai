@@ -56,6 +56,7 @@ export function mapSignupLinkedin(data) {
   return profile
 }
 export const signupLookupNotice = code => ({
+  slug_claimed: 'That profile is already claimed. You can continue with your name and add your LinkedIn export later.',
   disabled: 'Your LinkedIn export will fill in your profile. You can continue with your name for now.',
   paced: 'Profile lookups are busy. Try again shortly, or continue with your name and add your export later.',
   daily_cap: 'Profile lookups have reached today’s limit. You can continue with your name and add your export later.',
@@ -87,6 +88,7 @@ export function createSignupLinkedin({ store, config = unipileConfig(), fetchImp
           }
         } catch (error) { result = { code: error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'timeout' : 'provider_unavailable' } }
         const saved = await store.finish({ key, slug, attempt, now: now(), pacingMs: config.pacingMs, ...result })
+        if (saved?.code) return { status: 'unavailable', code: saved.code }
         return saved && result.profile ? { status: 'found', slug, profile: result.profile } : { status: 'unavailable', code: result.code ?? 'storage_unavailable' }
       } catch { return { status: 'unavailable', code: 'storage_unavailable' } }
     },
@@ -124,12 +126,33 @@ export function createNeo4jSignupLinkedinStore(driver, database = 'neo4j', gateI
   const write = (query, params = {}) => tx('executeWrite', t => t.run(query, params))
   const parsed = records => records.map(record => JSON.parse(record.get('json')))
   const active = `MATCH (b:OperationalOwner {namespace:'unlinked', sourceOwnerId:s.ownerId, userId:s.userId}) WHERE coalesce(b.active,true) = true`
+  // Inactive owner bindings do not hold a public identity. Remove their unique
+  // claim before checking the slug; retired records remain available for audit.
+  const releaseInactive = (t, slug = null) => t.run(`MATCH (s:UnlinkedSignupProfile) WHERE $slug IS NULL OR s.slug=$slug
+    OPTIONAL MATCH (b:OperationalOwner {namespace:'unlinked', sourceOwnerId:s.ownerId, userId:s.userId}) WHERE coalesce(b.active,true)=true
+    WITH s, count(b) AS bindings WHERE coalesce(s.retired,false)=true OR bindings=0
+    SET s.retired=true, s.retiredAt=coalesce(s.retiredAt,$now), s.retiredReason=coalesce(s.retiredReason,'owner-inactive-v1')
+    REMOVE s.activeSlug`, { slug, now: Date.now() })
+  const slugClaimed = async (t, { key, slug }) => {
+    await releaseInactive(t, slug)
+    const result = await t.run(`MATCH (s:UnlinkedSignupProfile {slug:$slug}) ${active}
+      AND coalesce(s.retired,false)=false AND s.key<>$key RETURN s.key AS key LIMIT 1`, { key, slug })
+    return result.records.length > 0
+  }
   return {
     async initialize() {
-      for (const [label, property] of [['UnlinkedSignupLookup','key'], ['UnlinkedSignupCache','slug'], ['UnlinkedSignupGate','id'], ['UnlinkedSignupProfile','key']]) await write(`CREATE CONSTRAINT ${label.toLowerCase()}_${property} IF NOT EXISTS FOR (n:${label}) REQUIRE n.${property} IS UNIQUE`)
+      for (const [label, property] of [['UnlinkedSignupLookup','key'], ['UnlinkedSignupCache','slug'], ['UnlinkedSignupGate','id'], ['UnlinkedSignupProfile','key'], ['UnlinkedSignupProfile','activeSlug']]) await write(`CREATE CONSTRAINT ${label.toLowerCase()}_${property} IF NOT EXISTS FOR (n:${label}) REQUIRE n.${property} IS UNIQUE`)
+      // Backfill pre-constraint sources atomically; ambiguous existing active
+      // claims fail closed rather than choosing or publishing two identities.
+      await tx('executeWrite', async t => {
+        await t.run("MERGE (g:UnlinkedSignupGate {id:$gateId}) SET g._lock=true REMOVE g._lock")
+        await releaseInactive(t)
+        await t.run(`MATCH (s:UnlinkedSignupProfile) ${active} AND coalesce(s.retired,false)=false SET s.activeSlug=s.slug`)
+      })
     },
     reserve: args => tx('executeWrite', async t => {
       await t.run(`MERGE (g:UnlinkedSignupGate {id:$gateId}) ON CREATE SET g.day=-1, g.used=0, g.nextAt=0 SET g._lock=true REMOVE g._lock`)
+      if (await slugClaimed(t, args)) return { code: 'slug_claimed' }
       const result = await t.run(`MATCH (g:UnlinkedSignupGate {id:$gateId})
         MERGE (a:UnlinkedSignupLookup {key:$key}) ON CREATE SET a.attempts=0
         WITH g, a
@@ -156,22 +179,29 @@ export function createNeo4jSignupLinkedinStore(driver, database = 'neo4j', gateI
         if (!result.records.length) return false
         await t.run("MATCH (g:UnlinkedSignupGate {id:$gateId, attempt:$attempt}) SET g.pendingUntil=0, g.nextAt=$nextAt", { attempt, nextAt: now + pacingMs })
         if (profile) await t.run('MERGE (c:UnlinkedSignupCache {slug:$slug}) SET c.json=$json', { slug, json: JSON.stringify(profile) })
+        if (profile && await slugClaimed(t, { key, slug })) return { code: 'slug_claimed' }
         return true
       })
     },
     async confirm({ key, owner, slug, profileId, receiptId, now }) {
-      const result = await tx('executeWrite', async t => {
-        await t.run("MERGE (g:UnlinkedSignupGate {id:$gateId}) SET g._lock=true REMOVE g._lock")
-        await lockProfileOwner(t, owner)
-        return t.run(`MATCH (a:UnlinkedSignupLookup {key:$key, slug:$slug}) WHERE a.json IS NOT NULL
-        MATCH (b:OperationalOwner {namespace:'unlinked', sourceOwnerId:$ownerId, userId:$userId}) WHERE coalesce(b.active,true)=true
-        OPTIONAL MATCH (l:UnlinkedLegacyAccount {ownerId:$ownerId})
-        WITH a, b, l WHERE l IS NULL
-        MERGE (s:UnlinkedSignupProfile {key:$key}) ON CREATE SET s.ownerId=$ownerId, s.userId=$userId, s.profileId=$profileId, s.slug=$slug,
-          s.profileJson=a.json, s.receiptId=$receiptId, s.confirmedAt=$now, s.source='self-asserted-public-linkedin-v1'
-        WITH s WHERE coalesce(s.retired,false)=false RETURN s.profileId AS id`, { key, ...owner, slug, profileId, receiptId, now })
-      })
-      return result.records.length === 1
+      try {
+        const result = await tx('executeWrite', async t => {
+          await t.run("MERGE (g:UnlinkedSignupGate {id:$gateId}) SET g._lock=true REMOVE g._lock")
+          await lockProfileOwner(t, owner)
+          if (await slugClaimed(t, { key, slug })) return { records: [] }
+          return t.run(`MATCH (a:UnlinkedSignupLookup {key:$key, slug:$slug}) WHERE a.json IS NOT NULL
+          MATCH (b:OperationalOwner {namespace:'unlinked', sourceOwnerId:$ownerId, userId:$userId}) WHERE coalesce(b.active,true)=true
+          OPTIONAL MATCH (l:UnlinkedLegacyAccount {ownerId:$ownerId})
+          WITH a, b, l WHERE l IS NULL
+          MERGE (s:UnlinkedSignupProfile {key:$key}) ON CREATE SET s.ownerId=$ownerId, s.userId=$userId, s.profileId=$profileId, s.slug=$slug,
+            s.profileJson=a.json, s.receiptId=$receiptId, s.confirmedAt=$now, s.source='self-asserted-public-linkedin-v1'
+          WITH s WHERE coalesce(s.retired,false)=false AND s.slug=$slug SET s.activeSlug=$slug RETURN s.profileId AS id`, { key, ...owner, slug, profileId, receiptId, now })
+        })
+        return result.records.length === 1
+      } catch (error) {
+        if (error?.code === 'Neo.ClientError.Schema.ConstraintValidationFailed') return false
+        throw error
+      }
     },
     async removeOwner(owner) {
       await tx('executeWrite', async t => {

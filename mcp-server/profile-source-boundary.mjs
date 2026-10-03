@@ -39,7 +39,7 @@ export function createLegacyProfileBoundary(driver, { now = Date.now } = {}) {
                 WHERE coalesce(a.testProfile,false)=false AND a.receiptId IS NOT NULL
                 MATCH (s:UnlinkedSignupProfile {ownerId:$ownerId, userId:$userId}) WHERE coalesce(s.retired,false)=false
                 SET s.retired=true, s.retiredAt=$now, s.retiredByProfileId=a.profileId, s.retiredByReceiptId=a.receiptId,
-                  s.retiredReason='legacy-profile-upgrade-v1'`, { ...confirmation.owner, profileId: confirmation.profileId, now: now() })
+                  s.retiredReason='legacy-profile-upgrade-v1', s.activeSlug=null`, { ...confirmation.owner, profileId: confirmation.profileId, now: now() })
               return result
             }, ...options)
           },
