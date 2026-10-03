@@ -165,7 +165,11 @@ test('provider failure yields friendly name-only fallback without a confirmation
   const f = await start(t, { displayName: 'New Member', signupLinkedin: service })
   const page = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
   assert.ok(page.includes('continue with your name')); assert.ok(!page.includes('name="candidate"')); assert.ok(!page.includes('raw secret'))
-  assert.ok((await (await f.signed('/profile')).text()).includes('New Member'))
+  const next = await f.signed('/profile')
+  assert.equal(next.status, 303); assert.equal(next.headers.get('location'), '/while-you-wait')
+  assert.equal((await f.signed(next.headers.get('location'))).status, 200)
+  const profile = await f.signed('/profile')
+  assert.equal(profile.status, 200); assert.ok((await profile.text()).includes('New Member'))
 })
 
 
@@ -204,5 +208,9 @@ test('account deletion fails closed if signup source cleanup fails', async t => 
   const service = signupService(async () => Response.json({ first_name: 'Public', last_name: 'Identity' }))
   const f = await start(t, { displayName: 'Login Name', signupLinkedin: { ...service, removeOwner: async () => { throw Error('storage_unavailable') } } })
   assert.equal((await f.post('/delete-account', { csrf: f.csrf, confirm: 'delete everything' })).status, 400)
-  assert.equal((await f.signed('/profile')).status, 200)
+  const next = await f.signed('/profile')
+  assert.equal(next.status, 303); assert.equal(next.headers.get('location'), '/while-you-wait')
+  assert.equal((await f.signed(next.headers.get('location'))).status, 200)
+  const profile = await f.signed('/profile')
+  assert.equal(profile.status, 200); assert.ok((await profile.text()).includes('Login Name'))
 })
