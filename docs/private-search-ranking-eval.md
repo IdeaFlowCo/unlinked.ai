@@ -7,7 +7,9 @@ candidates and supplies “Likely investing in gaming; possibly covering climate
 Before the fix, domain-only gaming founders/CEOs survive and speculative reasons
 are returned. After the fix, only four role-supported investment records survive;
 the explicit gaming title ranks first, and every reason quotes the supplied
-position/company and states when gaming sector focus is not evidenced.
+position/company and states when gaming sector focus is not evidenced. This
+bad-reason stub now exercises the exceptional fallback; normal model-written
+conversational one-liners are preserved verbatim.
 Engineer/gaming and recruiter/climate requests use the same role guard. An
 investor-relations manager, principal engineer at a capital-named company and
 founder/CEO at a venture-named company are excluded; a founder with explicit
@@ -20,7 +22,8 @@ no personal archive, owner names or production data are sent or persisted.
 Responses uses `store: false`. The script requires the baseline git object and
 configured M5 bridge; it is outside CI because live model selections vary.
 
-One before/after sample per scenario, using `gpt-4.1-mini-2025-04-14`:
+Historical samples from commit `6798c4f` before the parent reason-writing
+revision (locally templated reasons / empty model reasons), one per scenario, using `gpt-4.1-mini-2025-04-14`:
 
 | Fictional scenario | Before | After | Tokens before → after | Elapsed before → after |
 | --- | --- | --- | --- | --- |
@@ -36,8 +39,7 @@ p95 or a 3,153-person latency claim.
 The deterministic 3,153-record scenario has one investor and 3,152 gaming
 founders. Every record is counted as considered, while initial provider calls
 drop from 16 batches to one. No new calls or ranking rounds are introduced;
-concurrency remains bounded at four, reasons are generated locally (the model
-returns empty reason strings for guarded requests), and the final live
+concurrency remains bounded at four, and the final live
 consistency read still rejects a changed/deleted publication even when no
 role-supported records remain. The separate `unlinked-5oc` aggregate-read and
 rate-limit optimization work remains open.
@@ -46,3 +48,13 @@ The versioned grant/tool lists and response keys are unchanged. The discovery
 inventory and `docs/agent-api.md` document role-evidence requirements and the
 conservative guard's limits, including semantic handling of other roles and
 compound/exclusion queries.
+
+Parent review revision: removed the empty-reason provider mode and automatic
+local reason replacement. The model now writes conversational one-liners,
+aiming for 140 characters or fewer, stating when sector focus is not shown in
+the supplied record. Only empty/whitespace output or a whole-word banned hedge
+(likely, possibly, probably, perhaps, maybe, potentially, potential) triggers
+the record template. Stubbed tests pin natural prose preservation, each hedge
+and empty-output fallback, unchanged role filtering/sector order, no extra
+model calls and the HTTP contract shape. No new live-model sample was run for
+this revision; the historical token/timing figures above are not its results.

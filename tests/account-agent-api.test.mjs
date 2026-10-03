@@ -175,7 +175,7 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   const mine = await (await call(app.endpoint, accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'who is an engineer?', scope: 'mine' }) })).json()
   assert.equal(mine.scope, 'mine')
   assert.equal(mine.considered, 3)
-  assert.equal(mine.matches[0].reason, 'Title: "Engineer". Company: "Analytical".')
+  assert.equal(mine.matches[0].reason, 'Synthetic ranked reason')
   assert.ok(!JSON.stringify(mine).includes('private.invalid'))
   const everyone = await (await call(app.endpoint, accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'graph engineer' }) })).json()
   assert.equal(everyone.scope, 'everyone')
@@ -373,7 +373,16 @@ test('owner AI HTTP contract preserves keys and provenance while omitting gaming
   const { searchPeople } = await import('./fixtures/private-search-people.mjs')
   const quote = value => '"' + value.replaceAll('"', '""') + '"'
   const content = header + searchPeople.map((person, i) => [person.fields['first name'], 'Fictional', `https://www.linkedin.com/in/fictional-ranking-${i}`, '', person.fields.company, person.fields.position].map(quote).join(',')).join('\n') + '\n'
-  const complete = async ({ candidateIds }) => ({ matches: candidateIds.slice(-10).reverse().map(id => ({ id, reason: 'Likely investing in gaming' })) })
+  const reasons = new Map()
+  const complete = async ({ input, candidateIds }) => {
+    const observations = new Map(JSON.parse(input).observations.map(row => [row.id, row.fields]))
+    return { matches: candidateIds.slice(-10).reverse().map(id => {
+      const fields = observations.get(id)
+      const reason = `${fields.position} at ${fields.company} — ${fields.position.includes('gaming') ? 'gaming is in their title.' : "gaming focus isn't shown in their title, worth asking."}`
+      reasons.set(id, reason)
+      return { id, reason }
+    }) }
+  }
   const app = await launch(t, { f: fixture(), complete })
   await app.upload(await app.signIn(), content)
   const { accessToken } = await app.grants.issueGrant(app.owner)
@@ -392,6 +401,8 @@ test('owner AI HTTP contract preserves keys and provenance while omitting gaming
     assert.match(match.assertionId, /^[a-f0-9]{64}$/)
     assert.match(match.rowId, /^Connections.csv#record=\d+$/)
     assert.doesNotMatch(match.reason, /likely|possibly/i)
+    assert.equal(match.reason, reasons.get(match.assertionId))
+    assert.ok(match.reason.length <= 140)
     assert.doesNotMatch(match.headline, /founder|ceo/i)
   }
 })
