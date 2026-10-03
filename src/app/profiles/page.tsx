@@ -23,7 +23,7 @@ export default async function ProfilesPage() {
     .order('created_at', { ascending: false })
     .range(0, 9)
 
-  if (error) return <Container size="3"><div role="status" className="availability-note"><strong>Network profiles are temporarily unavailable.</strong> We could not reach the legacy profile service. This does not mean your network is empty. <Link href="/network">See private network availability</Link> or <Link href="/">return to Unlinked</Link>.</div></Container>
+  if (error) return <Container size="3"><div role="status" className="availability-note"><strong>Network profiles are temporarily unavailable.</strong> We could not reach the legacy profile service. This does not mean your network is empty. <Link href="/network">See network availability</Link> or <Link href="/">return to Unlinked</Link>.</div></Container>
 
   return (
     <Container size="3">
