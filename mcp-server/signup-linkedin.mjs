@@ -1,3 +1,4 @@
+import { lockProfileOwner } from './profile-source-boundary.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { linkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
@@ -96,6 +97,7 @@ export function createSignupLinkedin({ store, config = unipileConfig(), fetchImp
       return { profileId, receiptId }
     },
     read: owner => store.read(owner),
+    readForExport: owner => store.read(owner, { includeRetired: true }),
     list: () => store.list(),
     removeOwner: owner => store.removeOwner(owner),
   }
@@ -160,35 +162,37 @@ export function createNeo4jSignupLinkedinStore(driver, database = 'neo4j', gateI
     async confirm({ key, owner, slug, profileId, receiptId, now }) {
       const result = await tx('executeWrite', async t => {
         await t.run("MERGE (g:UnlinkedSignupGate {id:$gateId}) SET g._lock=true REMOVE g._lock")
+        await lockProfileOwner(t, owner)
         return t.run(`MATCH (a:UnlinkedSignupLookup {key:$key, slug:$slug}) WHERE a.json IS NOT NULL
         MATCH (b:OperationalOwner {namespace:'unlinked', sourceOwnerId:$ownerId, userId:$userId}) WHERE coalesce(b.active,true)=true
         OPTIONAL MATCH (l:UnlinkedLegacyAccount {ownerId:$ownerId})
         WITH a, b, l WHERE l IS NULL
         MERGE (s:UnlinkedSignupProfile {key:$key}) ON CREATE SET s.ownerId=$ownerId, s.userId=$userId, s.profileId=$profileId, s.slug=$slug,
           s.profileJson=a.json, s.receiptId=$receiptId, s.confirmedAt=$now, s.source='self-asserted-public-linkedin-v1'
-        RETURN s.profileId AS id`, { key, ...owner, slug, profileId, receiptId, now })
+        WITH s WHERE coalesce(s.retired,false)=false RETURN s.profileId AS id`, { key, ...owner, slug, profileId, receiptId, now })
       })
       return result.records.length === 1
     },
     async removeOwner(owner) {
       await tx('executeWrite', async t => {
         await t.run("MERGE (g:UnlinkedSignupGate {id:$gateId}) SET g._lock=true REMOVE g._lock")
+        await lockProfileOwner(t, owner, { requireActive: false })
         await t.run(`MATCH (s:UnlinkedSignupProfile {key:$key, ownerId:$ownerId, userId:$userId}) DETACH DELETE s`, { key: ownerKey(owner), ...owner })
         await t.run(`MATCH (a:UnlinkedSignupLookup {key:$key})
           WITH a, {key:a.key, attempts:coalesce(a.attempts,0), succeeded:coalesce(a.succeeded,false) OR a.json IS NOT NULL} AS quota
           SET a = quota`, { key: ownerKey(owner) })
       })
     },
-    async read(owner) {
+    async read(owner, { includeRetired = false } = {}) {
       return tx('executeRead', async t => {
-        const result = await t.run(`MATCH (s:UnlinkedSignupProfile {key:$key}) ${active} RETURN s.profileJson AS json, s.profileId AS id, s.receiptId AS receiptId`, { key: ownerKey(owner) })
+        const result = await t.run(`MATCH (s:UnlinkedSignupProfile {key:$key}) ${active} AND ($includeRetired OR coalesce(s.retired,false)=false) RETURN s.profileJson AS json, s.profileId AS id, s.receiptId AS receiptId, s.retired AS retired, s.retiredByProfileId AS retiredByProfileId`, { key: ownerKey(owner), includeRetired })
         if (!result.records.length) return null
-        const row = result.records[0]; return { profile: { ...JSON.parse(row.get('json')), id: row.get('id') }, receiptId: row.get('receiptId') }
+        const row = result.records[0]; return { profile: { ...JSON.parse(row.get('json')), id: row.get('id') }, receiptId: row.get('receiptId'), ...(row.get('retired') === true ? { retired: true, retiredByProfileId: row.get('retiredByProfileId') } : {}) }
       })
     },
     async list() {
       return tx('executeRead', async t => {
-        const result = await t.run(`MATCH (s:UnlinkedSignupProfile) ${active} RETURN s.profileJson AS json, s.profileId AS id, s.ownerId AS ownerId, s.userId AS userId, s.receiptId AS receiptId ORDER BY id LIMIT 1001`)
+        const result = await t.run(`MATCH (s:UnlinkedSignupProfile) ${active} AND coalesce(s.retired,false)=false RETURN s.profileJson AS json, s.profileId AS id, s.ownerId AS ownerId, s.userId AS userId, s.receiptId AS receiptId ORDER BY id LIMIT 1001`)
         if (result.records.length > 1000) throw Error('public_signup_profile_limit')
         return parsed(result.records).map((profile, i) => { const row = result.records[i]; return { owner: { ownerId: row.get('ownerId'), userId: row.get('userId') }, profile: { ...profile, id: row.get('id') }, receiptId: row.get('receiptId') } })
       })

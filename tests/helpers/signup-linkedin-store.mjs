@@ -24,7 +24,7 @@ export function memorySignupStore() {
     },
     async confirm({ key, owner, slug, profileId, receiptId }) {
       const account = accounts.get(key)
-      if (!active || !account?.json || account.slug !== slug) return false
+      if (!active || !account?.json || account.slug !== slug || sources.get(key)?.retired) return false
       if (!sources.has(key)) sources.set(key, { owner, profile: { ...JSON.parse(account.json), id: profileId }, receiptId })
       return true
     },
@@ -34,7 +34,7 @@ export function memorySignupStore() {
       const account = accounts.get(key)
       if (account) accounts.set(key, { attempts: account.attempts, succeeded: Boolean(account.succeeded || account.json) })
     },
-    async read(owner) { return active ? [...sources.values()].find(row => row.profile.id === signupProfileId(owner)) ?? null : null },
-    async list() { return active ? [...sources.values()] : [] },
+    async read(owner, { includeRetired = false } = {}) { return active ? [...sources.values()].find(row => row.profile.id === signupProfileId(owner) && (includeRetired || !row.retired)) ?? null : null },
+    async list() { return active ? [...sources.values()].filter(row => !row.retired) : [] },
   }
 }

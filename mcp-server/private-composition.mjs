@@ -1,3 +1,4 @@
+import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupLinkedin, createNeo4jSignupLinkedinStore } from './signup-linkedin.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
@@ -96,7 +97,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const signupLinkedinStore = publicPeople ? createNeo4jSignupLinkedinStore(driver) : null
     await signupLinkedinStore?.initialize()
     const signupLinkedin = signupLinkedinStore ? createSignupLinkedin({ store: signupLinkedinStore }) : undefined
-    const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
+    const legacyBoundary = publicPeople ? createLegacyProfileBoundary(driver) : null
+    const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(legacyBoundary?.driver ?? driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
     await legacyLinks?.initialize()
     // Member-delivered invites, when the runtime supplies their graph store.
     const invitationStore = typeof dependencies.createMemberInvitationStore === 'function' ? dependencies.createMemberInvitationStore(driver, 'neo4j') : null
@@ -397,7 +399,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         }
         return sent
       } : undefined,
-      legacyAccount: legacyLinks ? { candidate: legacyLinks.candidate.bind(legacyLinks), confirm: legacyLinks.confirm.bind(legacyLinks) } : undefined,
+      legacyAccount: legacyLinks ? { candidate: legacyLinks.candidate.bind(legacyLinks), confirm: (proof, profileId, confirmation) => legacyBoundary ? legacyBoundary.confirm(proof, profileId, () => legacyLinks.confirm(proof, profileId, confirmation)) : legacyLinks.confirm(proof, profileId, confirmation) } : undefined,
       // Owner-scoped parts of account deletion that live outside the resource
       // API: the legacy claim row and the owner's own staged asset directory.
       revokeLegacyLink: legacyLinks ? async owner => {
@@ -415,7 +417,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       } : undefined,
       // Self-serve claims, including the test-profile lane (mcp-server/self-claims.mjs).
       signupLinkedin,
-      selfClaims: legacyLinks && publicPeople ? createSelfClaims({ driver, publicPeople, slugIndex }) : undefined,
+      selfClaims: legacyLinks && publicPeople ? legacyBoundary.wrapSelfClaims(createSelfClaims({ driver: legacyBoundary.driver, publicPeople, slugIndex })) : undefined,
       removeOwnerAssets: async ownerId => {
         // Exact one-segment owner directory under the composition's asset root;
         // recovered legacy originals live under separate legacy storage keys.

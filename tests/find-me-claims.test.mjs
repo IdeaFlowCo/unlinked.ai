@@ -1,3 +1,4 @@
+import { createLegacyProfileBoundary } from '../mcp-server/profile-source-boundary.mjs'
 import { createSignupLinkedin, unipileConfig } from '../mcp-server/signup-linkedin.mjs'
 import { memorySignupStore } from './helpers/signup-linkedin-store.mjs'
 import test from 'node:test'
@@ -12,7 +13,7 @@ const snapshot = { state: 'published', complete: true, revision: 'public-v1', pr
   { id: 'dup-2', name: 'Casey Doe', positions: [], education: [], skills: [] },
 ], connections: [{ fromId: 'p-x', toId: 'p-jl' }] }
 
-async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null, signupLinkedin, published = true } = {}) {
+async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null, claimAction, signupLinkedin, published = true } = {}) {
   const calls = { lookups: [], names: [], claims: [], audits: [] }
   let provisioned = false, handler
   const selfClaims = {
@@ -21,7 +22,7 @@ async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl'
     // and an ambiguous name resolves to null.
     lookupName: async name => { calls.names.push(name); return name.trim() === 'Joshua Langsam' ? 'p-jl' : null },
     claimable: async profileId => claimableIds.includes(profileId),
-    claim: async request => { if (claimError) throw new Error(claimError); calls.claims.push(request); return { profileId: request.profileId, receiptId: 'receipt-1' } },
+    claim: async request => { if (claimError) throw new Error(claimError); calls.claims.push(request); return claimAction ? claimAction(request) : { profileId: request.profileId, receiptId: 'receipt-1' } },
   }
   const server = createServer((request, response) => void handler(request, response))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
@@ -213,4 +214,36 @@ test('account deletion fails closed if signup source cleanup fails', async t => 
   assert.equal((await f.signed(next.headers.get('location'))).status, 200)
   const profile = await f.signed('/profile')
   assert.equal(profile.status, 200); assert.ok((await profile.text()).includes('Login Name'))
+})
+
+
+test('two authenticated sessions can upgrade a signup stand-in to legacy; a stale signup confirmation cannot republish it', async t => {
+  const store = memorySignupStore()
+  let legacyConfirmed = false, reads = 0
+  const service = createSignupLinkedin({ store: { ...store, confirm: args => legacyConfirmed ? false : store.confirm(args) },
+    config: unipileConfig({ UNLINKED_UNIPILE_BASE: 'https://unipile.invalid', UNLINKED_UNIPILE_KEY: 'test-only', UNLINKED_UNIPILE_ACCOUNT_ID: 'test-account' }),
+    fetchImpl: async () => { reads++; return Response.json({ first_name: 'New', last_name: 'Member', headline: 'Day one profile' }) } })
+  const boundary = createLegacyProfileBoundary({ session: () => ({ close: async () => {}, executeWrite: async work => work({ run: async (query, params) => {
+    if (query.includes('RETURN b.sourceOwnerId')) return { records: [{ get: () => params.ownerId }] }
+    if (query === 'CREATE legacy') { legacyConfirmed = true; return {} }
+    for (const source of store.sources.values()) if (source.owner.ownerId === params.ownerId && legacyConfirmed) { source.retired = true; source.retiredByProfileId = params.profileId }
+    return {}
+  } }) }) })
+  const claimAction = request => boundary.confirm(request.owner, request.profileId, async () => {
+    const session = boundary.driver.session()
+    try { return await session.executeWrite(async tx => { await tx.run('CREATE legacy', {}); return { profileId: request.profileId, receiptId: 'legacy-receipt' } }) } finally { await session.close() }
+  })
+  const sourceTab = await start(t, { displayName: 'New Member', signupLinkedin: service }), legacyTab = await start(t, { signupLinkedin: service, claimAction })
+  const sourceCard = await (await sourceTab.post('/find-me', { csrf: sourceTab.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  const legacyCard = await (await legacyTab.post('/find-me', { csrf: legacyTab.csrf, linkedinUrl: 'https://linkedin.com/in/joshua-langsam-1352407' })).text()
+  const token = card => card.match(/name="candidate" value="([^"]+)"/)[1]
+  assert.equal((await sourceTab.post('/claim-me', { csrf: sourceTab.csrf, candidate: token(sourceCard) })).status, 303)
+  const staleTab = await start(t, { displayName: 'New Member', signupLinkedin: service })
+  const staleCard = await (await staleTab.post('/find-me', { csrf: staleTab.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  const results = await Promise.all([legacyTab.post('/claim-me', { csrf: legacyTab.csrf, candidate: token(legacyCard) }), staleTab.post('/claim-me', { csrf: staleTab.csrf, candidate: token(staleCard) })])
+  assert.equal(results[0].status, 303); assert.ok([200, 303].includes(results[1].status))
+  assert.deepEqual(await service.list(), []); assert.equal(reads, 1)
+  const retained = await service.readForExport({ ownerId: 'owner-a', userId: 'user-a' })
+  assert.equal(retained.retired, true); assert.equal(retained.retiredByProfileId, 'p-jl'); assert.equal(retained.profile.headline, 'Day one profile')
+  await assert.rejects(service.confirm({ owner: { ownerId: 'owner-a', userId: 'user-a' }, slug: 'new-member' }), /self_claim_conflict/)
 })

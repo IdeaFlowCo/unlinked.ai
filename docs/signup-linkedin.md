@@ -88,3 +88,24 @@ existing `UNLINKED_TEST_NEO4J_URI`, `UNLINKED_TEST_NEO4J_PASSWORD` and
 reservations, durable cross-instance cache/account limits, retry/cap behavior,
 confirmation source writes and active-owner filtering. Never point it at a
 shared runtime or production database.
+
+## Upgrade to a recovered legacy profile
+
+When another session confirms a legacy profile, that legacy profile becomes the
+account’s single public identity. `profile-source-boundary.mjs` extends the
+Noos managed write transaction for recovered confirmation and the self-claim
+transaction: both acquire the same active owner row lock used by signup
+confirmation, then retire the signup source in the legacy transaction. An error
+in either the native confirmation or retirement rolls both writes back.
+
+The retained signup record carries `retired`, retirement time, legacy profile
+and receipt ids, and an explicit upgrade reason for audit/undo. It never enters
+the public projection again; the owner’s account export includes the retired
+source with that status. No signup fields merge onto the legacy profile.
+Subsequent signup confirmation fails while the legacy claim exists. Undo is an
+operator concern; this slice does not add an undo action or automatically revive
+a retired source. Account deletion removes active and retired signup records.
+
+The tests include two authenticated sessions holding different candidates,
+concurrent legacy and signup confirmation, and a disposable real-Neo4j HTTP
+race with rollback fault injection at both confirmation and retirement.

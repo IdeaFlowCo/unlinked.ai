@@ -37,8 +37,8 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
       if (recovered?.assertions?.length) legacy = { ...(legacy ?? {}), recoveredObservations: recovered.assertions }
     }
   } catch { legacy = { ...(legacy ?? {}), error: 'legacy_records_unavailable' } }
-  const confirmed = signupLinkedin ? await signupLinkedin.read(owner) : null
-  const signupProfile = confirmed ? { profile: confirmed.profile, receiptId: confirmed.receiptId,
+  const confirmed = signupLinkedin ? await (typeof signupLinkedin.readForExport === 'function' ? signupLinkedin.readForExport(owner) : signupLinkedin.read(owner)) : null
+  const signupProfile = confirmed ? { profile: confirmed.profile, receiptId: confirmed.receiptId, ...(confirmed.retired ? { retired: true, retiredByProfileId: confirmed.retiredByProfileId } : {}),
     provenance: { source: 'public-linkedin', selfAsserted: true, confirmation: 'self-asserted-public-linkedin-v1' } } : null
   return { format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
     account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy, signupProfile }
