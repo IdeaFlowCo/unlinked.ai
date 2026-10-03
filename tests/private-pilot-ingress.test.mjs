@@ -4,10 +4,30 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { startPrivatePilot } from '../mcp-server/private-pilot.mjs'
 
-function parseServerHeaders(config) {
-  const headers = []
+// `map $uri $name { ~regex value; default value; }` blocks, evaluated the way
+// nginx does for these configs: regexes in order, else the default.
+function parseUriMaps(config) {
+  const maps = new Map()
+  for (const block of config.matchAll(/^\s*map\s+\$uri\s+\$([a-z_]+)\s*\{([^}]*)\}/gm)) {
+    const rules = [], fallback = { value: undefined }
+    for (const line of block[2].matchAll(/^\s*(\S+)\s+("[^"]*"|[^;\s]+)\s*;/gm)) {
+      const value = line[2].startsWith('"') ? line[2].slice(1, -1) : line[2]
+      if (line[1] === 'default') fallback.value = value
+      else { assert.ok(line[1].startsWith('~'), 'only regex map keys are expected'); rules.push([new RegExp(line[1].slice(1)), value]) }
+    }
+    maps.set(block[1], uri => rules.find(([pattern]) => pattern.test(uri))?.[1] ?? fallback.value)
+  }
+  return maps
+}
+
+// The headers nginx adds for one path: variables resolved through their map;
+// an empty value adds nothing.
+function parseServerHeaders(config, uri = '/') {
+  const headers = [], maps = parseUriMaps(config)
   for (const match of config.matchAll(/^\s*add_header\s+([A-Za-z0-9-]+)\s+([^;\s]+)\s+always\s*;/gm)) {
-    headers.push([match[1], match[2]])
+    const value = match[2].startsWith('$') ? maps.get(match[2].slice(1))?.(uri) : match[2]
+    assert.notEqual(value, undefined, `unresolved header variable ${match[2]}`)
+    if (value) headers.push([match[1], value])
   }
   return headers
 }
@@ -37,6 +57,20 @@ test('private pilot ingress emits strict-origin referrer policy on proxied respo
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
   assert.equal(response.headers.get('cache-control'), 'no-store')
   assert.deepEqual(configuredHeaders.filter(([name]) => name.toLowerCase() === 'referrer-policy'), [['Referrer-Policy', 'strict-origin']])
+})
+
+test('ingress keeps no-store everywhere except published profile photos, which keep the runtime cache header', async () => {
+  for (const file of ['nginx.conf', 'nginx.canonical.conf']) {
+    const config = await readFile(new URL(`../deploy/private-pilot/${file}`, import.meta.url), 'utf8')
+    const cache = uri => parseServerHeaders(config, uri).filter(([name]) => name.toLowerCase() === 'cache-control').map(([, value]) => value)
+    for (const uri of ['/', '/people', '/people/aaaaaaaa-1111-4111-8111-111111111111', '/api/people/aaaaaaaa-1111-4111-8111-111111111111', '/people/a/photo/x', '/people/photo', `/invite/${'a'.repeat(43)}`]) {
+      assert.deepEqual(cache(uri), ['no-store'], `${file} ${uri}`)
+    }
+    assert.deepEqual(cache('/people/aaaaaaaa-1111-4111-8111-111111111111/photo'), [], file)
+    // Every other security header still applies to photos.
+    const names = parseServerHeaders(config, '/people/aaaaaaaa-1111-4111-8111-111111111111/photo').map(([name]) => name)
+    assert.deepEqual(names, ['Strict-Transport-Security', 'Referrer-Policy', 'X-Content-Type-Options'], file)
+  }
 })
 
 test('canonical ingress accepts only the canonical host and forwards that host upstream', async () => {

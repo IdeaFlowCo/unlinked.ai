@@ -13,7 +13,7 @@ import { createOAuthServer } from './oauth-server.mjs'
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
 // invocation; no operational credential or provider token is sent to clients.
-export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic' }) {
+export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos }) {
   const base = new URL(baseUrl)
   const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : networkMode === 'isolated-container' && host === '0.0.0.0' && ['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) && port === 9367
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !Number.isSafeInteger(port) || port < 7000 || port > 9999 || !privateHost || typeof complete !== 'function') throw new Error('explicit_isolated_pilot_configuration_required')
@@ -27,10 +27,10 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
   const oauth = accountGrants ? createOAuthServer({ origin: base.origin, resourcePath: '/mcp', publicSearchEnabled: typeof readPublishedSnapshot === 'function',
     clientKey: new Uint8Array(hkdfSync('sha256', accountGrantKey, 'unlinked-oauth', 'client-registration-v1', 32)),
     issueGrant: accountGrants.issueGrant, revokeConnectionToken: accountGrants.revokeConnectionToken, audit }) : null
-  const browser = createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot,
+  const browser = createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot,
     issueAccountGrant: accountGrants?.issueGrant, ensureAccountGrant: accountGrants?.ensureGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
     issueGrant: grants.issueGrant, mcpEndpoint: new URL('/mcp', base).href, dataMode, backgroundImports, audit,
-    oauth: oauth ?? undefined, listAccountGrants: accountGrants?.listGrants })
+    oauth: oauth ?? undefined, listAccountGrants: accountGrants?.listGrants, ...(lookupCompanyFacts ? { lookupCompanyFacts } : {}), profilePhotos })
   // One tool service instance backs both agent surfaces, so the MCP tools and
   // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
   const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations }) : null

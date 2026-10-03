@@ -1,7 +1,20 @@
+import { createLegacyProfileBoundary } from '../mcp-server/profile-source-boundary.mjs'
+import { createSignupProfileLookup } from '../mcp-server/signup-profile-lookup.mjs'
+import { memorySignupStore, testLookupSettings } from './helpers/signup-profile-store.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+// Opt-in reviewer evidence from executed HTTP responses, using synthetic data.
+async function evidence(name, content) {
+  const directory = process.env.UNLINKED_TEST_EVIDENCE_DIR
+  if (!directory) return
+  await mkdir(directory, { recursive: true })
+  await writeFile(join(directory, name), content)
+}
 
 const snapshot = { state: 'published', complete: true, revision: 'public-v1', profiles: [
   { id: 'p-jl', name: 'Joshua Langsam', headline: 'Managing Director at Raptor Group', positions: [], education: [], skills: [] },
@@ -10,7 +23,7 @@ const snapshot = { state: 'published', complete: true, revision: 'public-v1', pr
   { id: 'dup-2', name: 'Casey Doe', positions: [], education: [], skills: [] },
 ], connections: [{ fromId: 'p-x', toId: 'p-jl' }] }
 
-async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null } = {}) {
+async function start(t, { displayName = 'Joshua Langsam', owner = { ownerId: 'owner-a', userId: 'user-a' }, claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null, claimAction, signupLookup, published = true } = {}) {
   const calls = { lookups: [], names: [], claims: [], audits: [] }
   let provisioned = false, handler
   const selfClaims = {
@@ -19,7 +32,7 @@ async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl'
     // and an ambiguous name resolves to null.
     lookupName: async name => { calls.names.push(name); return name.trim() === 'Joshua Langsam' ? 'p-jl' : null },
     claimable: async profileId => claimableIds.includes(profileId),
-    claim: async request => { if (claimError) throw new Error(claimError); calls.claims.push(request); return { profileId: request.profileId, receiptId: 'receipt-1' } },
+    claim: async request => { if (claimError) throw new Error(claimError); calls.claims.push(request); return claimAction ? claimAction(request) : { profileId: request.profileId, receiptId: 'receipt-1' } },
   }
   const server = createServer((request, response) => void handler(request, response))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
@@ -27,12 +40,12 @@ async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl'
   handler = createPrivateBrowserHandler({
     baseUrl: origin,
     login: { begin: async () => ({ location: 'https://idp.invalid/login', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://idp.invalid', subject: 'subject-a', clientId: 'client', verifiedAt: Date.now(), displayName }) },
-    resolveOwner: async () => provisioned ? { ownerId: 'owner-a', userId: 'user-a' } : null,
-    signup: async () => { provisioned = true; return { ownerId: 'owner-a', userId: 'user-a' } },
+    resolveOwner: async () => provisioned ? owner : null,
+    signup: async () => { provisioned = true; return owner },
     issueAccountGrant: async () => ({ token: 'grant' }), revokeAccountGrant: async () => {},
-    selfClaims,
-    getBackend: async () => ({ adapter: true, readResource: async () => null, listImportIds: async () => [], readLegacyProfile: async () => null }),
-    readPublishedSnapshot: async () => snapshot,
+    selfClaims, signupLookup,
+    getBackend: async () => ({ adapter: true, readResource: async () => null, listImportIds: async () => [], listAccountGrantIds: async () => [], readLegacyProfile: async () => null }),
+    readPublishedSnapshot: async () => { const sources = signupLookup ? await signupLookup.list() : []; return { ...snapshot, profiles: [...snapshot.profiles, ...(published ? sources.map(row => row.profile) : [])], members: sources.map(row => row.profile.id) } },
     complete: async () => ({ matches: [] }),
     audit: async event => { calls.audits.push(event) },
   })
@@ -66,7 +79,7 @@ test('a new account is offered the find-me step, a LinkedIn address finds the un
   assert.notEqual((await post('/claim-me', { csrf, candidate: 'stale-token' })).status, 303)
   assert.equal(calls.claims.length, 0)
   const claimed = await post('/claim-me', { csrf, candidate })
-  assert.equal(claimed.status, 303); assert.equal(claimed.headers.get('location'), '/while-you-wait')
+  assert.equal(claimed.status, 303); assert.equal(claimed.headers.get('location'), '/profile')
   assert.equal(calls.claims.length, 1)
   const request = calls.claims[0]
   assert.equal(request.profileId, 'p-jl'); assert.equal(request.evidence, 'self-asserted-linkedin-url-v1')
@@ -76,6 +89,20 @@ test('a new account is offered the find-me step, a LinkedIn address finds the un
   assert.ok(calls.audits.some(event => event.event === 'legacy_profile_self_claimed' && event.profileId === 'p-jl' && event.receiptId === 'receipt-1'))
   // The step is spent: a second confirm has no candidate and fails closed.
   assert.notEqual((await post('/claim-me', { csrf, candidate })).status, 303)
+})
+
+test('the rendered find-me skip link opens the member name-only profile directly', async t => {
+  const f = await start(t, { displayName: 'New Member' })
+  const page = await f.signed('/find-me')
+  assert.equal(page.status, 200)
+  const content = await page.text()
+  const skip = content.match(/<a href="([^"]+)">Skip for now →<\/a>/)
+  assert.ok(skip)
+  assert.equal(skip[1], '/profile')
+  const profile = await f.signed(skip[1])
+  assert.equal(profile.status, 200)
+  assert.ok((await profile.text()).includes('New Member'))
+  assert.equal(f.calls.claims.length, 0)
 })
 
 test('a newer lookup invalidates a stale card: the old token no longer claims, the new one does', async t => {
@@ -118,4 +145,168 @@ test('claim races fail closed with a notice, and a wrong csrf or stray field nev
   for (const fields of [{ csrf: 'wrong', candidate }, { csrf: racing.csrf, candidate, extra: 'field' }, { csrf: racing.csrf }]) {
     assert.notEqual((await racing.post('/claim-me', fields)).status, 303)
   }
+})
+
+function signupService(lookup) {
+  return createSignupProfileLookup({ store: memorySignupStore(), settings: testLookupSettings(), adapter: { lookup } })
+}
+test('no legacy match performs one fake adapter lookup; source-labelled card confirms into public People immediately', async t => {
+  let reads = 0
+  const service = signupService(async () => { reads++; return ({ name: 'New Member', headline: '<Engineer>', location: 'Austin', positions: [{ title: 'Builder', company: 'Example' }], education: [{ institution: 'Example University' }], photo: 'data:image/png;ignored', key: 'synthetic-key' }) })
+  const f = await start(t, { displayName: 'New Member', signupLookup: service })
+  const response = await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })
+  const card = await response.text()
+  await evidence('find-me-profile-lookup.html', card)
+  assert.equal(reads, 1); assert.ok(card.includes('from your public LinkedIn profile')); assert.ok(card.includes("Yes, that's me"))
+  assert.ok(card.includes('&lt;Engineer&gt;')); assert.ok(card.includes('Austin')); assert.ok(card.includes('Builder')); assert.ok(card.includes('Example University'))
+  assert.ok(!card.includes('data:image')); assert.ok(!card.includes('synthetic-key')); assert.ok(response.headers.get('content-security-policy').includes("img-src 'self'"))
+  assert.deepEqual(await service.list(), [])
+  const stale = card.match(/name="candidate" value="([^"]+)"/)[1]
+  const repeat = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  assert.equal(reads, 1)
+  const candidate = repeat.match(/name="candidate" value="([^"]+)"/)[1]
+  assert.notEqual((await f.post('/claim-me', { csrf: f.csrf, candidate: stale })).status, 303)
+  assert.notEqual((await f.post('/claim-me', { csrf: 'bad', candidate })).status, 303)
+  const confirmation = await f.post('/claim-me', { csrf: f.csrf, candidate })
+  assert.equal(confirmation.status, 303); assert.equal(confirmation.headers.get('location'), '/profile')
+  const spent = await f.signed('/find-me')
+  assert.equal(spent.status, 303); assert.equal(spent.headers.get('location'), '/profile')
+  assert.equal(f.calls.claims.length, 0)
+  const [source] = await service.list()
+  const publicPage = await f.request('/people/' + source.profile.id)
+  const publicHtml = await publicPage.text()
+  assert.equal(publicPage.status, 200); assert.ok(publicHtml.includes('&lt;Engineer&gt;'))
+  await evidence('confirmed-public-profile.html', publicHtml)
+  await evidence('signup-http-journey.json', JSON.stringify({
+    adapter: 'fake', lookups: reads,
+    lookup: { method: 'POST', path: '/find-me', status: response.status },
+    confirmation: { method: 'POST', path: '/claim-me', status: confirmation.status, location: confirmation.headers.get('location') },
+    publicProfile: { method: 'GET', path: '/people/' + source.profile.id, status: publicPage.status },
+    confirmedSource: source,
+  }, null, 2))
+  const own = await f.signed('/profile'); assert.equal(own.status, 200); assert.ok((await own.text()).includes('New Member'))
+  assert.ok(f.calls.audits.some(row => row.event === 'signup_profile_self_asserted'))
+})
+
+test('legacy URL or name matches, taken legacy profiles and invalid URLs never call the lookup adapter', async t => {
+  let reads = 0
+  const service = signupService(async () => { reads++; throw Error('must not call') })
+  const f = await start(t, { signupLookup: service })
+  for (const linkedinUrl of ['https://linkedin.com/in/joshua-langsam-1352407', 'https://linkedin.com/in/unknown', '', 'bare-slug', 'https://evil.test/linkedin.com/in/unknown']) await f.post('/find-me', { csrf: f.csrf, linkedinUrl })
+  const taken = await start(t, { signupLookup: service, claimableIds: [] })
+  await taken.post('/find-me', { csrf: taken.csrf, linkedinUrl: 'https://linkedin.com/in/joshua-langsam-1352407' })
+  assert.equal(reads, 0)
+})
+
+test('lookup failure yields friendly name-only fallback without a confirmation candidate', async t => {
+  const service = signupService(async () => { throw Object.assign(Error('raw secret response'), { code: 'unavailable' }) })
+  const f = await start(t, { displayName: 'New Member', signupLookup: service })
+  const page = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  await evidence('lookup-failure-fallback.html', page)
+  assert.ok(page.includes('continue with your name')); assert.ok(!page.includes('name="candidate"')); assert.ok(!page.includes('raw secret'))
+  const profile = await f.signed('/profile')
+  assert.equal(profile.status, 200); assert.ok((await profile.text()).includes('New Member'))
+})
+
+test('a slug confirmed by another account suppresses its cached card and stale confirmation, auditing only a reason', async t => {
+  let reads = 0
+  const service = signupService(async () => { reads++; return ({ name: 'Public Person' }) })
+  const a = await start(t, { displayName: 'New Member', signupLookup: service })
+  const b = await start(t, { displayName: 'Another Member', owner: { ownerId: 'owner-b', userId: 'user-b' }, signupLookup: service })
+  const slug = 'one-public-person', preview = async f => (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/' + slug })).text()
+  const aCard = await preview(a), bCard = await preview(b)
+  const candidate = card => card.match(/name="candidate" value="([^"]+)"/)[1]
+  const first = await a.post('/claim-me', { csrf: a.csrf, candidate: candidate(aCard) })
+  assert.equal(first.status, 303); assert.equal(first.headers.get('location'), '/profile')
+  const stale = await b.post('/claim-me', { csrf: b.csrf, candidate: candidate(bCard) })
+  assert.equal(stale.status, 200); assert.ok((await stale.text()).includes('can’t be claimed'))
+  const refused = await preview(b)
+  await evidence('claimed-slug-fallback.html', refused)
+  assert.ok(refused.includes('continue with your name')); assert.ok(refused.includes('export later'))
+  assert.ok(!refused.includes('name="candidate"')); assert.ok(!refused.includes("Yes, that's me"))
+  assert.equal(reads, 1); assert.equal((await service.list()).length, 1)
+  const audits = b.calls.audits.filter(row => row.event.endsWith('_refused'))
+  assert.deepEqual(audits.map(row => row.reason), ['self_claim_conflict', 'slug_claimed'])
+  assert.ok(audits.every(row => /^[a-f0-9]{64}$/.test(row.ownerHash)))
+  assert.ok(!JSON.stringify(audits).includes(slug)); assert.ok(!JSON.stringify(audits).includes('Public Person'))
+  await evidence('slug-conflict-http-journey.json', JSON.stringify({
+    adapter: 'fake', lookups: reads,
+    firstConfirmation: { status: first.status, location: first.headers.get('location') },
+    competingStaleConfirmation: { status: stale.status, outcome: 'refused' },
+    subsequentLookup: { outcome: 'continue with your name and add your export', confirmationCardOffered: false },
+    activePublicProfiles: (await service.list()).length,
+    refusalAudit: audits,
+  }, null, 2))
+})
+
+
+test('confirmed signup source supplies export, verified card target and owner deletion', async t => {
+  const service = signupService(async () => ({ name: 'Public Identity', headline: 'Builder', location: 'Austin' }))
+  const owner = { ownerId: 'owner-a', userId: 'user-a' }
+  await service.lookup({ owner, address: 'https://linkedin.com/in/public-identity' })
+  await service.confirm({ owner, slug: 'public-identity' })
+  const f = await start(t, { displayName: 'Login Name', signupLookup: service })
+  const [source] = await service.list()
+  const card = await (await f.signed('/card')).text()
+  assert.ok(card.includes('Public Identity')); assert.ok(card.includes('Builder')); assert.ok(card.includes('Austin'))
+  assert.ok(card.includes('/people/' + source.profile.id)); assert.ok(card.includes('<svg'))
+  const hidden = await start(t, { displayName: 'Login Name', signupLookup: service, published: false })
+  const unpublishedCard = await (await hidden.signed('/card')).text()
+  assert.ok(unpublishedCard.includes('Public Identity')); assert.ok(!unpublishedCard.includes('/people/' + source.profile.id))
+  const exported = await f.signed('/export')
+  assert.equal(exported.status, 200)
+  const data = await exported.json()
+  assert.deepEqual(data.imports, [])
+  assert.equal(data.signupProfile.profile.name, 'Public Identity')
+  assert.equal(data.signupProfile.receiptId, source.receiptId)
+  assert.deepEqual(data.signupProfile.provenance, { source: 'profile-lookup', selfAsserted: true, confirmation: 'self-asserted-public-profile-v1' })
+  const refused = await f.post('/delete-account', { csrf: f.csrf, confirm: 'delete' })
+  assert.equal(refused.status, 400); assert.ok(await service.read(owner))
+  const deleted = await f.post('/delete-account', { csrf: f.csrf, confirm: 'delete everything' })
+  assert.equal(deleted.status, 200)
+  assert.equal(await service.read(owner), null); assert.deepEqual(await service.list(), [])
+  assert.equal((await f.request('/people/' + source.profile.id)).status, 404)
+  const again = await start(t, { displayName: 'Login Name', signupLookup: service })
+  assert.ok(!(await (await again.signed('/profile')).text()).includes('Public Identity'))
+  assert.equal((await service.lookup({ owner, address: 'https://linkedin.com/in/public-identity' })).code, 'account_limit')
+})
+
+test('account deletion fails closed if signup source cleanup fails', async t => {
+  const service = signupService(async () => ({ name: 'Public Identity' }))
+  const f = await start(t, { displayName: 'Login Name', signupLookup: { ...service, removeOwner: async () => { throw Error('storage_unavailable') } } })
+  assert.equal((await f.post('/delete-account', { csrf: f.csrf, confirm: 'delete everything' })).status, 400)
+  const profile = await f.signed('/profile')
+  assert.equal(profile.status, 200); assert.ok((await profile.text()).includes('Login Name'))
+})
+
+
+test('two authenticated sessions can upgrade a signup stand-in to legacy; a stale signup confirmation cannot republish it', async t => {
+  const store = memorySignupStore()
+  let legacyConfirmed = false, reads = 0
+  const service = createSignupProfileLookup({ store: { ...store, confirm: args => legacyConfirmed ? false : store.confirm(args) },
+    settings: testLookupSettings(),
+    adapter: { lookup: async () => { reads++; return { name: 'New Member', headline: 'Day one profile' } } } })
+  const boundary = createLegacyProfileBoundary({ session: () => ({ close: async () => {}, executeWrite: async work => work({ run: async (query, params) => {
+    if (query.includes('RETURN b.sourceOwnerId')) return { records: [{ get: () => params.ownerId }] }
+    if (query === 'CREATE legacy') { legacyConfirmed = true; return {} }
+    for (const source of store.sources.values()) if (source.owner.ownerId === params.ownerId && legacyConfirmed) { source.retired = true; source.retiredByProfileId = params.profileId }
+    return {}
+  } }) }) })
+  const claimAction = request => boundary.confirm(request.owner, request.profileId, async () => {
+    const session = boundary.driver.session()
+    try { return await session.executeWrite(async tx => { await tx.run('CREATE legacy', {}); return { profileId: request.profileId, receiptId: 'legacy-receipt' } }) } finally { await session.close() }
+  })
+  const sourceTab = await start(t, { displayName: 'New Member', signupLookup: service }), legacyTab = await start(t, { signupLookup: service, claimAction })
+  const sourceCard = await (await sourceTab.post('/find-me', { csrf: sourceTab.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  const legacyCard = await (await legacyTab.post('/find-me', { csrf: legacyTab.csrf, linkedinUrl: 'https://linkedin.com/in/joshua-langsam-1352407' })).text()
+  const token = card => card.match(/name="candidate" value="([^"]+)"/)[1]
+  assert.equal((await sourceTab.post('/claim-me', { csrf: sourceTab.csrf, candidate: token(sourceCard) })).status, 303)
+  const staleTab = await start(t, { displayName: 'New Member', signupLookup: service })
+  const staleCard = await (await staleTab.post('/find-me', { csrf: staleTab.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  const results = await Promise.all([legacyTab.post('/claim-me', { csrf: legacyTab.csrf, candidate: token(legacyCard) }), staleTab.post('/claim-me', { csrf: staleTab.csrf, candidate: token(staleCard) })])
+  assert.equal(results[0].status, 303); assert.ok([200, 303].includes(results[1].status))
+  assert.deepEqual(await service.list(), []); assert.equal(reads, 1)
+  const retained = await service.readForExport({ ownerId: 'owner-a', userId: 'user-a' })
+  assert.equal(retained.retired, true); assert.equal(retained.retiredByProfileId, 'p-jl'); assert.equal(retained.profile.headline, 'Day one profile')
+  await assert.rejects(service.confirm({ owner: { ownerId: 'owner-a', userId: 'user-a' }, slug: 'new-member' }), /self_claim_conflict/)
 })

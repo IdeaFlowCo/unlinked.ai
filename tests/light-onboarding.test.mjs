@@ -4,7 +4,7 @@ import vm from 'node:vm'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
+import { inAppBrowser, escapeHref, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
 import { buildPreviews } from '../mcp-server/private-onboarding-preview.mjs'
 import { ONBOARDING_STYLE } from '../mcp-server/private-onboarding-style.mjs'
 
@@ -247,13 +247,13 @@ test('signed-out Join header keeps logo and Meet without member navigation or se
   }
 })
 
-test('Join and Bring-export offer quiet LinkedIn export links with safe outbound attributes', () => {
+test('Join and Bring-export offer one quiet LinkedIn export link with safe outbound attributes', () => {
   for (const view of [renderJoin(), renderBringArchive(account), renderBringArchive({ ...account, state: 'error' })]) {
     const links = [...view.content.matchAll(/<a\b[^>]*href="https:\/\/www\.linkedin\.com\/mypreferences\/d\/download-my-data"[^>]*>.*?<\/a>/gs)]
-    assert.equal(links.length, view.title === 'Join Unlinked' ? 1 : 2)
+    assert.equal(links.length, 1)
     assert.match(links[0][0], /target="_blank"/)
     assert.match(links[0][0], /rel="noopener noreferrer"/)
-    assert.match(links.at(-1)[0], />Don't have your LinkedIn export yet\? Request it now ↗<\/a>/)
+    assert.match(links[0][0], />Don't have your LinkedIn export yet\? Request it now ↗<\/a>/)
     assert.doesNotMatch(links[0][0], /class="button/)
     assert.match(view.content, /<p class="small">It takes LinkedIn a few minutes for Connections, up to a day for the complete archive\. Sign up while you wait\.<\/p>/)
   }
@@ -272,7 +272,7 @@ test('own-profile lookup is optional and uses a separate native POST with the ex
   assert.match(form, /Your LinkedIn address/)
   assert.match(form, /placeholder="linkedin.com\/in\/your-name"/)
   assert.match(form, /class="quiet" type="submit">Find me/)
-  assert.match(form, /Shows what Unlinked already knows about you: your old profile and members who list you\. Nothing is claimed until you confirm\./)
+  assert.match(form, /Finds your old Unlinked profile, or builds one from your public LinkedIn page\. Nothing is claimed until you confirm\./)
   assert.doesNotMatch(form, /required|<script|Import from LinkedIn/i)
   assert.ok(view.content.indexOf(form) > view.content.indexOf('Editing comes soon.'))
   assert.ok(view.content.indexOf(form) < view.content.indexOf('<aside>'))
@@ -485,7 +485,7 @@ test('fixture previews cover every requested screen and are reproducible without
     assert.match(everyoneDefault, /href="\/people\/00000000-0000-4000-8000-000000000001"/)
     assert.doesNotMatch(everyoneDefault, /class="own-group"|class="scope-controls"/)
     assert.match(first[files.findIndex(file => file.endsWith('/people-both-groups.html'))], /class="own-group".*class="everyone-group"/s)
-    assert.match(first[files.findIndex(file => file.endsWith('/landing.html'))], /Step one takes LinkedIn a day or two\./)
+    assert.match(first[files.findIndex(file => file.endsWith('/landing.html'))], /Your professional profile and network, in a place that’s yours\./)
     assert.match(first[files.findIndex(file => file.endsWith('/person-anonymous.html'))], /Maya’s connections · 2\+/)
     assert.match(first[files.findIndex(file => file.endsWith('/everyone-unavailable.html'))], /Member search is on its way\./)
     assert.match(first[files.findIndex(file => file.endsWith('/everyone-no-match.html'))], /No one on Unlinked matched that yet\./)
@@ -527,10 +527,15 @@ test('signed-out home shows the product: search, a way in, profiles to explore a
   const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
   assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents', '/login', '/join'])
   assert.match(header, /method="get" action="\/network" role="search"/)
-  assert.match(view.content, /<h1>Step one takes LinkedIn a day or two\. <em>Start it now\.<\/em><\/h1>/)
+  assert.match(view.content, /<h1>Your professional profile and network, in a place that’s yours\.<\/h1>/)
+  assert.match(view.content, /class="button lg" href="\/join">Create my profile<\/a>/)
+  assert.match(view.content, /<a href="\/people">or explore profiles first →/)
   assert.match(view.content, /Start my LinkedIn export ↗/)
-  assert.match(view.content, /I already have my file/)
-  assert.match(view.content, /example with fictional people/)
+  assert.doesNotMatch(view.content, /Email me the link|mailto:/)
+  assert.match(view.content, /It works in Safari or Chrome, not in the LinkedIn app/)
+  assert.doesNotMatch(view.content, /class="notice in-app"/)
+  assert.match(view.content, /Ask Claude about your own network/)
+  assert.match(view.content, /aria-hidden="true".*Illustration with a fictional person\./s)
   assert.match(view.content, /https:\/\/www\.unlinked\.ai\/mcp/)
   assert.match(view.content, /href="\/agents">How agents connect and what to upload →/)
   assert.match(view.content, /Not affiliated with LinkedIn\./)
@@ -619,4 +624,38 @@ test('Settings opens with one compact account row: who is signed in and a native
   // One row: no heading, card or paragraph of its own.
   assert.doesNotMatch(section, /<h2|class="card"|<p\b/)
   assert.doesNotMatch(section, /<script|onclick=/)
+})
+
+test('landing warns visitors inside another app\'s browser to open Safari or Chrome before exporting', () => {
+  const iphoneSafari = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+  const androidChrome = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'
+  assert.equal(inAppBrowser(iphoneSafari), null)
+  assert.equal(inAppBrowser(androidChrome), null)
+  assert.equal(inAppBrowser(undefined), null)
+  assert.deepEqual(inAppBrowser(`${iphoneSafari} Instagram 350.0.0`), { app: 'Instagram', browser: 'Safari', os: 'ios' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [LinkedInApp]/9.30'), { app: 'LinkedIn', browser: 'Safari', os: 'ios' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/480.0]'), { app: 'Facebook', browser: 'Chrome', os: 'android' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36'), { app: 'this app', browser: 'Chrome', os: 'android' })
+  const view = renderLanding({ inApp: { app: '<b>x</b>', browser: 'Safari', os: 'ios' } })
+  assert.match(view.content, /class="notice in-app" role="note"><p>You’re in &lt;b&gt;x&lt;\/b&gt;’s browser/)
+  assert.match(view.content, /Open in Safari/)
+})
+
+test('in-app browsers get tap-to-escape links to Safari or Chrome, with the manual fallback kept', () => {
+  const exportUrl = 'https://www.linkedin.com/mypreferences/d/download-my-data'
+  assert.equal(escapeHref(exportUrl, null), null)
+  assert.equal(escapeHref(exportUrl, { app: 'Instagram', os: 'ios' }), 'instagram://extbrowser/?url=https%3A%2F%2Fwww.linkedin.com%2Fmypreferences%2Fd%2Fdownload-my-data')
+  assert.equal(escapeHref(exportUrl, { app: 'Threads', os: 'ios' }), 'barcelona://extbrowser/?url=https%3A%2F%2Fwww.linkedin.com%2Fmypreferences%2Fd%2Fdownload-my-data')
+  assert.equal(escapeHref(exportUrl, { app: 'Facebook', os: 'ios' }), 'x-safari-https://www.linkedin.com/mypreferences/d/download-my-data')
+  assert.equal(escapeHref(exportUrl, { app: 'TikTok', os: 'ios' }), null)
+  assert.equal(escapeHref(exportUrl, { app: 'Instagram', os: 'android' }), 'intent://www.linkedin.com/mypreferences/d/download-my-data#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=https%3A%2F%2Fwww.linkedin.com%2Fmypreferences%2Fd%2Fdownload-my-data;end')
+  const instagram = renderLanding({ inApp: { app: 'Instagram', browser: 'Safari', os: 'ios' } }).content
+  assert.match(instagram, /href="instagram:\/\/extbrowser\/\?url=https%3A%2F%2Fwww\.unlinked\.ai%2F">Open Unlinked in Safari/)
+  assert.match(instagram, /href="instagram:\/\/extbrowser\/\?url=https%3A%2F%2Fwww\.linkedin\.com[^"]*">Start my LinkedIn export ↗/)
+  assert.match(instagram, /Didn’t open\? Tap ••• and choose <b>Open in Safari<\/b>/)
+  const tiktok = renderLanding({ inApp: { app: 'TikTok', browser: 'Safari', os: 'ios' } }).content
+  assert.doesNotMatch(tiktok, /Open Unlinked in/)
+  assert.match(tiktok, /href="https:\/\/www\.linkedin\.com\/mypreferences\/d\/download-my-data" target="_blank"/)
+  const plain = renderLanding().content
+  assert.doesNotMatch(plain, /instagram:|x-safari|intent:/)
 })

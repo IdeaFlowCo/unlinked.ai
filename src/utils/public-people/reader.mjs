@@ -13,6 +13,8 @@ const revisionValid = value => typeof value === 'string' && value.length > 0 && 
 const bounded = (value, max) => Number.isSafeInteger(value) && value > 0 && value <= max
 const plain = value => value !== null && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 const hash = value => createHash('sha256').update(value).digest('hex')
+// Same grammar as PHOTO_URL in mcp-server/profile-photos.mjs: only a same-origin photo path.
+const PHOTO_URL = /^\/people\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/photo\?v=[a-f0-9]{16}$/
 
 const dense = value => {
   if (!Array.isArray(value)) return false
@@ -47,8 +49,10 @@ const requestValue = value => {
 // `reuse: true` keeps the first successful snapshot for this reader's whole
 // life. Use it only for a reader made for one request, so a page that reads
 // the index several times builds it once and sees one consistent revision.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000, reuse = false } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
+// `photoFor(id)` optionally names a same-origin profile photo URL
+// (mcp-server/profile-photos.mjs); summaries and details then carry `photo`.
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000, reuse = false, photoFor } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
   // once, and building it is slow. With the default `reuse: false`, nothing
@@ -90,6 +94,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (!plain(input) || !idValid(input.id) || summaries.has(input.id)) unavailable()
         const summary = { id: input.id, name: text(input.name, true, true) }
         optional(summary, 'headline', input.headline); optional(summary, 'location', input.location)
+        const photo = photoFor?.(input.id)
+        if (typeof photo === 'string' && PHOTO_URL.test(photo)) summary.photo = photo
         const detail = { ...summary }
         optional(detail, 'about', input.about)
         detail.positions = array(input.positions, 100).map(position => {
