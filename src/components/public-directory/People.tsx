@@ -7,7 +7,7 @@ export function PeopleList({ people }: { people: PublicPerson[] }) {
 }
 export function DirectoryNotice({ kind }: { kind: 'unavailable' | 'empty' | 'not-found' }) {
   const copy = { unavailable: ['The public directory is not connected yet.', 'Public profile data is still being connected. This is different from an empty directory. Your own imported network remains available in the beta app.'], empty: ['No profiles match this search.', 'Try a different name or title, or clear your search to browse everyone.'], 'not-found': ['This public profile could not be found.', 'The profile may no longer be published. Return to the directory to find another person.'] }[kind]
-  return <section className={styles.notice} role="status"><h2>{copy[0]}</h2><p>{copy[1]}</p><a href="https://private.unlinked.ai/login">Open my own network →</a></section>
+  return <section className={styles.notice} role="status"><h2>{copy[0]}</h2><p>{copy[1]}</p><a href="https://www.unlinked.ai/login">Open my own network →</a></section>
 }
 export function ProfileBody({ profile }: { profile: PublicProfile }) {
   const date = (start?: string, end?: string) => [start, end].filter(Boolean).join(' – ')
