@@ -8,6 +8,7 @@ import { createContactCards, createNeo4jContactCardStore } from './contact-card.
 import { createNeo4jCompanyFactsStore } from './company-facts-store.mjs'
 import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
+import { createProfilePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
 import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
 import { isTestProfileId, testProfile, CLAIMED_PROFILE_FOR_OWNER, OWNER_FOR_CLAIMED_PROFILE, CLAIMED_MEMBER_PROFILES } from './test-profiles.mjs'
@@ -368,6 +369,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     }) : undefined
     return { login, getBackend, close, audit, backgroundImports: true,
       readPublishedSnapshot,
+      // Operator-published photos (publish-profile-photos.mjs), read-only here.
+      // No member hide-photo choice exists yet; when it does, pass it as
+      // `hidden` so it outranks the operator set (docs/profile-photos.md).
+      profilePhotos: createProfilePhotoStore({ directory: join(assetRoot, PHOTO_DIRECTORY) }),
       memberInvitations,
       memberConnections,
       notifications,
