@@ -41,7 +41,7 @@ test('a visitor can search and read profiles before signing in, from a home page
   assert.match(homeHTML, /href="\/people">or explore profiles first →/)
   assert.match(home.headers.get('content-security-policy'), /style-src 'unsafe-inline' https:\/\/fonts\.googleapis\.com; font-src https:\/\/fonts\.gstatic\.com;/)
   assert.doesNotMatch(homeHTML, /name="csrf"|Signed in as/)
-  const join = await request('/join'); assert.equal(join.status, 200); assert.match(await join.text(), /href="\/login">Continue with Google/)
+  const join = await request('/join'); assert.equal(join.status, 200); assert.match(await join.text(), /href="\/login">Sign in with Ideaflow/)
   const results = await request('/network?q=Last'); assert.equal(results.status, 200)
   const resultsHTML = await results.text()
   assert.match(resultsHTML, /Results for “Last”/); assert.match(resultsHTML, /href="\/people\/last">Z Last/); assert.doesNotMatch(resultsHTML, /A First|\/search-account/)

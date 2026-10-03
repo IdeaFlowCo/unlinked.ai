@@ -36,16 +36,28 @@ const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&a
 const cookie = (name, value, maxAge) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
 const cookies = request => Object.fromEntries((request.headers.cookie ?? '').split(';').map(value => value.trim().split('=')))
 
+const SELECT_ACCOUNT = 'select_account'
+// Set by an explicit sign-out (or Switch account). It carries no URL or
+// identity: it only makes the next sign-in in this browser show the Ideaflow
+// account chooser instead of silently reusing the provider session. A
+// successful sign-in clears it.
+const SIGNED_OUT_COOKIE = '__Host-ul-signed-out', SIGNED_OUT_SECONDS = 60 * 60
+
 export async function createIdeaflowLogin({ issuer, clientId, clientSecret, callbackUrl, fetchImpl }) {
   const server = new URL(issuer), callback = new URL(callbackUrl)
   if (server.protocol !== 'https:' || server.search || server.hash || server.username || server.password || callback.protocol !== 'https:' || callback.pathname !== '/auth/callback/ideaflow' || callback.search || callback.hash || callback.username || callback.password || !clientId || !clientSecret) throw new Error('explicit_ideaflow_client_required')
   const config = await oidc.discovery(server, clientId, { client_secret: clientSecret }, oidc.ClientSecretBasic(clientSecret), { timeout: 10, execute: [oidc.enableNonRepudiationChecks], ...(fetchImpl ? { [oidc.customFetch]: fetchImpl } : {}) })
   return {
     authorizationOrigin: server.origin,
-    async begin() {
+    // Silent SSO by default: with an Ideaflow ID session the provider returns a
+    // code without a page. The only other request is the provider's account
+    // chooser (`select_account`), used after an explicit Unlinked sign-out,
+    // for Switch account and for binding an invitation to an account.
+    async begin({ prompt } = {}) {
+      if (prompt !== undefined && prompt !== SELECT_ACCOUNT) throw new Error('unsupported_ideaflow_prompt')
       const verifier = oidc.randomPKCECodeVerifier(), state = oidc.randomState(), nonce = oidc.randomNonce()
       const location = oidc.buildAuthorizationUrl(config, { redirect_uri: callback.href, response_type: 'code', scope: 'openid profile email',
-        code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: 'S256', state, nonce, prompt: 'login' })
+        code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: 'S256', state, nonce, ...(prompt ? { prompt } : {}) })
       return { location: location.href, transaction: { verifier, state, nonce } }
     },
     async finish(url, transaction) {
@@ -213,8 +225,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     // app's callback may redirect again). The consent page renders no
     // attacker-controlled markup, so it allows https: hops, or the exact
     // loopback origin for an app on this computer.
+    // Switch account (the Me menu, and the connector consent page) is a form
+    // whose redirect chain ends at the configured Ideaflow ID origin.
+    const signInFormAction = authorizationOrigin ? ` ${authorizationOrigin}` : ''
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
-    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}'; connect-src 'self'; img-src 'self'${camera ? ' blob:; media-src \'self\' blob:' : ''}; manifest-src 'self'; worker-src 'self'; form-action 'self'${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}'; connect-src 'self'; img-src 'self'${camera ? ' blob:; media-src \'self\' blob:' : ''}; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=()')
     script = `${TOP_BAR_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
@@ -262,7 +277,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (sessionStore) {
       try { await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() }) } catch { }
     }
-    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
+    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     // An invitation link someone signed in to answer comes first; its page then
     // continues to the old-account or find-me step when there is one.
@@ -422,7 +437,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (viewer) readers.set(response, viewer)
       if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer.owner); if (alerts) responseAlerts.set(response, alerts) }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline, ...(responseAlerts.has(response) ? { alerts: responseAlerts.get(response) } : {}) } : {}
-      if (await servePublicDiscovery(request, response, url.pathname, chrome)) return
+      if (await servePublicDiscovery(request, response, url.pathname, chrome, { signInOrigin: authorizationOrigin })) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
         if (Date.now() - invitationWindow >= 60000) { invitationWindow = Date.now(); invitationRequests = 0 }
@@ -563,7 +578,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
         if (!invitation || input.getAll('csrf').length !== 1 || input.get('csrf') !== invitation.csrf || [...input.keys()].some(key => key !== 'csrf')) throw new Error('private_invitation_intent_invalid')
         if (pending.size >= 100) throw new Error('private_login_capacity')
-        const result = await login.begin(), transactionId = token()
+        // Binding an invitation to an account shows the provider's chooser, and
+        // Unlinked then asks the member to confirm the returned account.
+        const result = await login.begin({ prompt: SELECT_ACCOUNT }), transactionId = token()
         pending.set(transactionId, { ...result.transaction, invitationToken: invitation.token, newProfileIntent: true, expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', [cookie('__Host-ul-invite', '', 0), cookie('__Host-ul-login', transactionId, 300)])
         redirect(response, result.location); return
@@ -579,7 +596,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (action === 'cancel') { redirect(response, '/'); return }
         if (action === 'restart') {
           if (pending.size >= 100) throw new Error('private_login_capacity')
-          const result = await login.begin(), transactionId = token()
+          const result = await login.begin({ prompt: SELECT_ACCOUNT }), transactionId = token()
           pending.set(transactionId, { ...result.transaction, invitationToken: confirmation.invitationToken, newProfileIntent: true, expiresAt: Date.now() + 5 * 60000 })
           response.setHeader('Set-Cookie', [cookie('__Host-ul-confirm', '', 0), cookie('__Host-ul-login', transactionId, 300)])
           redirect(response, result.location); return
@@ -590,7 +607,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (request.method === 'GET' && url.pathname === '/login') {
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
-        const result = await login.begin(), id = token()
+        // Silent SSO unless this browser explicitly signed out of Unlinked.
+        const result = await login.begin(cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}), id = token()
         pending.set(id, { ...result.transaction, next: returnPath(url.searchParams.get('next')), expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
         redirect(response, result.location); return
@@ -621,7 +639,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         else if (request.method === 'GET' && url.pathname === '/join') journey(response, renderJoin())
         else if (request.method === 'GET' && url.pathname === '/scan') journey(response, renderScan({ tab: url.searchParams.get('tab') }))
         else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(url.pathname) }), null, '', 401)
-        else render(response, 'Sign in required', '<a class="action" href="/login">Sign in</a>', 401)
+        else render(response, 'Sign in required', '<a class="action" href="/login">Sign in with Ideaflow</a>', 401)
         return
       }
       if (request.method === 'GET' && url.pathname === '/join') { redirect(response, '/'); return }
@@ -1128,7 +1146,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})
         for (const [id, value] of sessions) if (value.owner.ownerId === session.owner.ownerId) sessions.delete(id)
         if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId).catch(() => {})
-        response.setHeader('Set-Cookie', cookie('__Host-ul-session', '', 0))
+        // Signing in again later starts from the Ideaflow account chooser.
+        response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS)])
         await recordAudit({ event: 'account_data_deleted', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), deletedResources: result.deletedResources })
         journey(response, renderDataDeleted())
         return
@@ -1209,18 +1228,23 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         render(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><p>Search uses the bounded OpenAI processing authorized at upload.</p><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Query-time search; no shared people index.</small>'}</form>${!signup && typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a search-only agent to search this import using the bounded OpenAI processing authorized at upload. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : signup ? '<p><a href="/network">Search my whole network</a> · <a href="/settings">Connect my agent</a></p>' : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
         return
       }
-      if (request.method === 'POST' && ['/search', '/setup', '/logout'].includes(url.pathname)) {
+      if (request.method === 'POST' && ['/search', '/setup', '/logout', '/switch-account'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf) throw new Error('private_browser_csrf')
-        if (url.pathname === '/logout') {
+        if (url.pathname === '/logout' || url.pathname === '/switch-account') {
           const sid = cookies(request)['__Host-ul-session']
           sessions.delete(sid)
           if (sessionStore && sid) {
             // Awaited: a restart right after sign-out must not restore it.
             await sessionStore.delete(createHash('sha256').update(sid).digest('hex')).catch(() => {})
           }
-          response.setHeader('Set-Cookie', cookie('__Host-ul-session', '', 0))
-          redirect(response, '/')
+          // The next sign-in in this browser shows the Ideaflow account chooser.
+          response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS)])
+          if (url.pathname === '/logout') { redirect(response, '/'); return }
+          // Switch account starts that sign-in now. The return page is only ever
+          // one of returnPath's local pages, never a request-chosen URL.
+          const next = input.getAll('next').length === 1 ? returnPath(input.get('next')) : null
+          redirect(response, next ? `/login?next=${encodeURIComponent(next)}` : '/login')
           return
         }
         const id = input.get('importId')

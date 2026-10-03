@@ -47,7 +47,7 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
       id_token: sign({ iss: issuer, sub: 'chosen-opaque-subject', aud: clientId, iat: now, exp: now + 300, nonce, email: 'same-email@example.invalid', email_verified: true, ...override }) })
   } })
   handler = createPrivateBrowserHandler({ baseUrl,
-    login: { authorizationOrigin: realLogin.authorizationOrigin, begin: async () => { const result = await realLogin.begin(); nonce = result.transaction.nonce; return result }, finish: realLogin.finish },
+    login: { authorizationOrigin: realLogin.authorizationOrigin, begin: async options => { const result = await realLogin.begin(options); nonce = result.transaction.nonce; return result }, finish: realLogin.finish },
     claimInvitation: async (token, identity) => {
       claims.push({ token, identity })
       if (claimFailure) throw new Error(claimFailure)
@@ -102,7 +102,8 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const started = await begin()
   assert.equal(started.status, 303)
   const authorization = new URL(started.headers.get('location'))
-  assert.equal(authorization.searchParams.get('prompt'), 'login')
+  // Binding an invitation shows the provider's chooser, never a forced password.
+  assert.equal(authorization.searchParams.get('prompt'), 'select_account')
   assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256')
   const verified = await callback(started)
   assert.equal(verified.status, 200); assert.equal(claims.length, 0)
@@ -197,6 +198,7 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   assert.equal(bindings.has(`${issuer}:other-subject-same-email`), false)
   const restarted = await confirm(otherResult, 'restart')
   assert.equal(restarted.status, 303); assert.equal(claims.length, beforeWrongSubject)
+  assert.equal(new URL(restarted.headers.get('location')).searchParams.get('prompt'), 'select_account')
   override = {}
   const intendedAfterRestart = await callback(restarted)
   assert.equal(intendedAfterRestart.status, 200)

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 let browser
 try { browser = await import('../mcp-server/private-browser.mjs') } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error }
 
-test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE and requests reauthentication', { skip: !browser }, async () => {
+test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE and uses silent SSO unless the account chooser is asked for', { skip: !browser }, async () => {
   const issuer = 'https://synthetic-ideaflow.invalid', callbackUrl = 'https://private.invalid/auth/callback/ideaflow'
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 }), wrongKeys = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const jwk = { ...keys.publicKey.export({ format: 'jwk' }), kid: 'synthetic-rsa', alg: 'RS256', use: 'sig' }
@@ -30,7 +30,8 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
   assert.equal(login.authorizationOrigin, issuer)
   for (const bad of [{}, { nonce: 'wrong' }, { iss: 'https://other.invalid' }, { aud: 'other-client' }]) {
     const start = await login.begin(), location = new URL(start.location)
-    assert.equal(location.searchParams.get('prompt'), 'login'); assert.equal(location.searchParams.get('code_challenge_method'), 'S256')
+    // Silent SSO: a normal sign-in never asks the provider for a page.
+    assert.equal(location.searchParams.has('prompt'), false); assert.equal(location.searchParams.get('code_challenge_method'), 'S256')
     nonce = start.transaction.nonce; override = bad
     const callback = new URL(`${callbackUrl}?code=synthetic-code&state=${start.transaction.state}`)
     if (!Object.keys(bad).length) {
@@ -41,6 +42,9 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
     }
     else await assert.rejects(login.finish(callback, start.transaction))
   }
+  // The account chooser is the only other request; nothing else reaches the provider.
+  assert.equal(new URL((await login.begin({ prompt: 'select_account' })).location).searchParams.get('prompt'), 'select_account')
+  for (const prompt of ['login', 'none', 'consent', 'select_account login', '']) await assert.rejects(login.begin({ prompt }), /unsupported_ideaflow_prompt/)
   const missingFlag = await login.begin(); nonce = missingFlag.transaction.nonce; override = { email_verified: undefined }
   const authenticated = await login.finish(new URL(`${callbackUrl}?code=code&state=${missingFlag.transaction.state}`), missingFlag.transaction)
   assert.equal(authenticated.verifiedEmail, 'authenticated@example.invalid')

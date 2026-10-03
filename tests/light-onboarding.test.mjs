@@ -101,10 +101,12 @@ test('unknown or inconsistent counts are indeterminate, never invented', () => {
 
 test('the accepted member journey uses light copy and the shared navigation', () => {
   const join = renderJoin()
-  assert.match(join.content, /href="\/login">Continue with Google/)
-  assert.match(join.content, /href="\/login">Continue with email/)
-  assert.match(join.content, /Same sign-in as OpenChat\./)
-  assert.equal(join.content.match(/<main class="journey">(.*?)<\/main>/s)[1].match(/class="button[^\"]*"/g).length, 2)
+  // Exactly one sign-in control: everything else happens on Ideaflow ID.
+  assert.match(join.content, /<div class="sign-in-options"><a class="button" href="\/login">Sign in with Ideaflow<\/a><\/div>/)
+  assert.equal(join.content.match(/href="\/login[?"]/g).length, 1)
+  assert.doesNotMatch(join.content, /Continue with Google|Continue with email|magic link|Other sign-in options|type="password"/i)
+  assert.match(join.content, /the same account as OpenChat\./)
+  assert.equal(join.content.match(/<main class="journey">(.*?)<\/main>/s)[1].match(/class="button[^\"]*"/g).length, 1)
   assert.match(join.content, /1\. Account.*·.*2\. Your LinkedIn export.*·.*3\. Your profile/s)
   const archive = renderBringArchive({ ...account, limitBytes: 32 * 1048576 })
   assert.match(archive.content, /Your full LinkedIn ZIP builds your profile and brings your connections\. Connections-only ZIP or CSV also works\./)
@@ -240,7 +242,8 @@ test('signed-out Join header keeps logo and Meet without member navigation or se
   for (const props of [{}, { ...account, signedIn: false }]) {
     const view = renderJoin(props)
     const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
-    assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents', '/login', '/join'])
+    // The page body is the one sign-in control, so the header carries none.
+    assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents'])
     assert.doesNotMatch(header, /href="\/(?:network|profile|settings)"|name="csrf"/)
     assert.match(view.content.match(/<footer>(.*?)<\/footer>/s)[1], /href="https:\/\/www\.unlinked\.ai\/meet"/)
     assert.doesNotMatch(view.content, /action="\/logout"|Signed in as/)
@@ -506,7 +509,9 @@ test('anonymous Everyone has one native GET search and only public navigation wi
   assert.match(view.content, /method="get" action="\/network"/)
   assert.match(view.content, /name="q"/)
   assert.match(view.content, /A&amp;B/)
-  assert.match(view.content, /href="\/login">Sign in<\/a><a class="button sm" href="\/join">Join<\/a>/)
+  // One sign-in control: Ideaflow ID handles sign-up too.
+  assert.match(view.content, /href="\/agents">For agents<\/a><a class="button sm" href="\/login">Sign in<\/a><\/nav>/)
+  assert.equal(view.content.match(/href="\/login[?"]/g).length, 1)
   assert.doesNotMatch(view.content, /name="csrf"|name="scope"|\/search-account|\/logout|\/settings|Signed in as/)
 })
 
@@ -525,7 +530,7 @@ test('controller-marked public uploads disclose member and visitor discovery; ol
 test('signed-out home shows the product: search, a way in, profiles to explore and agent setup, with no session authority', () => {
   const view = renderLanding()
   const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
-  assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents', '/login', '/join'])
+  assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents', '/login'])
   assert.match(header, /method="get" action="\/network" role="search"/)
   assert.match(view.content, /<h1>Your professional profile and network, in a place that’s yours\.<\/h1>/)
   assert.match(view.content, /class="button lg" href="\/join">Create my profile<\/a>/)

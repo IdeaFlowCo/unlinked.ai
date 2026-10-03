@@ -41,7 +41,7 @@ Any persistent deployment copy requires its own exact destination confirmation; 
 
 The production Id provider's supported existing Google sign-in is the candidate identity route.
 If a guest has no Ideaflow ID account, Google-based creation requires the explicit production account decision; native password signup/reset must not be advertised while deployment/mail gates remain unresolved.
-The app uses confidential code+PKCE/state/nonce/signed ID tokens, `prompt=login` reauthentication and an Unlinked confirmation screen for the returned verified account.
+The app uses confidential code+PKCE/state/nonce/signed ID tokens, the Ideaflow account chooser (`prompt=select_account`) and an Unlinked confirmation screen for the returned verified account.
 Its resolver returns only an established exact issuer/subject mapping; if none exists, the trusted signup capability creates a fresh Unlinked UUID, obtains/provisions its independently verified Noos principal through the approved identity adapter, and binds the verified production tuple in one transaction with a provenance receipt.
 An unknown subject cannot select an owner from email, archive, LinkedIn slug, legacy UUID or existing Noos account.
 The runtime composition uses the Noos callback-role `InvitedOwnerProvisioner` for browser signup and exact issuer/subject readback; no operator invitation capability is exposed over HTTP.
