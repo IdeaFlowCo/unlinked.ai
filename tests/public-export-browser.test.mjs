@@ -41,7 +41,7 @@ test('public beta bridge is honest, navigable and responsive', { skip: !base }, 
   assert.equal(page.files, 0);
   assert.equal(page.primary.length, 1);
   assert.match(page.primary[0].text, /^Start/);
-  assert.equal(page.primary[0].href, 'https://private.unlinked.ai/login');
+  assert.equal(page.primary[0].href, 'https://www.unlinked.ai/login');
   assert.match(page.text, /EXAMPLE · FICTIONAL PEOPLE/);
   assert.match(page.text, /Director of Partnerships\s+Northwind Solar/);
   assert.match(page.text, /Open beta. No invitation needed/);
@@ -50,7 +50,7 @@ test('public beta bridge is honest, navigable and responsive', { skip: !base }, 
   assert.equal(page.overflow, false);
   axi('open', new URL('/auth/login', base).href);
   page = surface();
-  assert.equal(page.primary[0].href, 'https://private.unlinked.ai/login');
+  assert.equal(page.primary[0].href, 'https://www.unlinked.ai/login');
   assert.match(page.text, /No invitation or separate Unlinked password is required/);
   assert.doesNotMatch(page.text, /not available yet|coming soon|invitation is ready/);
   axi('open', base);
@@ -58,7 +58,7 @@ test('public beta bridge is honest, navigable and responsive', { skip: !base }, 
   page = await eventually(surface, p => new URL(p.url).pathname === '/import-linkedin');
   assert.equal(new URL(page.url).hash, '');
   assert.match(page.text, /Choose the larger archive, or select Connections for a smaller export/);
-  assert.match(page.text, /Open beta at private.unlinked.ai/);
+  assert.match(page.text, /Open beta. No invitation needed/);
   assert.equal(evaluate(`(()=>{const r=document.querySelector('.export-instructions').getBoundingClientRect();return r.top<innerHeight&&r.bottom>0})()`), true);
   axi('resize', '390', '844');
   axi('open', base);

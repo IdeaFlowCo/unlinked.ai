@@ -17,8 +17,8 @@ export default function ImportLinkedInPage() {
         <section className="landing-example" id="next" aria-labelledby="next-title">
           <p className="eyebrow">Next · private import</p><h2 id="next-title">Your file is ready?<br />Start here.</h2>
           <p>Sign in or create your account through Ideaflow ID, then upload your export. No invitation is required.</p>
-          <aside className="availability-note" role="status"><strong>Open beta at private.unlinked.ai.</strong> The app currently runs on a separate host; the link below takes you to its working sign-in flow.</aside>
-          <div className="hero-actions"><a className="public-button public-button-primary" href="https://private.unlinked.ai/login">Sign in and upload →</a></div>
+          <aside className="availability-note" role="status"><strong>Open beta. No invitation needed.</strong> The link below takes you to sign-in at www.unlinked.ai.</aside>
+          <div className="hero-actions"><a className="public-button public-button-primary" href="https://www.unlinked.ai/login">Sign in and upload →</a></div>
           <p className="feature-caption">In the app, confirm your account and review the upload disclosure before choosing your file. AI search and Agent setup follow your import.</p>
           <p className="feature-caption">Had an older Unlinked account? Legacy access remains paused; this page requires no action on that account.</p>
           <Link className="landing-text-link" href="/">Back to Unlinked →</Link>
