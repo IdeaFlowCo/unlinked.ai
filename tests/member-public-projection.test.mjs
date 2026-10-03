@@ -33,6 +33,44 @@ test('delayed source removal fails the final shared publication read fence',asyn
  await assert.rejects(read(),/public_member_source_changed/)
 })
 
+test('legacy upgrade during final asynchronous reads rejects the retired signup projection and rebuilds', async t => {
+  for (const stage of ['members', 'invitations', 'decisions', 'decisions-without-members']) {
+    await t.test(stage, async () => {
+      const signupSource = { owner: { ownerId: 'bound-owner', userId: 'bound-user' }, receiptId: 'signup-receipt',
+        profile: { id: 'member-linkedin-test', name: 'Signup Person', positions: [], education: [], skills: [] } }
+      let retired = false, claimed = [], paused = false, enter, release
+      const entered = new Promise(resolve => { enter = resolve })
+      const resumed = new Promise(resolve => { release = resolve })
+      const pause = async phase => {
+        if (phase !== stage || paused) return
+        paused = true
+        enter()
+        await resumed
+      }
+      const read = createMemberPublicIndex({
+        readLegacy: async () => legacy, discover: async () => [],
+        publicPeople: { read: async () => null },
+        readSignupProfiles: async () => retired ? [] : [signupSource],
+        readMembers: stage === 'decisions-without-members' ? undefined : async () => { await pause('members'); return claimed },
+        readInviteEdges: async () => { await pause('invitations'); return [] },
+        readDecisions: async () => { await pause(stage === 'decisions-without-members' ? stage : 'decisions'); return [] },
+      })
+      const pending = read()
+      const rejected = assert.rejects(pending, /public_member_source_changed/)
+      await entered
+      retired = true
+      claimed = ['legacy']
+      release()
+      await rejected
+      const rebuilt = await read()
+      assert.deepEqual(rebuilt.profiles, legacy.profiles)
+      assert.ok(!rebuilt.profiles.some(row => row.id === signupSource.profile.id))
+      if (stage !== 'decisions-without-members') assert.deepEqual(rebuilt.members, ['legacy'])
+      assert.equal(signupSource.receiptId, 'signup-receipt')
+    })
+  }
+})
+
 test('confirmed legacy member reuses existing profile; latest uploaded profile overlays only live read, revoke removes overlay',async()=>{
  const sourceSha='e'.repeat(64), recovered={...legacy,revision:'legacy-public-v1:'+sourceSha}, link={profileId:'legacy',sourceSha256:sourceSha,receiptId:'link-receipt',revision:'legacy-public-v1:'+sourceSha}
  let active=true

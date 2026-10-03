@@ -111,7 +111,6 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       revisions.push(snapshot.revision)
       if (profiles.length > 20000 || connections.length > 100000) throw Error('shared_public_capacity_limit')
     }
-    if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
     if (identity(await discover()) !== identity(items)) throw Error('public_member_source_changed')
     // One account, one profile: when an account without a claimed legacy profile
     // published several imports, the newest stands for it and the others fold in.
@@ -130,7 +129,12 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     }
     // Replayed source edges are canonicalized without changing their receipts.
     const uniqueConnections = [...new Map(connections.map(edge => [JSON.stringify([edge.fromId, edge.toId]), edge])).values()]
-    if (typeof readMembers !== 'function') return decide({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections}, ownerMerges)
+    const finalize = async snapshot => {
+      const result = await decide(snapshot, ownerMerges)
+      if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
+      return result
+    }
+    if (typeof readMembers !== 'function') return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections})
     // Claimed profiles are members; everyone else in the index is a shadow.
     const claimed = await readMembers()
     if (!Array.isArray(claimed) || claimed.length > 20000) throw Error('public_member_presence_invalid')
@@ -138,7 +142,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     for (const id of claimed) if (known.has(id)) members.add(id)
     const memberIds = [...members].sort()
     revisions.push('members:' + hash(JSON.stringify(memberIds)))
-    return decide({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds}, ownerMerges)
+    return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds})
   }
   return async ({signal} = {}) => {
     signal?.throwIfAborted()
