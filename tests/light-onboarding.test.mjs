@@ -218,10 +218,10 @@ test('legacy People contacts and searchResults render own rows with PR35 precede
 test('People omits Everyone when absent and keeps supplied empty and unavailable states', () => {
   for (const props of [{}, { contacts: [] }, { own: [] }, { state: 'unavailable', contacts: [] }]) {
     const view = renderPeople({ ...account, ...props })
-    assert.doesNotMatch(view.content, /class="everyone-group"|Everyone on Unlinked|No members to show yet|Member search is on its way/)
+    assert.doesNotMatch(view.content, /class="everyone-group"|Everyone on Unlinked|No members to show yet|Searching everyone on Unlinked did not finish/)
   }
   assert.match(renderPeople({ ...account, everyone: [] }).content, /class="everyone-group"/)
-  assert.match(renderPeople({ ...account, everyone: [], state: 'unavailable' }).content, /Member search is on its way\./)
+  assert.match(renderPeople({ ...account, everyone: [], state: 'unavailable' }).content, /Searching everyone on Unlinked did not finish this time\./)
 })
 
 test('explicit own takes precedence over legacy inputs and keeps the new contract behaviour', () => {
@@ -358,7 +358,7 @@ test('People renders own contacts and reasons before everyone without inventing 
 
 test('everyone unavailable, empty browse and empty search have distinct copy', () => {
   const cases = [
-    [{ state: 'unavailable', query: 'climate', everyone: [{ id: 'ignored', name: 'Hidden stale member' }] }, 'Member search is on its way.'],
+    [{ state: 'unavailable', query: 'climate', everyone: [{ id: 'ignored', name: 'Hidden stale member' }] }, 'Searching everyone on Unlinked did not finish this time.'],
     [{ state: 'ready', query: 'climate', everyone: [] }, 'No one on Unlinked matched that yet.'],
     [{ state: 'ready', query: '', everyone: [] }, 'No members to show yet.'],
   ]
@@ -487,7 +487,7 @@ test('fixture previews cover every requested screen and are reproducible without
     assert.match(first[files.findIndex(file => file.endsWith('/people-both-groups.html'))], /class="own-group".*class="everyone-group"/s)
     assert.match(first[files.findIndex(file => file.endsWith('/landing.html'))], /Your professional profile and network, in a place that’s yours\./)
     assert.match(first[files.findIndex(file => file.endsWith('/person-anonymous.html'))], /Maya’s connections · 2\+/)
-    assert.match(first[files.findIndex(file => file.endsWith('/everyone-unavailable.html'))], /Member search is on its way\./)
+    assert.match(first[files.findIndex(file => file.endsWith('/everyone-unavailable.html'))], /Searching everyone on Unlinked did not finish this time\./)
     assert.match(first[files.findIndex(file => file.endsWith('/everyone-no-match.html'))], /No one on Unlinked matched that yet\./)
     const joinHeader = first[files.findIndex(file => file.endsWith('/join.html'))].match(/<header>(.*?)<\/header>/s)[1]
     assert.doesNotMatch(joinHeader, /href="\/(?:network|profile|settings)"/)

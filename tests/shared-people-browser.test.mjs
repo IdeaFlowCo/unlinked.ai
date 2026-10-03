@@ -80,7 +80,7 @@ test('signed-in network without public provider defaults search to own network',
   const people = await request('/network',{headers:{Cookie:session}}); assert.equal(people.status,200)
   const page = await people.text(), csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
   assert.match(page, /method="get" action="\/network" role="search"/)
-  assert.doesNotMatch(page, /name="scope" value="everyone"|Everyone on Unlinked|Member search is on its way/)
+  assert.doesNotMatch(page, /name="scope" value="everyone"|Everyone on Unlinked|Searching everyone on Unlinked did not finish/)
   const searched = await request('/search-account', { method:'POST', headers:{Cookie:session,Origin:baseUrl,'Content-Type':'application/x-www-form-urlencoded'}, body:new URLSearchParams({ query:'Legacy', scope:'everyone', csrf }) })
   assert.equal(searched.status,200); assert.match(await searched.text(),/1 connection searched across your own files/); assert.equal(models,1)
 })

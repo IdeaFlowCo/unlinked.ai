@@ -1,5 +1,6 @@
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
+import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
 import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
@@ -90,8 +91,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     })
     await provisioner.initialize()
     await store.initialize()
-    const publicPeople = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
-    await publicPeople?.initialize()
+    const publicPeopleStore = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
+    await publicPeopleStore?.initialize()
+    // Reuses an unchanged published revision instead of re-reading its chunks.
+    const publicPeople = cachePublicPeopleReads(publicPeopleStore, publishedRevisionReader(driver, 'neo4j'))
     const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
     await legacyLinks?.initialize()
     // Member-delivered invites, when the runtime supplies their graph store.

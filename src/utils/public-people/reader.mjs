@@ -47,7 +47,18 @@ const requestValue = value => {
 // `reuse: true` keeps the first successful snapshot for this reader's whole
 // life. Use it only for a reader made for one request, so a page that reads
 // the index several times builds it once and sees one consistent revision.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000, reuse = false } = {}) {
+// Compiled reader state (maps, search tokens, adjacency) per snapshot source.
+// Kept only for sources whose revision string identifies the content
+// (`revisionIdentifiesContent`), so an unchanged revision skips the rebuild
+// while any change to the publication yields a new revision and a new build.
+const compiled = new WeakMap()
+const deepFreeze = value => {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
+  if (!(value instanceof Map) && !(value instanceof Set)) for (const key of Reflect.ownKeys(value)) deepFreeze(value[key])
+  return Object.freeze(value)
+}
+
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false } = {}) {
   if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
@@ -74,6 +85,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (combined.aborted) abortHandler()
       })
       const value = await Promise.race([Promise.resolve().then(() => readPublishedSnapshot({ maxProfiles, maxConnections, maxTextBytes, signal: combined, viewer })), interruption])
+      const cacheable = viewer === null && readPublishedSnapshot.revisionIdentifiesContent === true && plain(value) && revisionValid(value.revision)
+      const cacheKey = cacheable ? [value.revision, maxProfiles, maxConnections, maxTextBytes].join('\u0000') : null
+      if (cacheable && compiled.get(readPublishedSnapshot)?.key === cacheKey) return compiled.get(readPublishedSnapshot).data
       if (!plain(value) || value.state !== 'published' || value.complete !== true || !revisionValid(value.revision) || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !dense(value.profiles) || !Array.isArray(value.connections) || value.connections.length > maxConnections || !dense(value.connections)) unavailable()
       let textBytes = 0
       const text = (input, required = false, nonempty = false) => {
@@ -134,7 +148,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (!plain(value.aliases) || Object.keys(value.aliases).length > maxProfiles) unavailable()
         for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to) }
       }
-      return { revision: value.revision, ordered, summaries, details, connected, tokens, aliases }
+      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases }
+      // Shared across requests, so no caller can change what another one sees.
+      if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(readPublishedSnapshot, { key: cacheKey, data }) }
+      return data
     } catch {
       unavailable()
     } finally {
