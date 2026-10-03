@@ -561,7 +561,7 @@ test('a profile page shows who someone is and who they know, escaped, for visito
   assert.match(anonymous.content, /<span class="tag">Partnerships<\/span>/)
   assert.match(anonymous.content, /Maya’s connections · 2\+/)
   assert.match(anonymous.content, /class="crow" href="\/people\/friend%2F1"/)
-  assert.match(anonymous.content, /href="\/people\/uuid%2F%22%3C%26\?cursor=next%2F2">Show more/)
+  assert.match(anonymous.content, /href="\/people\/uuid%2F%22%3C%26\/connections\?q=&amp;sort=detail&amp;cursor=next%2F2">Show more/)
   assert.match(anonymous.content, /href="\/join">Join Unlinked/)
   assert.match(anonymous.content, /&lt;script&gt;alert\(&quot;bad&quot;\)&lt;\/script&gt;/)
   assert.doesNotMatch(anonymous.content, /<script>|onclick=|secret@example\.test|linkedin\.com\/in\/maya|name="csrf"|action="\/logout"/)

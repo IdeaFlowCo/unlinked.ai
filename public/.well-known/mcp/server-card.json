@@ -322,5 +322,18 @@
         "additionalProperties": false
       }
     }
-  ]
+  ],
+  "connectionBrowsing": {
+    "browserPath": "/people/{id}/connections",
+    "sort": [
+      "detail",
+      "name"
+    ],
+    "queryParameter": "q",
+    "detailLevel": [
+      "basic",
+      "detailed"
+    ],
+    "description": "Page depth describes visible content, independently of membership. Only published connections are browsed."
+  }
 }

@@ -53,7 +53,7 @@ test('stable normalized name/id ordering and query-bound pagination survives pro
 test('explicit DTO whitelist excludes contact details, notes, source archive and search-only company', async () => {
   const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => published() })
   const list = await reader.list(), detail = await reader.profile({ id: 'a' })
-  assert.deepEqual(Object.keys(list.profiles[0]), ['id', 'name', 'headline'])
+  assert.deepEqual(Object.keys(list.profiles[0]), ['id', 'name', 'headline', 'detailLevel'])
   assert.doesNotMatch(JSON.stringify({ list, detail }), /private@example|private-phone|private-notes|private-archive|rawImport/)
   assert.deepEqual(detail.profile.positions, [{ title: '', company: 'Energy' }])
   assert.deepEqual(detail.profile.education, [{ institution: 'College' }])
