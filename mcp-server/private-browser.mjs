@@ -779,8 +779,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (!profile.name && source) Object.assign(profile, source.profile)
         if (!profile.name) profile.name = session.displayName
         // The QR target is the owner's already-public profile URL: the linked
-        // legacy profile id when one is confirmed, else the newest public-
-        // consent import that is actually in today's published snapshot (a
+        // legacy profile id when one is confirmed, else the stable confirmed
+        // signup id, else the newest public-consent import in today's snapshot (a
         // newer partial or not-yet-projected import never hides an older live
         // one). The code never encodes a private or dead target, and scanning
         // it grants nothing beyond what any visitor can already read.

@@ -13,6 +13,7 @@ The home page, People search (`/people`, `/network?q=`) and profile pages (`/peo
 Anyone can sign in or create an account through Ideaflow ID; no invitation is needed.
 If the signed Ideaflow email matches one of the privately seeded recovered legacy accounts, the standalone runtime may ask once whether to continue with that old Unlinked profile before showing `/profile`.
 After that explicit recovered-account confirmation, Settings may also list preserved original LinkedIn files for browser-only download; those originals are not exposed through agent grants or public People.
+At `/find-me`, enter your LinkedIn profile URL and review the matching card before choosing **Yes, that's me**. When the optional public LinkedIn lookup is enabled and no legacy profile matches, the card is labeled **from your public LinkedIn profile**; confirming it makes that profile public immediately. If lookup is unavailable, continue with your name and add your export later. See the [signup LinkedIn profile guide](docs/signup-linkedin.md) for configuration and source precedence.
 The older private.unlinked.ai host is a rollback/release-planning origin, not the current public onboarding URL.
 
 Prefer the full LinkedIn ZIP; Connections-only is also supported.
@@ -92,5 +93,3 @@ The isolated private Noos adapter, bounded publication journal, OIDC browser con
 
 See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/login` starts the current Ideaflow ID path in the standalone runtime; the Next.js `/auth/login` and `/auth/signup` pages remain local/historical source routes.
 The standalone runtime includes durable profile-first archive processing, owner-wide multi-import browsing/search, browser-only recovered-original downloads and account-scoped MCP grants. The Next.js app still retains historical/public source routes rather than hosting that runtime.
-
-The standalone `/find-me` flow can fill a new member’s profile from a server-only, default-off Unipile lookup after legacy matching fails. See [signup LinkedIn profile](docs/signup-linkedin.md) for runtime configuration, quotas, confirmation and export precedence.

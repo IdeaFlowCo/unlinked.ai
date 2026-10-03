@@ -44,7 +44,7 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
     account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy, signupProfile }
 }
 
-// Permanently tombstones every resource the account produced: assertions,
+// Permanently tombstones the account's operational resources: assertions,
 // observation chunks, source receipts, import receipts, the jobs themselves and
 // agent grants. Tombstones erase the stored payloads and can never be revived.
 // Content is erased first and each job last, so an interrupted run stays

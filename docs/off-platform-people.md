@@ -57,8 +57,9 @@ store.
 - **What accepting does:** it connects the two accounts (Jacob, 2026-10-02). Each
   sees the other in People you know (an `unlinked-invite` row that links to the
   other's public profile when they have one), and when both have a public
-  profile (a confirmed legacy profile, else their newest public-consent import)
-  the shared public graph carries an edge between them. The inviter sees
+  profile the shared public graph carries an edge between them. See the
+  [signup source precedence](signup-linkedin.md#public-projection-and-export-precedence)
+  for confirmed LinkedIn profiles and later imports. The inviter sees
   "Accepted" with the name the invitee signed in with. Accepting never claims a
   profile, and the inviter's private notes never transfer.
 - **Revoke** (`POST /invites/revoke`): only the inviter, only while pending.
