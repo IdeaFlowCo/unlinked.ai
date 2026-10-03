@@ -247,13 +247,13 @@ test('signed-out Join header keeps logo and Meet without member navigation or se
   }
 })
 
-test('Join and Bring-export offer one quiet LinkedIn export link with safe outbound attributes', () => {
+test('Join and Bring-export offer quiet LinkedIn export links with safe outbound attributes', () => {
   for (const view of [renderJoin(), renderBringArchive(account), renderBringArchive({ ...account, state: 'error' })]) {
     const links = [...view.content.matchAll(/<a\b[^>]*href="https:\/\/www\.linkedin\.com\/mypreferences\/d\/download-my-data"[^>]*>.*?<\/a>/gs)]
-    assert.equal(links.length, 1)
+    assert.equal(links.length, view.title === 'Join Unlinked' ? 1 : 2)
     assert.match(links[0][0], /target="_blank"/)
     assert.match(links[0][0], /rel="noopener noreferrer"/)
-    assert.match(links[0][0], />Don't have your LinkedIn export yet\? Request it now ↗<\/a>/)
+    assert.match(links.at(-1)[0], />Don't have your LinkedIn export yet\? Request it now ↗<\/a>/)
     assert.doesNotMatch(links[0][0], /class="button/)
     assert.match(view.content, /<p class="small">It takes LinkedIn a few minutes for Connections, up to a day for the complete archive\. Sign up while you wait\.<\/p>/)
   }
@@ -485,7 +485,7 @@ test('fixture previews cover every requested screen and are reproducible without
     assert.match(everyoneDefault, /href="\/people\/00000000-0000-4000-8000-000000000001"/)
     assert.doesNotMatch(everyoneDefault, /class="own-group"|class="scope-controls"/)
     assert.match(first[files.findIndex(file => file.endsWith('/people-both-groups.html'))], /class="own-group".*class="everyone-group"/s)
-    assert.match(first[files.findIndex(file => file.endsWith('/landing.html'))], /Your professional profile and network, in a place that’s yours\./)
+    assert.match(first[files.findIndex(file => file.endsWith('/landing.html'))], /Step one takes LinkedIn a day or two\./)
     assert.match(first[files.findIndex(file => file.endsWith('/person-anonymous.html'))], /Maya’s connections · 2\+/)
     assert.match(first[files.findIndex(file => file.endsWith('/everyone-unavailable.html'))], /Member search is on its way\./)
     assert.match(first[files.findIndex(file => file.endsWith('/everyone-no-match.html'))], /No one on Unlinked matched that yet\./)
@@ -527,10 +527,10 @@ test('signed-out home shows the product: search, a way in, profiles to explore a
   const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
   assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents', '/login', '/join'])
   assert.match(header, /method="get" action="\/network" role="search"/)
-  assert.match(view.content, /<h1>Your professional profile and network, in a place that’s yours\.<\/h1>/)
-  assert.match(view.content, /class="button lg" href="\/join">Create my profile<\/a><a href="\/people">or explore profiles first →/)
-  assert.match(view.content, /Start with your LinkedIn export/)
-  assert.match(view.content, /aria-hidden="true".*Illustration with a fictional person\./s)
+  assert.match(view.content, /<h1>Step one takes LinkedIn a day or two\. <em>Start it now\.<\/em><\/h1>/)
+  assert.match(view.content, /Start my LinkedIn export ↗/)
+  assert.match(view.content, /I already have my file/)
+  assert.match(view.content, /example with fictional people/)
   assert.match(view.content, /https:\/\/www\.unlinked\.ai\/mcp/)
   assert.match(view.content, /href="\/agents">How agents connect and what to upload →/)
   assert.match(view.content, /Not affiliated with LinkedIn\./)

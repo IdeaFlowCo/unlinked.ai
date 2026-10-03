@@ -1,3 +1,4 @@
+import { hasCompletedExport } from './export-onboarding.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
@@ -118,7 +119,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     if (emailStore && emailSettings.secret) {
       const settings = emailSettings
       let lastReport = 0
-      memberEmail = createMemberEmail({ config: settings, transport: settings.enabled ? emailTransportFactory({ apiKey: settings.apiKey }) : null, store: emailStore, notificationStore,
+      memberEmail = createMemberEmail({ config: settings, transport: settings.enabled ? emailTransportFactory({ apiKey: settings.apiKey }) : null, store: emailStore, notificationStore, hasCompletedImport: member => hasCompletedExport(member, getBackend),
         secret: settings.secret, origin: base.origin,
         // Failures carry only a code; at most one audit row per ten minutes.
         onError: event => { if (Date.now() - lastReport < 600000) return; lastReport = Date.now(); return audit({ ...event, at: new Date().toISOString() }) } })

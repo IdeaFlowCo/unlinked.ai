@@ -159,7 +159,7 @@ test('notification emails respect preferences, skip what was already seen, and u
   const { email, transport, notifications, notificationStore, clock, store } = setup()
   await email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true })
   // Defaults: profile_claimed is off, the other kinds are on.
-  assert.deepEqual((await email.settings(jacob)).preferences, { connection_request_received: true, connection_request_accepted: true, invite_accepted: true, profile_claimed: false })
+  assert.deepEqual((await email.settings(jacob)).preferences, { export_reminder: true, connection_request_received: true, connection_request_accepted: true, invite_accepted: true, profile_claimed: false })
   await notifications.notify({ recipient: jacob, kind: 'profile_claimed', actor: grace, actorName: 'Grace', dedupeKey: 'claimed' })
   await email.savePreferences(jacob, ['connection_request_accepted'])
   await request(notifications, jacob, 'Grace', 'received')
@@ -180,7 +180,7 @@ test('notification emails respect preferences, skip what was already seen, and u
   assert.equal(email.inspectUnsubscribe(token).scope, 'member')
   assert.equal((await email.settings(jacob)).preferences.connection_request_accepted, true, 'inspecting changes nothing')
   await email.unsubscribe(token)
-  assert.deepEqual((await email.settings(jacob)).preferences, { connection_request_received: false, connection_request_accepted: false, invite_accepted: false, profile_claimed: false })
+  assert.deepEqual((await email.settings(jacob)).preferences, { export_reminder: false, connection_request_received: false, connection_request_accepted: false, invite_accepted: false, profile_claimed: false })
   // Seen in the app before the mailer got to it: settled, not emailed.
   await email.savePreferences(jacob, ['invite_accepted'])
   await notifications.notify({ recipient: jacob, kind: 'invite_accepted', actor: ada, actorName: 'Ada', dedupeKey: 'invite' })
