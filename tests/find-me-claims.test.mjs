@@ -66,7 +66,7 @@ test('a new account is offered the find-me step, a LinkedIn address finds the un
   assert.notEqual((await post('/claim-me', { csrf, candidate: 'stale-token' })).status, 303)
   assert.equal(calls.claims.length, 0)
   const claimed = await post('/claim-me', { csrf, candidate })
-  assert.equal(claimed.status, 303); assert.equal(claimed.headers.get('location'), '/while-you-wait')
+  assert.equal(claimed.status, 303); assert.equal(claimed.headers.get('location'), '/profile')
   assert.equal(calls.claims.length, 1)
   const request = calls.claims[0]
   assert.equal(request.profileId, 'p-jl'); assert.equal(request.evidence, 'self-asserted-linkedin-url-v1')
