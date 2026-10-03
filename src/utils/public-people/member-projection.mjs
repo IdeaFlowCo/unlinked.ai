@@ -38,7 +38,7 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // is read again through the existing owner-authorized immutable publication.
 // Old/private/synthetic consent is excluded; tombstones/owner revocation remove
 // a source from every live snapshot even if its public chunks are retained.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges }) {
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges, readSignupProfiles }) {
   let work = null
   // Operator merges and renames apply last, over the complete union.
   // Operator and automatic decisions; the index's own merges come first.
@@ -57,6 +57,17 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       for (const row of enrichment.profiles) { const index = positions.get(row.id); if (index !== undefined) profiles[index] = row }
       revisions.push(enrichment.revision)
     }
+    const signupSources = typeof readSignupProfiles === 'function' ? await readSignupProfiles() : []
+    const signupIdentity = rows => JSON.stringify(rows.map(row => [row.profile.id, row.receiptId, row.owner.ownerId, row.owner.userId]))
+    if (!Array.isArray(signupSources) || signupSources.length > 1000) throw Error('public_signup_profile_limit')
+    const signupByOwner = new Map()
+    for (const source of signupSources) {
+      const key = `${source.owner.ownerId}\u0000${source.owner.userId}`
+      signupByOwner.set(key, source.profile.id)
+      profiles.push(source.profile); members.add(source.profile.id)
+      revisions.push('signup:' + source.receiptId)
+    }
+    const signupMerges = []
     for (const item of items) {
       const backend = await getBackend(item.owner), resource = await backend.readResource('import',item.id)
       if (!resource || resource.deleted || resource.sourceOwnerId !== item.owner.ownerId || resource.sourceRevision !== item.revision || resource.payload?.ownerId !== item.owner.ownerId || resource.payload.id !== item.id || !permitted(resource.payload)) throw Error('public_member_source_changed')
@@ -82,17 +93,29 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         revisions.push('legacy-link:' + linked.receiptId)
         linkedChecks.push(async () => { const current = await backend.readLegacyProfile(); if (!current || current.receiptId !== linked.receiptId || current.revision !== linked.revision) throw Error('public_member_source_changed') })
       } else {
-        profiles.push(...snapshot.profiles); connections.push(...snapshot.connections); members.add('member-import-' + item.id)
+        const signupId = signupByOwner.get(`${item.owner.ownerId}\u0000${item.owner.userId}`)
+        const ownId = 'member-import-' + item.id
+        if (signupId) {
+          profiles.push(...snapshot.profiles)
+          connections.push(...snapshot.connections.map(edge => ({ ...edge, fromId: edge.fromId === ownId ? signupId : edge.fromId })))
+          const own = snapshot.profiles.find(row => row.id === ownId), winner = overlays.get(signupId), key = [resource.payload.createdAt ?? 0, item.id]
+          if (!own) throw Error('public_member_source_changed')
+          if (own.name !== 'Unlinked member' && (!winner || key[0] > winner.key[0] || (key[0] === winner.key[0] && key[1] > winner.key[1]))) overlays.set(signupId, { key, profile: { ...own, id: signupId } })
+          signupMerges.push({ id: `signup:${ownId}`, kind: 'merge', profileId: ownId, survivorId: signupId })
+        } else {
+          profiles.push(...snapshot.profiles); connections.push(...snapshot.connections); members.add(ownId)
+        }
         const owner = `${item.owner.ownerId}\u0000${item.owner.userId}`
-        ownerImports.set(owner, [...(ownerImports.get(owner) ?? []), { id: 'member-import-' + item.id, key: [resource.payload.createdAt ?? 0, item.id] }])
+        if (!signupId) ownerImports.set(owner, [...(ownerImports.get(owner) ?? []), { id: 'member-import-' + item.id, key: [resource.payload.createdAt ?? 0, item.id] }])
       }
       revisions.push(snapshot.revision)
       if (profiles.length > 20000 || connections.length > 100000) throw Error('shared_public_capacity_limit')
     }
+    if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
     if (identity(await discover()) !== identity(items)) throw Error('public_member_source_changed')
     // One account, one profile: when an account without a claimed legacy profile
     // published several imports, the newest stands for it and the others fold in.
-    const ownerMerges = []
+    const ownerMerges = [...signupMerges]
     for (const list of ownerImports.values()) {
       if (list.length < 2) continue
       const ordered = [...list].sort((a, b) => b.key[0] - a.key[0] || (a.key[1] < b.key[1] ? 1 : -1))

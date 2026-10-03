@@ -1,3 +1,4 @@
+import { createSignupLinkedin, createNeo4jSignupLinkedinStore } from './signup-linkedin.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
@@ -92,6 +93,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await store.initialize()
     const publicPeople = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
     await publicPeople?.initialize()
+    const signupLinkedinStore = publicPeople ? createNeo4jSignupLinkedinStore(driver) : null
+    await signupLinkedinStore?.initialize()
+    const signupLinkedin = signupLinkedinStore ? createSignupLinkedin({ store: signupLinkedinStore }) : undefined
     const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
     await legacyLinks?.initialize()
     // Member-delivered invites, when the runtime supplies their graph store.
@@ -146,7 +150,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         const live = imported.records.map(record => ({ id: record.get('id'), document: JSON.parse(record.get('document')) }))
           .filter(value => !value.document.deleted && value.document.payload?.consent?.publicProfessionalSearch === true)
           .sort((a, b) => (b.document.payload?.createdAt ?? 0) - (a.document.payload?.createdAt ?? 0))
-        return live.length ? 'member-import-' + live[0].id : null
+        const signup = await signupLinkedin?.read(owner)
+        return signup ? signup.profile.id : live.length ? 'member-import-' + live[0].id : null
       } finally { await session.close() }
     }
     // The account behind a public profile: the confirmed owner of a legacy
@@ -156,6 +161,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return null
       const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
       try {
+        if (/^member-linkedin-[a-f0-9]{64}$/.test(profileId)) {
+          const sources = await signupLinkedin?.list() ?? []
+          return sources.find(source => source.profile.id === profileId)?.owner ?? null
+        }
         const imported = profileId.match(/^member-import-([a-f0-9]{64})$/)
         const result = imported
           ? await session.executeRead(tx => tx.run(`MATCH (r:OperationalResource {namespace: 'unlinked', type: 'import', sourceId: $id}) WHERE r.publicationOwner IS NOT NULL
@@ -305,7 +314,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       }
       return rows
     }
-    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend,
+    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLinkedin?.list,
       readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
       // An accepted invite is a connection both people agreed to: it joins the
       // public graph when both accounts have a public profile.
@@ -405,6 +414,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         } finally { await session.close() }
       } : undefined,
       // Self-serve claims, including the test-profile lane (mcp-server/self-claims.mjs).
+      signupLinkedin,
       selfClaims: legacyLinks && publicPeople ? createSelfClaims({ driver, publicPeople, slugIndex }) : undefined,
       removeOwnerAssets: async ownerId => {
         // Exact one-segment owner directory under the composition's asset root;

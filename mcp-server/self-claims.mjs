@@ -1,3 +1,4 @@
+import { linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { isTestProfileId, testProfile, testProfileBySlug, TEST_PROFILES_SHA256 } from './test-profiles.mjs'
 
@@ -22,7 +23,12 @@ export function createSelfClaims({ driver, publicPeople, slugIndex, database = '
     lookupSlug: async slug => {
       const test = testProfileBySlug(slug)
       if (test) return test.id
-      try { return (await slugIndex()).get(String(slug).toLowerCase()) ?? null } catch { return null }
+      try {
+        const wanted = linkedinSlug(`https://www.linkedin.com/in/${slug}`)
+        if (!wanted) return null
+        for (const [key, id] of await slugIndex()) if (linkedinSlug(`https://www.linkedin.com/in/${key}`) === wanted) return id
+        return null
+      } catch { return null }
     },
     // Names resolve only against the recovered legacy dataset, never the
     // merged shared snapshot — a member-imported contact with the same

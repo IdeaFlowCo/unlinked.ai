@@ -1,3 +1,5 @@
+import { createSignupLinkedin, unipileConfig } from '../mcp-server/signup-linkedin.mjs'
+import { memorySignupStore } from './helpers/signup-linkedin-store.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -10,7 +12,7 @@ const snapshot = { state: 'published', complete: true, revision: 'public-v1', pr
   { id: 'dup-2', name: 'Casey Doe', positions: [], education: [], skills: [] },
 ], connections: [{ fromId: 'p-x', toId: 'p-jl' }] }
 
-async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null } = {}) {
+async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl', 'dup-1', 'dup-2'], claimError = null, signupLinkedin } = {}) {
   const calls = { lookups: [], names: [], claims: [], audits: [] }
   let provisioned = false, handler
   const selfClaims = {
@@ -30,9 +32,9 @@ async function start(t, { displayName = 'Joshua Langsam', claimableIds = ['p-jl'
     resolveOwner: async () => provisioned ? { ownerId: 'owner-a', userId: 'user-a' } : null,
     signup: async () => { provisioned = true; return { ownerId: 'owner-a', userId: 'user-a' } },
     issueAccountGrant: async () => ({ token: 'grant' }), revokeAccountGrant: async () => {},
-    selfClaims,
+    selfClaims, signupLinkedin,
     getBackend: async () => ({ adapter: true, readResource: async () => null, listImportIds: async () => [], readLegacyProfile: async () => null }),
-    readPublishedSnapshot: async () => snapshot,
+    readPublishedSnapshot: async () => { const sources = signupLinkedin ? await signupLinkedin.list() : []; return { ...snapshot, profiles: [...snapshot.profiles, ...sources.map(row => row.profile)], members: sources.map(row => row.profile.id) } },
     complete: async () => ({ matches: [] }),
     audit: async event => { calls.audits.push(event) },
   })
@@ -118,4 +120,50 @@ test('claim races fail closed with a notice, and a wrong csrf or stray field nev
   for (const fields of [{ csrf: 'wrong', candidate }, { csrf: racing.csrf, candidate, extra: 'field' }, { csrf: racing.csrf }]) {
     assert.notEqual((await racing.post('/claim-me', fields)).status, 303)
   }
+})
+
+function signupService(fetchImpl) {
+  return createSignupLinkedin({ store: memorySignupStore(), config: unipileConfig({ UNLINKED_UNIPILE_BASE: 'https://unipile.invalid/api/v1', UNLINKED_UNIPILE_KEY: 'synthetic-key', UNLINKED_UNIPILE_ACCOUNT_ID: 'test-account' }), fetchImpl })
+}
+test('no legacy match performs one mocked Unipile read; source-labelled card confirms into public People immediately', async t => {
+  let reads = 0
+  const service = signupService(async () => { reads++; return Response.json({ first_name: 'New', last_name: 'Member', headline: '<Engineer>', location: 'Austin', work_experience: [{ position: 'Builder', company: 'Example' }], education: [{ school: 'Example University' }], profile_picture_url: 'data:image/png;ignored' }) })
+  const f = await start(t, { displayName: 'New Member', signupLinkedin: service })
+  const response = await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })
+  const card = await response.text()
+  assert.equal(reads, 1); assert.ok(card.includes('from your public LinkedIn profile')); assert.ok(card.includes("Yes, that's me"))
+  assert.ok(card.includes('&lt;Engineer&gt;')); assert.ok(card.includes('Austin')); assert.ok(card.includes('Builder')); assert.ok(card.includes('Example University'))
+  assert.ok(!card.includes('data:image')); assert.ok(!card.includes('synthetic-key')); assert.ok(response.headers.get('content-security-policy').includes("img-src 'self'"))
+  assert.deepEqual(await service.list(), [])
+  const stale = card.match(/name="candidate" value="([^"]+)"/)[1]
+  const repeat = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  assert.equal(reads, 1)
+  const candidate = repeat.match(/name="candidate" value="([^"]+)"/)[1]
+  assert.notEqual((await f.post('/claim-me', { csrf: f.csrf, candidate: stale })).status, 303)
+  assert.notEqual((await f.post('/claim-me', { csrf: 'bad', candidate })).status, 303)
+  assert.equal((await f.post('/claim-me', { csrf: f.csrf, candidate })).status, 303)
+  assert.equal(f.calls.claims.length, 0)
+  const [source] = await service.list()
+  const publicPage = await f.request('/people/' + source.profile.id)
+  assert.equal(publicPage.status, 200); assert.ok((await publicPage.text()).includes('&lt;Engineer&gt;'))
+  const own = await f.signed('/profile'); assert.equal(own.status, 200); assert.ok((await own.text()).includes('New Member'))
+  assert.ok(f.calls.audits.some(row => row.event === 'public_linkedin_profile_self_asserted'))
+})
+
+test('legacy URL or name matches, taken legacy profiles and invalid URLs never read Unipile', async t => {
+  let reads = 0
+  const service = signupService(async () => { reads++; throw Error('must not call') })
+  const f = await start(t, { signupLinkedin: service })
+  for (const linkedinUrl of ['https://linkedin.com/in/joshua-langsam-1352407', 'https://linkedin.com/in/unknown', '', 'bare-slug', 'https://evil.test/linkedin.com/in/unknown']) await f.post('/find-me', { csrf: f.csrf, linkedinUrl })
+  const taken = await start(t, { signupLinkedin: service, claimableIds: [] })
+  await taken.post('/find-me', { csrf: taken.csrf, linkedinUrl: 'https://linkedin.com/in/joshua-langsam-1352407' })
+  assert.equal(reads, 0)
+})
+
+test('provider failure yields friendly name-only fallback without a confirmation candidate', async t => {
+  const service = signupService(async () => new Response('raw secret response', { status: 503 }))
+  const f = await start(t, { displayName: 'New Member', signupLinkedin: service })
+  const page = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  assert.ok(page.includes('continue with your name')); assert.ok(!page.includes('name="candidate"')); assert.ok(!page.includes('raw secret'))
+  assert.ok((await (await f.signed('/profile')).text()).includes('New Member'))
 })
