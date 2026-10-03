@@ -1,3 +1,5 @@
+import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
+import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
@@ -50,7 +52,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   completionFactory = createResponsesCompletion, graphReadyDeadlineMs = 90000, graphReadyRetryMs = 1000,
   // Email delivery (docs/email.md): UNLINKED_EMAIL_ENABLED, RESEND_API_KEY, UNLINKED_EMAIL_SECRET,
   // UNLINKED_EMAIL_FROM, UNLINKED_INVITE_EMAILS_PER_DAY.
-  emailEnv = process.env, emailTransportFactory = createResendTransport, emailLog = line => process.stderr.write(`${line}\n`) }) {
+  emailEnv = process.env, emailTransportFactory = createResendTransport, emailLog = line => process.stderr.write(`${line}\n`),
+  // Optional signup profile lookup (docs/signup-profile-lookup.md): UNLINKED_PROFILE_LOOKUP_*.
+  profileLookupEnv = process.env, profileLookupLoader = loadProfileLookupAdapter }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : networkMode === 'isolated-container' && bolt.hostname === 'graph' && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -95,7 +99,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await store.initialize()
     const publicPeople = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
     await publicPeople?.initialize()
-    const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
+    const signupLookupStore = publicPeople ? createNeo4jSignupProfileStore(driver) : null
+    await signupLookupStore?.initialize()
+    // The adapter loads once; any failed check leaves lookups off while
+    // already confirmed sources stay readable.
+    const lookup = signupLookupStore ? await prepareProfileLookup({ env: profileLookupEnv, load: profileLookupLoader, log: emailLog }) : null
+    const signupLookup = signupLookupStore ? createSignupProfileLookup({ store: signupLookupStore, ...lookup }) : undefined
+    const legacyBoundary = publicPeople ? createLegacyProfileBoundary(driver) : null
+    const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(legacyBoundary?.driver ?? driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
     await legacyLinks?.initialize()
     // Member-delivered invites, when the runtime supplies their graph store.
     const invitationStore = typeof dependencies.createMemberInvitationStore === 'function' ? dependencies.createMemberInvitationStore(driver, 'neo4j') : null
@@ -140,8 +151,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // The inviter hears that their invite was accepted (and so that the invitee joined).
       onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,
         ...await publicProfileIdFor(value.invitee).then(id => id ? { actorProfileId: id } : {}, () => ({})), subjectId: value.invitationId, dedupeKey: `invite-accepted:${value.invitationId}` }) : undefined }) : undefined
-    // The public profile that stands for an account: its confirmed legacy
-    // profile, else the newest public-consent import it published.
+    // Public identity source precedence is owned by docs/signup-profile-lookup.md.
     const publicProfileIdFor = async owner => {
       const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
       try {
@@ -154,16 +164,20 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         const live = imported.records.map(record => ({ id: record.get('id'), document: JSON.parse(record.get('document')) }))
           .filter(value => !value.document.deleted && value.document.payload?.consent?.publicProfessionalSearch === true)
           .sort((a, b) => (b.document.payload?.createdAt ?? 0) - (a.document.payload?.createdAt ?? 0))
-        return live.length ? 'member-import-' + live[0].id : null
+        const signup = await signupLookup?.read(owner)
+        return signup ? signup.profile.id : live.length ? 'member-import-' + live[0].id : null
       } finally { await session.close() }
     }
-    // The account behind a public profile: the confirmed owner of a legacy
-    // profile, or the publisher of a member import. Null for shadows, revoked
-    // claims and inactive owners.
+    // Resolve account authority from live source ownership, never from public
+    // profile fields. Shadows, revoked claims and inactive owners have none.
     const accountForProfile = async profileId => {
       if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return null
       const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
       try {
+        if (/^member-signup-[a-f0-9]{64}$/.test(profileId)) {
+          const sources = await signupLookup?.list() ?? []
+          return sources.find(source => source.profile.id === profileId)?.owner ?? null
+        }
         const imported = profileId.match(/^member-import-([a-f0-9]{64})$/)
         const result = imported
           ? await session.executeRead(tx => tx.run(`MATCH (r:OperationalResource {namespace: 'unlinked', type: 'import', sourceId: $id}) WHERE r.publicationOwner IS NOT NULL
@@ -313,7 +327,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       }
       return rows
     }
-    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend,
+    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLookup?.list,
       readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
       // An accepted invite is a connection both people agreed to: it joins the
       // public graph when both accounts have a public profile.
@@ -401,7 +415,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         }
         return sent
       } : undefined,
-      legacyAccount: legacyLinks ? { candidate: legacyLinks.candidate.bind(legacyLinks), confirm: legacyLinks.confirm.bind(legacyLinks) } : undefined,
+      legacyAccount: legacyLinks ? { candidate: legacyLinks.candidate.bind(legacyLinks), confirm: (proof, profileId, confirmation) => legacyBoundary ? legacyBoundary.confirm(proof, profileId, () => legacyLinks.confirm(proof, profileId, confirmation)) : legacyLinks.confirm(proof, profileId, confirmation) } : undefined,
       // Owner-scoped parts of account deletion that live outside the resource
       // API: the legacy claim row and the owner's own staged asset directory.
       revokeLegacyLink: legacyLinks ? async owner => {
@@ -418,7 +432,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         } finally { await session.close() }
       } : undefined,
       // Self-serve claims, including the test-profile lane (mcp-server/self-claims.mjs).
-      selfClaims: legacyLinks && publicPeople ? createSelfClaims({ driver, publicPeople, slugIndex }) : undefined,
+      signupLookup,
+      selfClaims: legacyLinks && publicPeople ? legacyBoundary.wrapSelfClaims(createSelfClaims({ driver: legacyBoundary.driver, publicPeople, slugIndex })) : undefined,
       removeOwnerAssets: async ownerId => {
         // Exact one-segment owner directory under the composition's asset root;
         // recovered legacy originals live under separate legacy storage keys.

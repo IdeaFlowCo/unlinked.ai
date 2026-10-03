@@ -1,3 +1,4 @@
+import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
@@ -93,7 +94,7 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -657,11 +658,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         session.selfClaim.candidate = null
         const page = lookupResult => journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, lookupResult }))
         let profileId = null, evidence = null
-        const slugMatch = address.match(/linkedin\.com\/in\/([^/?#]+)/i) ?? (/^[A-Za-z0-9%._-]{1,120}$/.test(address) ? [null, address] : null)
-        if (address && slugMatch) {
-          let slug = slugMatch[1]
-          try { slug = decodeURIComponent(slug) } catch { /* use the raw segment */ }
-          profileId = await selfClaims.lookupSlug(slug)
+        const publicSlug = signupProfileSlug(address)
+        // Preserve bare-slug legacy lookup, but only validated profile URLs
+        // can trigger a profile lookup. Never parse a substring of another host.
+        const legacySlug = publicSlug ?? (/^[A-Za-z0-9%._-]{1,120}$/.test(address) ? address : null)
+        if (legacySlug) {
+          profileId = await selfClaims.lookupSlug(legacySlug)
           evidence = 'self-asserted-linkedin-url-v1'
         }
         if (!profileId) {
@@ -687,21 +689,33 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             page({ status: 'found', id: profileId, profileName: detail.profile.name, headline: detail.profile.headline ?? '', listedBy: detail.profile.connections.length, claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token, ...(detail.test === true ? { test: true } : {}) }); return
           }
         }
+        if (!profileId && publicSlug && signupLookup) {
+          const result = await signupLookup.lookup({ owner: session.owner, address })
+          if (result.status === 'found') {
+            session.selfClaim.candidate = { source: 'profile-lookup', slug: result.slug, token: token() }
+            page({ status: 'found', source: 'profile-lookup', profileName: result.profile.name, headline: result.profile.headline,
+              location: result.profile.location, positions: result.profile.positions, education: result.profile.education,
+              claimAction: '/claim-me', claimToken: session.selfClaim.candidate.token }); return
+          }
+          await recordAudit({ event: 'signup_profile_lookup_refused', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), reason: result.code })
+          page({ status: 'none', notice: signupLookupNotice(result.code) }); return
+        }
         page({ status: 'none' }); return
       }
       if (request.method === 'POST' && url.pathname === '/claim-me') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('candidate').length !== 1 || [...input.keys()].some(key => !['csrf', 'candidate'].includes(key))) throw new Error('private_browser_csrf')
         if (!selfClaims || !session.selfClaim?.candidate || input.get('candidate') !== session.selfClaim.candidate.token) throw new Error('self_claim_unavailable')
-        const { profileId, evidence } = session.selfClaim.candidate
+        const { profileId, evidence, source, slug } = session.selfClaim.candidate
         try {
-          const claimed = await selfClaims.claim({ owner: session.owner, issuer: session.selfClaim.identity.issuer, subject: session.selfClaim.identity.subject, emailHash: session.selfClaim.emailHash, profileId, evidence })
-          await recordAudit({ event: claimed.test === true ? 'test_profile_self_claimed' : 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId, evidence, receiptId: claimed.receiptId })
-          if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(profileId, session.owner).catch(() => {})
+          const claimed = source === 'profile-lookup' ? await signupLookup.confirm({ owner: session.owner, slug }) : await selfClaims.claim({ owner: session.owner, issuer: session.selfClaim.identity.issuer, subject: session.selfClaim.identity.subject, emailHash: session.selfClaim.emailHash, profileId, evidence })
+          await recordAudit({ event: source === 'profile-lookup' ? 'signup_profile_self_asserted' : claimed.test === true ? 'test_profile_self_claimed' : 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId: claimed.profileId, evidence: source === 'profile-lookup' ? 'self-asserted-public-profile-v1' : evidence, receiptId: claimed.receiptId })
+          if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(claimed.profileId, session.owner).catch(() => {})
           session.selfClaim = null
           redirect(response, '/profile'); return
         } catch (error) {
           if (error.message !== 'self_claim_conflict') throw error
+          await recordAudit({ event: 'profile_self_claim_refused', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), reason: 'self_claim_conflict' })
           if (session.selfClaim) session.selfClaim.candidate = null
           journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, notice: 'That profile can’t be claimed right now. If it’s yours, contact us.' })); return
         }
@@ -774,6 +788,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           const legacy = await backend.readLegacyProfile()
           if (legacy) Object.assign(profile, legacy.profile)
         }
+        if (!profile.name && signupLookup) { const source = await signupLookup.read(session.owner); if (source) Object.assign(profile, source.profile) }
         session.headline = profile.headline
         const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
         let testClaim = null
@@ -802,14 +817,17 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         let legacy = null
         if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
         if (!profile.name && legacy) Object.assign(profile, legacy.profile)
+        const source = signupLookup ? await signupLookup.read(session.owner) : null
+        if (!profile.name && source) Object.assign(profile, source.profile)
         if (!profile.name) profile.name = session.displayName
         // The QR target is the owner's already-public profile URL: the linked
-        // legacy profile id when one is confirmed, else the newest public-
-        // consent import that is actually in today's published snapshot (a
+        // legacy profile id when one is confirmed, else the stable confirmed
+        // signup id, else the newest public-consent import in today's snapshot (a
         // newer partial or not-yet-projected import never hides an older live
         // one). The code never encodes a private or dead target, and scanning
         // it grants nothing beyond what any visitor can already read.
         const candidates = legacy?.profileId ? [legacy.profileId] : []
+        if (source?.profile.id) candidates.push(source.profile.id)
         candidates.push(...jobs.filter(job => ['indexed', 'partial'].includes(job.payload.status) && job.payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && job.payload.consent.publicProfessionalSearch === true)
           .sort((a, b) => (b.payload.createdAt ?? 0) - (a.payload.createdAt ?? 0) || b.sourceId.localeCompare(a.sourceId))
           .map(job => 'member-import-' + job.sourceId))
@@ -1075,7 +1093,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (signup && request.method === 'GET' && url.pathname === '/export') {
         const jobs = await jobResources()
         const grants = await backend.listAccountGrantIds()
-        const data = await exportAccountData({ owner: session.owner, backend, jobs, grants })
+        const data = await exportAccountData({ owner: session.owner, backend, jobs, grants, signupLookup })
         data.account.accountLabel = session.accountLabel
         data.account.displayName = session.displayName
         // The contact card's details belong to the export; its link does not.
@@ -1099,7 +1117,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
-        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds })
+        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)
