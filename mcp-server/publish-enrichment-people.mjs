@@ -9,7 +9,7 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 const text = (value, required = false) => (required ? typeof value === 'string' && value.length > 0 : value === undefined || typeof value === 'string') && (value === undefined || value.length <= 20000)
 const allow = (value, allowed, required) => value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype && Object.keys(value).every(key => allowed.includes(key)) && required.every(key => text(value[key], true)) && Object.values(value).every(entry => text(entry))
 
-// Rows come from a reviewed offline fetch (for example Unipile profile reads);
+// Rows come from a reviewed offline operator source;
 // this validates the same shape the public store and reader enforce, so a bad
 // rows file fails here in plan mode instead of at the graph.
 export function prepareEnrichmentSnapshot(bytes) {

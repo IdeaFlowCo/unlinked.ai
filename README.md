@@ -50,10 +50,6 @@ unlinked.ai exposes a canonical account-scoped MCP endpoint from the standalone 
 - **Agent Keys:** Historical REST keys start with `ul_`; current Agent setup uses the standalone runtime's account grant.
 - **Strict isolation:** Current MCP grants are scoped to the owner's current and future published imports, same-owner sanitized recovered Connections observations and the published professional People index until revoked. Raw archives, recovered original files, contact email addresses and phone numbers stay out of agent access and model-returned matches. Legacy tool calls and agent API requests are resolved server-side to the authenticated user and can only access that user's profile and direct connections.
 
-## Private Unipile Preview Lab
-
-See the [private lab guide](docs/unipile-lab.md) for tester usage, stage configuration, and preview limitations.
-
 ## Getting Started
 
 For the historical Next.js public pages and archive preparation source routes, install dependencies and run the development server on an available high port:
