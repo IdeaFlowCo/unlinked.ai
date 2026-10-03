@@ -121,7 +121,7 @@ test('open browser signup →1001 ConnectionsZIP→whole-owner search→durable 
   const returned=await signIn();assert.equal(signupCalls,1)
   assert.ok((await (await fetch(endpoint + '/settings',{headers:{Cookie:returned.cookie}})).text()).includes('Connections-only.zip'))
   const post=(path,input)=>fetch(endpoint+path,{method:'POST',redirect:'manual',headers:{Cookie:signed.cookie,Origin:baseUrl},body:new URLSearchParams({csrf:signed.csrf,...input})})
-  const searched=await post('/search-account',{query:'Zephyr engineer'});assert.equal(searched.status,200);assert.match(await searched.text(),/Synthetic1000 Contact/);assert.equal(seen.size,1002)
+  const searched=await post('/search-account',{query:'Zephyr engineer'});assert.equal(searched.status,200);assert.match(await searched.text(),/Synthetic1000 Contact/);assert.equal(seen.size,1001) // Designer is evaluated locally and excluded from an engineer request
   const setup=await post('/setup-account',{});assert.equal(setup.status,200)
   const setupHtml=await setup.text(),encoded=setupHtml.match(/<textarea id="onboarding-agent-configuration"[^>]*>([\s\S]*?)<\/textarea>/)[1]
   const config=JSON.parse(encoded.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&'))

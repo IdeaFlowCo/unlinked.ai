@@ -301,6 +301,24 @@ public-scope grants, `mine` on owner-network grants).
 Response (`mine`): `{ kind, scope, mode, considered, indexed, matches: [{
 assertionId, sourceId, rowId, name, headline?, company?, reason,
 visibility: "owner_private" }] }`.
+Owner ranking treats a requested role as a constraint, rather than inferring it
+from a domain match. For common explicit single-role requests (investor,
+engineer/developer, recruiter, designer, founder, CEO), a local title-evidence
+guard runs before model top-ten selection; domain-only records are omitted.
+Investor evidence includes explicit investing titles or partner/principal/associate/
+managing-director titles at an investment-named company. Founder/CEO titles
+alone, including at a venture-named company, do not establish an investor role.
+Ambiguous titles can therefore be omitted even when the person invests in real life.
+Compound/exclusion queries and other roles remain semantic model ranking.
+Reasons for guarded requests quote bounded supplied title/company fields, with
+explicit gaming/climate evidence or a plain statement when that sector focus
+is not evidenced; a company mention does not independently verify sector focus.
+All other model reasons must follow the same evidence-only rule. No related-people
+bucket is added, and existing grants, tool versions and response keys are unchanged.
+`considered` still counts all owner connections evaluated, including local role
+exclusions. The guard adds no model calls and retains four-way bounded ranking,
+the existing retry policy, context bounds and final live consistency read.
+
 Response (`everyone`): `{ kind, scope, mode, revision, considered,
 lexicalMatches, modelCandidates, matches: [{ id, name, headline?, location?,
 company?, reason }], visibility: "public" }`.

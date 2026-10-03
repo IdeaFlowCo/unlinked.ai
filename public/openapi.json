@@ -535,6 +535,7 @@
     "/api/agent/v1/ai-search": {
       "post": {
         "summary": "Explicit AI people search: scope mine (own network) or everyone (public index, public-scope grant)",
+        "description": "Owner-network AI search requires supplied title/position evidence for a requested role, omits domain-only matches, and states when sector focus is not evidenced; response shapes and grant versions are unchanged.",
         "security": [
           {
             "accountGrant": []
