@@ -28,7 +28,7 @@ test('signed legacy match asks once; CSRF, typed identity injection and anonymou
   assert.equal((await post(new URLSearchParams({csrf,action:'confirm',email:'victim@example.invalid'}))).status,400)
   assert.equal((await post(new URLSearchParams({csrf,action:'confirm'}),'https://other.invalid')).status,403)
   assert.equal(confirms,0)
-  assert.equal((await post(new URLSearchParams({csrf,action:'confirm'}))).headers.get('Location'),'/while-you-wait');assert.equal(confirms,1)
+  assert.equal((await post(new URLSearchParams({csrf,action:'confirm'}))).headers.get('Location'),'/profile');assert.equal(confirms,1)
   assert.equal((await post(new URLSearchParams({csrf,action:'confirm'}))).status,400);assert.equal(confirms,1)
   const profile=await request('/profile',{headers:{Cookie:cookie}});assert.match(await profile.text(),/Recovered Member/)
   assert.equal((await signin()).result.headers.get('Location'),'/')

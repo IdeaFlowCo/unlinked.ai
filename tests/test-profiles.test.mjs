@@ -175,7 +175,7 @@ test('signed in, the test profile is found by its address, shown as a test, clai
   assert.ok(card.includes("Yes, that's me")); assert.ok(!card.includes('Listed by 0 members'))
   const candidate = card.match(/name="candidate" value="([^"]+)"/)[1]
   const claimed = await post('/claim-me', { csrf, candidate })
-  assert.equal(claimed.status, 303); assert.equal(claimed.headers.get('location'), '/while-you-wait')
+  assert.equal(claimed.status, 303); assert.equal(claimed.headers.get('location'), '/profile')
   assert.equal(store.rows.length, 1); assert.equal(store.rows[0].testProfile, true); assert.equal(store.rows[0].subject, 'subject-a')
   assert.ok(audits.some(event => event.event === 'test_profile_self_claimed' && event.profileId === TEST.id))
   assert.ok(!audits.some(event => event.event === 'legacy_profile_self_claimed'))

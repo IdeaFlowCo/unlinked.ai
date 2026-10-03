@@ -105,6 +105,8 @@ The provenance-backed one/two-hop reader, signed HTTP API and account MCP degree
 
 Shared public People/API/AI and backward-compatible account grant behavior are documented in `docs/shared-people-beta.md`; no raw private import or identity data is projected publicly.
 
+Company page facts (`/companies/<name>`) are the static list in `mcp-server/company-metadata.mjs` overlaid by the operator-published graph dataset `curated-companies-v1` (own labels, revoke-based rollback, static fallback on read errors); schema, publisher and rollback are in `docs/company-facts.md`.
+
 Member-to-member connection requests (Connect, `/invitations`) and the per-account notification feed (`/notifications`, header bell and My Network badges filled per request via `fillNavAlerts`) are documented in `docs/member-connections.md`; graph labels `UnlinkedConnectionRequest` and `UnlinkedNotification`.
 
 The versioned agent tool contract — hosted MCP tools plus the grant-authenticated HTTP JSON API under `/api/agent/v1/` (`mcp-server/account-tools.mjs`, `account-api.mjs`), typed error codes, grant-scope version catalog and old-grant compatibility — is `docs/agent-api.md`. Grant tool lists are versioned in `ACCOUNT_GRANT_TOOL_VERSIONS` (`mcp-server/account-grants.mjs`): add a new version to add tools; never mutate an existing version's list.
@@ -116,3 +118,7 @@ The immutable private legacy Storage recovery, owner confirmation/download bound
 Shared browser/agent connection authorization is in `mcp-server/connection-actions.mjs`; opt-in writes and grant update hints are documented in `docs/agent-api.md`.
 
 Invite and notification emails (Resend over `fetch`, `mcp-server/member-email.mjs`) are documented in `docs/email.md`: env `RESEND_API_KEY`, `UNLINKED_EMAIL_SECRET` (required, ≥32 bytes), `UNLINKED_EMAIL_FROM`, `UNLINKED_INVITE_EMAILS_PER_DAY`, `UNLINKED_EMAIL_ENABLED` (off with `false`/`0`). Invite caps are reserved atomically (`reserveInvite`). Never log or render an email address other than the signed-in member's own, a token or the key; `POST /email/unsubscribe` is the only POST exempt from the same-origin check.
+
+Operator-published profile photos (offline `mcp-server/publish-profile-photos.mjs`, read-only store `mcp-server/profile-photos.mjs`) live under `assets/profile-photos.public/` and are served same-origin at `GET/HEAD /people/<id>/photo`; views take `photo` only in the exact `PHOTO_URL` grammar and fall back to initials. Layout, publish/revoke host commands, the `hidden` precedence hook and the ingress Cache-Control map: `docs/profile-photos.md`.
+
+The optional operator-configured signup profile lookup (default off; a private host adapter behind the contract in `mcp-server/signup-profile-lookup.mjs`), its durable quota/cache/confirmed source store and later export precedence are documented in `docs/signup-profile-lookup.md`; keep find-me provenance separate from recovered legacy claims and keep adapter specifics out of this repository.

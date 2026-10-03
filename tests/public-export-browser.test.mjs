@@ -46,7 +46,6 @@ test('public beta bridge is honest, navigable and responsive', { skip: !base }, 
   assert.match(page.text, /Director of Partnerships\s+Northwind Solar/);
   assert.match(page.text, /Open beta. No invitation needed/);
   assert.match(page.text, /Full ZIP preferred; Connections-only also supported/);
-  assert.doesNotMatch(page.text, /Unipile/);
   assert.equal(page.overflow, false);
   axi('open', new URL('/auth/login', base).href);
   page = surface();
