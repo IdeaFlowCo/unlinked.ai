@@ -5,6 +5,8 @@ import { createMemberInvitations, createNeo4jInvitationStore } from './member-in
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
 import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
 import { createContactCards, createNeo4jContactCardStore } from './contact-card.mjs'
+import { createNeo4jCompanyFactsStore } from './company-facts-store.mjs'
+import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
 import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
@@ -34,7 +36,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -106,6 +108,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const contactCardStore = typeof dependencies.createContactCardStore === 'function' ? dependencies.createContactCardStore(driver, 'neo4j') : null
     await contactCardStore?.initialize()
     const contactCards = contactCardStore ? createContactCards({ store: contactCardStore }) : undefined
+    // Operator-published company facts (docs/company-facts.md), merged over the
+    // static list with a 60 s cache; a failed read serves the static list.
+    const companyFactsStore = typeof dependencies.createCompanyFactsStore === 'function' ? dependencies.createCompanyFactsStore(driver, 'neo4j') : null
+    await companyFactsStore?.initialize()
+    const lookupCompanyFacts = companyFactsStore ? createCompanyFacts({ readDataset: () => companyFactsStore.read(COMPANY_DATASET), onError: () => process.stderr.write('unlinked_company_facts_read_failed: serving the static list\n') }) : undefined
     // Invite and notification emails, when the runtime supplies their store.
     // Without RESEND_API_KEY (or with UNLINKED_EMAIL_ENABLED=false) nothing is
     // sent and no address is recorded; unsubscribe links keep working. Without
@@ -365,6 +372,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       memberConnections,
       notifications,
       contactCards,
+      lookupCompanyFacts,
       sessionStore,
       memberEmail,
       accountForProfile,

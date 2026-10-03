@@ -1,7 +1,9 @@
-// Reviewed company facts, fetched once from LinkedIn company profiles via the
-// operator's Unipile workspace on 2026-10-02 and committed as static data. The
-// runtime never calls an external API for these; absent companies simply show
-// the people list alone.
+// Reviewed company facts. The static list below was fetched once from LinkedIn
+// company profiles via the operator's Unipile workspace on 2026-10-02 and is
+// the floor: the operator-published graph dataset `curated-companies-v1`
+// (docs/company-facts.md, mcp-server/publish-company-facts.mjs) is merged over
+// it at runtime. The runtime never calls an external API for these; absent
+// companies simply show the people list alone.
 const COMPANIES = [
   {"name": "Alignment Growth", "tagline": "Growth Equity Investor in Media, Entertainment & Gaming", "description": "Alignment Growth is an investment manager focused on growth-stage, privately held companies across media, entertainment, and gaming.\n\nLeveraging its leadership team’s multi-decade track record of operating, strategy, and dealmaking experience as senior executives of global Fortune 500 companies, Alignment Growth provides value-added capital solutions to entrepreneurs seeking to build world-class businesses and…", "industry": "Investment Management", "employeeCount": 16, "headquarters": "New York, US", "founded": "2021", "linkedinUrl": "https://www.linkedin.com/company/alignment-growth/"},
   {"name": "CASSIUS", "tagline": "We are early-stage technology investors across North America and Europe.", "description": "We are early-stage technology investors across North America and Europe.", "industry": "Venture Capital and Private Equity Principals", "employeeCount": 21, "founded": "2017", "linkedinUrl": "https://www.linkedin.com/company/cassius-family/", "aliases": ["Cassius Family", "Cassius"]},
@@ -19,8 +21,84 @@ const COMPANIES = [
   {"name": "Templum", "tagline": "The new frontier for private markets.", "description": "Templum is the operating infrastructure for the future of private markets.\n\nWe built it because nothing adequate existed.\n\nAs demand for private and alternative investments accelerated, firms were forced to rely on fragmented systems, manual workflows, and expensive legacy technology that struggled to scale.\n\nTemplum was built to solve that.\n\nOur platform unifies the full investment lifecycle across primary…", "industry": "Financial Services", "employeeCount": 33, "headquarters": "Miami, Florida, US", "founded": "2018", "linkedinUrl": "https://www.linkedin.com/company/templuminc/", "aliases": ["Templum, Inc."]}
 ]
 
-const key = value => (typeof value === 'string' ? value : '').normalize('NFKC').toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter(Boolean).join(' ')
-const index = new Map()
-for (const company of COMPANIES) for (const alias of [company.name, ...(company.aliases ?? [])]) index.set(key(alias), company)
+export const COMPANY_DATASET = 'curated-companies-v1'
+export const COMPANY_FIELDS = ['name', 'tagline', 'description', 'industry', 'employeeCount', 'headquarters', 'founded', 'website', 'linkedinUrl', 'aliases']
 
-export const companyFacts = name => { const found = index.get(key(name)); return found ? { ...found } : null }
+export const companyKey = value => (typeof value === 'string' ? value : '').normalize('NFKC').toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter(Boolean).join(' ')
+const keysOf = company => [company.name, ...(company.aliases ?? [])].map(companyKey)
+
+const plain = value => value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype
+const short = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 200
+const long = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 2000
+const https = value => { if (!long(value)) return false; try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password && url.hostname.includes('.') } catch { return false } }
+const LINKEDIN_COMPANY = /^https:\/\/www\.linkedin\.com\/company\/[A-Za-z0-9%._~-]+\/?$/
+const CHECKS = {
+  name: short, tagline: long, description: long, industry: short, headquarters: short, founded: short,
+  employeeCount: value => Number.isSafeInteger(value) && value >= 0,
+  website: https,
+  linkedinUrl: value => typeof value === 'string' && value.length <= 300 && LINKEDIN_COMPANY.test(value),
+  aliases: value => Array.isArray(value) && value.length <= 50 && value.every(short),
+}
+
+// The one whitelist for company rows: the offline publisher, the graph store
+// and the runtime reader all apply it, so a bad row can never reach a page.
+// Every name and alias must normalize to a non-empty key no other row claims.
+export function validateCompanyRows(rows) {
+  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 5000) throw new Error('company_rows_invalid')
+  const claimed = new Set()
+  return rows.map((row, index) => {
+    if (!plain(row) || !short(row.name)) throw new Error(`company_row_invalid:${index}`)
+    for (const [field, value] of Object.entries(row)) if (!COMPANY_FIELDS.includes(field) || !CHECKS[field](value)) throw new Error(`company_row_invalid:${index}:${field}`)
+    for (const key of new Set(keysOf(row))) {
+      if (!key || claimed.has(key)) throw new Error(`company_row_duplicate:${index}`)
+      claimed.add(key)
+    }
+    return Object.fromEntries(COMPANY_FIELDS.filter(field => row[field] !== undefined).map(field => [field, field === 'aliases' ? [...row[field]] : row[field]]))
+  })
+}
+
+// Graph rows win: a static company that shares any normalized name or alias
+// with a graph row is superseded whole. Its other static aliases keep
+// resolving, but to the graph row, so a stale static fact is never served and
+// positions written as e.g. "Smartcar, Inc." still find the published company.
+export function buildCompanyIndex(graphRows = []) {
+  const index = new Map(), graph = new Map(graphRows.flatMap(company => keysOf(company).map(key => [key, company])))
+  for (const company of COMPANIES) {
+    const keys = keysOf(company), winner = keys.map(key => graph.get(key)).find(Boolean) ?? company
+    for (const key of keys) if (!graph.has(key)) index.set(key, winner)
+  }
+  for (const [key, company] of graph) index.set(key, company)
+  return index
+}
+
+const copy = company => company ? { ...company, ...(company.aliases ? { aliases: [...company.aliases] } : {}) } : null
+const staticIndex = buildCompanyIndex()
+
+// Static-only lookup, kept for callers without a graph.
+export const companyFacts = name => copy(staticIndex.get(companyKey(name)))
+
+// Runtime lookup: `readDataset()` returns the published dataset ({ revision,
+// companies }) or null. The merged index is cached for `ttlMs`, one read at a
+// time. Any read or validation failure falls back to the static list (also
+// cached for `ttlMs`, so a down graph is not retried on every page view) and
+// never throws to the company page.
+export function createCompanyFacts({ readDataset, ttlMs = 60000, now = Date.now, onError = () => {} } = {}) {
+  if (typeof readDataset !== 'function') return async name => companyFacts(name)
+  let cached = null, expires = 0, pending = null
+  const refresh = async () => {
+    try {
+      const dataset = await readDataset()
+      return buildCompanyIndex(dataset ? validateCompanyRows(dataset.companies) : [])
+    } catch (error) {
+      try { onError(error) } catch { /* reporting never breaks a page */ }
+      return staticIndex
+    }
+  }
+  return async name => {
+    if (!cached || now() >= expires) {
+      pending ??= refresh().then(index => { cached = index; expires = now() + ttlMs; return index }).finally(() => { pending = null })
+      await pending
+    }
+    return copy(cached.get(companyKey(name)))
+  }
+}
