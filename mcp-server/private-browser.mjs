@@ -1,3 +1,5 @@
+import { exportCalendarIcs, hasCompletedExport } from './export-onboarding.mjs'
+import { renderExportWaiting, exportWaitingBanner, EXPORT_WAIT_SCRIPT } from './private-onboarding-views.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
@@ -122,7 +124,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // Pages a sign-in may return to. Everything else lands on the home route.
   // An OAuth connector authorization request returns to its own validated
   // consent page (the query is re-validated there, never trusted).
-  const returnPath = value => typeof value === 'string' && (/^\/(?:profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:while-you-wait|export-reminder\.ics|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot })
@@ -182,6 +184,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // Live header counts (My Network, the bell) for this response, when the
   // request is a signed-in page view; read once per request.
   const responseAlerts = new WeakMap()
+  const responseWaiting = new WeakMap()
   // Both counts in parallel, each bounded: a slow graph costs a badge, never the page.
   const bounded = (work, fallback) => Promise.race([Promise.resolve().then(work).catch(() => fallback), new Promise(resolve => setTimeout(resolve, 800, fallback).unref?.())])
   const readAlerts = async owner => {
@@ -193,6 +196,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     !/^\/imports\/[a-f0-9]{64}\/status$/.test(pathname) && !/\.[a-z]+$/i.test(pathname) && !['/login', '/logout', '/export', '/auth/callback/ideaflow'].includes(pathname)
   const journey = (response, view, job = null, script = '', status = 200) => {
     view = { ...view, content: fillNavAlerts(view.content, responseAlerts.get(response)) }
+    if (responseWaiting.get(response) && view.title !== 'While LinkedIn prepares your file') view.content = view.content.replace('<main class="journey">', `<main class="journey">${exportWaitingBanner()}`)
     const nonce = token()
     // manifest-src/worker-src cover exactly the same-origin PWA manifest and the
     // static-only service worker; everything else stays locked to 'none'. The
@@ -206,7 +210,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
     response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}'; connect-src 'self'; img-src 'self'${camera ? ' blob:; media-src \'self\' blob:' : ''}; manifest-src 'self'; worker-src 'self'; form-action 'self'${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=()')
-    script = `${TOP_BAR_SCRIPT}${script}`
+    script = `${TOP_BAR_SCRIPT}${EXPORT_WAIT_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -214,8 +218,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   async function establishSession(response, identity, invitationToken = null, next = null) {
-    let claimed
+    let claimed, newOwner = false
     if (invitationToken) {
+      newOwner = !(await resolveOwner(identity))
       if (typeof claimInvitation !== 'function') throw new Error('private_invitation_intent_invalid')
       claimed = await claimInvitation(invitationToken, {
         issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
@@ -224,7 +229,6 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (!claimed || typeof claimed.ownerId !== 'string' || !claimed.ownerId || typeof claimed.userId !== 'string' || !claimed.userId) throw new Error('private_owner_recovery_required')
     }
     let owner = await resolveOwner(identity)
-    let newOwner = false
     if (!owner && !invitationToken && typeof signup === 'function') {
       const provisioned = await signup({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
         verifiedAt: identity.verifiedAt, provenanceReceiptId: identity.provenanceReceiptId, newProfileIntent: true })
@@ -244,11 +248,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
     const accountLabel = identity.verifiedEmail ?? identity.subject
     // The sign-in address, kept privately for notification emails and invite Reply-To while email is on.
-    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner }), false)
+    if (memberEmail && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner }), false)
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
-    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel, displayName, csrf, expiresAt })
+    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, exportOnboarding: newOwner, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel, displayName, csrf, expiresAt })
     if (sessionStore) {
       try { await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() }) } catch { }
     }
@@ -257,7 +261,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     // An invitation link someone signed in to answer comes first; its page then
     // continues to the old-account or find-me step when there is one.
     const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
-    redirect(response, invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
+    redirect(response, invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? (newOwner ? '/while-you-wait' : '/')))
   }
   // Connect rules shared with agent write tools (connection-actions.mjs).
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
@@ -387,6 +391,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
       if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer.owner); if (alerts) responseAlerts.set(response, alerts) }
+      if (signup && viewer && request.method === 'GET' && pageView(url.pathname) && !['/find-me', '/while-you-wait', '/email/unsubscribe', '/oauth/authorize'].includes(url.pathname)) responseWaiting.set(response, await bounded(() => hasCompletedExport(viewer.owner, getBackend).then(done => !done), false))
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline, ...(responseAlerts.has(response) ? { alerts: responseAlerts.get(response) } : {}) } : {}
       if (await servePublicDiscovery(request, response, url.pathname, chrome)) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
@@ -589,6 +594,23 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         else render(response, 'Sign in required', '<a class="action" href="/login">Sign in</a>', 401)
         return
       }
+      if (signup && request.method === 'GET' && url.pathname === '/export-reminder.ics') {
+        response.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': 'attachment; filename="unlinked-export-reminder.ics"' })
+        response.end(exportCalendarIcs()); return
+      }
+      if (signup && request.method === 'GET' && url.pathname === '/while-you-wait') {
+        session.exportOnboarding = false
+        if (await hasCompletedExport(session.owner, getBackend)) { redirect(response, '/network'); return }
+        const reminder = memberEmail ? await bounded(() => memberEmail.settings(session.owner), null) : null
+        journey(response, renderExportWaiting({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, reminder }), null, agentSetupCopyScript()); return
+      }
+      if (signup && memberEmail && request.method === 'POST' && url.pathname === '/export-reminder') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('enabled').length !== 1 || !['on', 'off'].includes(input.get('enabled')) || [...input.keys()].some(key => !['csrf', 'enabled'].includes(key))) throw new Error('private_browser_csrf')
+        await memberEmail.setExportReminder(session.owner, input.get('enabled') === 'on')
+        redirect(response, '/while-you-wait'); return
+      }
+      if (signup && session.exportOnboarding && request.method === 'GET' && ['/', '/profile'].includes(url.pathname)) { session.exportOnboarding = false; redirect(response, '/while-you-wait'); return }
       if (request.method === 'GET' && url.pathname === '/join') { redirect(response, '/'); return }
       if (request.method === 'GET' && url.pathname === '/legacy-account') {
         if (!session.legacyCandidate) { redirect(response, '/profile'); return }
@@ -604,14 +626,15 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(session.legacyCandidate.profileId, session.owner).catch(() => {})
         } else if (input.get('action') !== 'skip') throw new Error('legacy_confirmation_required')
         session.legacyCandidate = null
-        redirect(response, '/profile'); return
+        session.exportOnboarding = false
+        redirect(response, '/while-you-wait'); return
       }
       if (request.method === 'GET' && url.pathname === '/find-me') {
-        if (!selfClaims || !session.selfClaim) { redirect(response, '/profile'); return }
+        if (!selfClaims || !session.selfClaim) { redirect(response, '/while-you-wait'); return }
         journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf })); return
       }
       if (request.method === 'POST' && url.pathname === '/find-me') {
-        if (!selfClaims || !session.selfClaim) { redirect(response, '/profile'); return }
+        if (!selfClaims || !session.selfClaim) { redirect(response, '/while-you-wait'); return }
         const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('linkedinUrl').length > 1 || [...input.keys()].some(key => !['csrf', 'linkedinUrl'].includes(key))) throw new Error('private_browser_csrf')
         const address = (input.get('linkedinUrl') ?? '').trim()
@@ -665,7 +688,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           await recordAudit({ event: claimed.test === true ? 'test_profile_self_claimed' : 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId, evidence, receiptId: claimed.receiptId })
           if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(profileId, session.owner).catch(() => {})
           session.selfClaim = null
-          redirect(response, '/profile'); return
+          session.exportOnboarding = false
+          redirect(response, '/while-you-wait'); return
         } catch (error) {
           if (error.message !== 'self_claim_conflict') throw error
           if (session.selfClaim) session.selfClaim.candidate = null
