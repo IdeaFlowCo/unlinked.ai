@@ -8,8 +8,8 @@ export default function Home() {
         <div className="hero-copy">
           <p className="eyebrow">Your network, remembered</p>
           <h1 id="hero-title">You already know<br /><em>someone.</em></h1>
-          <p className="hero-subtitle">Find people in your LinkedIn connections by name, company, title and when you connected. A private network to ask, then share with your agent.</p>
-          <div className="hero-actions"><a className="public-button public-button-primary" href="https://private.unlinked.ai/login">Start →</a></div>
+          <p className="hero-subtitle">Find people in your LinkedIn connections by name, company, title and when you connected. Your network to search and ask, from Unlinked or your AI agent.</p>
+          <div className="hero-actions"><a className="public-button public-button-primary" href="https://www.unlinked.ai/login">Start →</a></div>
           <p className="feature-caption">Sign in or create your account, then upload your LinkedIn export. Full ZIP preferred; Connections-only also supported.</p>
           <Link className="landing-text-link" href="/import-linkedin">Need your export? Get it from LinkedIn →</Link>
         </div>
@@ -20,7 +20,7 @@ export default function Home() {
           <p className="feature-caption">An example of the fields in a connections export, not a live search result. No contact biography or work history is inferred.</p>
         </aside>
       </section>
-      <aside className="availability-note" role="status"><strong>Open beta. No invitation needed.</strong> Sign-in, upload, AI search and Agent setup currently run at private.unlinked.ai. The Start and Sign in links take you there; this homepage remains on www.unlinked.ai.</aside>
+      <aside className="availability-note" role="status"><strong>Open beta. No invitation needed.</strong> Sign in, upload, AI search and Agent setup all run at www.unlinked.ai.</aside>
       <section className="steps" aria-labelledby="steps-title">
         <div><p className="eyebrow">One file. Your network.</p><h2 id="steps-title">From connections<br />to an answer.</h2><p className="section-copy">Bring your export, sign in with your chosen account, and review your import before asking a question.</p></div>
         <ol>
