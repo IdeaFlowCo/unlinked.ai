@@ -310,10 +310,15 @@ managing-director titles at an investment-named company. Founder/CEO titles
 alone, including at a venture-named company, do not establish an investor role.
 Ambiguous titles can therefore be omitted even when the person invests in real life.
 Compound/exclusion queries and other roles remain semantic model ranking.
-Reasons for guarded requests quote bounded supplied title/company fields, with
-explicit gaming/climate evidence or a plain statement when that sector focus
-is not evidenced; a company mention does not independently verify sector focus.
-All other model reasons must follow the same evidence-only rule. No related-people
+Reasons are conversational model-written one-liners grounded only in supplied
+title/company/headline evidence, aiming for 140 characters or fewer. Unknown
+sector focus is stated plainly (for example, “gaming focus isn't shown in their
+title, worth asking”), without inventing a sector from a brand name. A cheap
+local post-check uses the bounded title/company template only when a reason is
+empty/whitespace or contains a whole-word hedge: likely, possibly, probably,
+perhaps, maybe, potentially or potential (case-insensitive). Good model reasons
+are preserved verbatim; the existing 512-character hard bound remains unchanged.
+The post-check adds no model calls. No related-people
 bucket is added, and existing grants, tool versions and response keys are unchanged.
 `considered` still counts all owner connections evaluated, including local role
 exclusions. The guard adds no model calls and retains four-way bounded ranking,

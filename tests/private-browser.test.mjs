@@ -127,7 +127,7 @@ test('private browser sign-in, action-disclosed upload, durable replay receipt, 
   const receiptHtml = await receiptResponse.text()
   const search = await fetch(`${endpoint}/search`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId, query: 'engineer' }) })
   const searchHtml = await search.text()
-  assert.match(searchHtml, /Title: &quot;Engineer&quot;\. Company: &quot;Synthetic&quot;\./)
+  assert.match(searchHtml, /Observed engineer/)
   assert.equal((await fetch(`${endpoint}/setup`, { method: 'POST', headers: { ...headers, Origin: 'https://wrong.invalid' }, body: new URLSearchParams({ csrf, importId }) })).status, 403)
   const setup = await fetch(`${endpoint}/setup`, { method: 'POST', headers, body: new URLSearchParams({ csrf, importId }) })
   assert.equal(setup.status, 200)

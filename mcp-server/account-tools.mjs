@@ -71,7 +71,7 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_accept_connection_request: 'Opt-in write tool. Accept a connection request the owner received (id from unlinked_list_connection_requests direction received). Connects both accounts.',
   unlinked_ignore_connection_request: 'Opt-in write tool. Ignore a connection request the owner received. Private: the sender is not told and still sees it as pending.',
   unlinked_withdraw_connection_request: 'Opt-in write tool. Withdraw a still-open connection request the owner sent (id from unlinked_list_connection_requests direction sent). The recipient’s notification is removed; asking the same person again waits 21 days.',
-  unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and state unknown sector focus. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
+  unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and give short conversational reasons stating unknown sector focus. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
 })
 
 const DETERMINISTIC_TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])

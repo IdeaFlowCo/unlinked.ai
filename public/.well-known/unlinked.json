@@ -24,7 +24,7 @@
   },
   "data": {
     "ownNetwork": true,
-    "ownerAiSearchRanking": "Owner-network AI search requires supplied title/position evidence for a requested role, omits domain-only matches, and states when sector focus is not evidenced; response shapes and grant versions are unchanged.",
+    "ownerAiSearchRanking": "Owner-network AI search requires supplied title/position evidence for a requested role, omits domain-only matches, and gives short conversational reasons grounded in supplied fields, stating when sector focus is unknown; response shapes and grant versions are unchanged.",
     "globalSearch": true,
     "recoveredLegacyProfileConfirmation": true,
     "rawArchiveAgentAccess": false,

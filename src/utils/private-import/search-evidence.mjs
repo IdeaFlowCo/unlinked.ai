@@ -17,6 +17,7 @@ const sectors = [
   { name: 'Gaming', terms: /\b(?:gaming|games?|esports?)\b/i },
   { name: 'Climate', terms: /\b(?:climate|cleantech|clean tech|decarboni[sz]ation|renewable energy)\b/i },
 ]
+const BANNED_HEDGE = /\b(?:likely|possibly|probably|perhaps|maybe|potentially|potential)\b/i
 
 function quote(value) {
   let text = value
@@ -43,15 +44,18 @@ export function searchEvidence(query) {
   return { role: role.name, sector: sector?.name,
     supports: fields => role.supports ? role.supports(fields) : role.title.test(fields.position ?? ''),
     sectorSupport: fields => sector ? sector.terms.test(fields.position ?? '') || sector.terms.test(fields.company ?? '') : false,
-    reason: fields => {
-      // Quote bounded supplied fields; never reuse model speculation as facts.
-      // Total stays under the existing 512-character reason contract.
-      const facts = [`Title: ${quote(fields.position ?? '')}.`, ...(fields.company ? [`Company: ${quote(fields.company)}.`] : [])]
-      if (sector) facts.push(sector.terms.test(fields.position ?? '') || sector.terms.test(fields.company ?? '')
-        ? `${sector.name} is mentioned in these fields; sector focus is not independently verified.`
-        : `${sector.name} sector focus is not evidenced in the supplied fields.`)
-      if (!sector && role.name === 'investor') facts.push('Investment sector focus is not established by this role evidence.')
-      return facts.join(' ')
-    },
   }
+}
+
+export function checkedSearchReason(reason, fields, query) {
+  // Keep conversational model prose. The bounded record template is only a
+  // fallback for empty or hedged output, with no extra provider call.
+  if (reason.trim() && !BANNED_HEDGE.test(reason)) return reason
+  const sector = sectors.find(value => value.terms.test(query))
+  const facts = [`Title: ${quote(fields.position ?? '')}.`, ...(fields.company ? [`Company: ${quote(fields.company)}.`] : [])]
+  if (sector) facts.push(sector.terms.test(fields.position ?? '') || sector.terms.test(fields.company ?? '')
+    ? `${sector.name} is mentioned in these fields; sector focus is not independently verified.`
+    : `${sector.name} sector focus is not evidenced in the supplied fields.`)
+  if (!sector && searchEvidence(query)?.role === 'investor') facts.push('Investment sector focus is not established by this role evidence.')
+  return facts.join(' ')
 }
