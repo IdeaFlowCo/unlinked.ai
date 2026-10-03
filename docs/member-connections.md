@@ -27,8 +27,8 @@ additive and idempotent; no existing data is touched.
 Rules:
 
 - **Who can be asked:** only a profile with `presence: member`. The account
-  behind it is resolved server-side (`accountForProfile`: a confirmed legacy
-  claim, or the publisher of a member import). Shadow profiles offer
+  behind it is resolved server-side (`accountForProfile`), following the
+  [member identity source contract](signup-linkedin.md#public-projection-and-export-precedence). Shadow profiles offer
   "Invite to Unlinked" instead.
 - **No duplicates:** one open request per pair, enforced by the `openKey`
   uniqueness constraint, and one accepted connection per pair (`connectedKey`).

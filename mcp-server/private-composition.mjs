@@ -138,8 +138,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // The inviter hears that their invite was accepted (and so that the invitee joined).
       onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,
         ...await publicProfileIdFor(value.invitee).then(id => id ? { actorProfileId: id } : {}, () => ({})), subjectId: value.invitationId, dedupeKey: `invite-accepted:${value.invitationId}` }) : undefined }) : undefined
-    // The public profile that stands for an account: its confirmed legacy
-    // profile, else the newest public-consent import it published.
+    // Public identity source precedence is owned by docs/signup-linkedin.md.
     const publicProfileIdFor = async owner => {
       const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
       try {
@@ -156,9 +155,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         return signup ? signup.profile.id : live.length ? 'member-import-' + live[0].id : null
       } finally { await session.close() }
     }
-    // The account behind a public profile: the confirmed owner of a legacy
-    // profile, or the publisher of a member import. Null for shadows, revoked
-    // claims and inactive owners.
+    // Resolve account authority from live source ownership, never from public
+    // profile fields. Shadows, revoked claims and inactive owners have none.
     const accountForProfile = async profileId => {
       if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return null
       const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })

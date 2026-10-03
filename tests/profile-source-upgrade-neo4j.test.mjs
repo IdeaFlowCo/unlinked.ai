@@ -8,6 +8,8 @@ import { createNeo4jSignupLinkedinStore, createSignupLinkedin, unipileConfig } f
 import { createSelfClaims } from '../mcp-server/self-claims.mjs'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 const uri = process.env.UNLINKED_TEST_NEO4J_URI
 const enabled = /^bolt:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uri ?? '') && process.env.UNLINKED_TEST_NEO4J_DRIVER
 
@@ -74,6 +76,8 @@ test('real Neo4j two-session HTTP race: legacy wins atomically, signup stays ret
   assert.equal(after.profiles.find(row => row.id === legacyId).headline, 'Legacy history wins')
   const retained = await signupLinkedin.readForExport(owner)
   assert.equal(retained.retired, true); assert.equal(retained.retiredByProfileId, legacyId); assert.equal(retained.profile.headline, 'Day one stand-in')
+  const raceEvidence = { provider: 'mocked Unipile', providerReads: reads, concurrentConfirmationStatuses: responses.map(response => response.status),
+    publicMembers: after.members, publicProfiles: after.profiles, retiredSourceInOwnerExport: retained }
   await assert.rejects(signupLinkedin.confirm({ owner, slug: standinSlug }), /self_claim_conflict/)
   // Recovered Noos confirmation uses the same wrapped managed transaction.
   // Simulate a failing native callback: the legacy write and retirement undo together.
@@ -88,6 +92,7 @@ test('real Neo4j two-session HTTP race: legacy wins atomically, signup stays ret
   } }
   await assert.rejects(boundary.confirm(owner, legacyId, () => recovered.confirm()), /native confirmation failed/)
   assert.equal((await readMembers()).length, 0); assert.equal((await listOwned()).length, 1)
+  const nativeFailureState = { legacyMembers: await readMembers(), signupSources: await listOwned() }
   // A failure in the retirement extension must also undo the native claim.
   const faultyDriver = new Proxy(driver, { get(target, key) {
     if (key !== 'session') { const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value }
@@ -108,9 +113,17 @@ test('real Neo4j two-session HTTP race: legacy wins atomically, signup stays ret
     try { await session.executeWrite(tx => tx.run('CREATE (:UnlinkedLegacyAccount {ownerId:$ownerId, userId:$userId, profileId:$legacyId, receiptId:$receiptId, revoked:false})', { ...owner, legacyId, receiptId: createHash('sha256').update(tag).digest('hex') })) } finally { await session.close() }
   }), /retirement write failed/)
   assert.equal((await readMembers()).length, 0); assert.equal((await listOwned()).length, 1)
+  const retirementFailureState = { legacyMembers: await readMembers(), signupSources: await listOwned() }
   await boundary.confirm(owner, legacyId, async () => {
     const s = boundary.driver.session()
     try { await s.executeWrite(tx => tx.run('CREATE (:UnlinkedLegacyAccount {ownerId:$ownerId, userId:$userId, profileId:$legacyId, receiptId:$receiptId, revoked:false})', { ...owner, legacyId, receiptId: createHash('sha256').update(tag).digest('hex') })) } finally { await s.close() }
   })
   assert.deepEqual(await listOwned(), []); assert.equal((await readMembers())[0], legacyId)
+  if (process.env.UNLINKED_TEST_EVIDENCE_DIR) {
+    await mkdir(process.env.UNLINKED_TEST_EVIDENCE_DIR, { recursive: true })
+    await writeFile(join(process.env.UNLINKED_TEST_EVIDENCE_DIR, 'neo4j-legacy-upgrade.json'), JSON.stringify({ ...raceEvidence,
+      rollbackChecks: { nativeConfirmationFailure: nativeFailureState, retirementFailure: retirementFailureState },
+      recoveredConfirmation: { publicLegacyId: (await readMembers())[0], activeSignupSources: await listOwned() },
+    }, null, 2))
+  }
 })

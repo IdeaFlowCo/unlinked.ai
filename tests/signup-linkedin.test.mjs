@@ -6,6 +6,8 @@ import { createSelfClaims } from '../mcp-server/self-claims.mjs'
 import { createMemberPublicIndex, projectPublicMemberImport, ENRICHMENT_DATASET } from '../src/utils/public-people/member-projection.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { PUBLIC_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 const owner = { ownerId: 'owner-a', userId: 'user-a' }
 const env = { UNLINKED_UNIPILE_BASE: 'https://unipile.invalid/api/v1', UNLINKED_UNIPILE_KEY: 'test-only-key', UNLINKED_UNIPILE_ACCOUNT_ID: 'shared-test-account' }
 const payload = { first_name: 'Ceyda', last_name: 'Kıran', headline: 'Engineer', location: 'Istanbul', summary: 'Public bio', profile_picture_url: 'data:image/png;secret', email: 'private@example.invalid',
@@ -110,6 +112,14 @@ test('confirmed source appears in public People immediately; newer member export
   const next = await reader.profile({ id: profileId }); assert.equal(next.profile.headline, 'Export wins'); assert.equal(next.profile.connections.length, 1)
   assert.deepEqual(await reader.profile({ id: 'member-import-' + id }), { moved: profileId })
   assert.equal((await read()).profiles.length, 2); assert.equal(snapshot.profiles[0].id, 'member-import-' + id)
+  if (process.env.UNLINKED_TEST_EVIDENCE_DIR) {
+    await mkdir(process.env.UNLINKED_TEST_EVIDENCE_DIR, { recursive: true })
+    await writeFile(join(process.env.UNLINKED_TEST_EVIDENCE_DIR, 'export-profile-precedence.json'), JSON.stringify({
+      beforeExport: first, afterExport: next,
+      oldImportAddress: await reader.profile({ id: 'member-import-' + id }),
+      immutableImportProfileId: snapshot.profiles[0].id,
+    }, null, 2))
+  }
   imports = []; assert.equal((await reader.profile({ id: profileId })).profile.headline, 'Engineer')
   f.store.setActive(false); assert.equal(await reader.profile({ id: profileId }), null)
 })

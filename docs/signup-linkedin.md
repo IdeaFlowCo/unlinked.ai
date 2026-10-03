@@ -55,6 +55,10 @@ Only confirmed sources with an active exact owner/user binding enter the live
 shared People projection. They are members, appear immediately at the stable
 `/people/member-linkedin-<account-hash>` address, and are distinct from recovered
 legacy claim evidence and operator `curated-enrichment-v1` data.
+Server-side account resolution recognizes confirmed legacy profiles, active
+signup sources and public-consent member imports. An account's public identity
+id is its confirmed legacy id, otherwise its active signup id, otherwise its
+newest live public-consent import id; shadows do not confer account authority.
 
 A later public-consent LinkedIn export from that same owner/user supersedes the
 signup profile, using the newest valid profile-bearing import. It keeps the
@@ -64,8 +68,10 @@ remain immutable. Retraction of an import restores the signup source; owner
 revocation excludes both from the live public index. A final source read fence
 checks active source receipts before returning the combined snapshot.
 
-The member card uses this source for identity when no import or legacy profile
-is available. Its QR target must resolve in the published People snapshot.
+The browser `/profile` page and member card display the available uploaded
+profile first, then a live confirmed legacy profile, then the active signup
+source, and finally the sign-in display name. The card's QR target must resolve
+in the published People snapshot.
 Download everything includes the confirmed source and receipt, explicitly labeled
 as public LinkedIn data confirmed by self-assertion. Account deletion erases the
 confirmed source and retained account lookup profile, invalidates unfinished
@@ -91,8 +97,8 @@ shared runtime or production database.
 
 ## Upgrade to a recovered legacy profile
 
-When another session confirms a legacy profile, that legacy profile becomes the
-account’s single public identity. `profile-source-boundary.mjs` extends the
+When another session confirms a non-test recovered legacy profile, that profile
+becomes the account’s single public identity. `profile-source-boundary.mjs` extends the
 Noos managed write transaction for recovered confirmation and the self-claim
 transaction: both acquire the same active owner row lock used by signup
 confirmation, then retire the signup source in the legacy transaction. An error

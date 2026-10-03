@@ -5,6 +5,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+// Opt-in reviewer evidence from executed HTTP responses, using synthetic data.
+async function evidence(name, content) {
+  const directory = process.env.UNLINKED_TEST_EVIDENCE_DIR
+  if (!directory) return
+  await mkdir(directory, { recursive: true })
+  await writeFile(join(directory, name), content)
+}
 
 const snapshot = { state: 'published', complete: true, revision: 'public-v1', profiles: [
   { id: 'p-jl', name: 'Joshua Langsam', headline: 'Managing Director at Raptor Group', positions: [], education: [], skills: [] },
@@ -132,6 +142,7 @@ test('no legacy match performs one mocked Unipile read; source-labelled card con
   const f = await start(t, { displayName: 'New Member', signupLinkedin: service })
   const response = await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })
   const card = await response.text()
+  await evidence('find-me-public-linkedin.html', card)
   assert.equal(reads, 1); assert.ok(card.includes('from your public LinkedIn profile')); assert.ok(card.includes("Yes, that's me"))
   assert.ok(card.includes('&lt;Engineer&gt;')); assert.ok(card.includes('Austin')); assert.ok(card.includes('Builder')); assert.ok(card.includes('Example University'))
   assert.ok(!card.includes('data:image')); assert.ok(!card.includes('synthetic-key')); assert.ok(response.headers.get('content-security-policy').includes("img-src 'self'"))
@@ -142,11 +153,21 @@ test('no legacy match performs one mocked Unipile read; source-labelled card con
   const candidate = repeat.match(/name="candidate" value="([^"]+)"/)[1]
   assert.notEqual((await f.post('/claim-me', { csrf: f.csrf, candidate: stale })).status, 303)
   assert.notEqual((await f.post('/claim-me', { csrf: 'bad', candidate })).status, 303)
-  assert.equal((await f.post('/claim-me', { csrf: f.csrf, candidate })).status, 303)
+  const confirmation = await f.post('/claim-me', { csrf: f.csrf, candidate })
+  assert.equal(confirmation.status, 303)
   assert.equal(f.calls.claims.length, 0)
   const [source] = await service.list()
   const publicPage = await f.request('/people/' + source.profile.id)
-  assert.equal(publicPage.status, 200); assert.ok((await publicPage.text()).includes('&lt;Engineer&gt;'))
+  const publicHtml = await publicPage.text()
+  assert.equal(publicPage.status, 200); assert.ok(publicHtml.includes('&lt;Engineer&gt;'))
+  await evidence('confirmed-public-profile.html', publicHtml)
+  await evidence('signup-http-journey.json', JSON.stringify({
+    provider: 'mocked Unipile', providerReads: reads,
+    lookup: { method: 'POST', path: '/find-me', status: response.status },
+    confirmation: { method: 'POST', path: '/claim-me', status: confirmation.status, location: confirmation.headers.get('location') },
+    publicProfile: { method: 'GET', path: '/people/' + source.profile.id, status: publicPage.status },
+    confirmedSource: source,
+  }, null, 2))
   const own = await f.signed('/profile'); assert.equal(own.status, 200); assert.ok((await own.text()).includes('New Member'))
   assert.ok(f.calls.audits.some(row => row.event === 'public_linkedin_profile_self_asserted'))
 })
@@ -165,6 +186,7 @@ test('provider failure yields friendly name-only fallback without a confirmation
   const service = signupService(async () => new Response('raw secret response', { status: 503 }))
   const f = await start(t, { displayName: 'New Member', signupLinkedin: service })
   const page = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
+  await evidence('provider-failure-fallback.html', page)
   assert.ok(page.includes('continue with your name')); assert.ok(!page.includes('name="candidate"')); assert.ok(!page.includes('raw secret'))
   const next = await f.signed('/profile')
   assert.equal(next.status, 303); assert.equal(next.headers.get('location'), '/while-you-wait')
