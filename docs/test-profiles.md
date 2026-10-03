@@ -1,10 +1,13 @@
 # Test profiles: checking the claim flow without a real person
 
-`/find-me` claims only recovered legacy profiles, and a claim is one-shot: the
+The recovered legacy claim lane in `/find-me` is one-shot: the
 self-asserted `UnlinkedLegacyAccount` row stays even when revoked, and its
 unique `profileId`, `ownerId`, `userId` and `emailHash` then block that profile
 and that account's address from ever self-claiming again. Test profiles let us
 check the whole lane end to end and then undo it completely.
+
+The separate signup profile source is documented in
+[signup profile lookup](signup-profile-lookup.md).
 
 ## What a test profile is
 

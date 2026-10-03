@@ -1,3 +1,4 @@
+import { linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { isTestProfileId, testProfile, testProfileBySlug, TEST_PROFILES_SHA256 } from './test-profiles.mjs'
 
@@ -18,11 +19,27 @@ const EVIDENCE = ['self-asserted-linkedin-url-v1', 'self-asserted-display-name-v
 
 export function createSelfClaims({ driver, publicPeople, slugIndex, database = 'neo4j' }) {
   if (!driver || typeof publicPeople?.read !== 'function' || typeof slugIndex !== 'function') throw Error('self_claims_configuration_required')
+  let normalizedSlugs = null
+  const readSlugs = () => {
+    if (!normalizedSlugs) normalizedSlugs = (async () => {
+      const index = new Map()
+      for (const [key, id] of await slugIndex()) {
+        const slug = linkedinSlug(`https://www.linkedin.com/in/${key}`)
+        if (slug && !index.has(slug)) index.set(slug, id)
+      }
+      return index
+    })().catch(error => { normalizedSlugs = null; throw error })
+    return normalizedSlugs
+  }
   return {
     lookupSlug: async slug => {
       const test = testProfileBySlug(slug)
       if (test) return test.id
-      try { return (await slugIndex()).get(String(slug).toLowerCase()) ?? null } catch { return null }
+      try {
+        const wanted = linkedinSlug(`https://www.linkedin.com/in/${slug}`)
+        if (!wanted) return null
+        return (await readSlugs()).get(wanted) ?? null
+      } catch { return null }
     },
     // Names resolve only against the recovered legacy dataset, never the
     // merged shared snapshot — a member-imported contact with the same

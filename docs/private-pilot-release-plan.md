@@ -80,7 +80,7 @@ Only the server-held signed issuer/subject/email and current owner tuple authori
 For this prototype, signed Ideaflow email is treated as verified, including matches to the 29 legacy email-provider-only accounts.
 A second subject cannot take an already-linked profile, and each owner/user can link only one legacy profile.
 Confirmation receipts replay, while operator revocation permanently fences the link without deleting the existing owner, imports, or immutable recovered public source.
-The linked own profile falls back to the recovered professional profile until an archive profile replaces its display; public member projection reuses the same legacy profile ID.
+Browser profile fallback, public identity and legacy upgrades follow the [profile source contract](signup-profile-lookup.md#public-projection-and-export-precedence).
 The original recovered publication is immutable, and overlays disappear after link/source revocation.
 
 The legacy Storage recovery lane is separate from the hash-only account manifest: an offline operator publishes exact original-object coverage plus sanitized professional assets into a private immutable Noos manifest after all asset readbacks pass.
