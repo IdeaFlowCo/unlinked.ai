@@ -30,7 +30,7 @@ test('real MCP SDK routes natural degree query through signed owner anchor and d
  assert.equal(cursorError.isError,true);assert.equal(models,0)
  linked=false
  const ordinary=await client.callTool({name:'unlinked_search_network',arguments:{query:'Engineer'}})
- assert.ok(!ordinary.isError);assert.equal(JSON.parse(ordinary.content[0].text).matches[0].reason,'Owner network match');assert.equal(models,1)
+ assert.ok(!ordinary.isError);assert.equal(JSON.parse(ordinary.content[0].text).matches[0].reason,'Title: "Engineer". Company: "Archive Co".');assert.equal(models,1)
  assert.equal((await client.callTool({name:'unlinked_search_network',arguments:{query:'Engineer',degree:1}})).isError,true)
  linked=true;revokeOnRead=true;assert.equal((await client.callTool({name:'unlinked_search_network',arguments:{query:'Engineer',degree:2}})).isError,true);assert.ok(reads>=2)
  await assert.rejects(client.callTool({name:'unlinked_search_network',arguments:{query:'Engineer',degree:2}}))

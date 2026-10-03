@@ -58,6 +58,8 @@ See `docs/private-archive-import.md` for the bounded parser/job adapter contract
 - `mcp-server/`: Standalone `@unlinked/mcp-server` package.
 - `public/`: Static discovery assets (`llms.txt`, `AGENTS.md`, `openapi.json`, `robots.txt`, `sitemap.xml`, `.well-known/`).
 
+Owner-role evidence ranking and its compatibility/latency boundaries are documented in `docs/agent-api.md` (AI search). The local guard is `src/utils/private-import/search-evidence.mjs`; fictional regression fixtures and the opt-in model evaluation are in `tests/fixtures/private-search-people.mjs` and `scripts/eval-private-search-ranking.mjs`.
+
 ## Common Commands
 
 ```bash

@@ -87,8 +87,8 @@ async function launch(t, { f, readPublishedSnapshot, complete, limits }) {
     const page = await (await fetch(endpoint, { headers: { Cookie: cookie } })).text()
     return { cookie, csrf: page.match(/name="csrf" value="([^"]+)"/)[1] }
   }
-  const upload = async signed => {
-    const form = new FormData(); form.set('csrf', signed.csrf); form.set('syntheticConsent', 'yes'); form.set('archive', new Blob([csv]), 'Connections.csv')
+  const upload = async (signed, content = csv) => {
+    const form = new FormData(); form.set('csrf', signed.csrf); form.set('syntheticConsent', 'yes'); form.set('archive', new Blob([content]), 'Connections.csv')
     const uploaded = await fetch(`${endpoint}/upload`, { method: 'POST', redirect: 'manual', headers: { Cookie: signed.cookie, Origin: baseUrl }, body: form })
     assert.equal(uploaded.status, 303)
   }
@@ -175,7 +175,7 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   const mine = await (await call(app.endpoint, accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'who is an engineer?', scope: 'mine' }) })).json()
   assert.equal(mine.scope, 'mine')
   assert.equal(mine.considered, 3)
-  assert.equal(mine.matches[0].reason, 'Synthetic ranked reason')
+  assert.equal(mine.matches[0].reason, 'Title: "Engineer". Company: "Analytical".')
   assert.ok(!JSON.stringify(mine).includes('private.invalid'))
   const everyone = await (await call(app.endpoint, accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'graph engineer' }) })).json()
   assert.equal(everyone.scope, 'everyone')
@@ -367,4 +367,31 @@ test('republished index invalidates cursors as typed cursor_invalid; transient b
   assert.deepEqual(await grants.authenticateGrantDetailed({ headers: {} }), { error: 'not_linked' })
   await grants.revoke(owner, issued.grantId)
   assert.deepEqual(await grants.authenticateGrantDetailed(headers), { error: 'grant_revoked' })
+})
+
+test('owner AI HTTP contract preserves keys and provenance while omitting gaming founders and CEOs', async t => {
+  const { searchPeople } = await import('./fixtures/private-search-people.mjs')
+  const quote = value => '"' + value.replaceAll('"', '""') + '"'
+  const content = header + searchPeople.map((person, i) => [person.fields['first name'], 'Fictional', `https://www.linkedin.com/in/fictional-ranking-${i}`, '', person.fields.company, person.fields.position].map(quote).join(',')).join('\n') + '\n'
+  const complete = async ({ candidateIds }) => ({ matches: candidateIds.slice(-10).reverse().map(id => ({ id, reason: 'Likely investing in gaming' })) })
+  const app = await launch(t, { f: fixture(), complete })
+  await app.upload(await app.signIn(), content)
+  const { accessToken } = await app.grants.issueGrant(app.owner)
+  const response = await call(app.endpoint, accessToken, 'ai-search', { method: 'POST', body: JSON.stringify({ query: 'Find investors who invest in gaming companies', scope: 'mine' }) })
+  assert.equal(response.status, 200)
+  const result = await response.json()
+  assert.deepEqual(Object.keys(result).sort(), ['considered', 'indexed', 'kind', 'matches', 'mode', 'scope'])
+  assert.equal(result.kind, 'unlinked_ai_search')
+  assert.equal(result.scope, 'mine')
+  assert.equal(result.considered, searchPeople.length)
+  assert.equal(result.matches[0].name, 'Gaming Investor Fictional')
+  assert.equal(result.matches.length, 4)
+  for (const match of result.matches) {
+    assert.deepEqual(Object.keys(match).sort(), ['assertionId', 'company', 'headline', 'name', 'reason', 'rowId', 'sourceId', 'visibility'])
+    assert.equal(match.visibility, 'owner_private')
+    assert.match(match.assertionId, /^[a-f0-9]{64}$/)
+    assert.match(match.rowId, /^Connections.csv#record=\d+$/)
+    assert.doesNotMatch(match.reason, /likely|possibly/i)
+    assert.doesNotMatch(match.headline, /founder|ceo/i)
+  }
 })

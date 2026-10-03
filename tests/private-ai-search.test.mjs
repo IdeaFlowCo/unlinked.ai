@@ -20,7 +20,7 @@ test('private AI search limits provider context and returns persisted provenance
 test('foreign model IDs fail closed, repeated IDs dedupe to the first reason, deleted/changed publications fail closed', async () => {
   await assert.rejects(createPrivateSearch({ readImport: async () => publication, complete: async () => ({ matches: [{ id: 'd'.repeat(64), reason: 'wrong owner' }] }) })({ importId: id, query: 'engineer' }), /invalid_result/)
   // The provider schema cannot enforce uniqueness; a repeated id keeps its first reason.
-  const deduped = await createPrivateSearch({ readImport: async () => publication, complete: async () => ({ matches: [{ id: rowId, reason: 'one' }, { id: rowId, reason: 'two' }] }) })({ importId: id, query: 'engineer' })
+  const deduped = await createPrivateSearch({ readImport: async () => publication, complete: async () => ({ matches: [{ id: rowId, reason: 'one' }, { id: rowId, reason: 'two' }] }) })({ importId: id, query: 'contact' })
   assert.equal(deduped.matches.length, 1)
   assert.equal(deduped.matches[0].reason, 'one')
   let reads = 0
@@ -123,4 +123,116 @@ test('a round ranks groups concurrently (bounded), retries one transient provide
   let hard = 0
   await assert.rejects(createPrivateSearch({ readImport: async () => indexed, complete: async () => { hard++; throw new Error('private_search_provider_refused') } })({ importId: id, query: 'hard' }), /provider_refused/)
   assert.ok(hard >= 1 && hard <= 4)
+})
+
+// The stub deliberately proposes unsupported investment claims in reverse
+// order. Observable results must be safe even with these bad model reasons.
+const { searchPeople } = await import('./fixtures/private-search-people.mjs')
+const evidencePublication = { ...publication, indexed: searchPeople.length, assertions: searchPeople }
+const badReasons = async ({ candidateIds }) => ({ matches: candidateIds.slice(-10).reverse().map(id => ({ id, reason: 'Likely investing in gaming; possibly covering climate.' })) })
+
+test('role evidence beats domain-only: gaming founders and CEOs are omitted, reasons cite records without hedging, shape stays unchanged', async () => {
+  const result = await createPrivateSearch({ readImport: async () => evidencePublication, complete: badReasons })({ importId: id, query: 'Find investors in my network who invest in gaming companies' })
+  assert.deepEqual(result.matches.map(match => match.fields['first name']), ['Gaming Investor', 'Investment Principal', 'Investment Partner', 'General Investor'])
+  assert.equal(result.matches[0].reason, 'Title: "Investor, gaming and esports". Company: "Example Seed". Gaming is mentioned in these fields; sector focus is not independently verified.')
+  assert.equal(result.matches.at(-1).reason, 'Title: "Investor". Company: "Example Capital". Gaming sector focus is not evidenced in the supplied fields.')
+  for (const match of result.matches) {
+    assert.doesNotMatch(match.reason, /likely|possibly|potential/i)
+    assert.deepEqual(Object.keys(match).sort(), ['assertionId', 'fields', 'reason', 'rowId', 'sourceId', 'subject'])
+  }
+  assert.deepEqual(Object.keys(result).sort(), ['considered', 'importId', 'indexed', 'matches', 'mode'])
+  assert.equal(result.considered, searchPeople.length)
+  assert.equal(result.mode, 'query_time_ai')
+})
+
+for (const [query, names] of [
+  ['Find engineers in gaming', ['Game Engineer']],
+  ['Find recruiters in climate', ['Climate Recruiter']],
+  ['Who is an investor in gaming?', ['Gaming Investor', 'Investment Principal', 'Investment Partner', 'General Investor']],
+  ['Find people who invest in gaming', ['Gaming Investor', 'Investment Principal', 'Investment Partner', 'General Investor']],
+]) test(`title evidence for ${query}`, async () => {
+  const result = await createPrivateSearch({ readImport: async () => evidencePublication, complete: badReasons })({ importId: id, query })
+  assert.deepEqual(result.matches.map(match => match.fields['first name']), names)
+})
+
+test('compound and exclusion queries keep semantic ranking rather than requiring every mentioned role', async () => {
+  for (const query of ['investors or founders in gaming', 'gaming founders, not investors', 'recruiters for engineers', 'Find people hiring engineers', 'Find people without investor experience', 'Find non-engineers in gaming', 'Find people other than investors']) {
+    const result = await createPrivateSearch({ readImport: async () => evidencePublication, complete: async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'A supplied founder title' }] }) })({ importId: id, query })
+    assert.equal(result.matches[0].fields['first name'], 'Studio Founder')
+  }
+})
+
+test('3153 connections are evaluated locally before provider selection; no additional calls, and the final consistency fence stays active', async () => {
+  const assertions = Array.from({ length: 3153 }, (_, i) => ({ ...searchPeople[i === 3152 ? 3 : 0], id: i.toString(16).padStart(64, '0') }))
+  const large = { ...publication, indexed: 3153, assertions }
+  let calls = 0, reads = 0
+  const result = await createPrivateSearch({ readImport: async () => { reads++; return large }, complete: async ({ candidateIds }) => {
+    calls++; assert.deepEqual(candidateIds, [assertions.at(-1).id])
+    return badReasons({ candidateIds })
+  } })({ importId: id, query: 'investors in gaming' })
+  assert.equal(result.considered, 3153)
+  assert.equal(result.matches[0].assertionId, assertions.at(-1).id)
+  assert.equal(calls, 1)
+  assert.equal(reads, 2)
+  reads = 0
+  await assert.rejects(createPrivateSearch({ readImport: async () => ++reads === 1 ? large : { ...large, assertions: [] }, complete: badReasons })({ importId: id, query: 'investors in gaming' }), /private_import_not_found/)
+
+  // Zero role evidence still performs the second read, without calling a model.
+  reads = 0
+  await assert.rejects(createPrivateSearch({ readImport: async () => ++reads === 1 ? { ...large, assertions: assertions.slice(0, -1) } : large, complete: async () => { assert.fail('No role-supported candidates') } })({ importId: id, query: 'investors in gaming' }), /private_import_not_found/)
+})
+
+test('quoted evidence respects the 512-character reason bound even with escaped fields', async () => {
+  const fields = { position: 'Investor ' + '"'.repeat(247), company: 'Gaming ' + '\n'.repeat(249) }
+  const long = { ...publication, assertions: [{ ...publication.assertions[0], fields }] }
+  const result = await createPrivateSearch({ readImport: async () => long, complete: badReasons })({ importId: id, query: 'investors in gaming' })
+  assert.ok(result.matches[0].reason.length <= 512)
+  assert.match(result.matches[0].reason, /Title: "Investor/)
+})
+
+test('investment-company employees need an investment title; founders with explicit angel-investor evidence remain eligible', async () => {
+  const entries = [
+    ['Principal Engineer', 'Example Capital'],
+    ['Associate Software Engineer', 'Example Ventures'],
+    ['Founder & Angel Investor', 'Example Gaming'],
+    ['Investor Relations', 'Example Capital'],
+  ].map(([position, company], i) => ({ ...searchPeople[0], id: (i + 20).toString(16).padStart(64, '0'), fields: { position, company } }))
+  const result = await createPrivateSearch({ readImport: async () => ({ ...publication, assertions: entries }), complete: badReasons })({ importId: id, query: 'investors in gaming' })
+  assert.deepEqual(result.matches.map(match => match.fields.position), ['Founder & Angel Investor'])
+})
+
+test('engineering leadership is role evidence; a gaming CEO without an engineering title is omitted', async () => {
+  const entries = ['Software Engineering Manager', 'Head of Engineering', 'VP of Engineering', 'Founder & CEO'].map((position, i) => ({ ...searchPeople[0], id: (i + 30).toString(16).padStart(64, '0'), fields: { position, company: 'Example Gaming' } }))
+  const result = await createPrivateSearch({ readImport: async () => ({ ...publication, assertions: entries }), complete: badReasons })({ importId: id, query: 'Find engineers in gaming' })
+  assert.deepEqual(result.matches.map(match => match.fields.position), ['VP of Engineering', 'Head of Engineering', 'Software Engineering Manager'])
+})
+
+test('guarded provider requests use empty reasons, keeping grounded explanation work local', async () => {
+  let requests = 0
+  await createPrivateSearch({ readImport: async () => evidencePublication, complete: async input => {
+    const request = responsesRequest(input)
+    // This is the emitted provider schema, rather than prompt source text.
+    assert.deepEqual(request.text.format.schema.properties.matches.items.properties.reason.enum, [''])
+    requests++
+    return { matches: [{ id: input.candidateIds[0], reason: '' }] }
+  } })({ importId: id, query: 'investors in gaming' })
+  assert.equal(requests, 1)
+  const request = responsesRequest({ input: '{}', candidateIds: [rowId] })
+  assert.equal(request.text.format.schema.properties.matches.items.properties.reason.enum, undefined)
+})
+
+test('company names and investor-relations requests are not misread as founder/investor constraints', async () => {
+  const entries = [
+    ['Investor', 'Example Founders Fund'],
+    ['Investor Relations Manager', 'Example Capital'],
+  ].map(([position, company], i) => ({ ...searchPeople[0], id: (i + 40).toString(16).padStart(64, '0'), fields: { position, company } }))
+  for (const [query, index] of [['Find contacts at Example Founders Fund', 0], ['Find investor relations managers', 1]]) {
+    let calls = 0
+    const result = await createPrivateSearch({ readImport: async () => ({ ...publication, assertions: entries }), complete: async ({ candidateIds }) => {
+      calls++; assert.deepEqual(candidateIds, entries.map(row => row.id))
+      return { matches: [{ id: entries[index].id, reason: `Supplied title: ${entries[index].fields.position}` }] }
+    } })({ importId: id, query })
+    assert.equal(calls, 1)
+    assert.equal(result.matches[0].fields.position, entries[index].fields.position)
+  }
 })
