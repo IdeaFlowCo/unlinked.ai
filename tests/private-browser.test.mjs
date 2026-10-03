@@ -75,6 +75,16 @@ test('signup mode does not expose invitation confirmation or account switching r
   const start = await fetch(`${endpoint}/login`, { redirect: 'manual' })
   const callback = await fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic&state=synthetic-state`, { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
   assert.equal(callback.status, 303)
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  for (const method of ['GET', 'POST']) {
+    const findMe = await fetch(`${endpoint}/find-me`, { method, redirect: 'manual', headers: { Cookie: cookie, Origin: baseUrl } })
+    assert.equal(findMe.status, 303)
+    assert.equal(findMe.headers.get('location'), '/profile')
+  }
+  const profile = await fetch(`${endpoint}/profile`, { headers: { Cookie: cookie } })
+  assert.equal(profile.status, 200)
+  assert.ok((await profile.text()).includes('Your profile'))
+  assert.equal((await fetch(`${endpoint}/while-you-wait`, { headers: { Cookie: cookie }, redirect: 'manual' })).status, 404)
   assert.equal(signups, 1)
 })
 

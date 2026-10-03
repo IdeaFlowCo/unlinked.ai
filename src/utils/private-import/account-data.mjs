@@ -7,7 +7,7 @@ const RECEIPT_PROBE_LIMIT = 600
 
 // The whole account in one reviewable JSON document. Reads use the same
 // owner-fenced readers as the pages; nothing bypasses tombstones or consent.
-export async function exportAccountData({ owner, backend, jobs, grants = [], signal }) {
+export async function exportAccountData({ owner, backend, jobs, grants = [], signupLookup, signal }) {
   const imports = []
   for (const resource of jobs) {
     signal?.throwIfAborted()
@@ -37,16 +37,20 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
       if (recovered?.assertions?.length) legacy = { ...(legacy ?? {}), recoveredObservations: recovered.assertions }
     }
   } catch { legacy = { ...(legacy ?? {}), error: 'legacy_records_unavailable' } }
+  const confirmed = signupLookup ? await (typeof signupLookup.readForExport === 'function' ? signupLookup.readForExport(owner) : signupLookup.read(owner)) : null
+  const signupProfile = confirmed ? { profile: confirmed.profile, receiptId: confirmed.receiptId, ...(confirmed.retired ? { retired: true, retiredByProfileId: confirmed.retiredByProfileId } : {}),
+    provenance: { source: 'profile-lookup', selfAsserted: true, confirmation: 'self-asserted-public-profile-v1' } } : null
   return { format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
-    account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy }
+    account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy, signupProfile }
 }
 
-// Permanently tombstones every resource the account produced: assertions,
+// Permanently tombstones the account's operational resources: assertions,
 // observation chunks, source receipts, import receipts, the jobs themselves and
 // agent grants. Tombstones erase the stored payloads and can never be revived.
 // Content is erased first and each job last, so an interrupted run stays
 // discoverable through the job listing and can simply be run again.
-export async function deleteAccountData({ owner, backend, jobs, grantIds = [], signal }) {
+export async function deleteAccountData({ owner, backend, jobs, grantIds = [], signupLookup, signal }) {
+  if (signupLookup) await signupLookup.removeOwner(owner)
   const ownerId = owner.ownerId
   const writeBatch = typeof backend.writeBatch === 'function'
     ? items => backend.writeBatch(items)

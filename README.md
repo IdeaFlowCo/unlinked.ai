@@ -13,6 +13,7 @@ The home page, People search (`/people`, `/network?q=`) and profile pages (`/peo
 Anyone can sign in or create an account through Ideaflow ID; no invitation is needed.
 If the signed Ideaflow email matches one of the privately seeded recovered legacy accounts, the standalone runtime may ask once whether to continue with that old Unlinked profile before showing `/profile`.
 After that explicit recovered-account confirmation, Settings may also list preserved original LinkedIn files for browser-only download; those originals are not exposed through agent grants or public People.
+At `/find-me`, enter your LinkedIn profile URL and review the matching card before choosing **Yes, that's me**. When the optional operator-configured profile lookup is enabled and no legacy profile matches, the card is labeled **from your public LinkedIn profile**; confirming it makes that profile public immediately. If lookup is unavailable, continue with your name and add your export later. See the [signup profile lookup guide](docs/signup-profile-lookup.md) for configuration and source precedence.
 The older private.unlinked.ai host is a rollback/release-planning origin, not the current public onboarding URL.
 
 Prefer the full LinkedIn ZIP; Connections-only is also supported.
