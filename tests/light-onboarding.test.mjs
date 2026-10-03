@@ -4,7 +4,7 @@ import vm from 'node:vm'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
+import { inAppBrowser, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
 import { buildPreviews } from '../mcp-server/private-onboarding-preview.mjs'
 import { ONBOARDING_STYLE } from '../mcp-server/private-onboarding-style.mjs'
 
@@ -531,7 +531,9 @@ test('signed-out home shows the product: search, a way in, profiles to explore a
   assert.match(view.content, /class="button lg" href="\/join">Create my profile<\/a>/)
   assert.match(view.content, /<a href="\/people">or explore profiles first →/)
   assert.match(view.content, /Start my LinkedIn export ↗/)
-  assert.match(view.content, /Email me the link for my computer/)
+  assert.doesNotMatch(view.content, /Email me the link|mailto:/)
+  assert.match(view.content, /It works in Safari or Chrome, not in the LinkedIn app/)
+  assert.doesNotMatch(view.content, /class="notice in-app"/)
   assert.match(view.content, /Ask Claude about your own network/)
   assert.match(view.content, /aria-hidden="true".*Illustration with a fictional person\./s)
   assert.match(view.content, /https:\/\/www\.unlinked\.ai\/mcp/)
@@ -622,4 +624,19 @@ test('Settings opens with one compact account row: who is signed in and a native
   // One row: no heading, card or paragraph of its own.
   assert.doesNotMatch(section, /<h2|class="card"|<p\b/)
   assert.doesNotMatch(section, /<script|onclick=/)
+})
+
+test('landing warns visitors inside another app\'s browser to open Safari or Chrome before exporting', () => {
+  const iphoneSafari = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+  const androidChrome = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'
+  assert.equal(inAppBrowser(iphoneSafari), null)
+  assert.equal(inAppBrowser(androidChrome), null)
+  assert.equal(inAppBrowser(undefined), null)
+  assert.deepEqual(inAppBrowser(`${iphoneSafari} Instagram 350.0.0`), { app: 'Instagram', browser: 'Safari' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [LinkedInApp]/9.30'), { app: 'LinkedIn', browser: 'Safari' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/480.0]'), { app: 'Facebook', browser: 'Chrome' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36'), { app: 'this app', browser: 'Chrome' })
+  const view = renderLanding({ inApp: { app: '<b>x</b>', browser: 'Safari' } })
+  assert.match(view.content, /class="notice in-app" role="note">You’re in &lt;b&gt;x&lt;\/b&gt;’s browser/)
+  assert.match(view.content, /Open in Safari/)
 })
