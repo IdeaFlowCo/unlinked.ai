@@ -141,6 +141,45 @@
         }
       }
     },
+    "/people/{id}/photo": {
+      "get": {
+        "summary": "Read an operator-published profile photo (also HEAD); people summaries carry its versioned URL as `photo` when one exists",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "description": "Content version from the `photo` URL; the exact current version is cacheable for a year.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "image/jpeg, image/png or image/webp with ETag; same-origin resource policy"
+          },
+          "304": {
+            "description": "Not modified (If-None-Match)"
+          },
+          "404": {
+            "description": "No published photo for this id"
+          },
+          "429": {
+            "description": "Photo read rate or concurrency bound"
+          }
+        }
+      }
+    },
     "/api/my-connections": {
       "get": {
         "summary": "Read recorded directed 1/2-hop public paths from the signed member's explicitly confirmed legacy profile",
