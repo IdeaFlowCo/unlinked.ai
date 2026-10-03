@@ -140,6 +140,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .land-steps .land-hint{margin:8px 0 0}
 .unlinked-onboarding .land-steps p b{display:inline;font-size:inherit}
 .unlinked-onboarding .notice.in-app{margin:18px 0 0}
+.unlinked-onboarding .notice.in-app p{margin:0 0 10px}
+.unlinked-onboarding .notice.in-app p.small{margin:10px 0 0}
 .unlinked-onboarding .eyebrow{text-transform:uppercase;letter-spacing:.08em;font-size:13px;font-weight:700;color:var(--brand);margin:0 0 6px}
 .unlinked-onboarding .agent-demo{display:grid;grid-template-columns:.85fr 1.15fr;gap:40px;align-items:center;padding:44px 0 10px}
 .unlinked-onboarding .agent-demo h2{font-size:28px;line-height:1.15;letter-spacing:-.025em;margin:0 0 10px}

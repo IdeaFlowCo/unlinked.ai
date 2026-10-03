@@ -4,7 +4,7 @@ import vm from 'node:vm'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { inAppBrowser, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
+import { inAppBrowser, escapeHref, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
 import { buildPreviews } from '../mcp-server/private-onboarding-preview.mjs'
 import { ONBOARDING_STYLE } from '../mcp-server/private-onboarding-style.mjs'
 
@@ -632,11 +632,30 @@ test('landing warns visitors inside another app\'s browser to open Safari or Chr
   assert.equal(inAppBrowser(iphoneSafari), null)
   assert.equal(inAppBrowser(androidChrome), null)
   assert.equal(inAppBrowser(undefined), null)
-  assert.deepEqual(inAppBrowser(`${iphoneSafari} Instagram 350.0.0`), { app: 'Instagram', browser: 'Safari' })
-  assert.deepEqual(inAppBrowser('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [LinkedInApp]/9.30'), { app: 'LinkedIn', browser: 'Safari' })
-  assert.deepEqual(inAppBrowser('Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/480.0]'), { app: 'Facebook', browser: 'Chrome' })
-  assert.deepEqual(inAppBrowser('Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36'), { app: 'this app', browser: 'Chrome' })
-  const view = renderLanding({ inApp: { app: '<b>x</b>', browser: 'Safari' } })
-  assert.match(view.content, /class="notice in-app" role="note">You’re in &lt;b&gt;x&lt;\/b&gt;’s browser/)
+  assert.deepEqual(inAppBrowser(`${iphoneSafari} Instagram 350.0.0`), { app: 'Instagram', browser: 'Safari', os: 'ios' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [LinkedInApp]/9.30'), { app: 'LinkedIn', browser: 'Safari', os: 'ios' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/480.0]'), { app: 'Facebook', browser: 'Chrome', os: 'android' })
+  assert.deepEqual(inAppBrowser('Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36'), { app: 'this app', browser: 'Chrome', os: 'android' })
+  const view = renderLanding({ inApp: { app: '<b>x</b>', browser: 'Safari', os: 'ios' } })
+  assert.match(view.content, /class="notice in-app" role="note"><p>You’re in &lt;b&gt;x&lt;\/b&gt;’s browser/)
   assert.match(view.content, /Open in Safari/)
+})
+
+test('in-app browsers get tap-to-escape links to Safari or Chrome, with the manual fallback kept', () => {
+  const exportUrl = 'https://www.linkedin.com/mypreferences/d/download-my-data'
+  assert.equal(escapeHref(exportUrl, null), null)
+  assert.equal(escapeHref(exportUrl, { app: 'Instagram', os: 'ios' }), 'instagram://extbrowser/?url=https%3A%2F%2Fwww.linkedin.com%2Fmypreferences%2Fd%2Fdownload-my-data')
+  assert.equal(escapeHref(exportUrl, { app: 'Threads', os: 'ios' }), 'barcelona://extbrowser/?url=https%3A%2F%2Fwww.linkedin.com%2Fmypreferences%2Fd%2Fdownload-my-data')
+  assert.equal(escapeHref(exportUrl, { app: 'Facebook', os: 'ios' }), 'x-safari-https://www.linkedin.com/mypreferences/d/download-my-data')
+  assert.equal(escapeHref(exportUrl, { app: 'TikTok', os: 'ios' }), null)
+  assert.equal(escapeHref(exportUrl, { app: 'Instagram', os: 'android' }), 'intent://www.linkedin.com/mypreferences/d/download-my-data#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=https%3A%2F%2Fwww.linkedin.com%2Fmypreferences%2Fd%2Fdownload-my-data;end')
+  const instagram = renderLanding({ inApp: { app: 'Instagram', browser: 'Safari', os: 'ios' } }).content
+  assert.match(instagram, /href="instagram:\/\/extbrowser\/\?url=https%3A%2F%2Fwww\.unlinked\.ai%2F">Open Unlinked in Safari/)
+  assert.match(instagram, /href="instagram:\/\/extbrowser\/\?url=https%3A%2F%2Fwww\.linkedin\.com[^"]*">Start my LinkedIn export ↗/)
+  assert.match(instagram, /Didn’t open\? Tap ••• and choose <b>Open in Safari<\/b>/)
+  const tiktok = renderLanding({ inApp: { app: 'TikTok', browser: 'Safari', os: 'ios' } }).content
+  assert.doesNotMatch(tiktok, /Open Unlinked in/)
+  assert.match(tiktok, /href="https:\/\/www\.linkedin\.com\/mypreferences\/d\/download-my-data" target="_blank"/)
+  const plain = renderLanding().content
+  assert.doesNotMatch(plain, /instagram:|x-safari|intent:/)
 })
