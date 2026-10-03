@@ -1,12 +1,11 @@
 # Email: invites and notifications
 
-The signed-in runtime sends three kinds of email through
+The signed-in runtime sends two kinds of email through
 [Resend](https://resend.com/docs/api-reference/emails/send-email)'s HTTP API
 (`fetch`, no SDK):
 
 - **Invite emails**, sent on a member's behalf when they give the invitee's
   address on `/invites`.
-- **Export reminder**, default on: one email 48 hours after signup if an export has not completed. See [export-onboarding.md](export-onboarding.md) for eligibility and the durable at-most-once delivery marker.
 - **Notification emails** for the in-app notification feed
   ([member-connections.md](member-connections.md#notifications-mcp-servermember-notificationsmjs)).
 
@@ -86,7 +85,6 @@ Settings:
 | `connection_request_received` | on |
 | `connection_request_accepted` | on |
 | `invite_accepted` | on |
-| `export_reminder` | on (one signup reminder, swept separately) |
 | `profile_claimed` | off (it can reach up to 200 members at once) |
 
 The mailer runs in-process on a 60-second timer (unref'd). Startup never waits
