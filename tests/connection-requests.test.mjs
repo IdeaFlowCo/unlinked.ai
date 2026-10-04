@@ -432,6 +432,26 @@ test('People POST confirms and persists request state; live badge reads are acco
   assert.equal((await notifications.list(jacob))[0].kind, 'connection_request_accepted')
 })
 
+test('authenticated POST search pages retain configured navigation for later badge updates', async t => {
+  const p = await site(t, { complete: async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Matching person' }] }) })
+  const sender = await p.signIn('jacob-subject'), recipient = await p.signIn('ada-subject')
+  for (const scope of ['everyone', 'own']) {
+    const response = await p.post('/search-account', recipient, { query: 'Jacob', scope })
+    assert.equal(response.status, 200)
+    const page = await response.text()
+    assert.match(page, /<a class="nav-ico" href="\/invitations"/)
+    assert.match(page, /<a class="nav-ico" href="\/notifications"/)
+    assert.match(page, /src="\/public-assets\/connection-feedback.js"/)
+  }
+  assert.deepEqual(JSON.parse((await p.get('/api/nav-alerts', recipient)).text), { network: 0, notifications: 0 })
+  assert.equal((await p.post('/connections/request', sender, { profileId: 'ada-profile' })).status, 303)
+  assert.deepEqual(JSON.parse((await p.get('/api/nav-alerts', recipient)).text), { network: 1, notifications: 1 })
+  const disabled = await site(t, { memberConnections: null, notifications: null })
+  const response = await disabled.post('/search-account', await disabled.signIn('ada-subject'), { query: 'Jacob', scope: 'own' })
+  assert.equal(response.status, 200)
+  assert.doesNotMatch(await response.text(), /<a class="nav-ico" href="\/(?:invitations|notifications)"/)
+})
+
 test('connection failures explain expired forms, sessions, missing profiles and server failures without claiming success', async t => {
   const p = await site(t), me = await p.signIn('jacob-subject')
   const bad = await p.post('/connections/request', { ...me, csrf: 'expired' }, { profileId: 'ada-profile' })

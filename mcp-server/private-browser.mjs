@@ -215,7 +215,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const pageView = pathname => !pathname.startsWith('/api/') && !pathname.startsWith('/public-assets/') && !pathname.startsWith('/legacy-files/') && !/^\/notifications\/[^/]+$/.test(pathname) &&
     !/^\/imports\/[a-f0-9]{64}\/status$/.test(pathname) && !/\.[a-z]+$/i.test(pathname) && !['/login', '/logout', '/export', '/auth/callback/ideaflow'].includes(pathname)
   const journey = (response, view, job = null, script = '', status = 200) => {
-    view = { ...view, content: fillNavAlerts(view.content, responseAlerts.get(response)) }
+    const alerts = responseAlerts.get(response) ?? (readers.has(response) ? {
+      ...(memberConnections ? { network: 0 } : {}),
+      ...(notifications ? { notifications: 0 } : {}),
+    } : undefined)
+    view = { ...view, content: fillNavAlerts(view.content, alerts) }
     const nonce = token()
     // manifest-src/worker-src cover exactly the same-origin PWA manifest and the
     // static-only service worker; everything else stays locked to 'none'. The
