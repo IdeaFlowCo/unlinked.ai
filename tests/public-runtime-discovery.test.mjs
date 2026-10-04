@@ -30,4 +30,16 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
   assert.match(meetHtml,/id="confirm-cancel"/)
   assert.doesNotMatch(meetHtml,/location\.assign/)
   const scanner=await(await fetch(endpoint+'/public-assets/browser-card-scanner.js')).text();assert.match(scanner,/from '\/public-assets\/jsqr-module.mjs'/)
+  for (const path of ['/', '/join', '/scan', '/agents', '/meet', '/import-linkedin']) {
+    const page = await fetch(endpoint + path)
+    const markup = await page.text()
+    assert.ok(markup.includes('href="https://worldissuetracker.com/tracker/unlinked-ai"'), path)
+    const nonce = markup.match(/<script nonce="([^"]+)"/)[1]
+    assert.ok(markup.includes(`<script nonce="${nonce}" src="https://worldissuetracker.com/widget/wit-feedback.js" data-tracker-slug="unlinked-ai"`), path)
+    const csp = page.headers.get('content-security-policy')
+    assert.ok(csp.includes(`'nonce-${nonce}' https://worldissuetracker.com`), path)
+    assert.ok(csp.includes("connect-src 'self' https://qmzopiburflputowkuhu.supabase.co https://worldissuetracker.com"), path)
+    assert.ok(csp.includes("img-src 'self' blob:"), path)
+  }
+  assert.equal((await fetch(endpoint+'/meet')).headers.get('permissions-policy'), 'camera=(self), microphone=(self)')
 })

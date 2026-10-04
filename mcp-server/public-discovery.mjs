@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { renderAgents, renderImportGuide, renderMeet, fillMeHeadline, fillNavAlerts, TOP_BAR_SCRIPT } from './private-onboarding-views.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
+import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
 
 const root = new URL('../', import.meta.url)
 const requireFromRoot = createRequire(new URL('package.json', root))
@@ -40,7 +41,7 @@ export const MEET_SCRIPT = `import { BrowserCardScanner } from '/public-assets/b
 const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 // Every page carries the header's Me-menu script under its own nonce.
 // Header counts (`alerts`) are display-only, like the rest of `chrome`.
-const document = (view, { headline, nonce, alerts }) => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="/public-assets/connection-feedback.js"></script>` : ''}</html>`
+const document = (view, { headline, nonce, alerts }) => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="/public-assets/connection-feedback.js"></script>` : ''}${feedbackWidgetTag(nonce)}</html>`
 const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
 
 // Exact, source-controlled anonymous discovery only. Never resolves an owner,
@@ -67,12 +68,12 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     type = 'text/html; charset=utf-8'
     const nonce = randomBytes(24).toString('base64url'), page = { headline: chrome.headline, nonce, alerts: chrome.alerts }
     const formAction = `form-action 'self'${typeof signInOrigin === 'string' && /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/.test(signInOrigin) ? ` ${signInOrigin}` : ''}`
-    response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}'; connect-src 'self'; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+    response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (pathname === '/agents') content = document(renderAgents(chrome), page)
     if (pathname === '/import-linkedin') content = document(renderImportGuide(chrome), page)
     if (pathname === '/meet') {
-      response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
-      response.setHeader('Permissions-Policy', 'camera=(self), microphone=()')
+      response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+      response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
       content = document(renderMeet(chrome), page).replace(/<\/html>$/, '') + `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}</script></html>`
     }
   }
