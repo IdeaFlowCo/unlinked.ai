@@ -2,6 +2,7 @@ import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
+import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
 import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
@@ -99,8 +100,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     })
     await provisioner.initialize()
     await store.initialize()
-    const publicPeople = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
-    await publicPeople?.initialize()
+    const publicPeopleStore = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
+    await publicPeopleStore?.initialize()
+    // Reuses an unchanged published revision instead of re-reading its chunks.
+    const publicPeople = cachePublicPeopleReads(publicPeopleStore, publishedRevisionReader(driver, 'neo4j'))
     const signupLookupStore = publicPeople ? createNeo4jSignupProfileStore(driver) : null
     await signupLookupStore?.initialize()
     // The adapter loads once; any failed check leaves lookups off while

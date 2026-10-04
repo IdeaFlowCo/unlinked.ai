@@ -50,9 +50,20 @@ const requestValue = value => {
 // `reuse: true` keeps the first successful snapshot for this reader's whole
 // life. Use it only for a reader made for one request, so a page that reads
 // the index several times builds it once and sees one consistent revision.
+// Compiled reader state (maps, search tokens, adjacency) per snapshot source.
+// Kept only for sources whose revision string identifies the content
+// (`revisionIdentifiesContent`), so an unchanged revision skips the rebuild
+// while any change to the publication yields a new revision and a new build.
+const compiled = new WeakMap()
+const deepFreeze = value => {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
+  if (!(value instanceof Map) && !(value instanceof Set)) for (const key of Reflect.ownKeys(value)) deepFreeze(value[key])
+  return Object.freeze(value)
+}
+
 // `photoFor(id)` optionally names a same-origin profile photo URL
 // (mcp-server/profile-photos.mjs); summaries and details then carry `photo`.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 3000, reuse = false, photoFor } = {}) {
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor } = {}) {
   if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
@@ -80,6 +91,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       })
       const value = await Promise.race([Promise.resolve().then(() => readPublishedSnapshot({ maxProfiles, maxConnections, maxTextBytes, signal: combined, viewer })), interruption])
       if (!plain(value) || value.state !== 'published' || value.complete !== true || !revisionValid(value.revision) || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !dense(value.profiles) || !Array.isArray(value.connections) || value.connections.length > maxConnections || !dense(value.connections)) unavailable()
+      const cacheable = viewer === null && readPublishedSnapshot.revisionIdentifiesContent === true && plain(value) && revisionValid(value.revision)
+      const cacheKey = cacheable ? [value.revision, maxProfiles, maxConnections, maxTextBytes].join('\u0000') : null
+      if (cacheable && compiled.get(readPublishedSnapshot)?.key === cacheKey) return compiled.get(readPublishedSnapshot).data
       let textBytes = 0
       const text = (input, required = false, nonempty = false) => {
         if (input === undefined && !required) return undefined
@@ -95,8 +109,6 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (!plain(input) || !idValid(input.id) || summaries.has(input.id)) unavailable()
         const summary = { id: input.id, name: text(input.name, true, true) }
         optional(summary, 'headline', input.headline); optional(summary, 'location', input.location)
-        const photo = photoFor?.(input.id)
-        if (typeof photo === 'string' && PHOTO_URL.test(photo)) summary.photo = photo
         const detail = { ...summary }
         optional(detail, 'about', input.about)
         detail.positions = array(input.positions, 100).map(position => {
@@ -143,7 +155,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (!plain(value.aliases) || Object.keys(value.aliases).length > maxProfiles) unavailable()
         for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to) }
       }
-      return { revision: value.revision, ordered, summaries, details, connected, tokens, aliases }
+      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases }
+      // Shared across requests, so no caller can change what another one sees.
+      if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(readPublishedSnapshot, { key: cacheKey, data }) }
+      return data
     } catch {
       unavailable()
     } finally {
@@ -162,6 +177,13 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     if (!plain(decoded) || decoded.v !== 1 || decoded.scope !== hash(scope) || !revisionValid(decoded.revision) || !Number.isSafeInteger(decoded.offset) || decoded.offset < 0) invalid()
     return decoded
   }
+  // Photos have their own live publication pointer and are not identified by
+  // the People revision. Resolve them only for returned rows, never in the index.
+  const withPhoto = row => {
+    if (!photoFor) return row
+    const photo = photoFor(row.id)
+    return Object.freeze({ ...row, ...(typeof photo === 'string' && PHOTO_URL.test(photo) ? { photo } : {}) })
+  }
   function page(rows, cursor, scope, revision) {
     let offset = 0
     if (cursor !== undefined) {
@@ -169,7 +191,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       if (cursor.offset > rows.length) invalid()
       offset = cursor.offset
     }
-    const profiles = rows.slice(offset, offset + pageSize)
+    const profiles = rows.slice(offset, offset + pageSize).map(withPhoto)
     const nextCursor = offset + pageSize < rows.length ? Buffer.from(JSON.stringify({ v: 1, scope: hash(scope), revision, offset: offset + pageSize })).toString('base64url') : undefined
     return { profiles, ...(nextCursor ? { nextCursor } : {}) }
   }
@@ -203,7 +225,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       if (search) { const matcher = createQueryMatcher(search, 'best'); rows = matcher ? rows.filter(person => matcher.test(data.tokens.get(person.id)).all) : [] }
       if (sort === 'detail') rows.sort((a, b) => Number(b.detailLevel === 'detailed') - Number(a.detailLevel === 'detailed'))
       const connections = page(rows, decodedCursor, scope, data.revision)
-      return { profile: { ...data.details.get(id), connectionCount, connectionsTotal: rows.length, connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
+      return { profile: { ...withPhoto(data.details.get(id)), connectionCount, connectionsTotal: rows.length, connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
     // The public summaries for known IDs, so a private row can link to the
     // matching public profile only when one is published.
@@ -212,7 +234,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(idValid)) invalid()
       const data = await snapshot(signal)
       const resolved = id => data.aliases.get(id) ?? id
-      return new Map(ids.filter(id => data.summaries.has(resolved(id))).map(id => [id, data.summaries.get(resolved(id))]))
+      return new Map(ids.filter(id => data.summaries.has(resolved(id))).map(id => [id, withPhoto(data.summaries.get(resolved(id)))]))
     },
     // Whether the public graph already connects two profiles (either direction,
     // merged addresses resolved). Used to avoid offering "Connect" to people
@@ -232,7 +254,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const data = await snapshot(signal)
       const from = data.aliases.get(id) ?? id
       const connected = data.connected.get(from)
-      return connected ? data.ordered.filter(person => connected.has(person.id)) : []
+      return connected ? data.ordered.filter(person => connected.has(person.id)).map(withPhoto) : []
     },
     // Everyone whose public profile ties them to a company, by the company name
     // as it appears on profiles: a position at it, or a headline naming it.
