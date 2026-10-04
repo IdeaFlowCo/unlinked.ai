@@ -159,7 +159,7 @@ test('notification emails respect preferences, skip what was already seen, and u
   const { email, transport, notifications, notificationStore, clock, store } = setup()
   await email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true })
   // Defaults: profile_claimed is off, the other kinds are on.
-  assert.deepEqual((await email.settings(jacob)).preferences, { connection_request_received: true, connection_request_accepted: true, invite_accepted: true, profile_claimed: false })
+  assert.deepEqual((await email.settings(jacob)).preferences, { connection_request_received: true, connection_request_accepted: true, invite_accepted: true, profile_claimed: false, linkedin_import_reminder: true })
   await notifications.notify({ recipient: jacob, kind: 'profile_claimed', actor: grace, actorName: 'Grace', dedupeKey: 'claimed' })
   await email.savePreferences(jacob, ['connection_request_accepted'])
   await request(notifications, jacob, 'Grace', 'received')
@@ -180,7 +180,7 @@ test('notification emails respect preferences, skip what was already seen, and u
   assert.equal(email.inspectUnsubscribe(token).scope, 'member')
   assert.equal((await email.settings(jacob)).preferences.connection_request_accepted, true, 'inspecting changes nothing')
   await email.unsubscribe(token)
-  assert.deepEqual((await email.settings(jacob)).preferences, { connection_request_received: false, connection_request_accepted: false, invite_accepted: false, profile_claimed: false })
+  assert.deepEqual((await email.settings(jacob)).preferences, { connection_request_received: false, connection_request_accepted: false, invite_accepted: false, profile_claimed: false, linkedin_import_reminder: false })
   // Seen in the app before the mailer got to it: settled, not emailed.
   await email.savePreferences(jacob, ['invite_accepted'])
   await notifications.notify({ recipient: jacob, kind: 'invite_accepted', actor: ada, actorName: 'Ada', dedupeKey: 'invite' })
@@ -568,4 +568,132 @@ test('the Resend transport carries the HTTP status and Retry-After (seconds or a
   const later = new Date(Date.now() + 10 * MINUTE).toUTCString()
   await assert.rejects(respond(503, { 'Retry-After': later }).send({ to: 'a@b.co' }), error => error.status === 503 && error.retryAfterMs > 8 * MINUTE && error.retryAfterMs <= 10 * MINUTE)
   await assert.rejects(respond(422, {}).send({ to: 'a@b.co' }), error => error.status === 422 && error.retryAfterMs === null)
+})
+
+
+test('LinkedIn reminders send once at 48 and 72 hours, with the link lifetime and a direct upload action', async () => {
+  const { email, clock, transport } = setup({ hasLinkedInUpload: async () => false })
+  const started = clock.now
+  await email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  clock.now = started + 2 * DAY - 1
+  assert.equal((await email.runImportReminders()).sent, 0)
+  clock.now++
+  assert.equal((await email.runImportReminders()).sent, 1)
+  assert.equal((await email.runImportReminders()).sent, 0)
+  clock.now = started + 3 * DAY - 1
+  assert.equal((await email.runImportReminders()).sent, 0)
+  clock.now++
+  assert.equal((await email.runImportReminders()).sent, 1)
+  assert.equal((await email.runImportReminders()).sent, 0)
+  assert.equal(transport.sent.length, 2)
+  assert.notEqual(transport.sent[0].idempotencyKey, transport.sent[1].idempotencyKey)
+  for (const message of transport.sent) {
+    assert.match(message.text, /3 days \(72 hours\) after the archive is ready/)
+    assert.match(message.text, /saved file does not expire/)
+    assert.match(message.text, /larger data archive.*recommended/)
+    assert.match(message.text, /If the link has expired, request a new export/)
+    assert.ok(message.text.includes(`${origin}/import`))
+    assert.match(message.headers['List-Unsubscribe'], /email\/unsubscribe/)
+  }
+})
+
+test('an uploaded file stops both reminders even while it is still processing', async () => {
+  let uploaded = false
+  const { email, clock, transport } = setup({ hasLinkedInUpload: async member => { assert.deepEqual(member, jacob); return uploaded } })
+  await email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  clock.now += 2 * DAY
+  await email.runImportReminders()
+  uploaded = true
+  clock.now += DAY
+  assert.equal((await email.runImportReminders()).skipped, 1)
+  assert.equal(transport.sent.length, 1)
+  // Removing the upload later cannot re-enroll the same signup.
+  uploaded = false
+  await email.runImportReminders()
+  assert.equal(transport.sent.length, 1)
+  const second = setup({ hasLinkedInUpload: async () => false })
+  await second.email.rememberAddress(ada, { address: 'ada@example.com', verified: true, newAccount: true })
+  await second.email.completeImportReminders(ada)
+  second.clock.now += 2 * DAY
+  assert.equal((await second.email.runImportReminders()).sent, 0)
+})
+
+test('reminder preferences, unsubscribe, verified addresses and the global email switch are respected', async () => {
+  const { email, clock, transport } = setup({ hasLinkedInUpload: async () => false })
+  await email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  await email.rememberAddress(ada, { address: 'ada@example.com', verified: false, newAccount: true })
+  await email.rememberAddress(grace, { address: 'grace@example.com', verified: true, newAccount: true })
+  await email.savePreferences(grace, ['invite_accepted'])
+  clock.now += 2 * DAY
+  await email.runImportReminders()
+  assert.deepEqual(transport.sent.map(message => message.to), ['jacob@example.com'])
+  const token = decodeURIComponent(transport.sent[0].headers['List-Unsubscribe'].match(/t=([^>]+)/)[1])
+  await email.unsubscribe(token)
+  assert.equal((await email.settings(jacob)).preferences.linkedin_import_reminder, false)
+  assert.equal((await email.settings(jacob)).preferences.invite_accepted, true)
+  clock.now += DAY
+  await email.runImportReminders()
+  assert.equal(transport.sent.length, 1)
+  const disabled = setup({ config: emailConfig({ UNLINKED_EMAIL_ENABLED: 'false' }), hasLinkedInUpload: async () => false })
+  await disabled.email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  disabled.clock.now += 2 * DAY
+  assert.equal((await disabled.email.runImportReminders()).sent, 0)
+})
+
+test('returning accounts are not enrolled and restarting late sends only the current reminder with no old backlog', async () => {
+  const { email, clock, transport } = setup({ hasLinkedInUpload: async () => false })
+  await email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true })
+  await email.rememberAddress(ada, { address: 'ada@example.com', verified: true, newAccount: true })
+  clock.now += 3 * DAY
+  await email.runImportReminders()
+  assert.deepEqual(transport.sent.map(message => message.to), ['ada@example.com'])
+  assert.match(transport.sent[0].subject, /before the link expires/)
+  await email.runImportReminders()
+  assert.equal(transport.sent.length, 1)
+  const late = setup({ hasLinkedInUpload: async () => false })
+  await late.email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  late.clock.now += 4 * DAY
+  assert.equal((await late.email.runImportReminders()).sent, 0)
+})
+
+test('reminder retry after restart keeps its exact payload and idempotency key, then persists completion', async () => {
+  const messages = []
+  let fail = true
+  const transport = { async send(value) { messages.push(structuredClone(value)); if (fail) throw new EmailError('email_transport_unreachable'); return { id: 'sent' } } }
+  const { email, clock, store } = setup({ transport, hasLinkedInUpload: async () => false })
+  await email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  clock.now += 2 * DAY
+  assert.equal((await email.runImportReminders()).failed, 1)
+  fail = false; clock.now += 3 * MINUTE
+  const restarted = createMemberEmail({ config: on, transport, store, secret, origin, now: () => clock.now, hasLinkedInUpload: async () => false })
+  assert.equal((await restarted.runImportReminders()).sent, 1)
+  assert.deepEqual(messages[0], messages[1])
+  const again = createMemberEmail({ config: on, transport, store, secret, origin, now: () => clock.now, hasLinkedInUpload: async () => false })
+  assert.equal((await again.runImportReminders()).sent, 0)
+})
+
+test('concurrent mailers sharing recipient state send only one reminder', async () => {
+  const { email, clock, store, transport } = setup({ transport: fakeTransport({ delay: 5 }), hasLinkedInUpload: async () => false })
+  await email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  clock.now += 2 * DAY
+  const other = createMemberEmail({ config: on, transport, store, secret, origin, now: () => clock.now, hasLinkedInUpload: async () => false })
+  await Promise.all([email.runImportReminders(), other.runImportReminders(), email.runImportReminders()])
+  assert.equal(transport.sent.length, 1)
+})
+
+test('upload checks fail closed, permanent rejection settles once, and deleting an account cancels reminders', async () => {
+  const unavailable = setup({ hasLinkedInUpload: async () => { throw Error('backend unavailable') } })
+  await unavailable.email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  unavailable.clock.now += 2 * DAY
+  assert.equal((await unavailable.email.runImportReminders()).failed, 1)
+  assert.equal(unavailable.transport.sent.length, 0)
+  const rejected = setup({ transport: fakeTransport({ fail: 1, error: () => new EmailError('email_transport_status_422', { status: 422 }) }), hasLinkedInUpload: async () => false })
+  await rejected.email.rememberAddress(jacob, { address: 'jacob@example.com', verified: true, newAccount: true })
+  rejected.clock.now += 2 * DAY
+  await rejected.email.runImportReminders(); await rejected.email.runImportReminders()
+  assert.equal(rejected.transport.attempts.length, 1)
+  await rejected.email.removeOwner(jacob)
+  rejected.clock.now += DAY
+  await rejected.email.runImportReminders()
+  assert.equal(rejected.transport.attempts.length, 1)
 })

@@ -10,7 +10,7 @@ export default function ImportLinkedInPage() {
           <p className="eyebrow">Your existing network</p>
           <h1 id="archive-title">Bring your<br /><em>LinkedIn export.</em></h1>
           <p className="hero-subtitle">On a personal computer, in LinkedIn’s “Get a copy of your data” settings, choose the larger download for your complete archive. Full LinkedIn ZIP is preferred; a Connections-only export is also supported.</p>
-          <ol className="export-instructions"><li>Choose the larger archive, or select Connections for a smaller export.</li><li>Wait for LinkedIn’s email. Unlinked cannot detect it.</li><li>Download within 72 hours of the link arriving. Keep the original file.</li></ol>
+          <ol className="export-instructions"><li>Choose the larger archive (recommended), or select Connections for a smaller export.</li><li>Wait for LinkedIn’s email. Unlinked cannot detect it.</li><li>Download within 3 days (72 hours) of LinkedIn’s email, then upload it here. Your saved file does not expire.</li></ol>
           <div className="hero-actions"><a className="public-button public-button-primary" href={LINKEDIN_EXPORT_URL} target="_blank" rel="noopener noreferrer">Open LinkedIn export ↗</a></div>
           <p className="feature-caption">LinkedIn says the larger download arrives within 24 hours and currently lists Connections within 48 hours; delivery can vary. Its export feature is not available on mobile. <a href="https://www.linkedin.com/help/linkedin/answer/a1339364?lang=en" target="_blank" rel="noopener noreferrer">LinkedIn’s export guidance ↗</a></p>
         </div>

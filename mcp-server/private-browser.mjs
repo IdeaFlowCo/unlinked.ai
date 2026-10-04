@@ -1347,6 +1347,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const file = form.get('archive')
         if (!file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name)) throw new Error('private_archive_filename_invalid')
         const receipt = await (backgroundImports ? stageArchive : ingestArchive)({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: dataMode === 'private_live' && readPublishedSnapshot ? PUBLIC_UPLOAD_CONSENT : COMBINED_UPLOAD_CONSENT })
+        if (memberEmail?.completeImportReminders) await bounded(() => memberEmail.completeImportReminders(session.owner), false)
         redirect(response, signup ? '/profile' : `/imports/${receipt.id}`); return
         } finally { uploadBusy = false }
       }

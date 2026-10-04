@@ -9,8 +9,8 @@ const list = value => Array.isArray(value) ? value : []
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString('en-US') : '—'
 const csrfInput = csrf => `<input type="hidden" name="csrf" value="${html(csrf)}">`
 const LINKEDIN_EXPORT = 'https://www.linkedin.com/mypreferences/d/download-my-data'
-const exportHelp = () => `<div class="export-help"><p class="small"><a href="${LINKEDIN_EXPORT}" target="_blank" rel="noopener noreferrer">Don't have your LinkedIn export yet? Request it now ↗</a></p><p class="small">It takes LinkedIn a few minutes for Connections, up to a day for the complete archive. Sign up while you wait.</p></div>`
-const exportSteps = () => '<ol><li>Open LinkedIn’s data download settings on a personal computer.</li><li>Request the larger download for your full archive, or select Connections.</li><li>Download the email link within 72 hours and keep your file.</li></ol>'
+const exportHelp = () => `<div class="export-help"><p class="small"><a href="${LINKEDIN_EXPORT}" target="_blank" rel="noopener noreferrer">Don't have your LinkedIn export yet? Request it now ↗</a></p><p class="small">The complete archive (recommended) is usually ready in about a day; Connections can take up to 48 hours. Sign up while you wait. Download your file within 3 days of LinkedIn’s email, then upload it here.</p></div>`
+const exportSteps = () => '<ol><li>Open LinkedIn’s data download settings on a personal computer.</li><li>Choose “Download larger data archive” (recommended) for your full profile and connections, or select Connections.</li><li>Download your file within 3 days (72 hours) of LinkedIn’s email, then upload it here. Once downloaded, your saved file does not expire.</li></ol>'
 // Keep native POSTs and their CSRF tokens on the current host.
 const localAction = value => typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !/[\\\s\x00-\x1f\x7f#]/.test(value) ? value : null
 const profileLookup = ({ linkedinLookup, lookupResult, csrf }) => {

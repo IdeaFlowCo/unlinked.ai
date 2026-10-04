@@ -1,11 +1,12 @@
 # Email: invites and notifications
 
-The signed-in runtime sends two kinds of email through
+The signed-in runtime sends three kinds of email through
 [Resend](https://resend.com/docs/api-reference/emails/send-email)'s HTTP API
 (`fetch`, no SDK):
 
 - **Invite emails**, sent on a member's behalf when they give the invitee's
   address on `/invites`.
+- **LinkedIn export reminders**, at 48 and 72 hours after signup if no file has been uploaded.
 - **Notification emails** for the in-app notification feed
   ([member-connections.md](member-connections.md#notifications-mcp-servermember-notificationsmjs)).
 
@@ -137,6 +138,38 @@ verified address is ever emailed or used as `Reply-To`. A member who has not
 signed in since email was turned on has no address yet; Settings tells them to
 sign in again. The address appears in no page except the member's own Settings,
 is included in their data export and is deleted with their account.
+
+## LinkedIn export reminders
+
+The same mailer checks new accounts on its 60-second timer and sends at **48
+hours** after signup, then **72 hours** if a file is still missing. Reminders
+use the existing verified sign-in address, sender, transport/backoff,
+unsubscribe links, Settings email choices and account-deletion cleanup; no new
+provider or credential is needed. “Remind me to download and upload my LinkedIn
+export” is on by default. There is no enrollment for older accounts or accounts
+created while email was off.
+
+Before each send the runtime authorizes the owner and checks durable upload
+receipts, including files still processing and recovered original files. A
+successful upload cancels the remaining reminders immediately; a failed upload
+check sends nothing and retries later. An email already in flight can finish
+if an upload happens during its provider request. Turning email off stops all
+reminders; unsubscribe stops this reminder category only.
+
+Each recipient stores an atomic claim and completed stage, so two processes
+cannot send the same stage concurrently. A stable Resend idempotency key and
+signup-anchored unsubscribe token keep retry payloads identical after restart;
+retries stop after 23 hours to stay within Resend’s 24-hour deduplication
+window. Stale claims recover after ten minutes. Missing the first window sends
+only the second reminder, and accounts at least four days old receive no
+backlog. All state remains on the private recipient node and is deleted with
+the account.
+
+The email explains [LinkedIn’s documented 72-hour download window](https://www.linkedin.com/help/linkedin/answer/a1339364/downloading-your-account-data?lang=en)
+and directs the member to `/import`. Signup time is only a reminder anchor:
+Unlinked cannot see when LinkedIn’s email arrives, so the reminder never claims
+an exact expiry date. A downloaded file can be kept and uploaded later; only
+the download link expires. If it has expired, request another export.
 
 ## Preferences and unsubscribe
 

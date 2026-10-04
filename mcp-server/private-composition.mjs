@@ -144,6 +144,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       let lastReport = 0
       memberEmail = createMemberEmail({ config: settings, transport: settings.enabled ? emailTransportFactory({ apiKey: settings.apiKey }) : null, store: emailStore, notificationStore,
         secret: settings.secret, origin: base.origin,
+        hasLinkedInUpload: async owner => {
+          const backend = await getBackend(owner)
+          // A durable upload receipt stops reminders while parsing continues;
+          // original files recovered from an old account count too.
+          return (await backend.listImportJobIds()).length > 0 || (await backend.readLegacyFiles?.())?.objects?.length > 0
+        },
         // Failures carry only a code; at most one audit row per ten minutes.
         onError: event => { if (Date.now() - lastReport < 600000) return; lastReport = Date.now(); return audit({ ...event, at: new Date().toISOString() }) } })
     }

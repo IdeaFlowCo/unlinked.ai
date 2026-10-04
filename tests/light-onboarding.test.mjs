@@ -258,7 +258,7 @@ test('Join and Bring-export offer one quiet LinkedIn export link with safe outbo
     assert.match(links[0][0], /rel="noopener noreferrer"/)
     assert.match(links[0][0], />Don't have your LinkedIn export yet\? Request it now ↗<\/a>/)
     assert.doesNotMatch(links[0][0], /class="button/)
-    assert.match(view.content, /<p class="small">It takes LinkedIn a few minutes for Connections, up to a day for the complete archive\. Sign up while you wait\.<\/p>/)
+    assert.match(view.content, /complete archive \(recommended\).*about a day/); assert.match(view.content, /Download your file within 3 days of LinkedIn’s email/)
   }
   assert.doesNotMatch(renderJoin({ ...account, signedIn: true }).content, /download-my-data/)
   assert.match(renderBringArchive(account).content, /<details><summary>Don’t have your export yet\?<\/summary><ol><li>Open LinkedIn’s data download settings/)
