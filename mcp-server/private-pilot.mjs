@@ -9,6 +9,7 @@ import { createAccountHostedHandler } from './account-hosted.mjs'
 import { createAccountAgentApiHandler } from './account-api.mjs'
 import { createAccountToolService } from './account-tools.mjs'
 import { createOAuthServer } from './oauth-server.mjs'
+import { warmPublicPeopleIndex } from './public-people-warmup.mjs'
 
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
@@ -57,6 +58,9 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
   server.requestTimeout = 120000
   server.headersTimeout = 15000
   server.maxHeadersCount = 32
+  // Finish the cold public index build before accepting the first visitor.
+  // Best effort: publication failure leaves account routes available.
+  await warmPublicPeopleIndex({ readPublishedSnapshot })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve) })
   return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => new Promise(resolve => server.close(resolve)) }
 }
