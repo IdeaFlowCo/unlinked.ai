@@ -20,7 +20,7 @@ import { lstat, mkdir, open, readFile, readdir, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
-import { createIdeaflowLogin } from './private-browser.mjs'
+import { createIdeaflowLogin, autoSignInEnabled } from './private-browser.mjs'
 import { CLIENT_ID_PATTERN } from './account-api.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
@@ -54,7 +54,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // UNLINKED_EMAIL_FROM, UNLINKED_INVITE_EMAILS_PER_DAY.
   emailEnv = process.env, emailTransportFactory = createResendTransport, emailLog = line => process.stderr.write(`${line}\n`),
   // Optional signup profile lookup (docs/signup-profile-lookup.md): UNLINKED_PROFILE_LOOKUP_*.
-  profileLookupEnv = process.env, profileLookupLoader = loadProfileLookupAdapter }) {
+  profileLookupEnv = process.env, profileLookupLoader = loadProfileLookupAdapter,
+  // Automatic sign-in kill switch: UNLINKED_AUTO_SIGNIN=off.
+  autoSignInEnv = process.env }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : networkMode === 'isolated-container' && bolt.hostname === 'graph' && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -382,6 +384,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       },
     }) : undefined
     return { login, getBackend, close, audit, backgroundImports: true,
+      // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
+      // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
+      autoSignIn: autoSignInEnabled(autoSignInEnv),
       readPublishedSnapshot,
       // Operator-published photos (publish-profile-photos.mjs), read-only here.
       // No member hide-photo choice exists yet; when it does, pass it as
