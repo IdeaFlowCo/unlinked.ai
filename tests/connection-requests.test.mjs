@@ -446,7 +446,7 @@ test('authenticated POST search pages retain configured navigation for later bad
   assert.deepEqual(JSON.parse((await p.get('/api/nav-alerts', recipient)).text), { network: 0, notifications: 0 })
   assert.equal((await p.post('/connections/request', sender, { profileId: 'ada-profile' })).status, 303)
   assert.deepEqual(JSON.parse((await p.get('/api/nav-alerts', recipient)).text), { network: 1, notifications: 1 })
-  const disabled = await site(t, { memberConnections: null, notifications: null })
+  const disabled = await site(t, { memberConnections: undefined, notifications: undefined, complete: async () => ({ matches: [] }) })
   const response = await disabled.post('/search-account', await disabled.signIn('ada-subject'), { query: 'Jacob', scope: 'own' })
   assert.equal(response.status, 200)
   assert.doesNotMatch(await response.text(), /<a class="nav-ico" href="\/(?:invitations|notifications)"/)

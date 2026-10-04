@@ -309,9 +309,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (next === '/notifications') return `/notifications?notice=${encodeURIComponent(code)}`
     return `/invitations?${next === '/invitations?tab=sent' ? 'tab=sent&' : ''}notice=${encodeURIComponent(code)}`
   }
-  // AI picks are a POST result; their row forms return to the plain listing for the same words.
   const connectionPost = request => request.method === 'POST' && /^\/connections\/(request|respond|withdraw|remove)$/.test(new URL(request.url, base).pathname)
   const connectionFailure = (response, message, status = 400) => render(response, 'Connection request not completed', `<p>${html(message)}</p><p><a href="/network">Return to People</a> · <a href="/invitations">Check your invitations</a> · <a href="/login">Sign in with Ideaflow</a></p>`, status)
+  // AI picks are a POST result; their row forms return to the plain listing for the same words.
   const searchReturn = query => typeof query === 'string' && query.trim() && query.length <= 200 ? `/network?q=${encodeURIComponent(query.trim())}` : '/network'
   // Connect controls for listing rows: members get their relation (one batched
   // read), imported profiles not on Unlinked yet get an invite link.

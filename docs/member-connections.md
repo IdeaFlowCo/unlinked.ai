@@ -73,18 +73,14 @@ There are two read states. `seenAt` is set when the member opens
 item (`/notifications/<id>` marks it read and redirects) or press "Mark all as
 read"; until then the item stays highlighted.
 
-**Email:** `NOTIFICATION_KINDS[kind].email` is whether a kind is emailed by
-default; members choose per kind in Settings. The in-process mailer
-(`mcp-server/member-email.mjs`) claims records without `emailedAt`, sends one
-email or digest per member at most every 15 minutes, and sets `emailedAt`
-exactly once (`emailOutcome` is `sent` or `skipped`). It is off without
-`RESEND_API_KEY` or with `UNLINKED_EMAIL_ENABLED=false`. See [email.md](email.md).
+**Email:** [email.md](email.md#notification-emails) owns notification email
+preferences, delivery timing, suppression and runtime configuration.
 
 ## Routes
 
 | Route | What it does |
 |---|---|
-| `GET /people/<id>` | Shows Connect / Pending + Withdraw / Accept + Ignore / Connected / This is you; signed-out visitors get "Sign in to connect" |
+| `GET /people/<id>` | Shows the shared connection controls described below; signed-out visitors get "Sign in to connect" |
 | `POST /connections/request` | `profileId`, optional `note`, optional `next`. Returns to the profile with `?connect=<code>` or a validated network listing with `?notice=<code>` |
 | `POST /connections/respond` | `id`, `action=accept\|ignore`, optional `next` |
 | `POST /connections/withdraw` | `id`, optional `next` |
@@ -98,7 +94,8 @@ All POSTs check the session CSRF token and the same-origin `Origin` header.
 The header shows My Network (pending requests received) and a bell (unseen
 notifications) between the main links and the Me menu. They are filled per
 request through `NAV_ALERTS_SLOT` / `fillNavAlerts`; an unconfigured feature
-shows no icon.
+shows no icon. See [Browser feedback and badge refresh](#browser-feedback-and-badge-refresh)
+for updates on already-open pages.
 
 ## Agents
 
@@ -111,7 +108,7 @@ owns the read tools, explicit opt-in write scope and grant compatibility.
 
 ## Connection controls and removal
 
-People rows show Connect, Pending + Withdraw, Accept + Ignore, Connected, or Invite, with the same shared rules as profiles. `/network?connected=1&presence=member` (also via signed-in `/people`) lists only your connected real members, with member/shadow/all counts and both graph directions.
+People rows and profiles share Connect, Accept + Ignore, Connected, or Invite controls; outgoing requests use the pending control described in [Browser feedback and badge refresh](#browser-feedback-and-badge-refresh). `/network?connected=1&presence=member` (also via signed-in `/people`) lists only your connected real members, with member/shadow/all counts and both graph directions.
 
 Either participant can remove an accepted member request through `POST /connections/remove`, after the profile/row confirmation. The request becomes `removed`, releases its pair key and removes the agreed edge from both accounts; no notification is sent. A fresh request can reconnect them when no independent imported edge still connects their profiles. Accepted off-platform invite connections also offer removal (their link is revoked). Removal captures the pair’s active request and accepted invitation IDs, then claims the exact selected accepted agreement with a store compare-and-set before settling only those captured agreements. The claim atomically stores those IDs on the selected agreement; either participant can resume an incomplete removal after a store failure, using only its original IDs. Completion closes that retry authorization. A stale duplicate cannot touch a fresh reconnection. Settlement retracts obsolete request notifications and imposes no withdrawal cooldown. Pair reads include every active request and the latest withdrawal per sender regardless of removed history. Reconnecting requires a fresh request and acceptance. Imported observations and claimed profiles remain independent provenance and are preserved. A profile connected by an imported observation can therefore still show Connected and remain in the connections filter after removal; that observation does not offer Remove.
 
