@@ -100,3 +100,10 @@ The isolated private Noos adapter, bounded publication journal, OIDC browser con
 
 See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/login` starts the current Ideaflow ID path in the standalone runtime; the Next.js `/auth/login` and `/auth/signup` pages remain local/historical source routes.
 The standalone runtime includes durable profile-first archive processing, owner-wide multi-import browsing/search, browser-only recovered-original downloads and account-scoped MCP grants. The Next.js app still retains historical/public source routes rather than hosting that runtime.
+
+The canonical landing page gives “Start my LinkedIn export” the same prominence
+as “Create my profile.” Opening LinkedIn changes the export link to a checked
+“Export page opened” state, remembered in that browser for four days even before
+sign-in. This records only opening the settings page, never a confirmed export
+request, account identity or the LinkedIn email’s arrival. Browser storage is
+best-effort; the native outbound link works without JavaScript or storage.
