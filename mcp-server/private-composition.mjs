@@ -148,7 +148,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           const backend = await getBackend(owner)
           // A durable upload receipt stops reminders while parsing continues;
           // original files recovered from an old account count too.
-          return (await backend.listImportJobIds()).length > 0 || (await backend.readLegacyFiles?.())?.objects?.length > 0
+          for (const id of await backend.listImportJobIds()) {
+            const receipt = await backend.readResource('import', id)
+            if (receipt && !receipt.deleted && receipt.sourceOwnerId === owner.ownerId && receipt.payload?.origin?.kind !== 'added-person') return true
+          }
+          return (await backend.readLegacyFiles?.())?.objects?.length > 0
         },
         // Failures carry only a code; at most one audit row per ten minutes.
         onError: event => { if (Date.now() - lastReport < 600000) return; lastReport = Date.now(); return audit({ ...event, at: new Date().toISOString() }) } })

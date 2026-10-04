@@ -150,7 +150,9 @@ export” is on by default. There is no enrollment for older accounts or account
 created while email was off.
 
 Before each send the runtime authorizes the owner and checks durable upload
-receipts, including files still processing and recovered original files. A
+receipts, including files still processing and recovered original files. Internal
+receipts from manually adding a person and deleted receipts do not count as a
+LinkedIn upload. A
 successful upload cancels the remaining reminders immediately; a failed upload
 check sends nothing and retries later. An email already in flight can finish
 if an upload happens during its provider request. Turning email off stops all

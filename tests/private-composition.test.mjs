@@ -223,10 +223,13 @@ test('a missing or short UNLINKED_EMAIL_SECRET disables email with one non-secre
   }
 })
 
-test('composed reminders stop for processing receipts and confirmed recovered originals', async t => {
-  for (const uploaded of ['none', 'processing', 'recovered']) {
+test('composed reminders ignore manual people and deleted receipts, and stop for uploads and recovered originals', async t => {
+  for (const uploaded of ['none', 'manual-person', 'deleted', 'processing', 'recovered']) {
     const { options, state } = await fixture(t)
-    state.importJobs = uploaded === 'processing' ? ['durable-processing-job'] : []
+    state.importJobs = ['manual-person', 'deleted', 'processing'].includes(uploaded) ? ['b'.repeat(64)] : []
+    if (uploaded === 'manual-person') state.resource.payload.origin = { kind: 'added-person' }
+    if (uploaded === 'deleted') state.resource.deleted = true
+    const missingUpload = ['none', 'manual-person', 'deleted'].includes(uploaded)
     const store = createMemoryEmailStore(), sent = []
     const link = { profileId: '00000000-0000-4000-8000-000000000002', receiptId: 'confirmed-receipt', sourceSha256: 'a'.repeat(64) }
     const modules = { ...options.modules,
@@ -258,9 +261,9 @@ test('composed reminders stop for processing receipts and confirmed recovered or
     await runtime.memberEmail.rememberAddress(member, { address: 'member@example.invalid', verified: true, newAccount: true })
     store.recipients.get(accountKey(member)).accountCreatedAt -= 48 * 60 * 60 * 1000
     const result = await runtime.memberEmail.runImportReminders()
-    assert.equal(result.sent, uploaded === 'none' ? 1 : 0)
-    assert.equal(result.skipped, uploaded === 'none' ? 0 : 1)
-    assert.equal(sent.length, uploaded === 'none' ? 1 : 0)
+    assert.equal(result.sent, missingUpload ? 1 : 0)
+    assert.equal(result.skipped, missingUpload ? 0 : 1)
+    assert.equal(sent.length, missingUpload ? 1 : 0)
     if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `composed-reminder-${uploaded}.json`), JSON.stringify({ boundary: 'Real runtime composition and owner-fenced recovery reader; injected graph/store/transport contracts, synthetic account.', durableUpload: uploaded, atSignupHours: 48, result, deliveredSubjects: sent.map(message => message.subject), persistedStage: store.recipients.get(accountKey(member)).importReminderStage }, null, 2))
     await runtime.close()
   }
