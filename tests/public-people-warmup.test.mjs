@@ -30,11 +30,15 @@ const options = port => ({ baseUrl: 'https://pilot.invalid', port,
 
 test('startup warms before listening and first public navigation retains live revocation checks', async t => {
   const port = await freePort(), entered = deferred(), release = deferred()
-  let reads = 0, active = true
+  let reads = 0, active = true, inspections = 0, revision = 'warmup-v1', name = 'Warm Person'
   const readPublishedSnapshot = async ({ viewer }) => {
     assert.equal(viewer, null); reads++
     if (reads === 1) { entered.resolve(); await release.promise }
-    return active ? snapshot() : null
+    if (!active) return null
+    const value = snapshot()
+    value.revision = revision; value.profiles[0].name = name
+    Object.defineProperty(value.profiles[0], 'positions', { enumerable: true, get() { inspections++; return [] } })
+    return value
   }
   readPublishedSnapshot.revisionIdentifiesContent = true
   const starting = startPrivatePilot({ ...options(port), readPublishedSnapshot })
@@ -45,9 +49,17 @@ test('startup warms before listening and first public navigation retains live re
   const runtime = await starting
   t.after(() => runtime.stop())
   assert.equal(reads, 1)
+  const coldInspections = inspections
+  assert.ok(coldInspections > 0)
   const first = await request(port, '/people')
   assert.equal(first.status, 200); assert.match(first.body, /Warm Person/)
   assert.equal(reads, 2)
+  assert.equal(inspections, coldInspections, 'first navigation must reuse the startup compilation')
+  revision = 'warmup-v2'; name = 'New Publication'
+  const updated = await request(port, '/people')
+  assert.equal(updated.status, 200); assert.match(updated.body, /New Publication/)
+  assert.doesNotMatch(updated.body, /Warm Person/)
+  assert.ok(inspections > coldInspections, 'changed publication must compile immediately')
   active = false
   const revoked = await request(port, '/api/people')
   assert.equal(revoked.status, 503)
