@@ -138,7 +138,8 @@
           "503": {
             "description": "Index unavailable"
           }
-        }
+        },
+        "description": " Public summaries and profiles include detailLevel (basic or detailed), derived only from visible content independently of membership. Profile connectionCount is the full published count and connectionsTotal is the current filtered count. Browser-only connections browsing is /people/{id}/connections?q=...&sort=detail|name; API cursor ordering remains alphabetical."
       }
     },
     "/people/{id}/photo": {
@@ -1242,7 +1243,7 @@
             "authorizationUrl": "https://www.unlinked.ai/oauth/authorize",
             "tokenUrl": "https://www.unlinked.ai/oauth/token",
             "scopes": {
-              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile’s recorded paths, and (where available) your connection requests and notifications.",
+              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile\u2019s recorded paths, and (where available) your connection requests and notifications.",
               "people": "Search and read the published People index on Unlinked (public professional profiles only).",
               "connections": "Send connection requests to members, and accept, ignore or withdraw your connection requests, under the same rules and daily limits as the site."
             }
