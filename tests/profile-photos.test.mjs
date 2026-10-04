@@ -237,7 +237,7 @@ test('GET/HEAD /people/<id>/photo serves published photos same-origin with nosni
   }
   assert.equal((await request(`/people/${C}/photo`, { method: 'HEAD' })).status, 404)
   assert.equal((await request(`/people/${A}/photo`, { method: 'PUT' })).status, 405)
-  assert.equal((await request(`/people/${A}`, { method: 'HEAD' })).status, 405)
+  assert.equal((await request(`/people/${A}`, { method: 'HEAD' })).status, 200)
 })
 
 test('without a photo store the photo route does not exist and pages keep initials', async t => {

@@ -128,3 +128,7 @@ The optional operator-configured signup profile lookup (default off; a private h
 ## Connection browsing and page depth
 
 Public People summaries expose detailLevel (basic or detailed), derived from visible content independently of membership. Profile pages link to /people/{id}/connections for search and richer-first or alphabetical browsing of published connections. See docs/connection-browsing.md in source.
+
+## Connector-free web search
+
+Connector-free public search and public HEAD behavior are owned by [docs/public-directory.md](docs/public-directory.md); renderer: `mcp-server/public-web-search.mjs`.

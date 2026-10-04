@@ -113,6 +113,38 @@
             "description": "Published complete index unavailable"
           }
         }
+      },
+      "head": {
+        "summary": "Probe public People status and JSON headers without a response body",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Public route headers without a response body"
+          },
+          "400": {
+            "description": "Invalid query/cursor"
+          },
+          "429": {
+            "description": "Public read rate or concurrency bound"
+          },
+          "503": {
+            "description": "Published complete index unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/paths/~1api~1people/get/parameters/0"
+          },
+          {
+            "$ref": "#/paths/~1api~1people/get/parameters/1"
+          },
+          {
+            "$ref": "#/paths/~1api~1people/get/parameters/2"
+          },
+          {
+            "$ref": "#/paths/~1api~1people/get/parameters/3"
+          }
+        ]
       }
     },
     "/api/people/{id}": {
@@ -140,6 +172,26 @@
           }
         },
         "description": " Public summaries and profiles include detailLevel (basic or detailed), derived only from visible content independently of membership. Profile connectionCount is the full published count and connectionsTotal is the current filtered count. Browser-only connections browsing is /people/{id}/connections?q=...&sort=detail|name; API cursor ordering remains alphabetical."
+      },
+      "head": {
+        "summary": "Probe public People status and JSON headers without a response body",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Public route headers without a response body"
+          },
+          "404": {
+            "description": "Profile absent from complete publication"
+          },
+          "503": {
+            "description": "Index unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/paths/~1api~1people~1{id}/get/parameters/0"
+          }
+        ]
       }
     },
     "/people/{id}/photo": {
@@ -1214,6 +1266,99 @@
           },
           "503": {
             "description": "Upstream unavailable"
+          }
+        }
+      }
+    },
+    "/search-public": {
+      "get": {
+        "summary": "Search published professional People as compact HTML without a connector",
+        "security": [],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "best",
+                "exact"
+              ],
+              "default": "best"
+            }
+          },
+          {
+            "name": "presence",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "member",
+                "shadow"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public-only HTML, up to 50 summaries and next-page link"
+          },
+          "400": {
+            "description": "Invalid public search input"
+          },
+          "429": {
+            "description": "Public request capacity exceeded; Retry-After supplied"
+          },
+          "503": {
+            "description": "Published People unavailable"
+          }
+        }
+      },
+      "head": {
+        "summary": "Probe public search status and HTML headers without a response body",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/paths/~1search-public/get/parameters/0"
+          },
+          {
+            "$ref": "#/paths/~1search-public/get/parameters/1"
+          },
+          {
+            "$ref": "#/paths/~1search-public/get/parameters/2"
+          },
+          {
+            "$ref": "#/paths/~1search-public/get/parameters/3"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public route headers without a response body"
+          },
+          "400": {
+            "description": "Invalid public search input"
+          },
+          "429": {
+            "description": "Public request capacity exceeded; Retry-After supplied"
+          },
+          "503": {
+            "description": "Published People unavailable"
           }
         }
       }

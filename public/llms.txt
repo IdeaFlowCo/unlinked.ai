@@ -1,5 +1,7 @@
 # Unlinked
 
+For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository.
+
 > Import a LinkedIn export, search your own network and connect your agent.
 
 Canonical app: https://www.unlinked.ai. Sign in with Ideaflow ID at /login; no invitation required.
