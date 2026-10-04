@@ -1,5 +1,7 @@
 # Unlinked agent guide
 
+Public web search without a connector: open https://www.unlinked.ai/search-public?q=Stanford (replace Stanford with your query). This compact server-rendered HTML uses only the published professional People index, needs no sign-in or JavaScript, and exposes ordinary links and next-page cursors. It does not call a model or search your private network. Public People pages and this view support GET and HEAD. ChatGPT web-fetch availability must be verified separately; a successful HTTP request alone does not prove ChatGPT can read it.
+
 Use https://www.unlinked.ai/login for Ideaflow ID sign-in; /settings holds your automatically prepared agent setup (view/copy, revoke or regenerate it there). No setup click is needed, repeated visits never mint duplicate grants, and a revoked automatic setup stays revoked until the owner regenerates.
 On a signed recovered-account match, the browser may ask once whether to continue with the old Unlinked profile.
 Import a full LinkedIn ZIP or Connections-only ZIP/CSV, maximum 64 MiB.

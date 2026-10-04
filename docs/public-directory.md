@@ -23,3 +23,11 @@ The existing open-beta login, full-archive export guidance and agent setup bridg
 
 `node --test tests/public-directory.test.mjs` exercises the injectable read contract without a live graph.
 Those synthetic test fixtures are not product data or proof of legacy migration.
+
+## Search links for web assistants
+
+Public web search without a connector: open https://www.unlinked.ai/search-public?q=Stanford (replace Stanford with your query). This compact server-rendered HTML uses only the published professional People index, needs no sign-in or JavaScript, and exposes ordinary links and next-page cursors. It does not call a model or search your private network. Public People pages and this view support GET and HEAD. ChatGPT web-fetch availability must be verified separately; a successful HTTP request alone does not prove ChatGPT can read it.
+
+Parameters match the public People reader: `q` (at most 200 characters), `mode=best|exact`, optional `presence=member|shadow`, and opaque `cursor` (at most 2048 characters). Up to 50 summaries per page; `best` labels partial matches when no profile matches all words. Queries, names, headlines and profile URLs are HTML-escaped. No private account chrome or contact details enter the document, even for signed-in visitors. Invalid inputs return 400, missing public profiles 404, unavailable/revoked publications 503 and capacity exhaustion 429 with Retry-After. Every request revalidates publication; responses remain no-store.
+
+Public HEAD probes previously returned 405, and the shared two-request pool could reject a small browser/crawler burst. Public HEAD now preserves the public route status and content type without a body. Eight overlapping reads can share one snapshot build; the existing 120-per-minute limit remains. Private routes, sign-in and state-changing actions are not added to HEAD support.

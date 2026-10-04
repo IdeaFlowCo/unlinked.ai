@@ -128,3 +128,7 @@ The optional operator-configured signup profile lookup (default off; a private h
 ## Connection browsing and page depth
 
 Public People summaries expose detailLevel (basic or detailed), derived from visible content independently of membership. Profile pages link to /people/{id}/connections for search and richer-first or alphabetical browsing of published connections. See docs/connection-browsing.md in source.
+
+## Connector-free web search
+
+`GET/HEAD /search-public?q=&mode=&presence=&cursor=` renders compact public-only HTML via `mcp-server/public-web-search.mjs`; see `docs/public-directory.md`. It shares the public reader, minute limit and bounded eight-request burst pool with People. No model or owner reads. Public People and company GET routes also accept HEAD; private HEAD routes remain denied.

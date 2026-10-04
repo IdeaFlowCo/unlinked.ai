@@ -32,6 +32,7 @@ import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { renderScan, fillMeHeadline, TOP_BAR_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError } from './private-onboarding-views.mjs'
 import { MEET_SCRIPT } from './public-discovery.mjs'
 import { PHOTO_ID } from './profile-photos.mjs'
+import { publicSearchDocument } from './public-web-search.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -220,6 +221,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
   let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
+  // Overlapping requests share the public reader's snapshot build. Let a small
+  // browser/crawler burst share it while retaining the site-wide minute bound.
+  const PUBLIC_IN_FLIGHT = 8
+  const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
   let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
   const PHOTO_PER_MINUTE = 6000, PHOTO_IN_FLIGHT = 32
@@ -443,7 +448,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     response.setHeader('X-Content-Type-Options', 'nosniff')
     response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
     if (request.headers.host !== base.host) { response.writeHead(403).end(); return }
-    if (!['GET', 'POST'].includes(request.method) && !(request.method === 'HEAD' && (isPublicDiscoveryPath(new URL(request.url, base).pathname) || photoPath(new URL(request.url, base).pathname)))) { response.writeHead(405).end(); return }
+    if (!['GET', 'POST'].includes(request.method) && !(request.method === 'HEAD' && (isPublicDiscoveryPath(new URL(request.url, base).pathname) || publicHeadPath(new URL(request.url, base).pathname) || photoPath(new URL(request.url, base).pathname)))) { response.writeHead(405).end(); return }
     // RFC 8058 one-click unsubscribe is posted by mail providers, without this
     // origin; its signed token is the whole authority and it only turns email off.
     const oneClick = request.method === 'POST' && memberEmail && new URL(request.url, base).pathname === '/email/unsubscribe'
@@ -477,6 +482,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           response.end(request.method === 'HEAD' ? undefined : found.bytes); return
         } finally { photoBusy-- }
       }
+      if (request.method === 'HEAD' && url.pathname === '/') { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(); return }
       // Page views read the photo set's pointer at most every 30 seconds.
       if (profilePhotos && request.method === 'GET') await profilePhotos.refresh().catch(() => {})
 
@@ -587,10 +593,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const publicProfile = url.pathname.match(/^\/people\/([^/]+)(\/connections)?$/)
       const publicCompanyApi = url.pathname.match(/^\/api\/companies\/([^/]+)$/)
       const publicCompany = url.pathname.match(/^\/companies\/([^/]+)$/)
-      if (request.method === 'GET' && url.pathname === '/people' && viewer) { redirect(response, `/network${url.search}`); return }
-      if (request.method === 'GET' && (url.pathname === '/api/people' || publicDetail || publicProfile || publicCompanyApi || publicCompany || url.pathname === '/people' || (url.pathname === '/network' && !viewer))) {
+      if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/people' && viewer) { redirect(response, `/network${url.search}`); return }
+      if (['GET', 'HEAD'].includes(request.method) && (url.pathname === '/search-public' || url.pathname === '/api/people' || publicDetail || publicProfile || publicCompanyApi || publicCompany || url.pathname === '/people' || (url.pathname === '/network' && !viewer))) {
         if (Date.now() - publicWindow >= 60000) { publicWindow = Date.now(); publicRequests = 0 }
-        if (++publicRequests > 120 || publicBusy >= 2) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (++publicRequests > 120 || publicBusy >= PUBLIC_IN_FLIGHT) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         publicBusy++
         try {
           if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1 || url.searchParams.getAll('presence').length > 1 || url.searchParams.getAll('sort').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
@@ -629,6 +635,11 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const result = await publicReader.list({ query, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined })
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
+          if (url.pathname === '/search-public') {
+            const content = publicSearchDocument(result, { query, mode, presence })
+            response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(content) })
+            response.end(request.method === 'HEAD' ? undefined : content); return
+          }
           const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, presence, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
           journey(response, view); return
         } catch (error) {

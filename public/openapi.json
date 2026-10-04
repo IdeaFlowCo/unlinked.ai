@@ -1217,6 +1217,126 @@
           }
         }
       }
+    },
+    "/search-public": {
+      "get": {
+        "summary": "Search published professional People as compact HTML without a connector",
+        "security": [],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "best",
+                "exact"
+              ],
+              "default": "best"
+            }
+          },
+          {
+            "name": "presence",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "member",
+                "shadow"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public-only HTML, up to 50 summaries and next-page link"
+          },
+          "400": {
+            "description": "Invalid public search input"
+          },
+          "429": {
+            "description": "Public request capacity exceeded; Retry-After supplied"
+          },
+          "503": {
+            "description": "Published People unavailable"
+          }
+        }
+      },
+      "head": {
+        "summary": "Probe public search status and HTML headers without a response body",
+        "security": [],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "best",
+                "exact"
+              ],
+              "default": "best"
+            }
+          },
+          {
+            "name": "presence",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "member",
+                "shadow"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public-only HTML, up to 50 summaries and next-page link"
+          },
+          "400": {
+            "description": "Invalid public search input"
+          },
+          "429": {
+            "description": "Public request capacity exceeded; Retry-After supplied"
+          },
+          "503": {
+            "description": "Published People unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
