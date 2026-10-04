@@ -1,3 +1,4 @@
+import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
@@ -583,7 +584,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         journey(response, renderContactCard({ ...chrome, card, token: contactLink[1] }), null, '', card ? 200 : 404); return
       }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
-      const publicProfile = url.pathname.match(/^\/people\/([^/]+)$/)
+      const publicProfile = url.pathname.match(/^\/people\/([^/]+)(\/connections)?$/)
       const publicCompanyApi = url.pathname.match(/^\/api\/companies\/([^/]+)$/)
       const publicCompany = url.pathname.match(/^\/companies\/([^/]+)$/)
       if (request.method === 'GET' && url.pathname === '/people' && viewer) { redirect(response, `/network${url.search}`); return }
@@ -592,7 +593,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (++publicRequests > 120 || publicBusy >= 2) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         publicBusy++
         try {
-          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1 || url.searchParams.getAll('presence').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1 || url.searchParams.getAll('presence').length > 1 || url.searchParams.getAll('sort').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
           if (publicCompanyApi || publicCompany) {
             let name
             try { name = decodeURIComponent((publicCompanyApi ?? publicCompany)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
@@ -607,10 +608,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           if (publicDetail || publicProfile) {
             let id
             try { id = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
-            const result = await publicReader.profile({ id, cursor: url.searchParams.get('cursor') ?? undefined })
+            const connectionQuery = publicProfile ? url.searchParams.get('q') ?? '' : ''
+            const connectionSort = publicProfile ? url.searchParams.get('sort') ?? 'detail' : 'name'
+            const result = await publicReader.profile({ id, cursor: url.searchParams.get('cursor') ?? undefined, query: connectionQuery, sort: connectionSort })
             if (!result) { response.writeHead(404).end(); return }
             // A merged profile's old address moves to the profile it was merged into.
-            if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? '/api/people/' : '/people/'}${encodeURIComponent(result.moved)}`, 'Cache-Control': 'no-store' }).end(); return }
+            if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? '/api/people/' : '/people/'}${encodeURIComponent(result.moved)}${publicProfile?.[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
             // Connect: only members (an account stands behind the profile) can be asked.
             let connect
@@ -619,7 +622,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
               else if (viewer && result.profile.presence === 'shadow' && memberInvitations) connect = { state: 'invite' }
             }
             const notice = url.searchParams.get('connect')
-            journey(response, renderPerson({ ...chrome, profile: result.profile, connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined })); return
+            const companies = new Map(await Promise.all([...new Set(result.profile.positions.map(position => position.company).filter(Boolean))].map(async name => [name, companyDetailLevel(await lookupCompanyFacts(name))])))
+            const profile = { ...result.profile, positions: result.profile.positions.map(position => ({ ...position, companyDetailLevel: companies.get(position.company) })) }
+            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined })); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const result = await publicReader.list({ query, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined })

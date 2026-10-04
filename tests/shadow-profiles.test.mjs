@@ -21,7 +21,7 @@ test('a snapshot that names members marks presence and reach on every surface; o
   await assert.rejects(reader.lookup({ ids: 'second' }), { status: 400 })
   await assert.rejects(createPublicPeopleReader({ readPublishedSnapshot: async () => published({ members: ['nobody'] }) }).list(), { status: 503 })
   const plain = (await createPublicPeopleReader({ readPublishedSnapshot: async () => published() }).profile({ id: 'second' })).profile
-  assert.equal(plain.presence, undefined); assert.equal(plain.connectionCount, undefined)
+  assert.equal(plain.presence, undefined); assert.equal(plain.connectionCount, 2)
 })
 
 test('claimed legacy profiles become members, unknown claims are ignored, and membership changes the revision', async () => {
