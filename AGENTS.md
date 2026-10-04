@@ -131,4 +131,4 @@ Public People summaries expose detailLevel (basic or detailed), derived from vis
 
 ## Connector-free web search
 
-`GET/HEAD /search-public?q=&mode=&presence=&cursor=` renders compact public-only HTML via `mcp-server/public-web-search.mjs`; see `docs/public-directory.md`. It shares the public reader, minute limit and bounded eight-request burst pool with People. No model or owner reads. Public People and company GET routes also accept HEAD; private HEAD routes remain denied.
+Connector-free public search and public HEAD behavior are owned by [docs/public-directory.md](docs/public-directory.md); renderer: `mcp-server/public-web-search.mjs`.

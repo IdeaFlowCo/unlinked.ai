@@ -1,6 +1,6 @@
 # Unlinked
 
-Public web search without a connector: open https://www.unlinked.ai/search-public?q=Stanford (replace Stanford with your query). This compact server-rendered HTML uses only the published professional People index, needs no sign-in or JavaScript, and exposes ordinary links and next-page cursors. It does not call a model or search your private network. Public People pages and this view support GET and HEAD. ChatGPT web-fetch availability must be verified separately; a successful HTTP request alone does not prove ChatGPT can read it.
+For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository.
 
 > Import a LinkedIn export, search your own network and connect your agent.
 
