@@ -13,9 +13,9 @@ Unknown, unpublished, unavailable, incomplete, malformed or over-limit snapshots
 Provider exceptions are replaced with data-free errors.
 Requests time out and receive an abort signal; adapters must honor that signal to stop their own work.
 
-Default maxima are20,000profiles,100,000directed public edges,16MiB accepted DTO text and8seconds per snapshot call.
+Default maxima are 20,000 profiles, 100,000 directed public edges, 16 MiB accepted DTO text and 8 seconds per snapshot call.
 The provider must bound its own fetch/serialization before returning; these maxima are not permission to read private operational rows.
-All entity arrays must have their own data entries at every index. The factory validates all rows before computing counts/order, never truncates an oversized snapshot, and rejects duplicate IDs/edges or dangling endpoints.
+All entity arrays must have their own data entries at every index. On compilation, the factory validates all rows before computing counts/order, never truncates an oversized snapshot, and rejects duplicate IDs/edges or dangling endpoints. Reusing a compiled index relies on the trusted source's content-addressed revision guarantee below.
 Empty published snapshots are valid, distinguishable from unavailable publication.
 
 Each published profile has `id`, `name`, optional `headline`, `location`, `about`, optional search-only `company`, and arrays `positions`, `education`, `skills`.
@@ -35,7 +35,7 @@ Overlapping reads without their own signal share one snapshot build. A request-s
 
 The standalone composition wraps immutable public datasets with `cachePublicPeopleReads`: every read checks the current published revision and digest in Neo4j, reusing validated chunks only while both match. Changed, revoked, failed or racing pointers trigger a full store read. The member projection checks current owner/source authorization and includes every content input in its revision. No member page or browser response is cached.
 
-The shared profile-decision revision hashes applied decisions in execution order, including kind, profile ID, survivor ID or trimmed rename value as well as decision ID. Automatic decisions that retain an ID while changing their target invalidate compiled indexes; merge order also identifies which source fills missing survivor fields. Member merge protections remain unchanged.
+Decision content and execution order participate in the revision; see [profile decisions](profile-decisions.md) for that contract.
 
 Each dataset cache retains at most 64 snapshots and 64 MiB of estimated retained data, evicting least-recently-used entries to satisfy both limits. The estimate counts UTF-16 strings, property names and conservative per-object/property overhead; it is a retention budget, not an exact heap measurement. Oversized snapshots are returned normally without retention. Evicted datasets are read fresh on their next request after the usual publication pointer check. Tests may supply smaller limits (including zero to disable retention); limits cannot exceed the defaults. Replacement, revocation and failed reads release the previous entry, so inactive deleted/replaced imports cannot accumulate without bound.
 

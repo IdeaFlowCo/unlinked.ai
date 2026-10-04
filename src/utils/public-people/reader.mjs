@@ -67,8 +67,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
-  // once, and building it is slow. With the default `reuse: false`, nothing
-  // outlives the build and each new read sees the current publication. A
+  // once, and building it is slow. With the default `reuse: false`, each new
+  // read checks the source before reusing any compiled public index. A
   // caller's own signal reads alone unless a reusable snapshot is already kept.
   let inflight = null, kept = null
   async function snapshot(signal) {

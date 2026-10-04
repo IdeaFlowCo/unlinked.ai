@@ -5,6 +5,27 @@ import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 
 const snapshot = (revision, name = 'Ada Lovelace') => ({ state: 'published', complete: true, revision, profiles: [{ id: 'a', name, positions: [], education: [], skills: [] }], connections: [] })
 
+test('same revision with a changed digest rereads immutable chunks', async () => {
+  let digest = 'first', reads = 0
+  const store = cachePublicPeopleReads({ read: async () => { reads++; return snapshot('r1') } }, async () => ({ revision: 'r1', digest }))
+  const first = await store.read('legacy')
+  digest = 'second'
+  assert.notEqual(await store.read('legacy'), first)
+  assert.equal(reads, 2)
+})
+
+test('compiled indexes respect text limits and never retain viewer-scoped rows', async () => {
+  const source = async ({ viewer }) => snapshot('r1', viewer ? viewer.subject : 'Ada Lovelace')
+  source.revisionIdentifiesContent = true
+  await createPublicPeopleReader({ readPublishedSnapshot: source }).list()
+  await assert.rejects(createPublicPeopleReader({ readPublishedSnapshot: source, maxTextBytes: 1 }).list(), { status: 503 })
+  for (const subject of ['Viewer One', 'Viewer Two']) {
+    const viewer = Object.freeze({ issuer: 'https://identity.invalid', subject })
+    assert.equal((await createPublicPeopleReader({ readPublishedSnapshot: source, viewer }).list()).profiles[0].name, subject)
+  }
+  assert.equal((await createPublicPeopleReader({ readPublishedSnapshot: source }).list()).profiles[0].name, 'Ada Lovelace')
+})
+
 test('a dataset read is reused only while the published pointer names the same revision and digest', async () => {
   let pointer = { revision: 'r1', digest: 'd1' }, reads = 0, current = snapshot('r1')
   const store = cachePublicPeopleReads({ read: async () => { reads++; return structuredClone(current) }, publish: async () => 'published' }, async () => pointer)
