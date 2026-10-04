@@ -44,6 +44,42 @@ const SELECT_ACCOUNT = 'select_account'
 // successful sign-in clears it.
 const SIGNED_OUT_COOKIE = '__Host-ul-signed-out', SIGNED_OUT_SECONDS = 60 * 60
 
+// Automatic sign-in (docs/ideaflow-sign-in.md, "Automatic sign-in"): a signed-out
+// page view makes ONE silent (`prompt=none`) round trip to Ideaflow ID per
+// browser session. The marker is a session cookie (no Max-Age), set on that
+// redirect and by an explicit sign-out, and it is never cleared by a failed attempt.
+const PROMPT_NONE = 'none'
+export const AUTO_SIGNIN_COOKIE = '__Host-ideaflow_auto_signin'
+const browserSessionCookie = (name, value) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax`
+// The provider answers a prompt=none request it cannot satisfy silently with one
+// of these; only a silent attempt ever asks for prompt=none.
+const SILENT_PROVIDER_ERRORS = new Set(['login_required', 'consent_required', 'interaction_required', 'account_selection_required'])
+// Shared across the Ideaflow apps (code-xbh.21): crawlers, link unfurlers and
+// scripted clients never get the hop. HeadlessChrome is deliberately not listed.
+const AUTO_SIGNIN_BOTS = /bot|crawl|spider|slurp|facebookexternalhit|facebookcatalog|embedly|quora link preview|outbrain|pinterest|vkshare|w3c_validator|whatsapp|telegram|discord|slack|skype|twitter|linkedin|preview|lighthouse|inspectiontool|ahrefs|semrush|mj12|yandex|baidu|duckduck|applebot|petalbot|bytespider|gptbot|claude|perplexity|ccbot|python|curl|wget|go-http|node-fetch|axios|okhttp|java\//i
+// Embedded webviews, in-app browsers and native shells keep their own flows.
+const AUTO_SIGNIN_EMBEDDED = /FBAN|FBAV|FB_IAB|Instagram|Line\/|Twitter|LinkedInApp|Snapchat|; wv\)|WebView|Electron/i
+// The kill switch: UNLINKED_AUTO_SIGNIN=off (or false/0/no) in runtime.env, then restart.
+export const autoSignInEnabled = env => !/^(?:off|false|0|no)$/i.test(String(env?.UNLINKED_AUTO_SIGNIN ?? '').trim())
+// Ordinary app pages a signed-out visitor may be silently signed in on. Never
+// the sign-in, callback, sign-out, join, invitation, confirmation (legacy
+// account, find-me, claim), unsubscribe or contact-card token routes, assets,
+// photos, APIs, /mcp, /oauth/* or /.well-known/*.
+const AUTO_SIGNIN_PAGES = new Set(['/', '/people', '/network', '/profile', '/card', '/settings', '/import', '/invites', '/invitations', '/notifications', '/people/add', '/scan', '/meet', '/agents', '/import-linkedin'])
+export const autoSignInPage = pathname => typeof pathname === 'string' && (AUTO_SIGNIN_PAGES.has(pathname) ||
+  /^\/people\/[^/]{1,480}$/.test(pathname) || /^\/companies\/[^/]{1,200}$/.test(pathname))
+// Header guards (server side): a real top-level document navigation asking for
+// HTML, not a prefetch/prerender, from an ordinary browser. Missing Sec-Fetch
+// headers mean "do not attempt".
+export function autoSignInRequest(headers = {}) {
+  const value = name => typeof headers[name] === 'string' ? headers[name] : ''
+  if (value('sec-fetch-mode') !== 'navigate' || value('sec-fetch-dest') !== 'document') return false
+  if (!/text\/html/i.test(value('accept'))) return false
+  if (/prefetch|prerender/i.test(`${value('sec-purpose')} ${value('purpose')} ${value('x-purpose')} ${value('x-moz')}`)) return false
+  const agent = value('user-agent')
+  return Boolean(agent) && agent.length <= 1024 && !AUTO_SIGNIN_BOTS.test(agent) && !AUTO_SIGNIN_EMBEDDED.test(agent) && !inAppBrowser(agent)
+}
+
 export async function createIdeaflowLogin({ issuer, clientId, clientSecret, callbackUrl, fetchImpl }) {
   const server = new URL(issuer), callback = new URL(callbackUrl)
   if (server.protocol !== 'https:' || server.search || server.hash || server.username || server.password || callback.protocol !== 'https:' || callback.pathname !== '/auth/callback/ideaflow' || callback.search || callback.hash || callback.username || callback.password || !clientId || !clientSecret) throw new Error('explicit_ideaflow_client_required')
@@ -53,9 +89,10 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
     // Silent SSO by default: with an Ideaflow ID session the provider returns a
     // code without a page. The only other request is the provider's account
     // chooser (`select_account`), used after an explicit Unlinked sign-out,
-    // for Switch account and for binding an invitation to an account.
+    // for Switch account and for binding an invitation to an account. The
+    // automatic sign-in hop asks for `none`: no provider page at all.
     async begin({ prompt } = {}) {
-      if (prompt !== undefined && prompt !== SELECT_ACCOUNT) throw new Error('unsupported_ideaflow_prompt')
+      if (prompt !== undefined && prompt !== SELECT_ACCOUNT && prompt !== PROMPT_NONE) throw new Error('unsupported_ideaflow_prompt')
       const verifier = oidc.randomPKCECodeVerifier(), state = oidc.randomState(), nonce = oidc.randomNonce()
       const location = oidc.buildAuthorizationUrl(config, { redirect_uri: callback.href, response_type: 'code', scope: 'openid profile email',
         code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: 'S256', state, nonce, ...(prompt ? { prompt } : {}) })
@@ -107,7 +144,7 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos }) {
+export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -243,7 +280,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="/public-assets/connection-feedback.js"></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}</html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
-  async function establishSession(response, identity, invitationToken = null, next = null) {
+  // `silentBack` (automatic sign-in) signs in only an existing owner with
+  // nothing left to confirm, and returns to that page. It never provisions an
+  // account or opens an onboarding/confirmation step; it answers why not instead.
+  async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null) {
     let claimed
     if (invitationToken) {
       if (typeof claimInvitation !== 'function') throw new Error('private_invitation_intent_invalid')
@@ -255,6 +295,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     }
     let owner = await resolveOwner(identity)
     let newOwner = false
+    if (silentBack !== null && (invitationToken || !owner)) return 'no_account'
     if (!owner && !invitationToken && typeof signup === 'function') {
       const provisioned = await signup({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
         verifiedAt: identity.verifiedAt, provenanceReceiptId: identity.provenanceReceiptId, newProfileIntent: true })
@@ -269,6 +310,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const sessionId = token()
     const legacyProof = identity.verifiedEmail && identity.emailEvidence === 'signed-ideaflow-beta-v1' ? Object.freeze({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId, verifiedAt: identity.verifiedAt, email: identity.verifiedEmail, emailEvidence: identity.emailEvidence, ownerId: owner.ownerId, userId: owner.userId }) : null
     const legacyCandidate = legacyProof && legacyAccount ? await legacyAccount.candidate(legacyProof) : null
+    if (silentBack !== null && legacyCandidate && !legacyCandidate.linked) return 'needs_confirmation'
     // A lookup-hint claim identity: the hash mirrors the manifest's email
     // formula so a later seeded row for the same address collides cleanly.
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
@@ -287,7 +329,29 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     // An invitation link someone signed in to answer comes first; its page then
     // continues to the old-account or find-me step when there is one.
     const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
-    redirect(response, invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
+    redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
+    return 'signed_in'
+  }
+  // Where a silent attempt returns: the same-origin page it started on, only
+  // ever one of the automatic sign-in pages; anything else goes home.
+  const silentReturn = value => {
+    if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.length > 2048 || !/^[\x21-\x7e]+$/.test(value) || value.includes('\\') || value.includes('#')) return '/'
+    let target
+    try { target = new URL(value, base) } catch { return '/' }
+    return target.origin === base.origin && autoSignInPage(target.pathname) ? `${target.pathname}${target.search}` : '/'
+  }
+  // The callback of a silent attempt. Every outcome lands back on the page it
+  // started from; only an existing owner with nothing to confirm is signed in.
+  // State, nonce and PKCE are checked exactly as for an explicit sign-in.
+  async function finishSilent(response, url, transaction) {
+    const back = silentReturn(transaction.returnTo)
+    if (url.searchParams.has('error') || url.searchParams.getAll('code').length !== 1) { redirect(response, back); return }
+    let outcome
+    try {
+      outcome = await establishSession(response, await login.finish(url, transaction), null, null, back)
+    } catch { outcome = 'failed' }
+    await recordAudit({ event: 'auth_silent_signin', outcome })
+    if (!response.headersSent) redirect(response, back)
   }
   // Connect rules shared with agent write tools (connection-actions.mjs).
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
@@ -446,6 +510,26 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
 
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
+      // Automatic sign-in: one silent round trip to Ideaflow ID before a
+      // signed-out page renders. Only open-account runtimes (signup), only
+      // ordinary pages, once per browser session and never after an explicit
+      // sign-out. Every failure returns to this same page, signed out.
+      if (autoSignIn && !viewer && request.method === 'GET' && typeof signup === 'function' && autoSignInPage(url.pathname) && request.url.length <= 2048) {
+        const jar = cookies(request)
+        purge(pending)
+        // Explicit sign-ins keep their headroom: silent attempts never fill the table.
+        if (jar[AUTO_SIGNIN_COOKIE] === undefined && jar[SIGNED_OUT_COOKIE] === undefined && pending.size < 50 && autoSignInRequest(request.headers)) {
+          let started = null
+          try { started = await login.begin({ prompt: PROMPT_NONE }) } catch { /* Render the page signed out. */ }
+          if (started) {
+            const id = token()
+            pending.set(id, { ...started.transaction, silent: true, returnTo: `${url.pathname}${url.search}`, expiresAt: Date.now() + 5 * 60000 })
+            response.setHeader('Set-Cookie', [browserSessionCookie(AUTO_SIGNIN_COOKIE, '1'), cookie('__Host-ul-login', id, 300)])
+            // Location carries no fragment, so the browser keeps the page's #hash.
+            response.writeHead(302, { Location: started.location }); response.end(); return
+          }
+        }
+      }
       if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer.owner); if (alerts) responseAlerts.set(response, alerts) }
       if (request.method === 'GET' && url.pathname === '/api/nav-alerts') {
         response.writeHead(viewer ? 200 : 401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
@@ -631,8 +715,21 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (request.method === 'GET' && url.pathname === '/auth/callback/ideaflow') {
         purge(pending); purge(confirmations)
         const id = cookies(request)['__Host-ul-login'], transaction = pending.get(id)
+        const state = url.searchParams.getAll('state').length === 1 ? url.searchParams.get('state') : null
+        // A silent attempt whose login cookie a concurrent tab replaced: its
+        // code is never exchanged (the cookie binding is the login-CSRF
+        // defence); the tab just returns to its page. The other tab's
+        // transaction and cookie stay untouched.
+        if (state && transaction?.state !== state) {
+          const stale = [...pending].find(([, value]) => value.silent === true && value.state === state)
+          if (stale) { pending.delete(stale[0]); redirect(response, silentReturn(stale[1].returnTo)); return }
+        }
         pending.delete(id) // All callback outcomes consume the one-use transaction.
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', '', 0))
+        if (transaction?.silent === true && state === transaction.state) { await finishSilent(response, url, transaction); return }
+        // prompt=none answers whose attempt is gone (expired, or the runtime
+        // restarted mid-hop) go home signed out, without an error page.
+        if (!transaction && url.searchParams.getAll('error').length === 1 && SILENT_PROVIDER_ERRORS.has(url.searchParams.get('error'))) { redirect(response, '/'); return }
         if (!transaction || url.searchParams.getAll('state').length !== 1 || url.searchParams.get('state') !== transaction.state || url.searchParams.getAll('code').length !== 1) throw new Error('private_login_transaction_invalid')
         const identity = await login.finish(url, transaction)
         if (transaction.invitationToken) {
@@ -1163,7 +1260,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         for (const [id, value] of sessions) if (value.owner.ownerId === session.owner.ownerId) sessions.delete(id)
         if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId).catch(() => {})
         // Signing in again later starts from the Ideaflow account chooser.
-        response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS)])
+        response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS), browserSessionCookie(AUTO_SIGNIN_COOKIE, '1')])
         await recordAudit({ event: 'account_data_deleted', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), deletedResources: result.deletedResources })
         journey(response, renderDataDeleted())
         return
@@ -1255,7 +1352,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             await sessionStore.delete(createHash('sha256').update(sid).digest('hex')).catch(() => {})
           }
           // The next sign-in in this browser shows the Ideaflow account chooser.
-          response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS)])
+          response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS), browserSessionCookie(AUTO_SIGNIN_COOKIE, '1')])
           if (url.pathname === '/logout') { redirect(response, '/'); return }
           // Switch account starts that sign-in now. The return page is only ever
           // one of returnPath's local pages, never a request-chosen URL.
