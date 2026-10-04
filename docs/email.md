@@ -146,15 +146,15 @@ hours** have elapsed after signup, then **72 hours** if a file is still missing.
 Reminders use the existing verified sign-in address, sender, transport/backoff,
 unsubscribe links, Settings email choices and account-deletion cleanup; no new
 provider or credential is needed. “Remind me to download and upload my LinkedIn
-export” is on by default. There is no enrollment for older accounts or accounts
-created while email was off.
+export” is on by default. New accounts created through invitations are enrolled
+too; returning sign-ins do not reset the signup anchor. There is no enrollment
+for older accounts or accounts created while email was off.
 
-Before each send the runtime authorizes the owner and checks durable upload
-receipts, including files still processing and recovered original files. Internal
-receipts from manually adding a person and deleted receipts do not count as a
-LinkedIn upload. A
-successful upload cancels the remaining reminders immediately; a failed upload
-check sends nothing and retries later. An email already in flight can finish
+Before each send the runtime authorizes the owner and reads owner-scoped import
+job receipts, including files still processing, and recovered original files.
+Internal receipts from manually adding a person and deleted receipts do not
+count as a LinkedIn upload. A successful upload cancels the remaining reminders
+immediately; a failed upload check sends nothing and retries later. An email already in flight can finish
 if an upload happens during its provider request. Turning email off stops all
 reminders; unsubscribe stops this reminder category only.
 
@@ -165,14 +165,17 @@ keep retry payloads identical after restart, including after address or sender
 changes; retries stop 23 hours after the stage's first attempt to stay within
 Resend’s 24-hour deduplication window. Stale claims recover after ten minutes.
 Missing the first window sends only the second reminder, and accounts at least
-four days old receive no
-backlog. All state remains on the private recipient node and is deleted with
-the account.
+four days old receive no backlog. All state remains on the private recipient
+node and is deleted with the account.
 
 The email explains the [export download guidance](../README.md#import-linkedin-archive)
 and directs the member to `/import`. Signup time is only a reminder anchor:
 Unlinked cannot see when LinkedIn’s email arrives, so the reminder never claims
 an exact expiry date.
+
+Composition coverage for manual-person, deleted, processing and recovered-file
+receipts is in `tests/private-composition.test.mjs`; invited signup enrollment
+and upload cancellation are covered by `tests/private-invitation-browser.test.mjs`.
 
 ## Preferences and unsubscribe
 
