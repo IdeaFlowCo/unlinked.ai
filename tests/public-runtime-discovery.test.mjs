@@ -38,7 +38,7 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
     assert.ok(markup.includes(`<script nonce="${nonce}" src="https://worldissuetracker.com/widget/wit-feedback.js" data-tracker-slug="unlinked-ai"`), path)
     const csp = page.headers.get('content-security-policy')
     assert.ok(csp.includes(`'nonce-${nonce}' https://worldissuetracker.com`), path)
-    assert.ok(csp.includes("connect-src 'self' https://qmzopiburflputowkuhu.supabase.co https://worldissuetracker.com"), path)
+    assert.ok(csp.includes("connect-src 'self' https://api.worldissuetracker.com https://worldissuetracker.com"), path)
     assert.ok(csp.includes("img-src 'self' blob:"), path)
   }
   assert.equal((await fetch(endpoint+'/meet')).headers.get('permissions-policy'), 'camera=(self), microphone=(self)')
