@@ -35,6 +35,8 @@ Overlapping reads without their own signal share one snapshot build. A request-s
 
 The standalone composition wraps immutable public datasets with `cachePublicPeopleReads`: every read checks the current published revision and digest in Neo4j, reusing validated chunks only while both match. Changed, revoked, failed or racing pointers trigger a full store read. The member projection checks current owner/source authorization and includes every content input in its revision. No member page or browser response is cached.
 
+Each dataset cache retains at most 64 snapshots and 64 MiB of estimated retained data, evicting least-recently-used entries to satisfy both limits. The estimate counts UTF-16 strings, property names and conservative per-object/property overhead; it is a retention budget, not an exact heap measurement. Oversized snapshots are returned normally without retention. Evicted datasets are read fresh on their next request after the usual publication pointer check. Tests may supply smaller limits (including zero to disable retention); limits cannot exceed the defaults. Replacement, revocation and failed reads release the previous entry, so inactive deleted/replaced imports cannot accumulate without bound.
+
 Profile photos have an independent live publication. `photoFor` is applied to returned summaries and details after compilation, so photo changes, revocation and different photo providers cannot inherit stale cached URLs.
 The controller maps null to HTTP404; `PublicPeopleReaderError.status===503` maps to unavailable.
 Requests must be plain data objects. Invalid request shapes, signals, queries, IDs and cursor structures/scopes return a data-free status400 error before backend access or unknown-profile handling.

@@ -33,6 +33,85 @@ test('a pointer failure or a publication racing the read is never cached', async
   assert.equal(reads, 4)
 })
 
+test('the default dataset cache evicts inactive imports and rereads them fresh', async () => {
+  const reads = new Map(), pointers = new Map()
+  const store = cachePublicPeopleReads({ read: async dataset => {
+    reads.set(dataset, (reads.get(dataset) ?? 0) + 1)
+    return snapshot('r1', `${dataset} read ${reads.get(dataset)}`)
+  } }, async dataset => {
+    pointers.set(dataset, (pointers.get(dataset) ?? 0) + 1)
+    return { revision: 'r1', digest: 'd1' }
+  })
+  for (let i = 0; i < 64; i++) await store.read(`import-${i}`)
+  const recent = await store.read('import-0')
+  await store.read('import-64')
+  assert.equal(await store.read('import-0'), recent)
+  assert.equal(reads.get('import-0'), 1)
+  assert.equal((await store.read('import-1')).profiles[0].name, 'import-1 read 2')
+  assert.equal(reads.get('import-1'), 2)
+  assert.equal(pointers.get('import-0'), 3)
+  assert.equal(pointers.get('import-1'), 2)
+})
+
+test('the byte budget evicts snapshots before the entry limit and skips oversized data', async () => {
+  const reads = new Map()
+  const store = cachePublicPeopleReads({ read: async dataset => {
+    reads.set(dataset, (reads.get(dataset) ?? 0) + 1)
+    return snapshot('r1', (dataset === 'oversized' ? 'x'.repeat(10000) : 'x'.repeat(700)) + reads.get(dataset))
+  } }, async () => ({ revision: 'r1', digest: 'd1' }), { maxEntries: 64, maxBytes: 4096 })
+  await store.read('a')
+  const second = await store.read('b')
+  assert.equal(await store.read('b'), second)
+  assert.equal(reads.get('b'), 1)
+  assert.ok((await store.read('a')).profiles[0].name.endsWith('2'))
+  assert.equal(reads.get('a'), 2)
+  const held = await store.read('a')
+  const oversized = await store.read('oversized')
+  assert.equal(oversized.profiles[0].name.length, 10001)
+  assert.notEqual(await store.read('oversized'), oversized)
+  assert.equal(reads.get('oversized'), 2)
+  assert.equal(await store.read('a'), held)
+})
+
+test('replacement and failed reads release retention before caching another dataset', async () => {
+  let revision = 'r1', failing = false
+  const reads = new Map()
+  const store = cachePublicPeopleReads({ read: async dataset => {
+    reads.set(dataset, (reads.get(dataset) ?? 0) + 1)
+    if (failing && dataset === 'a') throw Error('unavailable')
+    return snapshot(revision, 'x'.repeat(700))
+  } }, async () => ({ revision, digest: revision }), { maxBytes: 4096 })
+  await store.read('a')
+  revision = 'r2'
+  const replacement = await store.read('a')
+  assert.equal(await store.read('a'), replacement)
+  assert.equal(reads.get('a'), 2)
+  revision = 'r3'; failing = true
+  await assert.rejects(store.read('a'), /unavailable/)
+  const second = await store.read('b')
+  assert.equal(await store.read('b'), second)
+  assert.equal(reads.get('b'), 1)
+  failing = false
+  assert.equal((await store.read('a')).revision, 'r3')
+  assert.equal(reads.get('a'), 4)
+})
+
+test('zero retention limits still check pointers and return fresh plain data', async () => {
+  for (const limits of [{ maxEntries: 0 }, { maxBytes: 0 }]) {
+    let reads = 0, pointers = 0
+    const store = cachePublicPeopleReads({ read: async () => { reads++; return snapshot('r1') } }, async () => {
+      pointers++
+      return { revision: 'r1', digest: 'd1' }
+    }, limits)
+    const first = await store.read('a'), second = await store.read('a')
+    assert.deepEqual(second, first)
+    assert.notEqual(second, first)
+    assert.equal(reads, 2)
+    assert.equal(pointers, 2)
+    assert.equal(Object.getPrototypeOf(second), Object.prototype)
+  }
+})
+
 test('the compiled index is reused across readers only for content-addressed sources', async () => {
   let builds = 0, revision = 'shared-1'
   const source = async () => { builds++; return snapshot(revision) }
