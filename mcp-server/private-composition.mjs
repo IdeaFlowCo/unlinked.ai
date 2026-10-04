@@ -130,7 +130,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const companyFactsStore = typeof dependencies.createCompanyFactsStore === 'function' ? dependencies.createCompanyFactsStore(driver, 'neo4j') : null
     await companyFactsStore?.initialize()
     const lookupCompanyFacts = companyFactsStore ? createCompanyFacts({ readDataset: () => companyFactsStore.read(COMPANY_DATASET), onError: () => process.stderr.write('unlinked_company_facts_read_failed: serving the static list\n') }) : undefined
-    // Invite and notification emails, when the runtime supplies their store.
+    // Member email, when the runtime supplies its private store.
     // Without RESEND_API_KEY (or with UNLINKED_EMAIL_ENABLED=false) nothing is
     // sent and no address is recorded; unsubscribe links keep working. Without
     // a usable UNLINKED_EMAIL_SECRET the feature is absent (no routes, no sending).

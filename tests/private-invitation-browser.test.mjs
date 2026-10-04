@@ -139,6 +139,9 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const headers = { Cookie: sessionCookie, Origin: baseUrl }
   const imported = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: uploadForm, redirect: 'manual' })
   assert.equal(imported.status, 303)
+  emailNow += 24 * 60 * 60 * 1000
+  assert.equal((await memberEmail.runImportReminders()).sent, 0, 'durable HTTP upload cancels the 72-hour reminder')
+  assert.equal(delivered.length, 1)
   const receiptPath = imported.headers.get('location'), importId = receiptPath.split('/').pop()
   const stored = resources.get(importId)
   assert.equal(stored.sourceOwnerId, owner.ownerId)
@@ -156,6 +159,8 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   assert.deepEqual(issued, [{ importIds: [importId], tools: ['unlinked_search_import'] }])
   assert.equal(configuration.mcpServers['unlinked-private'].url, `${baseUrl}/mcp`)
   if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) {
+    await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, 'invited-reminder.html'), delivered[0].html)
+    await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, 'invited-reminder-cancellation.json'), JSON.stringify({ signupAt, reminderAtHours: 48, reminderRecipient: delivered[0].to, uploadStatus: imported.status, checkAtHours: 72, emailsAfterUpload: delivered.length, persistedReminderStage: emailStore.recipients.get(accountKey(owner)).importReminderStage }, null, 2))
     for (const [name, output] of [['invitation', invitationHtml], ['upload', uploadHtml], ['receipt', receiptHtml], ['search', searchHtml]]) {
       await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `invited-${name}.html`), output)
     }

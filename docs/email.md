@@ -1,4 +1,4 @@
-# Email: invites and notifications
+# Email: invites, notifications and export reminders
 
 The signed-in runtime sends three kinds of email through
 [Resend](https://resend.com/docs/api-reference/emails/send-email)'s HTTP API
@@ -6,7 +6,7 @@ The signed-in runtime sends three kinds of email through
 
 - **Invite emails**, sent on a member's behalf when they give the invitee's
   address on `/invites`.
-- **LinkedIn export reminders**, at 48 and 72 hours after signup if no file has been uploaded.
+- **LinkedIn export reminders** ([eligibility and timing](#linkedin-export-reminders)).
 - **Notification emails** for the in-app notification feed
   ([member-connections.md](member-connections.md#notifications-mcp-servermember-notificationsmjs)).
 
@@ -23,7 +23,7 @@ Tests: `tests/member-email.test.mjs` (a fake transport; no network).
 | `RESEND_API_KEY` | none | Resend API key. Without it nothing is sent and the app behaves exactly as before |
 | `UNLINKED_EMAIL_SECRET` | none | **Required.** Dedicated key for unsubscribe-link signatures and invitee-address hashes: hex or base64/base64url, **at least 32 bytes after decoding** (e.g. `openssl rand -hex 32`). Missing or shorter: email is disabled entirely (no routes, no sending) and the runtime logs one line, `unlinked_email_disabled: UNLINKED_EMAIL_SECRET is missing or shorter than 32 bytes`. Changing it invalidates unsubscribe links already sent and resets the per-recipient invite history |
 | `UNLINKED_INVITE_EMAILS_PER_DAY` | `500` | Site-wide ceiling on invite emails per rolling day |
-| `UNLINKED_EMAIL_FROM` | `Unlinked <noreply@id.ideaflow.app>` | Sender for notification emails. Its address is also the sender of invite emails, which use the display name `<Member> via Unlinked`. Must be on a domain verified in Resend (`id.ideaflow.app` is). An invalid value turns sending off |
+| `UNLINKED_EMAIL_FROM` | `Unlinked <noreply@id.ideaflow.app>` | Sender for notification and export-reminder emails. Its address is also the sender of invite emails, which use the display name `<Member> via Unlinked`. Must be on a domain verified in Resend (`id.ideaflow.app` is). An invalid value turns sending off |
 
 Sending happens only when the flag is on **and** a key and a valid secret are present. In the
 private pilot these go in the runtime's private `runtime/runtime.env`, which
@@ -107,7 +107,7 @@ next tick. Each pass:
    `emailedAt` with `emailOutcome: sent`.
 4. Failures, by kind:
    - **429, 5xx, or 401 (rejected key):** the claim is released, the pass
-     stops, and all sending (notifications and invites) pauses: for
+     stops, and all sending (notifications, invites and export reminders) pauses: for
      `Retry-After` when Resend sends one, otherwise 2, 4, 8 … minutes, capped
      at one hour. A success resets it. (401 is treated like an outage rather
      than a per-message rejection, so a bad key cannot discard every
@@ -141,9 +141,9 @@ is included in their data export and is deleted with their account.
 
 ## LinkedIn export reminders
 
-The same mailer checks new accounts on its 60-second timer and sends at **48
-hours** after signup, then **72 hours** if a file is still missing. Reminders
-use the existing verified sign-in address, sender, transport/backoff,
+The same mailer checks new accounts on its 60-second timer and sends when **48
+hours** have elapsed after signup, then **72 hours** if a file is still missing.
+Reminders use the existing verified sign-in address, sender, transport/backoff,
 unsubscribe links, Settings email choices and account-deletion cleanup; no new
 provider or credential is needed. “Remind me to download and upload my LinkedIn
 export” is on by default. There is no enrollment for older accounts or accounts
@@ -156,20 +156,21 @@ check sends nothing and retries later. An email already in flight can finish
 if an upload happens during its provider request. Turning email off stops all
 reminders; unsubscribe stops this reminder category only.
 
-Each recipient stores an atomic claim, outgoing payload and completed stage, so two processes
-cannot send the same stage concurrently. A stable Resend idempotency key and
-signup-anchored unsubscribe token and persisted outgoing message keep retry payloads identical after restart, including after address or sender changes;
-retries stop after 23 hours to stay within Resend’s 24-hour deduplication
-window. Stale claims recover after ten minutes. Missing the first window sends
-only the second reminder, and accounts at least four days old receive no
+Each recipient stores an atomic claim, outgoing payload and completed stage, so
+two processes cannot send the same stage concurrently. A stable Resend
+idempotency key, signup-anchored unsubscribe token and persisted outgoing message
+keep retry payloads identical after restart, including after address or sender
+changes; retries stop 23 hours after the stage's first attempt to stay within
+Resend’s 24-hour deduplication window. Stale claims recover after ten minutes.
+Missing the first window sends only the second reminder, and accounts at least
+four days old receive no
 backlog. All state remains on the private recipient node and is deleted with
 the account.
 
-The email explains [LinkedIn’s documented 72-hour download window](https://www.linkedin.com/help/linkedin/answer/a1339364/downloading-your-account-data?lang=en)
+The email explains the [export download guidance](../README.md#import-linkedin-archive)
 and directs the member to `/import`. Signup time is only a reminder anchor:
 Unlinked cannot see when LinkedIn’s email arrives, so the reminder never claims
-an exact expiry date. A downloaded file can be kept and uploaded later; only
-the download link expires. If it has expired, request another export.
+an exact expiry date.
 
 ## Preferences and unsubscribe
 
@@ -197,7 +198,8 @@ the download link expires. If it has expired, request another export.
 - No email address, token or key is ever logged or written to the audit log;
   failures record only a code such as `email_transport_status_422`.
 - Graph labels: `UnlinkedEmailRecipient` (member address, verified flag,
-  preferences, last-emailed time, backoff, new-account start),
+  preferences, last-emailed time, backoff, new-account start and reminder claims,
+  stages and persisted outgoing payload),
   `UnlinkedEmailSuppression` and `UnlinkedEmailSend` (hashes only), and one
   `UnlinkedEmailInviteLock` node. `initialize()` only adds their own
   constraints and indexes.

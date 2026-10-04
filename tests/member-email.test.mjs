@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createHmac } from 'node:crypto'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { accountKey, EmailError, createMemberEmail, createMemoryEmailStore, createNeo4jEmailStore, createResendTransport, createUnsubscribeTokens, emailAddress, emailConfig, emailSecret, headerText, inviteEmail, inviteFromHeader, senderName,
   DEFAULT_EMAIL_FROM, NEW_ACCOUNT_INVITE_EMAILS_PER_DAY, INVITE_EMAILS_PER_DAY, INVITE_RECIPIENT_COOLDOWN_MS, RESEND_ENDPOINT } from '../mcp-server/member-email.mjs'
 import { createNotifications, createMemoryNotificationStore, createNeo4jNotificationStore } from '../mcp-server/member-notifications.mjs'
@@ -587,6 +589,12 @@ test('LinkedIn reminders send once at 48 and 72 hours, with the link lifetime an
   assert.equal((await email.runImportReminders()).sent, 0)
   assert.equal(transport.sent.length, 2)
   assert.notEqual(transport.sent[0].idempotencyKey, transport.sent[1].idempotencyKey)
+  if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) {
+    for (const [index, message] of transport.sent.entries()) {
+      await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `linkedin-reminder-${index + 1}.html`), message.html)
+      await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `linkedin-reminder-${index + 1}.txt`), `${message.subject}\n\n${message.text}`)
+    }
+  }
   for (const message of transport.sent) {
     assert.match(message.text, /3 days \(72 hours\) after the archive is ready/)
     assert.match(message.text, /saved file does not expire/)
@@ -672,6 +680,7 @@ test('reminder retry after restart keeps its exact payload and idempotency key, 
   assert.deepEqual(messages[0], messages[1])
   const again = createMemberEmail({ config: on, transport, store, secret, origin, now: () => clock.now, hasLinkedInUpload: async () => false })
   assert.equal((await again.runImportReminders()).sent, 0)
+  if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, 'reminder-restart.json'), JSON.stringify({ boundary: 'Service instances restarted over shared test store, injected failing-then-successful transport.', firstAttempt: messages[0], restartedAttempt: messages[1], persistedStage: (await store.getRecipient(accountKey(jacob))).importReminderStage }, null, 2))
 })
 
 test('concurrent mailers sharing recipient state send only one reminder', async () => {

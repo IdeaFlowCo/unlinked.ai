@@ -2,9 +2,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto
 import { NOTIFICATION_KINDS } from './member-notifications.mjs'
 import { HEAVY_INVITES_PER_DAY } from './member-invitations.mjs'
 
-// Email delivery for the signed-in runtime (docs/email.md): invite emails sent
-// on a member's behalf, and notification emails. Sending needs RESEND_API_KEY
-// and stays on unless UNLINKED_EMAIL_ENABLED is "false"/"0"/"off"/"no". Nothing
+// Email delivery configuration and contracts are owned by docs/email.md. Nothing
 // here ever logs or returns an email address, a token or the API key.
 
 export const RESEND_ENDPOINT = 'https://api.resend.com/emails'
@@ -15,7 +13,8 @@ export const INVITE_RECIPIENT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 export const UNSUBSCRIBE_TTL_MS = 365 * 24 * 60 * 60 * 1000
 // At most one notification email per member per window; several become one digest.
 export const NOTIFICATION_EMAIL_WINDOW_MS = 15 * 60 * 1000
-// Settings labels, one per notification kind. Defaults come from NOTIFICATION_KINDS[kind].email.
+// Notification defaults come from NOTIFICATION_KINDS[kind].email;
+// export reminders are a separate preference, enabled by default.
 export const EMAIL_PREFERENCES = Object.freeze({
   connection_request_received: 'Someone asks to connect with you',
   connection_request_accepted: 'Someone accepts your connection request',

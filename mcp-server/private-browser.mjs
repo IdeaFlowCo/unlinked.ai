@@ -324,7 +324,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     // formula so a later seeded row for the same address collides cleanly.
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
     const accountLabel = identity.verifiedEmail ?? identity.subject
-    // The sign-in address, kept privately for notification emails and invite Reply-To while email is on.
+    // Keep the sign-in address private for member email and invite Reply-To.
     if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner }), false)
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()

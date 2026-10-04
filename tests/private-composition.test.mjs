@@ -1,12 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { createPrivatePilotDependencies } from '../mcp-server/private-composition.mjs'
-import { createMemoryEmailStore } from '../mcp-server/member-email.mjs'
+import { accountKey, createMemoryEmailStore } from '../mcp-server/member-email.mjs'
 import { createMemoryNotificationStore } from '../mcp-server/member-notifications.mjs'
 
 const require = createRequire(new URL('../mcp-server/package.json', import.meta.url))
@@ -29,7 +29,7 @@ async function fixture(t) {
   // is separate; this test executes composition, signed bearer and HTTP routing.
   class OperationalStore {
     async listPendingImportJobs() { return [] }
-    async listImportJobIds() { return [] }
+    async listImportJobIds() { return state.importJobs ?? [] }
     ready = false
     async initialize() { this.ready = true; state.storeInitialized = true }
     checkReady() { if (!this.ready) throw new Error('operational_unavailable') }
@@ -220,5 +220,48 @@ test('a missing or short UNLINKED_EMAIL_SECRET disables email with one non-secre
     assert.equal(dependencies.memberEmail, undefined)
     assert.deepEqual(lines, ['unlinked_email_disabled: UNLINKED_EMAIL_SECRET is missing or shorter than 32 bytes'])
     await dependencies.close()
+  }
+})
+
+test('composed reminders stop for processing receipts and confirmed recovered originals', async t => {
+  for (const uploaded of ['none', 'processing', 'recovered']) {
+    const { options, state } = await fixture(t)
+    state.importJobs = uploaded === 'processing' ? ['durable-processing-job'] : []
+    const store = createMemoryEmailStore(), sent = []
+    const link = { profileId: '00000000-0000-4000-8000-000000000002', receiptId: 'confirmed-receipt', sourceSha256: 'a'.repeat(64) }
+    const modules = { ...options.modules,
+      createEmailStore: () => store,
+      createNotificationStore: () => ({ ...createMemoryNotificationStore(), initialize: async () => {} }),
+      UnlinkedLegacyStorageStore: class {
+        async initialize() {}
+        async readOwner(ownerId, userId) {
+          assert.equal(ownerId, 'owner-one'); assert.equal(userId, 'user-one')
+          return uploaded === 'recovered' ? { ...link, objects: [{ objectId: 'original-one', sourceFields: { name: 'old/Connections.csv' }, rawBytes: 100, category: 'connections', parsed: { accepted: 1, rejected: 0 } }] } : null
+        }
+      },
+      UnlinkedLegacyLinks: class { async initialize() {} async readBound() { return link } async candidate() { return null } async confirm() { throw Error('unused confirmation') } },
+      UnlinkedPublicPeopleStore: class {
+        async initialize() {}
+        async read() { return { revision: 'legacy-public-v1:' + link.sourceSha256, profiles: [{ id: link.profileId, name: 'Recovered member' }], connections: [] } }
+      },
+    }
+    const originalDriver = modules.neo4j.driver
+    modules.neo4j = { ...modules.neo4j, driver: (...args) => ({ ...originalDriver(...args), session: () => ({
+      executeRead: work => work({ run: async () => ({ records: [] }) }),
+      executeWrite: work => work({ run: async () => ({ records: [] }) }), close: async () => {},
+    }) }) }
+    const runtime = await createPrivatePilotDependencies({ ...options, modules, profileLookupEnv: {},
+      emailEnv: { RESEND_API_KEY: 'synthetic', UNLINKED_EMAIL_SECRET: 'cd'.repeat(32) },
+      emailTransportFactory: () => ({ async send(message) { sent.push(message); return { id: 'sent' } } }) })
+    t.after(runtime.close)
+    const member = { ownerId: 'owner-one', userId: 'user-one' }
+    await runtime.memberEmail.rememberAddress(member, { address: 'member@example.invalid', verified: true, newAccount: true })
+    store.recipients.get(accountKey(member)).accountCreatedAt -= 48 * 60 * 60 * 1000
+    const result = await runtime.memberEmail.runImportReminders()
+    assert.equal(result.sent, uploaded === 'none' ? 1 : 0)
+    assert.equal(result.skipped, uploaded === 'none' ? 0 : 1)
+    assert.equal(sent.length, uploaded === 'none' ? 1 : 0)
+    if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `composed-reminder-${uploaded}.json`), JSON.stringify({ boundary: 'Real runtime composition and owner-fenced recovery reader; injected graph/store/transport contracts, synthetic account.', durableUpload: uploaded, atSignupHours: 48, result, deliveredSubjects: sent.map(message => message.subject), persistedStage: store.recipients.get(accountKey(member)).importReminderStage }, null, 2))
+    await runtime.close()
   }
 })
