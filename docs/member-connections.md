@@ -116,3 +116,26 @@ People rows show Connect, Pending + Withdraw, Accept + Ignore, Connected, or Inv
 Either participant can remove an accepted member request through `POST /connections/remove`, after the profile/row confirmation. The request becomes `removed`, releases its pair key and removes the agreed edge from both accounts; no notification is sent. A fresh request can reconnect them when no independent imported edge still connects their profiles. Accepted off-platform invite connections also offer removal (their link is revoked). Removal captures the pair’s active request and accepted invitation IDs, then claims the exact selected accepted agreement with a store compare-and-set before settling only those captured agreements. The claim atomically stores those IDs on the selected agreement; either participant can resume an incomplete removal after a store failure, using only its original IDs. Completion closes that retry authorization. A stale duplicate cannot touch a fresh reconnection. Settlement retracts obsolete request notifications and imposes no withdrawal cooldown. Pair reads include every active request and the latest withdrawal per sender regardless of removed history. Reconnecting requires a fresh request and acceptance. Imported observations and claimed profiles remain independent provenance and are preserved. A profile connected by an imported observation can therefore still show Connected and remain in the connections filter after removal; that observation does not offer Remove.
 
 Focused removal regressions run with `node --test tests/connection-removal-races.test.mjs`. To exercise both stores, point `UNLINKED_CONNECTION_TEST_HTTP` at a disposable Neo4j HTTP endpoint on `127.0.0.1` and set `UNLINKED_CONNECTION_TEST_DISPOSABLE=1`; authentication must be disabled. The integration fixtures replace only their synthetic removal accounts’ request/invitation records and exercise real Cypher, including a transaction holding the selected agreement lock.
+
+## Browser feedback and badge refresh
+
+Connect remains a normal form POST, including when JavaScript is disabled.
+The redirect shows a “Request sent” confirmation and the next server-rendered
+profile or People row shows “Request sent · Pending” with Withdraw. Requests
+and notifications persist in the graph, so reloads retain the state. Duplicate,
+already-connected and rate-limit results have plain-language notices. Expired
+forms/sessions, unavailable profiles and unexpected failures show recovery links;
+an uncertain failure asks the member to check invitations before retrying.
+Accept/Ignore from Notifications returns there with a status message.
+
+The nonce-authorized `/public-assets/connection-feedback.js` adds an immediate
+“Sending…” state and prevents a second submission while the first is navigating.
+It restores controls when the browser restores a page from its back/forward
+cache. It adds no inline handlers or styles. The authenticated, read-only
+`GET /api/nav-alerts` returns only the current account's counts, with `no-store`.
+Visible pages refresh badges every 15 seconds and on focus; hidden pages pause,
+expired sessions stop polling, and failed reads keep the last confirmed badge.
+Polling does not mark notifications seen or read. Without JavaScript, badges
+refresh on page navigation. Notification emails already use the Resend mailer
+and preferences described in [email.md](email.md); the feed reflects whether
+that runtime has email enabled.

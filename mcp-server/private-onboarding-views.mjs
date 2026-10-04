@@ -367,7 +367,7 @@ export function renderFindMe({ accountLabel, displayName, csrf, importJob, looku
 // Anyone's profile, readable with or without a session: who they are and who they know.
 // The Connect control on someone else's profile, by where the two accounts stand.
 const CONNECT_NOTICES = {
-  removed: 'Connection removed for both of you. You can send a new request. Imported connection observations stay in your files.', sent: 'Invitation sent. They will see it in My Network.', accepted: 'You are now connected.', withdrawn: 'Invitation withdrawn.', ignored: 'Invitation ignored.',
+  removed: 'Connection removed for both of you. You can send a new request. Imported connection observations stay in your files.', sent: 'Request sent. They will see it in My Network and Notifications.', accepted: 'You are now connected.', withdrawn: 'Invitation withdrawn.', ignored: 'Invitation ignored.',
   connection_pending: 'You already have an invitation waiting with them.', connection_exists: 'You are already connected.', connection_self: 'That is your own profile.',
   connection_rate_limited: 'You have sent a lot of invitations today. Try again tomorrow.', connection_cooldown: 'You withdrew an invitation to them recently. You can invite them again in a few weeks.',
   connection_note_invalid: 'Keep the note under 300 characters.', connection_unavailable: 'That invitation is no longer available.', connection_not_found: 'That invitation is no longer available.', connection_not_member: 'They are not on Unlinked yet.',
@@ -379,7 +379,7 @@ const connectControl = ({ connect, csrf, id, name, next, row = false }) => {
   if (connect.state === 'signed-out') return `<a class="button sm" href="${html(`/login?next=${encodeURIComponent(`/people/${encodeURIComponent(id)}`)}`)}">Sign in to connect</a>`
   if (connect.state === 'self') return '<a class="button sec sm" href="/profile">This is you · My profile</a>'
   if (connect.state === 'connected') return `<span class="state-pill ok">✓ Connected</span>${connect.requestId ? `<details class="connection-remove"><summary>Remove connection…</summary><p>Remove ${html(name || 'this person')} from your member connections? This removes the connection for both of you. Nobody is notified. Your imported files and claimed profiles stay.</p><form method="post" action="/connections/remove">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(connect.requestId)}">${back}<button class="quiet sm">Confirm removal</button></form></details>` : ''}`
-  if (connect.state === 'outgoing') return `<span class="state-pill">Pending</span><form method="post" action="/connections/withdraw">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(connect.requestId)}">${back}<button class="quiet sm" type="submit">Withdraw</button></form>`
+  if (connect.state === 'outgoing') return `<span class="state-pill">Request sent · Pending</span><form method="post" action="/connections/withdraw">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(connect.requestId)}">${back}<button class="quiet sm" type="submit">Withdraw</button></form>`
   if (connect.state === 'incoming') return `<form method="post" action="/connections/respond">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(connect.requestId)}">${back}<button class="sm" name="action" value="accept">Accept invitation</button><button class="quiet sm" name="action" value="ignore">Ignore</button></form>`
   if (connect.state === 'none') return `<form${row ? '' : ' id="connect-form"'} class="connect" method="post" action="/connections/request">${csrfInput(csrf)}<input type="hidden" name="profileId" value="${html(id)}">${back}<button class="sm" type="submit">${PLUS_ICON}Connect</button></form>`
   if (connect.state === 'invite') return '<a class="button sec sm" href="/invites">Invite to Unlinked</a>'
@@ -527,7 +527,7 @@ const ago = (at, now) => {
 const profileHref = id => html(`/people/${encodeURIComponent(raw(id))}`)
 const named = value => value.profileId ? `<a href="${profileHref(value.profileId)}"><b>${html(value.name)}</b></a>` : `<b>${html(value.name)}</b>`
 const respondForm = (csrf, id, next = '') => `<form class="row-actions" method="post" action="/connections/respond">${csrfInput(csrf)}<input type="hidden" name="id" value="${html(id)}">${next ? `<input type="hidden" name="next" value="${html(next)}">` : ''}<button class="quiet sm" name="action" value="ignore">Ignore</button><button class="sm" name="action" value="accept">Accept</button></form>`
-const INVITATION_NOTICES = { accepted: 'Accepted. You are now connected.', ignored: 'Ignored. They are not told.', withdrawn: 'Invitation withdrawn.', connection_unavailable: 'That invitation is no longer available.', connection_not_found: 'That invitation is no longer available.' }
+const INVITATION_NOTICES = { ...CONNECT_NOTICES, accepted: 'Accepted. You are now connected.', ignored: 'Ignored. They are not told.', withdrawn: 'Invitation withdrawn.', connection_unavailable: 'That invitation is no longer available.', connection_not_found: 'That invitation is no longer available.' }
 
 // My Network → Invitations: requests waiting for you, and the ones you sent.
 export function renderInvitations({ accountLabel, displayName, csrf, importJob, tab = 'received', received = [], sent = [], notice, now = Date.now() } = {}) {
@@ -549,7 +549,7 @@ const NOTIFICATION_TEXT = {
 }
 // The notification feed. `pending` maps request ids that still await an answer,
 // so a request notification can be answered in place.
-export function renderNotifications({ accountLabel, displayName, csrf, importJob, items = [], pending = new Map(), pendingCount = 0, now = Date.now() } = {}) {
+export function renderNotifications({ accountLabel, displayName, csrf, importJob, items = [], pending = new Map(), pendingCount = 0, now = Date.now(), notice, emailEnabled = false } = {}) {
   const rows = list(items).filter(value => NOTIFICATION_TEXT[value.kind]).map(value => {
     // The whole row opens the item (and marks it read), so the name is not a separate link.
     const waiting = value.kind === 'connection_request_received' && pending.has(value.subjectId)
@@ -557,5 +557,5 @@ export function renderNotifications({ accountLabel, displayName, csrf, importJob
   }).join('')
   const unread = list(items).some(value => !value.read)
   const summary = pendingCount > 0 ? `<a class="note-summary" href="/invitations">${NETWORK_NAV_ICON}<span><b>${count(pendingCount)} pending ${pendingCount === 1 ? 'invitation' : 'invitations'}</b><span class="small">Review them in My Network</span></span></a>` : ''
-  return base('Notifications', `<section class="narrow wide notes"><div class="notes-top"><h1 class="hq">Notifications</h1>${unread ? `<form method="post" action="/notifications/read-all">${csrfInput(csrf)}<button class="quiet sm" type="submit">Mark all as read</button></form>` : ''}</div>${summary}<div class="card">${rows ? `<ul class="note-list">${rows}</ul>` : '<p class="small empty">Nothing yet. Invitations to connect, people accepting yours, and people you know joining Unlinked show up here.</p>'}</div><p class="small">Unlinked shows notifications here only; it does not email or push them yet.</p></section>`, { accountLabel, displayName, csrf, importJob })
+  return base('Notifications', `<section class="narrow wide notes"><div class="notes-top"><h1 class="hq">Notifications</h1>${unread ? `<form method="post" action="/notifications/read-all">${csrfInput(csrf)}<button class="quiet sm" type="submit">Mark all as read</button></form>` : ''}</div>${Object.hasOwn(CONNECT_NOTICES, raw(notice)) ? `<p class="notice" role="status">${html(CONNECT_NOTICES[notice])}</p>` : ''}${summary}<div class="card">${rows ? `<ul class="note-list">${rows}</ul>` : '<p class="small empty">Nothing yet. Invitations to connect, people accepting yours, and people you know joining Unlinked show up here.</p>'}</div><p class="small">${emailEnabled ? 'Email notifications follow your <a href="/settings#email">email preferences</a>. Requests you have already seen here are not emailed.' : 'Notifications appear here. Email delivery is currently unavailable.'}</p></section>`, { accountLabel, displayName, csrf, importJob })
 }

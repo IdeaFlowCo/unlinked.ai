@@ -18,6 +18,7 @@ import { stageArchive, importJobStatus, importErrorMessage, ADDED_PERSON } from 
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
 import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
+import { CONNECTION_FEEDBACK_SCRIPT } from './connection-feedback.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
 import { ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
@@ -206,9 +207,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const responseAlerts = new WeakMap()
   // Both counts in parallel, each bounded: a slow graph costs a badge, never the page.
   const bounded = (work, fallback) => Promise.race([Promise.resolve().then(work).catch(() => fallback), new Promise(resolve => setTimeout(resolve, 800, fallback).unref?.())])
-  const readAlerts = async owner => {
+  const readAlerts = async (owner, fallback = 0) => {
     if (!memberConnections && !notifications) return null
-    const [network, unseen] = await Promise.all([memberConnections ? bounded(() => memberConnections.pendingCount(owner), 0) : undefined, notifications ? bounded(() => notifications.counts(owner).then(value => value.unseen), 0) : undefined])
+    const [network, unseen] = await Promise.all([memberConnections ? bounded(() => memberConnections.pendingCount(owner), fallback) : undefined, notifications ? bounded(() => notifications.counts(owner).then(value => value.unseen), fallback) : undefined])
     return { ...(memberConnections ? { network } : {}), ...(notifications ? { notifications: unseen } : {}) }
   }
   const pageView = pathname => !pathname.startsWith('/api/') && !pathname.startsWith('/public-assets/') && !pathname.startsWith('/legacy-files/') && !/^\/notifications\/[^/]+$/.test(pathname) &&
@@ -235,7 +236,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}</html>`)
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="/public-assets/connection-feedback.js"></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}</html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   async function establishSession(response, identity, invitationToken = null, next = null) {
@@ -301,10 +302,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     if (typeof next === 'string' && /^\/people\/[A-Za-z0-9._~%-]{1,480}$/.test(next)) return `${next}?connect=${encodeURIComponent(code)}`
     const listing = networkReturn(next)
     if (listing) { listing.searchParams.set('notice', code); return `${listing.pathname}${listing.search}` }
-    if (next === '/notifications') return '/notifications'
+    if (next === '/notifications') return `/notifications?notice=${encodeURIComponent(code)}`
     return `/invitations?${next === '/invitations?tab=sent' ? 'tab=sent&' : ''}notice=${encodeURIComponent(code)}`
   }
   // AI picks are a POST result; their row forms return to the plain listing for the same words.
+  const connectionPost = request => request.method === 'POST' && /^\/connections\/(request|respond|withdraw|remove)$/.test(new URL(request.url, base).pathname)
+  const connectionFailure = (response, message, status = 400) => render(response, 'Connection request not completed', `<p>${html(message)}</p><p><a href="/network">Return to People</a> · <a href="/invitations">Check your invitations</a> · <a href="/login">Sign in with Ideaflow</a></p>`, status)
   const searchReturn = query => typeof query === 'string' && query.trim() && query.length <= 200 ? `/network?q=${encodeURIComponent(query.trim())}` : '/network'
   // Connect controls for listing rows: members get their relation (one batched
   // read), imported profiles not on Unlinked yet get an invite link.
@@ -375,10 +378,14 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     // RFC 8058 one-click unsubscribe is posted by mail providers, without this
     // origin; its signed token is the whole authority and it only turns email off.
     const oneClick = request.method === 'POST' && memberEmail && new URL(request.url, base).pathname === '/email/unsubscribe'
-    if (request.method === 'POST' && !oneClick && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
+    if (request.method === 'POST' && !oneClick && request.headers.origin !== base.origin) { if (connectionPost(request)) connectionFailure(response, 'This page could not be verified. Refresh Unlinked and try again.', 403); else response.writeHead(403).end(); return }
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/public-assets/connection-feedback.js') {
+        response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' })
+        response.end(request.method === 'HEAD' ? undefined : CONNECTION_FEEDBACK_SCRIPT); return
+      }
       // A published profile photo: public like the profile itself, no session,
       // served before any session or graph work. Only exact legacy ids in the
       // live photo set answer; everything else is 404.
@@ -436,6 +443,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
       if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer.owner); if (alerts) responseAlerts.set(response, alerts) }
+      if (request.method === 'GET' && url.pathname === '/api/nav-alerts') {
+        response.writeHead(viewer ? 200 : 401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+        response.end(JSON.stringify(viewer ? await readAlerts(viewer.owner, null) ?? {} : { error: 'Sign in to see notifications.' })); return
+      }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline, ...(responseAlerts.has(response) ? { alerts: responseAlerts.get(response) } : {}) } : {}
       if (await servePublicDiscovery(request, response, url.pathname, chrome, { signInOrigin: authorizationOrigin })) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
@@ -639,6 +650,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         else if (request.method === 'GET' && url.pathname === '/join') journey(response, renderJoin())
         else if (request.method === 'GET' && url.pathname === '/scan') journey(response, renderScan({ tab: url.searchParams.get('tab') }))
         else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(url.pathname) }), null, '', 401)
+        else if (connectionPost(request)) connectionFailure(response, 'Your session has expired. Sign in, then send your connection request again.', 401)
         else render(response, 'Sign in required', '<a class="action" href="/login">Sign in with Ideaflow</a>', 401)
         return
       }
@@ -970,7 +982,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           // The sender is named by their public profile when they have one, never by an email address.
           let outcome
           try { outcome = await connectionActions.send(session.owner, { profileId: input.get('profileId'), note: input.get('note') ?? undefined, fallbackName: session.displayName }) }
-          catch (failure) { if (failure instanceof ConnectionError && failure.code === 'connection_profile_not_found') { response.writeHead(404).end(); return } throw failure }
+          catch (failure) { if (failure instanceof ConnectionError && failure.code === 'connection_profile_not_found') { connectionFailure(response, 'That profile is no longer available. Return to People to find them again.', 404); return } throw failure }
           // A Connect button on a People row returns to that listing; the profile's own button to the profile.
           const listing = networkReturn(input.get('next'))
           redirect(response, afterConnection(listing ? input.get('next') : `/people/${encodeURIComponent(outcome.profileId)}`, outcome.code)); return
@@ -998,7 +1010,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         await notifications.markSeen(session.owner)
         const alerts = responseAlerts.get(response)
         if (alerts) responseAlerts.set(response, { ...alerts, notifications: 0 })
-        journey(response, renderNotifications({ ...props, items, pending: new Map(received.map(value => [value.id, value])), pendingCount: received.length }), props.importJob); return
+        journey(response, renderNotifications({ ...props, items, pending: new Map(received.map(value => [value.id, value])), pendingCount: received.length, notice: url.searchParams.get('notice'), emailEnabled: memberEmail?.sending === true }), props.importJob); return
       }
       const notificationItem = url.pathname.match(/^\/notifications\/([0-9a-f-]{36})$/)
       if (signup && notifications && request.method === 'GET' && notificationItem) {
@@ -1268,6 +1280,12 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       }
       response.writeHead(404).end()
     } catch (error) {
+      if (connectionPost(request) && !response.headersSent) {
+        connectionFailure(response, error.message === 'private_browser_csrf'
+          ? 'This form has expired or could not be verified. Refresh the page and try again. If you have signed out, sign in first.'
+          : 'We could not confirm that change. Check your invitations before trying again.', error.message === 'private_browser_csrf' ? 400 : 503)
+        return
+      }
       if (new URL(request.url, base).pathname === '/auth/callback/ideaflow') await recordAudit({ event: 'auth_callback_denied', reason: ['private_login_transaction_invalid', 'private_owner_recovery_required'].includes(error.message) ? error.message : 'oidc_or_owner_validation_failed' })
       const limited = error.message === 'private_body_limit' || error.message === 'archive_size_limit'
       const recovery = error.message === 'private_owner_recovery_required'
