@@ -135,7 +135,7 @@ test('the search bar QR button opens a scan sheet: Scan for anyone, My card for 
   let html = await page.text()
   const csp = page.headers.get('content-security-policy')
   assert.match(csp, /script-src 'self' 'nonce-[^']+'/); assert.match(csp, /img-src 'self' blob:; media-src 'self' blob:/); assert.match(csp, /default-src 'none'/)
-  assert.equal(page.headers.get('permissions-policy'), 'camera=(self), microphone=()')
+  assert.equal(page.headers.get('permissions-policy'), 'camera=(self), microphone=(self)')
   assert.match(html, /role="tablist"/)
   assert.match(html, /<a role="tab" id="tab-scan" href="\/scan" aria-controls="panel-scan" aria-selected="true">Scan<\/a>/)
   assert.match(html, /<a role="tab" id="tab-card" href="\/scan\?tab=card" aria-controls="panel-card" aria-selected="false" tabindex="-1">My card<\/a>/)
