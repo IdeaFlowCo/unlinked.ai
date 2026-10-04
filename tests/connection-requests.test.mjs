@@ -247,17 +247,17 @@ test('views: escaped names, inline answers, header badges only for configured fe
   const profile = { id: 'ada', name: 'Ada Lovelace', presence: 'member', positions: [], connections: [] }
   const control = connect => renderPerson({ csrf: 'tok', profile, connect }).content
   assert.match(control({ state: 'none' }), /<form id="connect-form" class="connect" method="post" action="\/connections\/request">.*?name="profileId" value="ada">.*?Connect<\/button><\/form>.*?<details class="connect-note"><summary>Add a note<\/summary>.*?A short note for Ada.*?name="note" form="connect-form"/)
-  assert.match(control({ state: 'outgoing', requestId: 'r9' }), /Pending<\/span><form method="post" action="\/connections\/withdraw">.*?value="r9"><input type="hidden" name="next" value="\/people\/ada">.*?Withdraw/)
+  assert.match(control({ state: 'outgoing', requestId: 'r9' }), /Request sent · Pending<\/span><form method="post" action="\/connections\/withdraw">.*?value="r9"><input type="hidden" name="next" value="\/people\/ada">.*?Withdraw/)
   assert.match(control({ state: 'incoming', requestId: 'r9', note: 'Hello <b>' }), /Ada wants to connect with you\. <q>Hello &lt;b&gt;<\/q>.*?Accept invitation/)
   assert.match(control({ state: 'connected' }), /✓ Connected/); assert.match(control({ state: 'self' }), /This is you/)
   assert.match(control({ state: 'invite' }), /href="\/invites">Invite to Unlinked/)
   assert.match(renderPerson({ profile, connect: { state: 'signed-out' } }).content, /href="\/login\?next=%2Fpeople%2Fada">Sign in to connect/)
-  assert.match(renderPerson({ csrf: 'tok', profile, connect: { state: 'none' }, connectNotice: 'sent' }).content, /role="status">Invitation sent\./)
+  assert.match(renderPerson({ csrf: 'tok', profile, connect: { state: 'none' }, connectNotice: 'sent' }).content, /role="status">Request sent\./)
   assert.doesNotMatch(renderPerson({ csrf: 'tok', profile, connectNotice: '<script>' }).content, /script>/)
 })
 
 // Two members with public profiles, plus a shadow, on one handler.
-async function site(t) {
+async function site(t, overrides = {}) {
   const person = (id, name) => ({ id, name, positions: [], education: [], skills: [] })
   const snapshot = { state: 'published', complete: true, revision: 'connect-fixture', profiles: [person('jacob-profile', 'Jacob Cole'), person('ada-profile', 'Ada Lovelace'), person('grace-profile', 'Grace Hopper'), person('shadow', 'Shadow Person')], connections: [{ fromId: 'jacob-profile', toId: 'grace-profile' }], members: ['jacob-profile', 'ada-profile', 'grace-profile'] }
   const accounts = { 'jacob-profile': jacob, 'ada-profile': ada, 'grace-profile': grace }
@@ -276,7 +276,7 @@ async function site(t) {
     readPublishedSnapshot: async () => snapshot,
     login: { begin: async () => ({ location: 'https://identity.invalid/login', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://identity.invalid', subject: next, verifiedEmail: `${next}@example.invalid`, displayName: names[next] }) },
     resolveOwner: async identity => owners[identity.subject], signup: async identity => owners[identity.subject], issueAccountGrant: async () => ({ accessToken: 'g' }), revokeAccountGrant: async () => {},
-    getBackend: async () => backend() })
+    getBackend: async () => backend(), ...overrides })
   const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
   const signIn = async subject => {
     next = subject
@@ -309,7 +309,7 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   assert.equal((await request('/connections/request', { method: 'POST', headers: { Cookie: me.cookie, Origin: 'https://evil.invalid', 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${me.csrf}&profileId=ada-profile` })).status, 403)
   const sent = await post('/connections/request', me, { profileId: 'ada-profile', note: 'Loved your talk' })
   assert.equal(sent.status, 303); assert.equal(sent.headers.get('location'), '/people/ada-profile?connect=sent')
-  assert.match((await get('/people/ada-profile?connect=sent', me)).text, /Invitation sent\..*?Pending<\/span>/s)
+  assert.match((await get('/people/ada-profile?connect=sent', me)).text, /Request sent\..*?Pending<\/span>/s)
   assert.equal((await post('/connections/request', me, { profileId: 'ada-profile' })).headers.get('location'), '/people/ada-profile?connect=connection_pending')
   assert.equal((await post('/connections/request', me, { profileId: 'shadow' })).headers.get('location'), '/people/shadow?connect=connection_not_member')
   assert.equal((await post('/connections/request', me, { profileId: 'jacob-profile' })).headers.get('location'), '/people/jacob-profile?connect=connection_self')
@@ -363,7 +363,7 @@ test('end to end: withdraw from Sent, ignore privately, and account deletion cle
   await post('/connections/request', third, { profileId: 'ada-profile' })
   const [graceRequest] = await memberConnections.received(ada)
   assert.equal((await post('/connections/respond', her, { id: graceRequest.id, action: 'ignore' })).headers.get('location'), '/invitations?notice=ignored')
-  assert.match((await get('/people/ada-profile', third)).text, /Pending<\/span>/)
+  assert.match((await get('/people/ada-profile', third)).text, /Request sent · Pending<\/span>/)
   assert.doesNotMatch((await get('/invitations', her)).text, /Grace Hopper/)
   // Unknown query keys on /invitations are dropped.
   assert.equal((await get('/invitations?x=1', her)).location, '/invitations')
@@ -406,4 +406,90 @@ test('review hardening: inherited keys are not notices, opaque ids are not names
   await requests.respond(ada, sent.request.id, 'ignore')
   const [mine] = await requests.sent(jacob)
   assert.deepEqual([mine.status, mine.respondedAt], ['pending', undefined])
+})
+
+test('People POST confirms and persists request state; live badge reads are account-scoped and never mark notifications seen', async t => {
+  const { signIn, get, post, notifications } = await site(t)
+  const me = await signIn('jacob-subject'), her = await signIn('ada-subject')
+  assert.equal((await get('/api/nav-alerts', { cookie: '' })).status, 401)
+  assert.deepEqual(JSON.parse((await get('/api/nav-alerts', her)).text), { network: 0, notifications: 0 })
+  const sent = await post('/connections/request', me, { profileId: 'ada-profile', next: '/network?q=Ada&presence=member' })
+  assert.equal(sent.status, 303)
+  assert.equal(sent.headers.get('location'), '/network?q=Ada&presence=member&notice=sent')
+  const page = await get(sent.headers.get('location'), me)
+  assert.match(page.text, /role="status">Request sent\./)
+  assert.match(page.text, /Request sent · Pending.*?Withdraw/s)
+  assert.match((await get('/people/ada-profile', me)).text, /Request sent · Pending.*?Withdraw/s)
+  for (let i = 0; i < 2; i++) assert.deepEqual(JSON.parse((await get('/api/nav-alerts', her)).text), { network: 1, notifications: 1 })
+  assert.deepEqual(JSON.parse((await get('/api/nav-alerts', me)).text), { network: 0, notifications: 0 })
+  const [item] = await notifications.list(ada)
+  assert.equal(item.kind, 'connection_request_received')
+  assert.equal((await notifications.counts(ada)).unseen, 1)
+  const accepted = await post('/connections/respond', her, { id: item.subjectId, action: 'accept', next: '/notifications' })
+  assert.equal(accepted.headers.get('location'), '/notifications?notice=accepted')
+  assert.match((await get(accepted.headers.get('location'), her)).text, /role="status">You are now connected\./)
+  assert.deepEqual(JSON.parse((await get('/api/nav-alerts', me)).text), { network: 0, notifications: 1 })
+  assert.equal((await notifications.list(jacob))[0].kind, 'connection_request_accepted')
+})
+
+test('authenticated POST search pages retain configured navigation for later badge updates', async t => {
+  const p = await site(t, { complete: async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Matching person' }] }) })
+  const sender = await p.signIn('jacob-subject'), recipient = await p.signIn('ada-subject')
+  for (const scope of ['everyone', 'own']) {
+    const response = await p.post('/search-account', recipient, { query: 'Jacob', scope })
+    assert.equal(response.status, 200)
+    const page = await response.text()
+    assert.match(page, /<a class="nav-ico" href="\/invitations"/)
+    assert.match(page, /<a class="nav-ico" href="\/notifications"/)
+    assert.match(page, /src="\/public-assets\/connection-feedback.js"/)
+  }
+  assert.deepEqual(JSON.parse((await p.get('/api/nav-alerts', recipient)).text), { network: 0, notifications: 0 })
+  assert.equal((await p.post('/connections/request', sender, { profileId: 'ada-profile' })).status, 303)
+  assert.deepEqual(JSON.parse((await p.get('/api/nav-alerts', recipient)).text), { network: 1, notifications: 1 })
+  const disabled = await site(t, { memberConnections: undefined, notifications: undefined, complete: async () => ({ matches: [] }) })
+  const response = await disabled.post('/search-account', await disabled.signIn('ada-subject'), { query: 'Jacob', scope: 'own' })
+  assert.equal(response.status, 200)
+  assert.doesNotMatch(await response.text(), /<a class="nav-ico" href="\/(?:invitations|notifications)"/)
+})
+
+test('connection failures explain expired forms, sessions, missing profiles and server failures without claiming success', async t => {
+  const p = await site(t), me = await p.signIn('jacob-subject')
+  const bad = await p.post('/connections/request', { ...me, csrf: 'expired' }, { profileId: 'ada-profile' })
+  assert.equal(bad.status, 400); assert.match(await bad.text(), /form has expired.*Refresh the page/)
+  const expired = await p.post('/connections/request', { cookie: '', csrf: '' }, { profileId: 'ada-profile' })
+  assert.equal(expired.status, 401); assert.match(await expired.text(), /session has expired.*Sign in/)
+  const missing = await p.post('/connections/request', me, { profileId: 'unknown' })
+  assert.equal(missing.status, 404); assert.match(await missing.text(), /profile is no longer available/)
+  assert.deepEqual(await p.memberConnections.sent(jacob), [])
+  const down = await site(t, { accountForProfile: async () => { throw Error('secret-database-address') } })
+  const failure = await down.post('/connections/request', await down.signIn('jacob-subject'), { profileId: 'ada-profile' })
+  assert.equal(failure.status, 503)
+  const text = await failure.text(); assert.match(text, /could not confirm that change.*Check your invitations/); assert.doesNotMatch(text, /secret-database-address|Request sent/)
+})
+
+test('rate limit and duplicate requests return plain-language notices; email copy reflects runtime configuration', async t => {
+  const p = await site(t), me = await p.signIn('jacob-subject')
+  for (let i = 0; i < 50; i++) await p.memberConnections.send({ sender: jacob, recipient: { ownerId: `limit-${i}`, userId: `limit-${i}` }, senderName: 'Test', recipientName: 'Test' })
+  const limited = await p.post('/connections/request', me, { profileId: 'ada-profile', next: '/network' })
+  assert.equal(limited.headers.get('location'), '/network?notice=connection_rate_limited')
+  assert.match((await p.get(limited.headers.get('location'), me)).text, /Try again tomorrow/)
+  assert.match(renderNotifications({ emailEnabled: true }).content, /email preferences/)
+  assert.doesNotMatch(renderNotifications({ emailEnabled: true }).content, /does not email|unavailable/)
+  assert.match(renderNotifications({ emailEnabled: false }).content, /Email delivery is currently unavailable/)
+})
+
+test('feedback asset is executable JavaScript with the page nonce; badge API is never cached', async t => {
+  const p = await site(t), me = await p.signIn('jacob-subject')
+  const asset = await p.request('/public-assets/connection-feedback.js')
+  assert.equal(asset.status, 200); assert.match(asset.headers.get('content-type'), /javascript/)
+  const script = await asset.text(); assert.doesNotThrow(() => new Function(script))
+  const page = await p.request('/people/ada-profile', { headers: { Cookie: me.cookie } })
+  const policy = page.headers.get('content-security-policy'), nonce = policy.match(/'nonce-([^']+)'/)[1]
+  assert.ok((await page.text()).includes(`<script nonce="${nonce}" src="/public-assets/connection-feedback.js"></script>`))
+  const alerts = await p.request('/api/nav-alerts', { headers: { Cookie: me.cookie } })
+  assert.equal(alerts.headers.get('cache-control'), 'no-store')
+  assert.match(alerts.headers.get('content-type'), /application\/json/)
+  const guide = await p.request('/agents', { headers: { Cookie: me.cookie } })
+  assert.match(guide.headers.get('content-security-policy'), /connect-src 'self'/)
+  assert.match(await guide.text(), /src="\/public-assets\/connection-feedback.js"/)
 })
