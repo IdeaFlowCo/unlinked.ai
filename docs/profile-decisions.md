@@ -16,8 +16,13 @@ built (`src/utils/public-people/profile-decisions.mjs`, wired through
 - **rename** `{profileId, name}`: changes only the published display name, for
   example to mark test accounts.
 - Inputs are never changed. A decision is **revoked**, not deleted, and the next
-  snapshot is exactly what it would have been without it. The applied decision
-  ids are folded into the snapshot revision, so cursors restart after a change.
+  snapshot is exactly what it would have been without it.
+
+The snapshot revision hashes applied decisions in execution order, including
+decision ID, kind, profile ID and survivor ID or trimmed rename value. Automatic
+decisions that retain an ID while changing their target invalidate compiled
+indexes and cursors; merge order also identifies which source fills missing
+survivor fields. Regression coverage is in `tests/profile-decisions.test.mjs`.
 
 Operate inside the runtime container:
 

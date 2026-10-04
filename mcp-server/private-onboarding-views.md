@@ -77,8 +77,9 @@ legacy contact rows.
 
 Everyone rows show only initials, linked name (`/people/{encodeURIComponent(id)}`),
 headline/company and optional location. No LinkedIn link, listed-by/member flags,
-reason or mutual counts appear in that group. Unavailable shows “Member search is
-on its way.” and no rows; ready empty lists distinguish no query from no match.
+reason or mutual counts appear in that group. Unavailable (the shared index read
+failed, including a timeout) shows “Searching everyone on Unlinked did not finish this time.”
+with a Try again link and no rows; ready empty lists distinguish no query from no match.
 Error retains the existing failure alert rather than claiming either list is empty.
 `nextCursor` supplies a native Show more GET link to `/network?cursor=...`, with
 encoded `q` before cursor when query is nonempty. No scope or other fields are

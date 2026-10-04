@@ -7,6 +7,8 @@ import { createMemberPublicIndex, ENRICHMENT_DATASET } from '../src/utils/public
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { operateProfileDecisions } from '../mcp-server/profile-decisions-operator.mjs'
+import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
+import { PUBLIC_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 
 const person = (id, name, extra = {}) => ({ id, name, positions: [], education: [], skills: [], ...extra })
 // old and new are one person under two LinkedIn addresses; each was listed by a different member.
@@ -48,6 +50,63 @@ test('the reader resolves a merged address to its survivor for pages, lookups an
   const found = await reader.lookup({ ids: ['old', 'eden'] })
   assert.equal(found.get('old').id, 'new'); assert.equal(found.get('eden').id, 'eden')
   await assert.rejects(createPublicPeopleReader({ readPublishedSnapshot: async () => ({ ...base(), aliases: { old: 'missing' } }) }).list(), { status: 503 })
+})
+
+test('decision revisions identify rename values, merge endpoints and field-fill order', () => {
+  const first = applyProfileDecisions(base(), [rename('same', 'test', 'First name')])
+  const second = applyProfileDecisions(base(), [rename('same', 'test', 'Second name')])
+  assert.notEqual(first.revision, second.revision)
+  assert.equal(second.profiles.find(row => row.id === 'test').name, 'Second name')
+  const otherProfile = applyProfileDecisions(base(), [rename('same', 'eden', 'First name')])
+  assert.notEqual(first.revision, otherProfile.revision)
+  const toNew = applyProfileDecisions(base(), [merge('same', 'old', 'new')])
+  const toEden = applyProfileDecisions(base(), [merge('same', 'old', 'eden')])
+  assert.notEqual(toNew.revision, toEden.revision)
+  assert.deepEqual(toEden.aliases, { old: 'eden' })
+  const input = { ...base(), profiles: [person('one', 'One', { headline: 'One headline' }), person('two', 'Two', { headline: 'Two headline' }), person('survivor', 'Survivor')], connections: [] }
+  const decisions = [merge('one-merge', 'one', 'survivor'), merge('two-merge', 'two', 'survivor')]
+  const ordered = applyProfileDecisions(input, decisions), reversed = applyProfileDecisions(input, [...decisions].reverse())
+  assert.equal(ordered.profiles[0].headline, 'One headline')
+  assert.equal(reversed.profiles[0].headline, 'Two headline')
+  assert.notEqual(ordered.revision, reversed.revision)
+})
+
+test('warmed shared readers refresh automatic aliases and edges when an operator redirects a claimed survivor', async () => {
+  const importId = 'a'.repeat(64), source = 'b'.repeat(64), ownId = 'member-import-' + importId
+  const owner = { ownerId: 'owner', userId: 'user' }
+  const legacy = { state: 'published', complete: true, revision: 'legacy-public-v1:' + source,
+    profiles: [person('A', 'Claimed A'), person('B', 'Public B')], connections: [] }
+  const imported = { state: 'published', complete: true, revision: 'member-public-v1:' + importId,
+    profiles: [person(ownId, 'Claimed A'), person('public-X', 'Imported X', { headline: 'Imported headline' })], connections: [{ fromId: ownId, toId: 'public-X' }] }
+  const job = { id: importId, ownerId: owner.ownerId, consent: PUBLIC_UPLOAD_CONSENT }
+  const link = { profileId: 'A', sourceSha256: source, receiptId: 'claim-A', revision: legacy.revision }
+  let explicit = []
+  const read = createMemberPublicIndex({
+    readLegacy: async () => legacy,
+    discover: async () => [{ id: importId, owner, revision: 1 }],
+    getBackend: async () => ({ readResource: async () => ({ sourceOwnerId: owner.ownerId, sourceRevision: 1, payload: job }), readLegacyProfile: async () => link }),
+    publicPeople: { read: async dataset => dataset === ENRICHMENT_DATASET ? null : imported },
+    readMembers: async () => ['A'],
+    readDecisions: async () => [...urlIdentityMerges({ rows: [{ publicId: 'public-X', subject: 'https://www.linkedin.com/in/claimed-a' }], slugIndex: new Map([['claimed-a', 'A']]), explicit }), ...explicit],
+  })
+  const reader = () => createPublicPeopleReader({ readPublishedSnapshot: read })
+  const before = await read()
+  assert.deepEqual(before.aliases, { 'public-X': 'A' })
+  assert.deepEqual(before.connections, [])
+  assert.deepEqual(await reader().profile({ id: 'public-X' }), { moved: 'A' })
+  assert.equal((await reader().profile({ id: 'A' })).profile.headline, 'Imported headline')
+  explicit = [merge('operator-A-B', 'A', 'B')]
+  const after = await read()
+  assert.notEqual(after.revision, before.revision)
+  assert.deepEqual(after.aliases, { 'public-X': 'B' })
+  assert.deepEqual(after.connections, [{ fromId: 'A', toId: 'B' }])
+  assert.deepEqual(after.members, ['A'])
+  assert.ok(after.profiles.some(row => row.id === 'A'))
+  assert.deepEqual(await reader().profile({ id: 'public-X' }), { moved: 'B' })
+  const claimed = (await reader().profile({ id: 'A' })).profile
+  assert.equal(claimed.headline, undefined)
+  assert.deepEqual(claimed.connections.map(row => row.id), ['B'])
+  assert.equal((await reader().profile({ id: 'B' })).profile.headline, 'Imported headline')
 })
 
 test('a merged profile address answers 301 to the survivor, as a page and as JSON', async t => {

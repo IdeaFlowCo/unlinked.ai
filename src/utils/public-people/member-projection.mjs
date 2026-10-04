@@ -144,9 +144,13 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     revisions.push('members:' + hash(JSON.stringify(memberIds)))
     return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds})
   }
-  return async ({signal} = {}) => {
+  const read = async ({signal} = {}) => {
     signal?.throwIfAborted()
     if (!work) work=build().finally(()=>{work=null})
     const value=await work;signal?.throwIfAborted();return value
   }
+  // The revision hashes every input above (legacy, enrichment, each import,
+  // links, invites, members, decisions), so readers may reuse a compiled index.
+  read.revisionIdentifiesContent = true
+  return read
 }

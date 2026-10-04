@@ -71,7 +71,8 @@ export function applyProfileDecisions(snapshot, stored) {
     const fromId = point(edge.fromId), toId = point(edge.toId)
     if (fromId !== toId) pairs.set(JSON.stringify([fromId, toId]), { fromId, toId })
   }
-  const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : renames.has(value.profileId)).map(value => value.id).sort()
+  const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : renames.has(value.profileId))
+    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.name.trim()])
   return {
     ...snapshot,
     revision: `${snapshot.revision}+decisions:${hash(JSON.stringify(applied)).slice(0, 16)}`,

@@ -13,9 +13,9 @@ Unknown, unpublished, unavailable, incomplete, malformed or over-limit snapshots
 Provider exceptions are replaced with data-free errors.
 Requests time out and receive an abort signal; adapters must honor that signal to stop their own work.
 
-Default maxima are20,000profiles,100,000directed public edges,16MiB accepted DTO text and3seconds per snapshot call.
+Default maxima are 20,000 profiles, 100,000 directed public edges, 16 MiB accepted DTO text and 8 seconds per snapshot call.
 The provider must bound its own fetch/serialization before returning; these maxima are not permission to read private operational rows.
-All entity arrays must have their own data entries at every index. The factory validates all rows before computing counts/order, never truncates an oversized snapshot, and rejects duplicate IDs/edges or dangling endpoints.
+All entity arrays must have their own data entries at every index. On compilation, the factory validates all rows before computing counts/order, never truncates an oversized snapshot, and rejects duplicate IDs/edges or dangling endpoints. Reusing a compiled index relies on the trusted source's content-addressed revision guarantee below.
 Empty published snapshots are valid, distinguishable from unavailable publication.
 
 Each published profile has `id`, `name`, optional `headline`, `location`, `about`, optional search-only `company`, and arrays `positions`, `education`, `skills`.
@@ -31,7 +31,15 @@ A profile's connections are its edges from both ends: an edge is stored only fro
 When the snapshot carries `members` (profile IDs supplied by the shared index), every summary and detail adds `presence: 'member'|'shadow'` and `connectionCount` (both directions). See [signup source precedence](signup-profile-lookup.md#public-projection-and-export-precedence) for member identity sources. Snapshots without `members` add neither field. A member ID missing from the profiles is a malformed snapshot (503).
 `reader.list({query?,mode?,presence?,cursor?,signal?})` accepts `presence: 'member'|'shadow'` and then also returns the filtered `total`; the filter is part of the cursor scope, so a cursor never pages a different filter. A snapshot without `members` matches neither filter; any other value is a 400.
 `reader.lookup({ids,signal?})` takes at most 1000 IDs and returns a `Map` of the summaries that are published, in request order; unknown IDs are omitted.
-Overlapping reads without their own signal share one snapshot build; nothing is kept after it, so later reads see the current publication.
+Overlapping reads without their own signal share one snapshot build. A request-scoped reader may use `reuse: true` to keep one coherent snapshot for that request. Across requests, compiled public indexes are reused only when the trusted source sets `revisionIdentifiesContent: true` and the revision and configured limits match; every request still reads the source and validates its publication envelope. Signed-in viewer-scoped sources never use the shared cache. Returned cached rows are frozen.
+
+The standalone composition wraps immutable public datasets with `cachePublicPeopleReads`: every read checks the current published revision and digest in Neo4j, reusing validated chunks only while both match. Changed, revoked, failed or racing pointers trigger a full store read. The member projection checks current owner/source authorization and includes every content input in its revision. No member page or browser response is cached.
+
+Decision content and execution order participate in the revision; see [profile decisions](profile-decisions.md) for that contract.
+
+Each dataset cache retains at most 64 snapshots and 64 MiB of estimated retained data, evicting least-recently-used entries to satisfy both limits. The estimate counts UTF-16 strings, property names and conservative per-object/property overhead; it is a retention budget, not an exact heap measurement. Oversized snapshots are returned normally without retention. Evicted datasets are read fresh on their next request after the usual publication pointer check. Tests may supply smaller limits (including zero to disable retention); limits cannot exceed the defaults. Replacement, revocation and failed reads release the previous entry, so inactive deleted/replaced imports cannot accumulate without bound.
+
+Profile photos have an independent live publication. `photoFor` is applied to returned summaries and details after compilation, so photo changes, revocation and different photo providers cannot inherit stale cached URLs.
 The controller maps null to HTTP404; `PublicPeopleReaderError.status===503` maps to unavailable.
 Requests must be plain data objects. Invalid request shapes, signals, queries, IDs and cursor structures/scopes return a data-free status400 error before backend access or unknown-profile handling.
 No HTTP route is implemented by this module; the standalone runtime maps it to anonymous `/network`, `/people`, `/people/:id`, `/api/people` and `/api/people/:id`.
