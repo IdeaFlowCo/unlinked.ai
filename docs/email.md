@@ -156,7 +156,9 @@ Internal receipts from manually adding a person and deleted receipts do not
 count as a LinkedIn upload. A successful upload cancels the remaining reminders
 immediately; a failed upload check sends nothing and retries later. An email already in flight can finish
 if an upload happens during its provider request. Turning email off stops all
-reminders; unsubscribe stops this reminder category only.
+reminders; unsubscribe stops this reminder category only. Once the mailer
+observes that this preference is off, it cancels the signup’s remaining reminders;
+turning the preference back on does not re-enroll that signup.
 
 Each recipient stores an atomic claim, outgoing payload and completed stage, so
 two processes cannot send the same stage concurrently. A stable Resend

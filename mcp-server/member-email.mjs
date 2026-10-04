@@ -394,8 +394,8 @@ export function createMemberEmail({ config, transport, store, notificationStore,
           idempotencyKey: `unlinked-import-${key}-${stage}` }))
         recipient = await store.claimImportReminder(key, { stage, claim, at, staleClaimBefore: at - claimMs, payload })
         if (!recipient) continue
-        // Preferences/address can change after discovery. Recheck upload after
-        // the claim too, including an uploaded file still processing.
+        // Preferences/address can change after discovery. Check upload after
+        // the claim, including an uploaded file still processing.
         const current = await store.getRecipient(key)
         if (!current || !current.verified || !emailAddress(current.address) || !preferencesOf(current).linkedin_import_reminder || current.importReminderStage === 2 || await hasLinkedInUpload(member)) {
           await store.finishImportReminders(key); result.skipped++; continue
