@@ -665,7 +665,9 @@ test('reminder retry after restart keeps its exact payload and idempotency key, 
   clock.now += 2 * DAY
   assert.equal((await email.runImportReminders()).failed, 1)
   fail = false; clock.now += 3 * MINUTE
-  const restarted = createMemberEmail({ config: on, transport, store, secret, origin, now: () => clock.now, hasLinkedInUpload: async () => false })
+  await email.rememberAddress(jacob, { address: 'updated@example.com', verified: true })
+  const changedConfig = { ...on, from: { name: 'New sender', address: 'changed@example.com' } }
+  const restarted = createMemberEmail({ config: changedConfig, transport, store, secret, origin, now: () => clock.now, hasLinkedInUpload: async () => false })
   assert.equal((await restarted.runImportReminders()).sent, 1)
   assert.deepEqual(messages[0], messages[1])
   const again = createMemberEmail({ config: on, transport, store, secret, origin, now: () => clock.now, hasLinkedInUpload: async () => false })

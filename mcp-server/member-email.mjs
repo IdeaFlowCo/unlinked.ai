@@ -388,7 +388,12 @@ export function createMemberEmail({ config, transport, store, notificationStore,
       const claim = randomUUID()
       let recipient
       try {
-        recipient = await store.claimImportReminder(key, { stage, claim, at, staleClaimBefore: at - claimMs })
+        const reminderTokens = createUnsubscribeTokens({ key: subkey('unlinked-email-unsubscribe-key-v1'), now: () => candidate.accountCreatedAt })
+        const link = unsubscribeUrl(reminderTokens.issue({ scope: 'member', subject: key, kinds: ['linkedin_import_reminder'] }))
+        const content = linkedinImportReminderEmail({ stage, origin: base.origin, unsubscribeUrl: link })
+        const payload = JSON.stringify(message({ ...content, to: candidate.address, from: service.from, unsubscribeUrl: link,
+          idempotencyKey: `unlinked-import-${key}-${stage}` }))
+        recipient = await store.claimImportReminder(key, { stage, claim, at, staleClaimBefore: at - claimMs, payload })
         if (!recipient) continue
         // Preferences/address can change after discovery. Recheck upload after
         // the claim too, including an uploaded file still processing.
@@ -401,13 +406,7 @@ export function createMemberEmail({ config, transport, store, notificationStore,
         if (at - recipient.importReminderAttemptAt >= 23 * 60 * 60 * 1000) {
           await store.settleImportReminder(key, { stage, claim }); result.skipped++; continue
         }
-        // Anchor the unsubscribe expiry to signup so retry payloads are byte
-        // identical even after process restart (Resend requires this).
-        const reminderTokens = createUnsubscribeTokens({ key: subkey('unlinked-email-unsubscribe-key-v1'), now: () => recipient.accountCreatedAt })
-        const link = unsubscribeUrl(reminderTokens.issue({ scope: 'member', subject: key, kinds: ['linkedin_import_reminder'] }))
-        const content = linkedinImportReminderEmail({ stage, origin: base.origin, unsubscribeUrl: link })
-        await transport.send(message({ ...content, to: current.address, from: service.from, unsubscribeUrl: link,
-          idempotencyKey: `unlinked-import-${key}-${stage}` }))
+        await transport.send(JSON.parse(recipient.importReminderPayload))
         pauseAttempts = 0
         await store.settleImportReminder(key, { stage, claim })
         result.sent++
@@ -516,10 +515,11 @@ export function createMemoryEmailStore() {
         (value.importReminderStage ?? 0) < (at - value.accountCreatedAt >= 3 * DAY ? 2 : 1) && (value.retryAfter ?? 0) <= at && (value.importReminderClaim == null || value.importReminderClaimAt < staleClaimBefore))
         .sort((a, b) => a.accountCreatedAt - b.accountCreatedAt).slice(0, limit).map(value => structuredClone(value))
     },
-    async claimImportReminder(key, { stage, claim, at, staleClaimBefore }) {
+    async claimImportReminder(key, { stage, claim, at, staleClaimBefore, payload }) {
       const value = recipients.get(key)
       if (!value || (value.importReminderStage ?? 0) >= stage || (value.importReminderClaim != null && value.importReminderClaimAt >= staleClaimBefore)) return null
-      if (value.importReminderAttemptStage !== stage) { value.importReminderAttemptStage = stage; value.importReminderAttemptAt = at }
+      if (value.importReminderAttemptStage !== stage) { value.importReminderAttemptStage = stage; value.importReminderAttemptAt = at; value.importReminderPayload = payload }
+      value.importReminderPayload ??= payload
       Object.assign(value, { importReminderClaim: claim, importReminderClaimAt: at })
       return structuredClone(value)
     },
@@ -555,7 +555,7 @@ export function createMemoryEmailStore() {
 }
 
 const number = value => typeof value?.toNumber === 'function' ? value.toNumber() : value
-const RECIPIENT_KEYS = ['accountKey', 'ownerId', 'userId', 'address', 'verified', 'preferences', 'lastNotifiedAt', 'retryAfter', 'retryAttempts', 'accountCreatedAt', 'updatedAt', 'importReminderStage', 'importReminderClaim', 'importReminderClaimAt', 'importReminderAttemptStage', 'importReminderAttemptAt']
+const RECIPIENT_KEYS = ['accountKey', 'ownerId', 'userId', 'address', 'verified', 'preferences', 'lastNotifiedAt', 'retryAfter', 'retryAttempts', 'accountCreatedAt', 'updatedAt', 'importReminderStage', 'importReminderClaim', 'importReminderClaimAt', 'importReminderAttemptStage', 'importReminderAttemptAt', 'importReminderPayload']
 // UnlinkedEmailRecipient / UnlinkedEmailSuppression / UnlinkedEmailSend /
 // UnlinkedEmailInviteLock nodes; initialize() only adds their own constraints and indexes.
 export function createNeo4jEmailStore(driver, database = 'neo4j') {
@@ -617,12 +617,13 @@ export function createNeo4jEmailStore(driver, database = 'neo4j') {
         { at, staleClaimBefore, twoDays: 2 * DAY, threeDays: 3 * DAY, fourDays: 4 * DAY })
       return result.records.map(record => Object.fromEntries(Object.entries(record.get('e')).filter(([key]) => RECIPIENT_KEYS.includes(key)).map(([key, value]) => [key, number(value)])))
     },
-    async claimImportReminder(key, { stage, claim, at, staleClaimBefore }) {
+    async claimImportReminder(key, { stage, claim, at, staleClaimBefore, payload }) {
       const result = await write(`MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e._emailLock = coalesce(e._emailLock, 0) + 1
         WITH e WHERE coalesce(e.importReminderStage, 0) < $stage AND (e.importReminderClaim IS NULL OR e.importReminderClaimAt < $staleClaimBefore)
-        SET e.importReminderAttemptAt = CASE WHEN e.importReminderAttemptStage = $stage THEN e.importReminderAttemptAt ELSE $at END,
+        SET e.importReminderPayload = CASE WHEN e.importReminderAttemptStage = $stage THEN coalesce(e.importReminderPayload, $payload) ELSE $payload END,
+          e.importReminderAttemptAt = CASE WHEN e.importReminderAttemptStage = $stage THEN e.importReminderAttemptAt ELSE $at END,
           e.importReminderAttemptStage = $stage, e.importReminderClaim = $claim, e.importReminderClaimAt = $at
-        RETURN properties(e) AS e`, { key, stage, claim, at, staleClaimBefore })
+        RETURN properties(e) AS e`, { key, stage, claim, at, staleClaimBefore, payload })
       const value = result.records[0]?.get('e')
       return value ? Object.fromEntries(Object.entries(value).filter(([key]) => RECIPIENT_KEYS.includes(key)).map(([key, value]) => [key, number(value)])) : null
     },

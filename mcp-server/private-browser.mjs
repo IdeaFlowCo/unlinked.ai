@@ -292,16 +292,18 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // account or opens an onboarding/confirmation step; it answers why not instead.
   async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null) {
     let claimed
+    let owner = await resolveOwner(identity)
+    let newOwner = false
     if (invitationToken) {
       if (typeof claimInvitation !== 'function') throw new Error('private_invitation_intent_invalid')
+      newOwner = !owner
       claimed = await claimInvitation(invitationToken, {
         issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
         verifiedAt: identity.verifiedAt, provenanceReceiptId: identity.provenanceReceiptId, newProfileIntent: true,
       })
       if (!claimed || typeof claimed.ownerId !== 'string' || !claimed.ownerId || typeof claimed.userId !== 'string' || !claimed.userId) throw new Error('private_owner_recovery_required')
     }
-    let owner = await resolveOwner(identity)
-    let newOwner = false
+    if (invitationToken) owner = await resolveOwner(identity)
     if (silentBack !== null && (invitationToken || !owner)) return 'no_account'
     if (!owner && !invitationToken && typeof signup === 'function') {
       const provisioned = await signup({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,

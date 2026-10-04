@@ -156,9 +156,9 @@ check sends nothing and retries later. An email already in flight can finish
 if an upload happens during its provider request. Turning email off stops all
 reminders; unsubscribe stops this reminder category only.
 
-Each recipient stores an atomic claim and completed stage, so two processes
+Each recipient stores an atomic claim, outgoing payload and completed stage, so two processes
 cannot send the same stage concurrently. A stable Resend idempotency key and
-signup-anchored unsubscribe token keep retry payloads identical after restart;
+signup-anchored unsubscribe token and persisted outgoing message keep retry payloads identical after restart, including after address or sender changes;
 retries stop after 23 hours to stay within Resend’s 24-hour deduplication
 window. Stale claims recover after ten minutes. Missing the first window sends
 only the second reminder, and accounts at least four days old receive no
