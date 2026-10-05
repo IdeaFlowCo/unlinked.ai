@@ -226,6 +226,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // Overlapping requests share the public reader's snapshot build. Let a small
   // browser/crawler burst share it while retaining the site-wide minute bound.
   const PUBLIC_IN_FLIGHT = 8
+  let suggestRequests = 0, suggestWindow = Date.now(), suggestBusy = 0
   const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
   let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
@@ -460,6 +461,22 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      // Browser autocomplete reads the same published projection for everyone.
+      // Its own burst budget keeps keystrokes out of the full-page read budget.
+      if (request.method === 'GET' && url.pathname === '/search-suggestions') {
+        if (Date.now() - suggestWindow >= 60000) { suggestWindow = Date.now(); suggestRequests = 0 }
+        if (++suggestRequests > 600 || suggestBusy >= 8) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        suggestBusy++
+        try {
+          if (url.searchParams.getAll('q').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'q')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          const result = await publicReader.suggest({ query: url.searchParams.get('q') })
+          response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
+        } catch (error) {
+          const status = error instanceof PublicPeopleReaderError ? error.status : 503
+          response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' }))
+        } finally { suggestBusy-- }
+        return
+      }
       if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/public-assets/connection-feedback.js') {
         response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' })
         response.end(request.method === 'HEAD' ? undefined : CONNECTION_FEEDBACK_SCRIPT); return

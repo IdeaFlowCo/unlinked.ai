@@ -13,6 +13,21 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .logo{text-decoration:none;letter-spacing:-.04em;color:var(--brand)}
 .unlinked-onboarding .logo strong{font-size:21px;font-weight:700;color:var(--brand)}
 .unlinked-onboarding .header-search{position:relative;display:flex;flex:1;max-width:440px;margin-right:auto}
+/* The omnibox uses the product's existing type, indigo tokens and profile faces. */
+.unlinked-onboarding .omni-panel{position:absolute;top:calc(100% + 10px);left:0;width:max(100%,390px);max-width:calc(100vw - 40px);z-index:45;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 48px #25295324;overflow:hidden}
+.unlinked-onboarding .omni-panel[hidden]{display:none}
+.unlinked-onboarding #omni-suggestions{max-height:min(58vh,540px);overflow-y:auto;overscroll-behavior:contain;padding:6px}
+.unlinked-onboarding .omni-heading{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 12px 5px}
+.unlinked-onboarding .omni-option{display:flex;gap:12px;align-items:center;min-height:58px;padding:9px 12px;border-radius:10px;color:var(--fg);text-decoration:none}
+.unlinked-onboarding .omni-option:hover,.unlinked-onboarding .omni-option[aria-selected=true]{background:var(--tint)}
+.unlinked-onboarding .omni-face{position:relative;display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;border-radius:50%;background:var(--tint);color:var(--brand-d);font-size:12px;font-weight:700;overflow:hidden}
+.unlinked-onboarding .omni-face img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.unlinked-onboarding .omni-square{border-radius:9px;background:var(--page)}
+.unlinked-onboarding .omni-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+.unlinked-onboarding .omni-name{font-size:14px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.unlinked-onboarding .omni-name mark{color:var(--brand-d);background:transparent;font-weight:700}
+.unlinked-onboarding .omni-subtitle{font-size:12px;line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unlinked-onboarding .omni-status{padding:10px 16px;border-top:1px solid var(--line);background:var(--page);font-size:11px;color:var(--muted)}
 .unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 84px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
 /* The icon is an element, not a data: background, so the page's default-src 'none' policy allows it. */
 .unlinked-onboarding .header-search .search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}

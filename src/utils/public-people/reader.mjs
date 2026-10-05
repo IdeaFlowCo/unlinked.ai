@@ -155,7 +155,13 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (!plain(value.aliases) || Object.keys(value.aliases).length > maxProfiles) unavailable()
         for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to) }
       }
-      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases }
+      // Autocomplete companies come only from visible positions, never raw imports.
+      const companies = new Map()
+      for (const detail of details.values()) for (const position of detail.positions) {
+        const name = position.company.trim(), key = normalized(name), tokens = words(name)
+        if (name.length <= 200 && tokens.length > 0 && tokens.length <= 12 && !companies.has(key)) companies.set(key, { name, tokens })
+      }
+      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, companies }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(readPublishedSnapshot, { key: cacheKey, data }) }
       return data
@@ -196,6 +202,18 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     return { profiles, ...(nextCursor ? { nextCursor } : {}) }
   }
   return {
+    async suggest(request = {}) {
+      const { query = '', signal } = requestValue(request)
+      const search = queryValue(query), matcher = createQueryMatcher(search)
+      if (search.length < 2 || !matcher) return { people: [], companies: [] }
+      const data = await snapshot(signal)
+      const priority = name => normalized(name) === search ? 2 : normalized(name).startsWith(search) ? 1 : 0
+      const people = rankMatches(data.ordered, matcher, person => data.tokens.get(person.id)).rows
+      people.sort((a, b) => priority(b.name) - priority(a.name))
+      const companies = [...data.companies.values()].filter(company => matcher.test({ name: company.tokens }).all)
+        .sort((a, b) => priority(b.name) - priority(a.name) || compare(normalized(a.name), normalized(b.name)))
+      return { people: people.slice(0, 5).map(withPhoto), companies: companies.slice(0, 3).map(({ name }) => ({ name })) }
+    },
     async list(request = {}) {
       const { query = '', cursor, signal, mode = 'best', presence } = requestValue(request)
       if (!SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
