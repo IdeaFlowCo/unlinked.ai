@@ -1,6 +1,6 @@
 # Unlinked
 
-For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository.
+For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository. An experimental alternate public transport is https://unlinked-ideaflowco.vercel.app/search-public?q=gaming%20investors. It fetches the same live public page anonymously without retaining results; ordinary ChatGPT reader access is not established.
 
 > Import a LinkedIn export, search your own network and connect your agent.
 

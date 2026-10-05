@@ -1,6 +1,6 @@
 # Unlinked agent guide
 
-For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository.
+For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository. An experimental alternate public transport is https://unlinked-ideaflowco.vercel.app/search-public?q=gaming%20investors. It fetches the same live public page anonymously without retaining results; ordinary ChatGPT reader access is not established.
 
 Use https://www.unlinked.ai/login for Ideaflow ID sign-in; /settings holds your automatically prepared agent setup (view/copy, revoke or regenerate it there). No setup click is needed, repeated visits never mint duplicate grants, and a revoked automatic setup stays revoked until the owner regenerates.
 On a signed recovered-account match, the browser may ask once whether to continue with the old Unlinked profile.

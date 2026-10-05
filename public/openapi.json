@@ -1328,7 +1328,8 @@
           "503": {
             "description": "Published People unavailable"
           }
-        }
+        },
+        "description": "The alternate Vercel transport fetches this canonical public page anonymously, without caller credentials, redirects or stored results. Only q/mode/presence/cursor are accepted there; responses are capped at 256 KiB and upstream fetches at 10 seconds. HTTP success is not proof of ordinary ChatGPT reader access."
       },
       "head": {
         "summary": "Probe public search status and HTML headers without a response body",
@@ -1360,8 +1361,19 @@
           "503": {
             "description": "Published People unavailable"
           }
+        },
+        "description": "The alternate Vercel transport fetches this canonical public page anonymously, without caller credentials, redirects or stored results. Only q/mode/presence/cursor are accepted there; responses are capped at 256 KiB and upstream fetches at 10 seconds. HTTP success is not proof of ordinary ChatGPT reader access."
+      },
+      "servers": [
+        {
+          "url": "https://www.unlinked.ai",
+          "description": "Canonical standalone public search"
+        },
+        {
+          "url": "https://unlinked-ideaflowco.vercel.app",
+          "description": "Experimental anonymous relay for this path only; ordinary ChatGPT access is not established"
         }
-      }
+      ]
     }
   },
   "components": {

@@ -346,6 +346,12 @@
     "queryParameter": "q",
     "maxPageSize": 50,
     "scope": "published professional People only; excludes private networks and contact details",
-    "format": "server-rendered HTML without JavaScript"
+    "format": "server-rendered HTML without JavaScript",
+    "alternateTransport": {
+      "url": "https://unlinked-ideaflowco.vercel.app/search-public",
+      "experimental": true,
+      "scope": "same live canonical public page; no credentials forwarded or stored publication",
+      "readerVerification": "ordinary ChatGPT access not established"
+    }
   }
 }
