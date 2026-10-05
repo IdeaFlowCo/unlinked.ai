@@ -40,7 +40,7 @@ function harness(t, overrides = {}) {
       resolveOwner: async () => owner, signup: async () => owner,
       getBackend: async value => { assert.deepEqual(value, owner); return backend },
       complete: async () => ({ matches: [] }),
-      ownProfileId: overrides.ownProfileId,
+      ownProfileId: overrides.ownProfileId, signupLookup: overrides.signupLookup,
       issueAccountGrant: async () => ({ accessToken: 'synthetic' }), revokeAccountGrant: async () => {},
       readPublishedSnapshot: async () => { if (!snapshot.current) throw new Error('unavailable'); return snapshot.current },
       mcpEndpoint: `${baseUrl}/mcp` })
@@ -180,8 +180,9 @@ test('the search bar QR button opens a scan sheet: Scan for anyone, My card for 
 
 
 test('owner profiles retain upload facts before publication and use older addresses only as fallback', async t => {
-  let confirmed = null
-  const fixture = harness(t, { ownProfileId: async () => 'confirmed-person', backend: { readLegacyProfile: async () => confirmed } })
+  let confirmed = null, fallbackUnavailable = false
+  const fixture = harness(t, { ownProfileId: async () => 'confirmed-person', backend: { readLegacyProfile: async () => { if (fallbackUnavailable) throw Error('legacy_profile_source_unavailable'); return confirmed } },
+    signupLookup: { read: async () => { if (fallbackUnavailable) throw Error('signup_source_unavailable'); return null } } })
   const signed = await fixture.start(), { owner, resources } = fixture
   const id = 'a'.repeat(64), sourceId = 'b'.repeat(64), rowId = 'profile-row'
   const assertionId = privateId(owner.ownerId, 'assertion', sourceId, rowId), chunkId = privateId(owner.ownerId, 'index-chunk', id, 0)
@@ -215,6 +216,11 @@ test('owner profiles retain upload facts before publication and use older addres
   html = await page()
   assert.match(html, /href="https:\/\/www.linkedin.com\/in\/confirmed-person"/); assert.match(html, /Boston/)
   assert.doesNotMatch(html, /Confirmed city/)
+  fallbackUnavailable = true
+  fields['public profile url'] = 'https://www.linkedin.com/in/new-upload'
+  html = await page()
+  assert.match(html, /Boston/); assert.match(html, /New research/); assert.match(html, /href="https:\/\/www.linkedin.com\/in\/new-upload"/)
+  assert.doesNotMatch(html, /legacy_profile_source_unavailable|signup_source_unavailable|confirmed-person|PRIVATE_EMAIL|PRIVATE_PHONE/)
   resources.get(assertionId).sourceOwnerId = 'different-owner'
   const rejected = await fetch(`${signed.endpoint}/profile`, { headers: { Cookie: signed.cookie } })
   assert.equal(rejected.status, 400)
