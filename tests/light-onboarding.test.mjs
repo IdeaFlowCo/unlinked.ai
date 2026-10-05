@@ -121,7 +121,7 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   assert.match(own.content, /class="button" href="\/network">Looks good<\/a>/)
   const people = renderPeople({ ...account, state: 'welcome', own: [] })
   assert.match(people.content, /You're in\. The people you know, ready to search\./)
-  assert.match(people.content, /placeholder="Search people, roles, companies"/)
+  assert.match(people.content, /placeholder="Name, company, role, or keyword"/)
   for (const view of [renderJoin({ ...account, signedIn: true }), archive, own, people, renderSettings(account), renderImporting(account)]) {
     const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
     assert.match(header, /href="https:\/\/www\.unlinked\.ai\/"/)
@@ -140,28 +140,19 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   assert.doesNotMatch(renderImporting({ ...account, importJob: { status: 'parsing' } }).content, /See your profile/)
 })
 
-test('every page has one header search: a plain GET that needs no session, with an escaped query', () => {
+test('People has one scoped native search; other pages retain the global header search', () => {
   const query = '<"climate&>'
   for (const props of [{}, { state: 'welcome', own: [{ name: 'Avery Lee' }] }, { query, own: [] }, { state: 'error' }]) {
     const view = renderPeople({ ...account, ...props })
     const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
-    const forms = [...header.matchAll(/<form\b[^>]*role="search"[^>]*>.*?<\/form>/gs)]
+    assert.doesNotMatch(header, /role="search"/)
+    const forms = [...view.content.matchAll(/<form\b[^>]*role="search"[^>]*>.*?<\/form>/gs)]
     assert.equal(forms.length, 1)
     assert.match(forms[0][0], /method="get" action="\/network" role="search"/)
     assert.match(forms[0][0], /name="q" type="search"/)
     assert.doesNotMatch(forms[0][0], /name="csrf"/)
     assert.equal([...view.content.matchAll(/<input\b[^>]*type="(?:search|text)"/g)].length, 1)
-    assert.doesNotMatch(view.content, /Ask your network|Search my people|Filter by name or company/)
-    const journey = view.content.match(/<main class="journey">(.*?)<\/main>/s)[1]
-    assert.doesNotMatch(journey, /<input\b[^>]*type="(?:search|text)"/)
-    if (props.query) {
-      assert.match(header, /value="&lt;&quot;climate&amp;&gt;"/)
-      assert.match(journey, /Results for “&lt;&quot;climate&amp;&gt;”/)
-      const ask = journey.match(/<form class="ask-ai[^"]*" method="post" action="\/search-account">(.*?)<\/form>/s)[1]
-      assert.match(ask, /name="csrf" value="csrf-value"/)
-      assert.match(ask, /type="hidden" name="query" value="&lt;&quot;climate&amp;&gt;"/)
-      assert.match(ask, /name="scope" value="own">Ask AI across my people/)
-    } else assert.doesNotMatch(journey, /<form/)
+    if (props.query) assert.match(forms[0][0], /value="&lt;&quot;climate&amp;&gt;"/)
   }
   for (const view of [renderLanding(), renderJoin(), renderSignInRequired({ next: '/profile' }), renderPerson({ profile: { id: 'p', name: 'Maya Chen' } })]) {
     assert.equal([...view.content.matchAll(/<form\b[^>]*method="get" action="\/network" role="search"/g)].length, 1)
