@@ -136,12 +136,6 @@
     }
   },
   "publicProfileDetails": {
-    "optionalFields": [
-      "linkedinUrl",
-      "website",
-      "company",
-      "industry"
-    ],
-    "privacy": "Professional fields only; contact details and contact-card links are excluded."
+    "documentation": "docs/profile-details.md"
   }
 }

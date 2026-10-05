@@ -8,4 +8,4 @@ The standalone composition supplements the live recovered legacy snapshot from i
 
 Owner browser profiles derive retained LinkedIn addresses, location and industry directly from the newest owner-authorized profile rows, including profile-ready uploads before public completion. Confirmed or published addresses fill missing links without overriding uploaded fields. Operator enrichment replaces existing content, retaining only missing supplemental LinkedIn, website and industry fields; stale headline, About and history do not survive replacement.
 
-Public detail JSON includes optional `linkedinUrl`, `website`, `company` and `industry`. Summaries and cursors retain their existing shape. Agent tool lists, grants and scopes are unchanged.
+Public detail field names and bounds are owned by `detailSchema` in `src/components/public-directory/contract.ts`; the standalone projection is implemented by `src/utils/public-people/reader.mjs`. Summaries and cursors retain their existing shape. Agent tool lists, grants and scopes are unchanged.
