@@ -1,3 +1,5 @@
+import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
+import { NETWORK_FILTER_SCRIPT } from './network-filter-script.mjs'
 import { unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
@@ -189,7 +191,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
-  const contactRow = row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
+  const contactRow = row => ({ ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
   const publicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite', 'unlinked-connection'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
   const usableTarget = id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
   async function contactRows(rows, reader = publicReader) {
@@ -211,14 +213,31 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // accepted invites and connection requests) plus everyone the public graph
   // connects to its own profile. Its own profile is never listed.
   async function connectedProfiles(owner, network, reader) {
-    const targets = [...new Set(network.assertions.filter(row => row.category === 'connections').map(publicTarget).map(usableTarget).filter(Boolean))]
+    const assertions = network.assertions.filter(row => row.category === 'connections')
+    const targets = [...new Set(assertions.map(publicTarget).map(usableTarget).filter(Boolean))]
     const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner).catch(() => null) : null
-    const found = new Map()
-    for (let start = 0; start < targets.length; start += 1000) for (const summary of (await reader.lookup({ ids: targets.slice(start, start + 1000) })).values()) found.set(summary.id, summary)
+    const found = new Map(), resolved = new Map()
+    for (let start = 0; start < targets.length; start += 1000) {
+      for (const [sourceId, summary] of await reader.lookup({ ids: targets.slice(start, start + 1000) })) {
+        resolved.set(sourceId, summary.id); found.set(summary.id, summary)
+      }
+    }
     if (mine) {
       for (const summary of await reader.neighbors({ id: mine })) found.set(summary.id, summary)
       const self = (await reader.lookup({ ids: [mine] })).get(mine)
       found.delete(mine); if (self) found.delete(self.id)
+    }
+    // Deduplication retains the earliest known date, so reimporting a contact
+    // does not make an old connection look newly imported or newly connected.
+    for (const row of assertions) {
+      const id = resolved.get(publicTarget(row)), profile = found.get(id)
+      if (!profile) continue
+      const dates = {}
+      for (const key of ['connectedAt', 'importedAt']) {
+        const at = validTimestamp(row[key])
+        if (at) dates[key] = Math.min(at, validTimestamp(profile[key]) ?? at)
+      }
+      found.set(id, { ...profile, ...dates })
     }
     return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
@@ -281,7 +300,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
     response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
-    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${script}`
+    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -367,7 +386,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
   // A People listing a Connect/answer/withdraw/remove form may return to: the
   // /network path with only its own filter parameters (a stale notice is dropped).
-  const NETWORK_RETURN_KEYS = ['q', 'mode', 'presence', 'connected', 'scope', 'cursor', 'page']
+  const NETWORK_RETURN_KEYS = ['q', 'mode', 'presence', 'connected', 'scope', 'cursor', 'page', 'sort']
   const networkReturn = value => {
     if (typeof value !== 'string' || value.length > 1200 || !/^\/network(?:\?[\x21-\x7e]*)?$/.test(value) || value.includes('#')) return null
     const url = new URL(value, base)
@@ -637,14 +656,15 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
             journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined })); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
-          const result = await publicReader.list({ query, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined })
+          const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
+          const result = await publicReader.list({ query, mode, presence, sort, includeTotal: url.pathname !== '/api/people', cursor: url.searchParams.get('cursor') ?? undefined })
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
           if (url.pathname === '/search-public') {
             const content = publicSearchDocument(result, { query, mode, presence })
             response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(content) })
             response.end(request.method === 'HEAD' ? undefined : content); return
           }
-          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, presence, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
+          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, presence, sort, total: result.total, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
@@ -1175,6 +1195,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const connectedValues = url.searchParams.getAll('connected')
         if (connectedValues.length > 1 || (connectedValues.length && connectedValues[0] !== '1')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
         const connectedOnly = connectedValues[0] === '1'
+        const sort = url.searchParams.get('sort') ?? 'best'
+        if (url.searchParams.getAll('sort').length > 1 || !(connectedOnly ? NETWORK_SORTS : PUBLIC_NETWORK_SORTS).includes(sort)) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
         // The same matching as the public list: every word in any form, else the closest people.
         const matcher = typed ? createQueryMatcher(typed, mode) : null
         const index = Number(url.searchParams.get('page') ?? '0')
@@ -1193,27 +1215,29 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (connectedOnly) {
           const kept = (mine ?? []).filter(value => !presence || value.presence === presence)
           const ranked = matcher ? rankMatches(kept, matcher, value => ({ name: words(value.name), text: words([value.name, value.headline, value.location].filter(Boolean).join(' ')) })) : { rows: kept, match: 'none' }
-          const rows = await withConnect(session.owner, ranked.rows.slice(index * 100, (index + 1) * 100), reader)
-          const view = renderPeople({ ...props, query: typed, mode, presence, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
+          const ordered = orderNetwork(ranked.rows, sort)
+          const rows = await withConnect(session.owner, ordered.slice(index * 100, (index + 1) * 100), reader)
+          const view = renderPeople({ ...props, query: typed, mode, presence, sort, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
             connectedView: { rows, total: ranked.rows.length, ...(ranked.rows.length > (index + 1) * 100 ? { nextPage: index + 1 } : {}) } })
           journey(response, view, props.importJob); return
         }
         const ownMatches = matcher ? rankMatches(connections, matcher, row => ({ name: words([row.fields['first name'], row.fields['last name']].filter(Boolean).join(' ')), text: words([row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].filter(Boolean).join(' ')) })) : { rows: connections, match: 'none' }
-        const rows = ownMatches.rows
-        const linking = contactRows(rows.slice(index * 100, (index + 1) * 100), reader)
-        let everyone, nextCursor, state = 'ready', match = ownMatches.match
+        const rows = orderNetwork(ownMatches.rows, sort, row => [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '))
+        const linking = contactRows(rows, reader)
+        let everyone, nextCursor, total, state = 'ready', match = ownMatches.match
         if (publicProfessionalSearch) {
           everyone = []
-          try { const result = await reader.list({ query: filter, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
+          try { const result = await reader.list({ query: filter, mode, presence, sort, includeTotal: true, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; total = result.total; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
           catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
         // The contact lookup ran alongside the public list and shares its snapshot read.
-        const contacts = await withConnect(session.owner, await linking, reader)
+        const matchingContacts = (await linking).filter(value => !presence || value.presence === presence)
+        const contacts = await withConnect(session.owner, matchingContacts.slice(index * 100, (index + 1) * 100), reader)
         everyone = await withConnect(session.owner, everyone, reader)
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
-        if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}">Next contacts</a></p>`)
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, total, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
+        if (matchingContacts.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}${presence ? `&presence=${presence}` : ''}&sort=${sort}">Next contacts</a></p>`)
         journey(response, view, props.importJob)
         return
       }

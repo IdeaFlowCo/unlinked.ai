@@ -136,3 +136,7 @@ Connector-free public search, public HEAD behavior and the experimental anonymou
 Profile **Message with OpenChat** shared identity resolution, explicit Send and private-only fallback are documented in [docs/openchat-message.md](docs/openchat-message.md); link validator: `src/utils/openchat-profile-context.mjs`. Profile names/imported email never prove an OpenChat recipient.
 
 Unlinked is the network and OpenChat its messenger. The confidential `/api/messaging/v1/recipient` service resolves published-profile ownership to a shared Ideaflow identity; it is not a browser/agent-grant endpoint. See docs/openchat-message.md.
+
+## People directory controls
+
+The standalone browser's progressive filtering, URL state, ordering and private date provenance are described in `docs/network-controls.md`. Browser ordering is not an agent API contract change; preserve existing agent defaults and keep owner relationship dates out of public profile projections.

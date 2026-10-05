@@ -6,9 +6,9 @@ import { renderPeople, renderLanding, renderScan, fillMeHeadline, ME_HEADLINE_SL
 const account = { accountLabel: 'sam@example.test', displayName: 'Sam Rivera', csrf: 'csrf-value' }
 const header = view => view.content.match(/<header>(.*?)<\/header>/s)[1]
 
-test('the search field ends in a QR scan button for everyone', () => {
+test('the header retains QR scanning when directory search moves into the list', () => {
   for (const view of [renderLanding(), renderPeople({ ...account, state: 'ready' })]) {
-    const search = header(view).match(/<form class="header-search".*?<\/form>/s)[0]
+    const search = header(view)
     assert.match(search, /<a class="scan" href="\/scan" aria-label="Scan a QR code or show your card"/)
     assert.doesNotMatch(search, /data:/)
   }
