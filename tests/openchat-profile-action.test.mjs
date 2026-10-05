@@ -32,7 +32,7 @@ function loadComponent(path, stubs = {}) {
   })
 }
 
-test('anonymous and signed-in runtime person profiles open the same context-only compose; own public context is verified', async t => {
+test('anonymous and signed-in runtime person profiles open the same shared-inbox entry; own public context is verified', async t => {
   let handler, ownerReads = 0, writes = 0, snapshotUnavailable = false, signupSourceUnavailable = false
   const owner = { ownerId: 'synthetic-openchat-owner', userId: 'synthetic-openchat-user' }
   const snapshot = { state: 'published', complete: true, revision: 'synthetic-openchat-v1', profiles: [{ id: 'seed-person', name: 'Seed Person', presence: 'shadow', email: 'never-share@example.invalid', positions: [], education: [], skills: [] }], connections: [] }
@@ -104,7 +104,7 @@ test('anonymous and signed-in runtime person profiles open the same context-only
 test('private-only own profile never exports its name, imported email, account id or private profile id', () => {
   const page = renderOwnProfile({ csrf: 'c', profile: { id: 'private-person-id', name: 'Private Person', email: 'private@example.invalid' } })
   assert.deepEqual([...action(page.content).searchParams], [['intent', 'compose'], ['source', 'unlinked']])
-  assert.match(page.content, /Your private profile details stay here/)
+  assert.match(page.content, /shared Ideaflow account/)
 })
 
 test('rendered public action escapes RFC3986 profile ids and never exports profile fields', () => {
