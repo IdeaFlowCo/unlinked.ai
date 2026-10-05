@@ -136,6 +136,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .land-steps p{margin:2px 0 10px}
 .unlinked-onboarding .land-steps li.later p{margin-bottom:0}
 .unlinked-onboarding .button.sec.brand{color:var(--brand-d);border-color:var(--brand)}
+.unlinked-onboarding .button.export-opened{background:#e8f5eb;color:#166534;border-color:#39734b}
+.unlinked-onboarding .export-opened-step .n{background:#e8f5eb;color:#166534;border:1px solid #39734b}
 .unlinked-onboarding .land-explore{margin:16px 0 0}
 .unlinked-onboarding .land-steps .land-hint{margin:8px 0 0}
 .unlinked-onboarding .land-steps p b{display:inline;font-size:inherit}

@@ -119,7 +119,7 @@ The immutable private legacy Storage recovery, owner confirmation/download bound
 
 Shared browser/agent connection authorization is in `mcp-server/connection-actions.mjs`; opt-in writes and grant update hints are documented in `docs/agent-api.md`.
 
-Invite and notification emails (Resend over `fetch`, `mcp-server/member-email.mjs`) are documented in `docs/email.md`: env `RESEND_API_KEY`, `UNLINKED_EMAIL_SECRET` (required, ≥32 bytes), `UNLINKED_EMAIL_FROM`, `UNLINKED_INVITE_EMAILS_PER_DAY`, `UNLINKED_EMAIL_ENABLED` (off with `false`/`0`). Invite caps are reserved atomically (`reserveInvite`). Never log or render an email address other than the signed-in member's own, a token or the key; `POST /email/unsubscribe` is the only POST exempt from the same-origin check.
+Member email configuration, invite caps, export reminders, privacy and unsubscribe boundaries are owned by [docs/email.md](docs/email.md); implementation: `mcp-server/member-email.mjs`.
 
 Operator-published profile photos (offline `mcp-server/publish-profile-photos.mjs`, read-only store `mcp-server/profile-photos.mjs`) live under `assets/profile-photos.public/` and are served same-origin at `GET/HEAD /people/<id>/photo`; views take `photo` only in the exact `PHOTO_URL` grammar and fall back to initials. Layout, publish/revoke host commands, the `hidden` precedence hook and the ingress Cache-Control map: `docs/profile-photos.md`.
 

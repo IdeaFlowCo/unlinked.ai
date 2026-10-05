@@ -2,9 +2,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto
 import { NOTIFICATION_KINDS } from './member-notifications.mjs'
 import { HEAVY_INVITES_PER_DAY } from './member-invitations.mjs'
 
-// Email delivery for the signed-in runtime (docs/email.md): invite emails sent
-// on a member's behalf, and notification emails. Sending needs RESEND_API_KEY
-// and stays on unless UNLINKED_EMAIL_ENABLED is "false"/"0"/"off"/"no". Nothing
+// Email delivery configuration and contracts are owned by docs/email.md. Nothing
 // here ever logs or returns an email address, a token or the API key.
 
 export const RESEND_ENDPOINT = 'https://api.resend.com/emails'
@@ -15,12 +13,14 @@ export const INVITE_RECIPIENT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 export const UNSUBSCRIBE_TTL_MS = 365 * 24 * 60 * 60 * 1000
 // At most one notification email per member per window; several become one digest.
 export const NOTIFICATION_EMAIL_WINDOW_MS = 15 * 60 * 1000
-// Settings labels, one per notification kind. Defaults come from NOTIFICATION_KINDS[kind].email.
+// Notification defaults come from NOTIFICATION_KINDS[kind].email;
+// export reminders are a separate preference, enabled by default.
 export const EMAIL_PREFERENCES = Object.freeze({
   connection_request_received: 'Someone asks to connect with you',
   connection_request_accepted: 'Someone accepts your connection request',
   invite_accepted: 'Someone accepts your invite and joins',
   profile_claimed: 'Someone you listed as a connection joins and claims their profile',
+  linkedin_import_reminder: 'Remind me to download and upload my LinkedIn export',
 })
 const DAY = 24 * 60 * 60 * 1000
 const OFF = ['false', '0', 'off', 'no']
@@ -216,6 +216,22 @@ export function notificationEmail({ items, origin, unsubscribeUrl }) {
   }
 }
 
+export function linkedinImportReminderEmail({ stage, origin, unsubscribeUrl }) {
+  return {
+    subject: stage === 2 ? 'Remember to save your LinkedIn export before the link expires' : 'Your LinkedIn export may be ready — bring it to Unlinked',
+    ...layout({
+      lines: ['You signed up for Unlinked but have not uploaded your LinkedIn export yet.',
+        'If you requested your archive, check your inbox for LinkedIn’s email. Its download link is available for only 3 days (72 hours) after the archive is ready.',
+        'Download the file while the link works, then upload it to Unlinked. Your saved file does not expire.',
+        'If you have not requested it yet, choose “Download larger data archive” (recommended) in LinkedIn’s data download settings. It is usually ready in about a day; some data can take up to 48 hours.',
+        'If the link has expired, request a new export from LinkedIn.'],
+      action: { label: 'Upload my LinkedIn export', url: `${origin}/import` },
+      why: 'You got this email because you signed up for Unlinked and LinkedIn export reminders are on.',
+      unsubscribeUrl, unsubscribeLabel: 'Stop LinkedIn export reminders',
+    }),
+  }
+}
+
 // --- The service -----------------------------------------------------------
 
 export const accountKey = member => createHash('sha256').update(`unlinked-email-account-v1\u0000${member.ownerId}\u0000${member.userId}`).digest('hex')
@@ -223,7 +239,7 @@ const owner = value => {
   if (!value || typeof value.ownerId !== 'string' || !value.ownerId || typeof value.userId !== 'string' || !value.userId) throw new Error('email_owner_required')
   return value
 }
-const defaults = () => Object.fromEntries(Object.keys(EMAIL_PREFERENCES).map(kind => [kind, NOTIFICATION_KINDS[kind]?.email === true]))
+const defaults = () => Object.fromEntries(Object.keys(EMAIL_PREFERENCES).map(kind => [kind, kind === 'linkedin_import_reminder' || NOTIFICATION_KINDS[kind]?.email === true]))
 const preferencesOf = record => {
   const value = { ...defaults() }
   let saved = {}
@@ -237,9 +253,9 @@ const preferencesOf = record => {
 // Resend in production and a fake in tests. Without `config.enabled` nothing
 // is ever sent and no address is recorded.
 export function createMemberEmail({ config, transport, store, notificationStore, secret, origin, now = Date.now, onError = () => {},
-  windowMs = NOTIFICATION_EMAIL_WINDOW_MS, minAgeMs = 60 * 1000, maxAgeMs = DAY, claimMs = 10 * 60 * 1000, recipientsPerRun = 100,
+  hasLinkedInUpload, windowMs = NOTIFICATION_EMAIL_WINDOW_MS, minAgeMs = 60 * 1000, maxAgeMs = DAY, claimMs = 10 * 60 * 1000, recipientsPerRun = 100,
   siteInvitesPerDay = config?.invitesPerDay ?? DEFAULT_SITE_INVITE_EMAILS_PER_DAY }) {
-  if (!store || ['initialize', 'getRecipient', 'setAddress', 'noteNewAccount', 'setPreferences', 'unsubscribe', 'markNotified', 'setRetry', 'heldRecipients', 'deleteOwner', 'isSuppressed', 'suppress', 'reserveInvite', 'releaseSend'].some(name => typeof store[name] !== 'function')) throw new Error('email_store_required')
+  if (!store || ['initialize', 'getRecipient', 'setAddress', 'noteNewAccount', 'setPreferences', 'unsubscribe', 'markNotified', 'setRetry', 'heldRecipients', 'deleteOwner', 'isSuppressed', 'suppress', 'reserveInvite', 'releaseSend', 'pendingImportReminders', 'claimImportReminder', 'settleImportReminder', 'releaseImportReminder', 'finishImportReminders'].some(name => typeof store[name] !== 'function')) throw new Error('email_store_required')
   if (!(secret instanceof Uint8Array) || secret.length < 32) throw new Error('email_secret_required')
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash) throw new Error('email_origin_required')
@@ -251,7 +267,7 @@ export function createMemberEmail({ config, transport, store, notificationStore,
   const unsubscribeUrl = token => `${base.origin}/email/unsubscribe?t=${token}`
   const report = event => { try { void Promise.resolve(onError(event)).catch(() => {}) } catch { /* reporting never fails delivery */ } }
   const code = error => error instanceof EmailError ? error.code : 'email_error'
-  let timer = null, running = null
+  let timer = null, running = null, remindersRunning = null
   // Provider-wide pause (429, 5xx, rejected key), shared by invites and the mailer.
   let pausedUntil = 0, pauseAttempts = 0
   const pause = (error, at) => { pausedUntil = at + (error.retryAfterMs ?? backoffMs(pauseAttempts)); pauseAttempts++ }
@@ -334,20 +350,75 @@ export function createMemberEmail({ config, transport, store, notificationStore,
       running = deliverNotifications().finally(() => { running = null })
       return running
     },
+    // Two bounded reminders per new account; durable stage/claim state lives
+    // on its existing private recipient record, deleted with the account.
+    runImportReminders() {
+      if (!sending || typeof hasLinkedInUpload !== 'function') return Promise.resolve({ sent: 0, skipped: 0, failed: 0 })
+      if (remindersRunning) return remindersRunning
+      remindersRunning = deliverImportReminders().finally(() => { remindersRunning = null })
+      return remindersRunning
+    },
+    async completeImportReminders(member) { await store.finishImportReminders(accountKey(owner(member))) },
     // In-process timer; never awaited by startup, never throws out of a tick.
     start({ intervalMs = 60 * 1000 } = {}) {
-      if (!sending || !notificationStore || timer) return false
-      timer = setInterval(() => { service.runNotifications().catch(error => report({ event: 'email_notifications_failed', code: error?.code ?? 'email_mailer_error' })) }, intervalMs)
+      if (!sending || (!notificationStore && typeof hasLinkedInUpload !== 'function') || timer) return false
+      timer = setInterval(() => {
+        service.runNotifications().then(() => service.runImportReminders()).catch(error => report({ event: 'email_notifications_failed', code: error?.code ?? 'email_mailer_error' }))
+      }, intervalMs)
       timer.unref?.()
       return true
     },
-    async stop() { if (timer) clearInterval(timer); timer = null; await running?.catch(() => {}) },
+    async stop() { if (timer) clearInterval(timer); timer = null; await running?.catch(() => {}); await remindersRunning?.catch(() => {}) },
     async exportOwner(member) {
       const value = await service.settings(member)
       return { address: value.address, preferences: value.preferences }
     },
     // Account deletion: the stored address, preferences and invite-send counters.
     async removeOwner(member) { await store.deleteOwner(accountKey(owner(member))) },
+  }
+
+  async function deliverImportReminders() {
+    const at = now(), result = { sent: 0, skipped: 0, failed: 0 }
+    if (pausedUntil > at) return { ...result, paused: true }
+    const pending = await store.pendingImportReminders({ at, staleClaimBefore: at - claimMs, limit: recipientsPerRun })
+    for (const candidate of pending) {
+      const key = candidate.accountKey, member = { ownerId: candidate.ownerId, userId: candidate.userId }
+      const stage = at - candidate.accountCreatedAt >= 3 * DAY ? 2 : 1
+      const claim = randomUUID()
+      let recipient
+      try {
+        const reminderTokens = createUnsubscribeTokens({ key: subkey('unlinked-email-unsubscribe-key-v1'), now: () => candidate.accountCreatedAt })
+        const link = unsubscribeUrl(reminderTokens.issue({ scope: 'member', subject: key, kinds: ['linkedin_import_reminder'] }))
+        const content = linkedinImportReminderEmail({ stage, origin: base.origin, unsubscribeUrl: link })
+        const payload = JSON.stringify(message({ ...content, to: candidate.address, from: service.from, unsubscribeUrl: link,
+          idempotencyKey: `unlinked-import-${key}-${stage}` }))
+        recipient = await store.claimImportReminder(key, { stage, claim, at, staleClaimBefore: at - claimMs, payload })
+        if (!recipient) continue
+        // Preferences/address can change after discovery. Check upload after
+        // the claim, including an uploaded file still processing.
+        const current = await store.getRecipient(key)
+        if (!current || !current.verified || !emailAddress(current.address) || !preferencesOf(current).linkedin_import_reminder || current.importReminderStage === 2 || await hasLinkedInUpload(member)) {
+          await store.finishImportReminders(key); result.skipped++; continue
+        }
+        // Keep retries within Resend’s 24-hour idempotency retention. No old
+        // reminder backlog after downtime, and no two catch-up emails at once.
+        if (at - recipient.importReminderAttemptAt >= 23 * 60 * 60 * 1000) {
+          await store.settleImportReminder(key, { stage, claim }); result.skipped++; continue
+        }
+        await transport.send(JSON.parse(recipient.importReminderPayload))
+        pauseAttempts = 0
+        await store.settleImportReminder(key, { stage, claim })
+        result.sent++
+      } catch (error) {
+        result.failed++; report({ event: 'email_import_reminder_failed', code: code(error) })
+        if (permanentFailure(error)) { await store.settleImportReminder(key, { stage, claim }); continue }
+        await store.releaseImportReminder(key, claim).catch(() => {})
+        if (globalFailure(error)) { pause(error, at); result.paused = true; break }
+        const attempts = recipient?.retryAttempts ?? 0
+        await store.setRetry(key, { retryAfter: at + backoffMs(attempts), attempts: attempts + 1 })
+      }
+    }
+    return result
   }
 
   async function deliverNotifications() {
@@ -438,6 +509,34 @@ export function createMemoryEmailStore() {
     async heldRecipients({ notifiedSince, now, limit }) {
       return [...recipients.values()].filter(value => value.lastNotifiedAt > notifiedSince || value.retryAfter > now).slice(0, limit).map(value => `${value.ownerId}\u0000${value.userId}`)
     },
+    async pendingImportReminders({ at, staleClaimBefore, limit }) {
+      return [...recipients.values()].filter(value => value.verified && value.accountCreatedAt != null && at - value.accountCreatedAt >= 2 * DAY && at - value.accountCreatedAt < 4 * DAY &&
+        (value.importReminderStage ?? 0) < (at - value.accountCreatedAt >= 3 * DAY ? 2 : 1) && (value.retryAfter ?? 0) <= at && (value.importReminderClaim == null || value.importReminderClaimAt < staleClaimBefore))
+        .sort((a, b) => a.accountCreatedAt - b.accountCreatedAt).slice(0, limit).map(value => structuredClone(value))
+    },
+    async claimImportReminder(key, { stage, claim, at, staleClaimBefore, payload }) {
+      const value = recipients.get(key)
+      if (!value || (value.importReminderStage ?? 0) >= stage || (value.importReminderClaim != null && value.importReminderClaimAt >= staleClaimBefore)) return null
+      if (value.importReminderAttemptStage !== stage) { value.importReminderAttemptStage = stage; value.importReminderAttemptAt = at; value.importReminderPayload = payload }
+      value.importReminderPayload ??= payload
+      Object.assign(value, { importReminderClaim: claim, importReminderClaimAt: at })
+      return structuredClone(value)
+    },
+    async settleImportReminder(key, { stage, claim }) {
+      const value = recipients.get(key)
+      if (value?.importReminderClaim !== claim) return
+      value.importReminderStage = stage
+      delete value.importReminderClaim; delete value.importReminderClaimAt
+      delete value.retryAfter; delete value.retryAttempts
+    },
+    async releaseImportReminder(key, claim) {
+      const value = recipients.get(key)
+      if (value?.importReminderClaim === claim) { delete value.importReminderClaim; delete value.importReminderClaimAt }
+    },
+    async finishImportReminders(key) {
+      const value = recipients.get(key)
+      if (value) { value.importReminderStage = 2; delete value.importReminderClaim; delete value.importReminderClaimAt }
+    },
     async deleteOwner(key) { recipients.delete(key); for (const [id, value] of sends) if (value.senderKey === key) sends.delete(id) },
     async isSuppressed(hash) { return suppressed.has(hash) },
     async suppress(hash, at) { if (!suppressed.has(hash)) suppressed.set(hash, at) },
@@ -455,7 +554,7 @@ export function createMemoryEmailStore() {
 }
 
 const number = value => typeof value?.toNumber === 'function' ? value.toNumber() : value
-const RECIPIENT_KEYS = ['accountKey', 'ownerId', 'userId', 'address', 'verified', 'preferences', 'lastNotifiedAt', 'retryAfter', 'retryAttempts', 'accountCreatedAt', 'updatedAt']
+const RECIPIENT_KEYS = ['accountKey', 'ownerId', 'userId', 'address', 'verified', 'preferences', 'lastNotifiedAt', 'retryAfter', 'retryAttempts', 'accountCreatedAt', 'updatedAt', 'importReminderStage', 'importReminderClaim', 'importReminderClaimAt', 'importReminderAttemptStage', 'importReminderAttemptAt', 'importReminderPayload']
 // UnlinkedEmailRecipient / UnlinkedEmailSuppression / UnlinkedEmailSend /
 // UnlinkedEmailInviteLock nodes; initialize() only adds their own constraints and indexes.
 export function createNeo4jEmailStore(driver, database = 'neo4j') {
@@ -466,6 +565,7 @@ export function createNeo4jEmailStore(driver, database = 'neo4j') {
     async initialize() {
       await write('CREATE CONSTRAINT unlinked_email_recipient_key IF NOT EXISTS FOR (e:UnlinkedEmailRecipient) REQUIRE e.accountKey IS UNIQUE', {})
       await write('CREATE INDEX unlinked_email_recipient_notified IF NOT EXISTS FOR (e:UnlinkedEmailRecipient) ON (e.lastNotifiedAt)', {})
+      await write('CREATE INDEX unlinked_email_recipient_created IF NOT EXISTS FOR (e:UnlinkedEmailRecipient) ON (e.accountCreatedAt)', {})
       await write('CREATE INDEX unlinked_email_recipient_retry IF NOT EXISTS FOR (e:UnlinkedEmailRecipient) ON (e.retryAfter)', {})
       await write('CREATE CONSTRAINT unlinked_email_suppression_hash IF NOT EXISTS FOR (e:UnlinkedEmailSuppression) REQUIRE e.recipientHash IS UNIQUE', {})
       await write('CREATE CONSTRAINT unlinked_email_send_id IF NOT EXISTS FOR (e:UnlinkedEmailSend) REQUIRE e.id IS UNIQUE', {})
@@ -507,6 +607,37 @@ export function createNeo4jEmailStore(driver, database = 'neo4j') {
     async heldRecipients({ notifiedSince, now, limit }) {
       const result = await read(`MATCH (e:UnlinkedEmailRecipient) WHERE e.lastNotifiedAt > $notifiedSince OR e.retryAfter > $now RETURN e.ownerId AS ownerId, e.userId AS userId LIMIT ${Math.min(Math.max(Number(limit) | 0, 1), 100000)}`, { notifiedSince, now })
       return result.records.map(record => `${record.get('ownerId')}\u0000${record.get('userId')}`)
+    },
+    async pendingImportReminders({ at, staleClaimBefore, limit }) {
+      const result = await read(`MATCH (e:UnlinkedEmailRecipient) WHERE e.verified = true AND e.accountCreatedAt <= $at - $twoDays AND e.accountCreatedAt > $at - $fourDays
+        AND coalesce(e.importReminderStage, 0) < CASE WHEN e.accountCreatedAt <= $at - $threeDays THEN 2 ELSE 1 END
+        AND coalesce(e.retryAfter, 0) <= $at AND (e.importReminderClaim IS NULL OR e.importReminderClaimAt < $staleClaimBefore)
+        RETURN properties(e) AS e ORDER BY e.accountCreatedAt LIMIT ${Math.min(Math.max(Number(limit) | 0, 1), 1000)}`,
+        { at, staleClaimBefore, twoDays: 2 * DAY, threeDays: 3 * DAY, fourDays: 4 * DAY })
+      return result.records.map(record => Object.fromEntries(Object.entries(record.get('e')).filter(([key]) => RECIPIENT_KEYS.includes(key)).map(([key, value]) => [key, number(value)])))
+    },
+    async claimImportReminder(key, { stage, claim, at, staleClaimBefore, payload }) {
+      const result = await write(`MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e._emailLock = coalesce(e._emailLock, 0) + 1
+        WITH e WHERE coalesce(e.importReminderStage, 0) < $stage AND (e.importReminderClaim IS NULL OR e.importReminderClaimAt < $staleClaimBefore)
+        SET e.importReminderPayload = CASE WHEN e.importReminderAttemptStage = $stage THEN coalesce(e.importReminderPayload, $payload) ELSE $payload END,
+          e.importReminderAttemptAt = CASE WHEN e.importReminderAttemptStage = $stage THEN e.importReminderAttemptAt ELSE $at END,
+          e.importReminderAttemptStage = $stage, e.importReminderClaim = $claim, e.importReminderClaimAt = $at
+        RETURN properties(e) AS e`, { key, stage, claim, at, staleClaimBefore, payload })
+      const value = result.records[0]?.get('e')
+      return value ? Object.fromEntries(Object.entries(value).filter(([key]) => RECIPIENT_KEYS.includes(key)).map(([key, value]) => [key, number(value)])) : null
+    },
+    async settleImportReminder(key, { stage, claim }) {
+      await write(`MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e._emailLock = coalesce(e._emailLock, 0) + 1
+        WITH e WHERE e.importReminderClaim = $claim SET e.importReminderStage = $stage
+        REMOVE e.importReminderClaim, e.importReminderClaimAt, e.retryAfter, e.retryAttempts`, { key, stage, claim })
+    },
+    async releaseImportReminder(key, claim) {
+      await write(`MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e._emailLock = coalesce(e._emailLock, 0) + 1
+        WITH e WHERE e.importReminderClaim = $claim REMOVE e.importReminderClaim, e.importReminderClaimAt`, { key, claim })
+    },
+    async finishImportReminders(key) {
+      await write(`MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) SET e._emailLock = coalesce(e._emailLock, 0) + 1, e.importReminderStage = 2
+        REMOVE e.importReminderClaim, e.importReminderClaimAt`, { key })
     },
     async deleteOwner(key) {
       await write('MATCH (e:UnlinkedEmailRecipient {accountKey: $key}) DETACH DELETE e', { key })

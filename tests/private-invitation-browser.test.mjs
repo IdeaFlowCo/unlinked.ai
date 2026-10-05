@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { accountKey, createMemberEmail, createMemoryEmailStore, emailConfig } from '../mcp-server/member-email.mjs'
 import { createIdeaflowLogin, createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 
 test('invitation intent executes signed chosen-account OIDC before guarded claim and owner session', async t => {
@@ -25,6 +26,15 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
       },
     })
   } }
+  const emailStore = createMemoryEmailStore()
+  let enrollments = 0
+  const noteNewAccount = emailStore.noteNewAccount
+  emailStore.noteNewAccount = async (...args) => { enrollments++; return noteNewAccount(...args) }
+  const delivered = []
+  let emailNow = Date.now()
+  const memberEmail = createMemberEmail({ config: emailConfig({ RESEND_API_KEY: 'synthetic', UNLINKED_EMAIL_SECRET: 'ab'.repeat(32) }),
+    store: emailStore, transport: { async send(value) { delivered.push(value); return { id: 'sent' } } }, secret: new Uint8Array(32).fill(7),
+    origin: 'https://www.unlinked.ai', now: () => emailNow, hasLinkedInUpload: async () => false })
   let invitationHtml
   let nonce, handler, override = {}, claimFailure, returnedOwner = owner, tokenExchanges = 0
   const server = createServer((req, res) => handler(req, res))
@@ -46,7 +56,7 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
     return Response.json({ access_token: 'synthetic-provider-token', token_type: 'Bearer', expires_in: 300,
       id_token: sign({ iss: issuer, sub: 'chosen-opaque-subject', aud: clientId, iat: now, exp: now + 300, nonce, email: 'same-email@example.invalid', email_verified: true, ...override }) })
   } })
-  handler = createPrivateBrowserHandler({ baseUrl,
+  handler = createPrivateBrowserHandler({ baseUrl, memberEmail,
     login: { authorizationOrigin: realLogin.authorizationOrigin, begin: async options => { const result = await realLogin.begin(options); nonce = result.transaction.nonce; return result }, finish: realLogin.finish },
     claimInvitation: async (token, identity) => {
       claims.push({ token, identity })
@@ -110,6 +120,11 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const verifiedIntent = await confirmationIntent(verified)
   const completed = await postConfirm(verifiedIntent)
   assert.equal(completed.status, 303); assert.equal(claims.length, 1)
+  assert.equal(emailStore.recipients.get(accountKey(owner)).accountCreatedAt, emailNow)
+  emailNow += 48 * 60 * 60 * 1000
+  assert.equal((await memberEmail.runImportReminders()).sent, 1)
+  assert.equal(delivered[0].to, 'same-email@example.invalid')
+  const signupAt = emailStore.recipients.get(accountKey(owner)).accountCreatedAt
   const sessionCookie = completed.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
   const upload = await fetch(endpoint, { headers: { Cookie: sessionCookie } })
   const uploadDirectives = new Map(upload.headers.get('content-security-policy').split(';').map(value => value.trim().split(/\s+/)).map(([key, ...values]) => [key, values]))
@@ -124,6 +139,9 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const headers = { Cookie: sessionCookie, Origin: baseUrl }
   const imported = await fetch(`${endpoint}/upload`, { method: 'POST', headers, body: uploadForm, redirect: 'manual' })
   assert.equal(imported.status, 303)
+  emailNow += 24 * 60 * 60 * 1000
+  assert.equal((await memberEmail.runImportReminders()).sent, 0, 'durable HTTP upload cancels the 72-hour reminder')
+  assert.equal(delivered.length, 1)
   const receiptPath = imported.headers.get('location'), importId = receiptPath.split('/').pop()
   const stored = resources.get(importId)
   assert.equal(stored.sourceOwnerId, owner.ownerId)
@@ -141,6 +159,8 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   assert.deepEqual(issued, [{ importIds: [importId], tools: ['unlinked_search_import'] }])
   assert.equal(configuration.mcpServers['unlinked-private'].url, `${baseUrl}/mcp`)
   if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) {
+    await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, 'invited-reminder.html'), delivered[0].html)
+    await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, 'invited-reminder-cancellation.json'), JSON.stringify({ signupAt, reminderAtHours: 48, reminderRecipient: delivered[0].to, uploadStatus: imported.status, checkAtHours: 72, emailsAfterUpload: delivered.length, persistedReminderStage: emailStore.recipients.get(accountKey(owner)).importReminderStage }, null, 2))
     for (const [name, output] of [['invitation', invitationHtml], ['upload', uploadHtml], ['receipt', receiptHtml], ['search', searchHtml]]) {
       await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `invited-${name}.html`), output)
     }
@@ -156,6 +176,8 @@ test('invitation intent executes signed chosen-account OIDC before guarded claim
   const recovered = await callback(await begin())
   assert.equal(recovered.status, 200)
   assert.equal((await confirm(recovered)).status, 303); assert.equal(claims.length, 2)
+  assert.equal(emailStore.recipients.get(accountKey(owner)).accountCreatedAt, signupAt)
+  assert.equal(enrollments, 1)
   for (const bad of [{ nonce: 'wrong' }, { aud: 'other-client' }, { iss: 'https://other.invalid' }]) {
     const response = await begin(); override = bad
     assert.equal((await callback(response)).status, 400)

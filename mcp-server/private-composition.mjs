@@ -130,7 +130,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const companyFactsStore = typeof dependencies.createCompanyFactsStore === 'function' ? dependencies.createCompanyFactsStore(driver, 'neo4j') : null
     await companyFactsStore?.initialize()
     const lookupCompanyFacts = companyFactsStore ? createCompanyFacts({ readDataset: () => companyFactsStore.read(COMPANY_DATASET), onError: () => process.stderr.write('unlinked_company_facts_read_failed: serving the static list\n') }) : undefined
-    // Invite and notification emails, when the runtime supplies their store.
+    // Member email, when the runtime supplies its private store.
     // Without RESEND_API_KEY (or with UNLINKED_EMAIL_ENABLED=false) nothing is
     // sent and no address is recorded; unsubscribe links keep working. Without
     // a usable UNLINKED_EMAIL_SECRET the feature is absent (no routes, no sending).
@@ -144,6 +144,16 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       let lastReport = 0
       memberEmail = createMemberEmail({ config: settings, transport: settings.enabled ? emailTransportFactory({ apiKey: settings.apiKey }) : null, store: emailStore, notificationStore,
         secret: settings.secret, origin: base.origin,
+        hasLinkedInUpload: async owner => {
+          const backend = await getBackend(owner)
+          // A durable upload receipt stops reminders while parsing continues;
+          // original files recovered from an old account count too.
+          for (const id of await backend.listImportJobIds()) {
+            const receipt = await backend.readResource('import', id)
+            if (receipt && !receipt.deleted && receipt.sourceOwnerId === owner.ownerId && receipt.payload?.origin?.kind !== 'added-person') return true
+          }
+          return (await backend.readLegacyFiles?.())?.objects?.length > 0
+        },
         // Failures carry only a code; at most one audit row per ten minutes.
         onError: event => { if (Date.now() - lastReport < 600000) return; lastReport = Date.now(); return audit({ ...event, at: new Date().toISOString() }) } })
     }

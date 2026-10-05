@@ -16,7 +16,16 @@ After that explicit recovered-account confirmation, Settings may also list prese
 At `/find-me`, enter your LinkedIn profile URL and review the matching card before choosing **Yes, that's me**. When the optional operator-configured profile lookup is enabled and no legacy profile matches, the card is labeled **from your public LinkedIn profile**; confirming it makes that profile public immediately. If lookup is unavailable, continue with your name and add your export later. See the [signup profile lookup guide](docs/signup-profile-lookup.md) for configuration and source precedence.
 The older private.unlinked.ai host is a rollback/release-planning origin, not the current public onboarding URL.
 
-Prefer the full LinkedIn ZIP; Connections-only is also supported.
+In LinkedIn’s [data download settings](https://www.linkedin.com/mypreferences/d/download-my-data),
+choose **Download larger data archive (recommended)** for the full LinkedIn ZIP;
+Connections-only is also supported. LinkedIn lists up to 24 hours for the larger
+archive and up to 48 hours for Connections. Download the file within **72 hours
+after the archive becomes available**, using LinkedIn’s email link. Unlinked
+cannot observe that email or calculate an exact expiry time. Your downloaded
+file does not expire; keep it and upload it later if needed. If the link expires,
+request another export. See [LinkedIn’s export guidance](https://www.linkedin.com/help/linkedin/answer/a1339364?lang=en).
+New members without an upload can receive reminder emails; see
+[reminder timing, eligibility and preferences](docs/email.md#linkedin-export-reminders).
 `/import-linkedin` explains how to request and keep the export, then links to sign-in and upload.
 `/login` starts Ideaflow ID sign-in in the standalone runtime, and `/agents` points to Settings for Agent setup.
 The fictional homepage answer illustrates title/company matching, not a live search result or inferred biography.
@@ -91,3 +100,11 @@ The isolated private Noos adapter, bounded publication journal, OIDC browser con
 
 See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/login` starts the current Ideaflow ID path in the standalone runtime; the Next.js `/auth/login` and `/auth/signup` pages remain local/historical source routes.
 The standalone runtime includes durable profile-first archive processing, owner-wide multi-import browsing/search, browser-only recovered-original downloads and account-scoped MCP grants. The Next.js app still retains historical/public source routes rather than hosting that runtime.
+
+The canonical landing page gives “Start my LinkedIn export” the same prominence
+as “Create my profile.” Opening LinkedIn changes the export link to a quieter
+green checked “Export page opened” state, remembered in that browser for four
+days even before sign-in. This records only opening the settings page, never a confirmed export
+request, account identity or the LinkedIn email’s arrival. Browser storage is
+best-effort localStorage; when storage is blocked, the checked state lasts only
+on the current page. The native outbound link works without JavaScript or storage.

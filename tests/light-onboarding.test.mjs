@@ -4,7 +4,7 @@ import vm from 'node:vm'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { inAppBrowser, escapeHref, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
+import { LINKEDIN_EXPORT_PROGRESS_SCRIPT, inAppBrowser, escapeHref, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderOwnProfile, renderPerson, renderPeople, renderSettings, renderImporting, uploadProgressScript, agentSetupCopyScript } from '../mcp-server/private-onboarding-views.mjs'
 import { buildPreviews } from '../mcp-server/private-onboarding-preview.mjs'
 import { ONBOARDING_STYLE } from '../mcp-server/private-onboarding-style.mjs'
 
@@ -258,7 +258,7 @@ test('Join and Bring-export offer one quiet LinkedIn export link with safe outbo
     assert.match(links[0][0], /rel="noopener noreferrer"/)
     assert.match(links[0][0], />Don't have your LinkedIn export yet\? Request it now ↗<\/a>/)
     assert.doesNotMatch(links[0][0], /class="button/)
-    assert.match(view.content, /<p class="small">It takes LinkedIn a few minutes for Connections, up to a day for the complete archive\. Sign up while you wait\.<\/p>/)
+    assert.match(view.content, /complete archive \(recommended\).*about a day/); assert.match(view.content, /Download your file within 3 days of LinkedIn’s email/)
   }
   assert.doesNotMatch(renderJoin({ ...account, signedIn: true }).content, /download-my-data/)
   assert.match(renderBringArchive(account).content, /<details><summary>Don’t have your export yet\?<\/summary><ol><li>Open LinkedIn’s data download settings/)
@@ -663,4 +663,49 @@ test('in-app browsers get tap-to-escape links to Safari or Chrome, with the manu
   assert.match(tiktok, /href="https:\/\/www\.linkedin\.com\/mypreferences\/d\/download-my-data" target="_blank"/)
   const plain = renderLanding().content
   assert.doesNotMatch(plain, /instagram:|x-safari|intent:/)
+})
+
+
+test('LinkedIn export click progress survives anonymous reloads, expires and respects blocked storage', () => {
+  const key = 'unlinked.linkedin-export-opened.v1', values = new Map()
+  let now = 1000000
+  const storage = { getItem: name => values.get(name) ?? null, setItem: (name, value) => values.set(name, value), removeItem: name => values.delete(name) }
+  const page = (localStorage = storage) => {
+    const handlers = {}, events = {}, classes = new Set(), stepClasses = new Set()
+    const toggle = (set, name, on) => on ? set.add(name) : set.delete(name)
+    const link = { textContent: 'Start my LinkedIn export ↗', classList: { toggle: (name, on) => toggle(classes, name, on) }, closest: () => ({ classList: { toggle: (name, on) => toggle(stepClasses, name, on) } }), addEventListener: (name, fn) => { handlers[name] = fn } }
+    const status = { hidden: true, textContent: '' }
+    vm.runInNewContext(LINKEDIN_EXPORT_PROGRESS_SCRIPT, { document: { querySelectorAll: () => [link], getElementById: () => status }, localStorage, Date: { now: () => now }, addEventListener: (name, fn) => { events[name] = fn } })
+    return { link, status, classes, events, click: event => handlers.click({ button: 0, ...event }) }
+  }
+  const first = page()
+  assert.equal(first.link.textContent, 'Start my LinkedIn export ↗')
+  first.click({ defaultPrevented: true })
+  assert.equal(values.size, 0)
+  first.click({ button: 2 })
+  assert.equal(values.size, 0)
+  first.click()
+  assert.equal(values.get(key), String(now))
+  assert.equal(first.link.textContent, 'Export page opened ✓')
+  assert.ok(first.classes.has('export-opened'))
+  assert.equal(first.status.hidden, false)
+  assert.match(first.status.textContent, /If you requested your archive/)
+  const anonymousReload = page()
+  assert.equal(anonymousReload.link.textContent, 'Export page opened ✓')
+  values.clear(); anonymousReload.events.storage({ key: null })
+  assert.equal(anonymousReload.link.textContent, 'Start my LinkedIn export ↗')
+  first.click()
+  now += 4 * 24 * 60 * 60 * 1000
+  first.events.pageshow()
+  assert.equal(first.link.textContent, 'Start my LinkedIn export ↗')
+  assert.equal(first.status.hidden, true)
+  assert.equal(values.size, 0)
+  for (const invalid of ['garbage', String(now + 1), '-1']) {
+    values.set(key, invalid)
+    assert.equal(page().link.textContent, 'Start my LinkedIn export ↗')
+  }
+  const blocked = page({ getItem() { throw Error('blocked') }, setItem() { throw Error('blocked') }, removeItem() { throw Error('blocked') } })
+  blocked.click()
+  assert.equal(blocked.link.textContent, 'Export page opened ✓')
+  assert.equal(blocked.status.hidden, false)
 })
