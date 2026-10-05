@@ -1,3 +1,4 @@
+import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { createHash } from 'node:crypto'
 import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
@@ -111,6 +112,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         optional(summary, 'headline', input.headline); optional(summary, 'location', input.location)
         const detail = { ...summary }
         optional(detail, 'about', input.about)
+        for (const key of ['company', 'industry']) optional(detail, key, input[key])
+        const linkedinUrl = publicLinkedinUrl(input.linkedinUrl), website = publicWebsite(input.website)
+        if (linkedinUrl) optional(detail, 'linkedinUrl', linkedinUrl)
+        if (website) optional(detail, 'website', website)
         detail.positions = array(input.positions, 100).map(position => {
           if (!plain(position)) unavailable()
           const result = { title: text(position.title, true), company: text(position.company, true) }

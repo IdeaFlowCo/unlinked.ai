@@ -1,4 +1,6 @@
 import { createMessagingResolver, createMessagingSession } from './messaging.mjs'
+
+import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
@@ -343,8 +345,18 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       }
       return rows
     }
+    let legacyDetails = null
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLookup?.list,
-      readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
+      includeDetails: true,
+      readLegacy: async () => {
+        const snapshot = await publicPeople.read('recovered-legacy-public-v1')
+        const digest = snapshot?.revision?.match(/^legacy-public-v1:([a-f0-9]{64})$/)?.[1]
+        if (!digest) return snapshot
+        try {
+          if (legacyDetails?.sourceSha256 !== digest) legacyDetails = JSON.parse(await readFile(join(root, 'audit', `legacy-public-source-manifest-${digest}.json`), 'utf8'))
+          return withLegacyProfileDetails(snapshot, legacyDetails)
+        } catch { return snapshot }
+      },
       // An accepted invite is a connection both people agreed to: it joins the
       // public graph when both accounts have a public profile.
       // An accepted connection request is the same kind of agreed connection.

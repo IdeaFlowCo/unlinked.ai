@@ -559,6 +559,7 @@ test('a profile page shows who someone is and who they know, escaped, for visito
   }
   const anonymous = renderPerson({ profile })
   assert.equal(anonymous.title, 'Maya Chen')
+  assert.match(anonymous.content, /href="https:\/\/www.linkedin.com\/in\/maya" target="_blank" rel="noopener noreferrer"/)
   assert.match(anonymous.content, /<h1>Maya Chen<\/h1>/)
   assert.match(anonymous.content, /Portland · 2\+ connections/)
   assert.match(anonymous.content, /<h3>Experience<\/h3>.*<b>Lead<\/b>.*2021 to Present/s)
@@ -569,7 +570,7 @@ test('a profile page shows who someone is and who they know, escaped, for visito
   assert.match(anonymous.content, /href="\/people\/uuid%2F%22%3C%26\/connections\?q=&amp;sort=detail&amp;cursor=next%2F2">Show more/)
   assert.match(anonymous.content, /href="\/join">Join Unlinked/)
   assert.match(anonymous.content, /&lt;script&gt;alert\(&quot;bad&quot;\)&lt;\/script&gt;/)
-  assert.doesNotMatch(anonymous.content, /<script>|onclick=|secret@example\.test|linkedin\.com\/in\/maya|name="csrf"|action="\/logout"/)
+  assert.doesNotMatch(anonymous.content, /<script>|onclick=|secret@example\.test|name="csrf"|action="\/logout"/)
   const member = renderPerson({ ...account, profile })
   assert.match(member.content, /href="\/profile">View profile/)
   assert.match(member.content, /action="\/logout"/)

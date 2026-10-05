@@ -1016,10 +1016,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         } catch { /* The profile stands on its own while the network is still being read. */ }
         await warming
         // The photo published for this member's public profile, when there is one.
-        if (profilePhotos && typeof ownProfileId === 'function') {
+        if (typeof ownProfileId === 'function') {
           const mine = await ownProfileId(session.owner).catch(() => null)
-          const photo = mine ? profilePhotos.urlFor(mine) : null
+          const photo = mine ? profilePhotos?.urlFor(mine) : null
           if (photo) profile.photo = photo
+          const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
+          for (const key of ['linkedinUrl', 'website', 'company', 'industry']) if (published?.profile?.[key]) profile[key] = published.profile[key]
         }
         journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }

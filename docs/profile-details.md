@@ -1,0 +1,9 @@
+# Profile details and outbound links
+
+People headers show a LinkedIn profile link when its address is retained, a website when an explicitly public profile source supplies one, and available company, industry and location. About, experience (including dates and descriptions), education (including dates and degrees) and skills remain below. Company headers show stored website and LinkedIn page links alongside existing company facts. Missing addresses are omitted; never invent a slug from a name.
+
+`profile-links.mjs` accepts only the LinkedIn person URL grammar and credential-free HTTPS websites. Both browser renderers validate links again. Contact-card settings, email, phone and raw assertions are excluded.
+
+The standalone composition supplements the live recovered legacy snapshot from its exact hash-matched source manifest, projecting only the LinkedIn slug and professional industry. Confirmed signup profiles derive their link from their stored confirmed slug. Member import details are reconstructed with `createScopedImportReader` after the current public-consent owner/publication checks. Only professional DTOs are cached, keyed by owner, import and revision; each reuse checks current authorization and the final source fence. Removed imports evict their derived cache. Existing graph projections remain immutable and need no republishing or schema migration. `profile-details-v1` changes the shared revision so compiled caches rebuild. Uploaded profiles win over older sources, but keep a retained LinkedIn address when the new archive omits it; identity merges also preserve missing professional links.
+
+Public detail JSON includes optional `linkedinUrl`, `website`, `company` and `industry`. Summaries and cursors retain their existing shape. Agent tool lists, grants and scopes are unchanged.

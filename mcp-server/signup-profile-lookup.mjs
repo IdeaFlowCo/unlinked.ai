@@ -1,3 +1,4 @@
+import { linkedinUrlFromSlug } from '../src/utils/public-people/profile-links.mjs'
 import { lockProfileOwner } from './profile-source-boundary.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
@@ -265,16 +266,16 @@ export function createNeo4jSignupProfileStore(driver, database = 'neo4j', gateId
     },
     async read(owner, { includeRetired = false } = {}) {
       return tx('executeRead', async t => {
-        const result = await t.run(`MATCH (s:UnlinkedSignupProfile {key:$key}) ${active} AND ($includeRetired OR coalesce(s.retired,false)=false) RETURN s.profileJson AS json, s.profileId AS id, s.receiptId AS receiptId, s.retired AS retired, s.retiredByProfileId AS retiredByProfileId`, { key: ownerKey(owner), includeRetired })
+        const result = await t.run(`MATCH (s:UnlinkedSignupProfile {key:$key}) ${active} AND ($includeRetired OR coalesce(s.retired,false)=false) RETURN s.profileJson AS json, s.slug AS slug, s.profileId AS id, s.receiptId AS receiptId, s.retired AS retired, s.retiredByProfileId AS retiredByProfileId`, { key: ownerKey(owner), includeRetired })
         if (!result.records.length) return null
-        const row = result.records[0]; return { profile: { ...JSON.parse(row.get('json')), id: row.get('id') }, receiptId: row.get('receiptId'), ...(row.get('retired') === true ? { retired: true, retiredByProfileId: row.get('retiredByProfileId') } : {}) }
+        const row = result.records[0]; return { profile: { ...JSON.parse(row.get('json')), ...(linkedinUrlFromSlug(row.get('slug')) ? {linkedinUrl:linkedinUrlFromSlug(row.get('slug'))} : {}), id: row.get('id') }, receiptId: row.get('receiptId'), ...(row.get('retired') === true ? { retired: true, retiredByProfileId: row.get('retiredByProfileId') } : {}) }
       })
     },
     async list() {
       return tx('executeRead', async t => {
-        const result = await t.run(`MATCH (s:UnlinkedSignupProfile) ${active} AND coalesce(s.retired,false)=false RETURN s.profileJson AS json, s.profileId AS id, s.ownerId AS ownerId, s.userId AS userId, s.receiptId AS receiptId ORDER BY id LIMIT 1001`)
+        const result = await t.run(`MATCH (s:UnlinkedSignupProfile) ${active} AND coalesce(s.retired,false)=false RETURN s.profileJson AS json, s.slug AS slug, s.profileId AS id, s.ownerId AS ownerId, s.userId AS userId, s.receiptId AS receiptId ORDER BY id LIMIT 1001`)
         if (result.records.length > 1000) throw Error('public_signup_profile_limit')
-        return parsed(result.records).map((profile, i) => { const row = result.records[i]; return { owner: { ownerId: row.get('ownerId'), userId: row.get('userId') }, profile: { ...profile, id: row.get('id') }, receiptId: row.get('receiptId') } })
+        return parsed(result.records).map((profile, i) => { const row = result.records[i]; return { owner: { ownerId: row.get('ownerId'), userId: row.get('userId') }, profile: { ...profile, ...(linkedinUrlFromSlug(row.get('slug')) ? {linkedinUrl:linkedinUrlFromSlug(row.get('slug'))} : {}), id: row.get('id') }, receiptId: row.get('receiptId') } })
       })
     },
   }
