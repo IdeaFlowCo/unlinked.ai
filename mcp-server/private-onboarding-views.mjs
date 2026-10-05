@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs'
 import { profileDetailLevel, companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { ONBOARDING_STYLE } from './private-onboarding-style.mjs'
 import { displayPhone, whatsappUrl, isSafeContactLink } from './contact-card.mjs'
 import { PHOTO_URL } from './profile-photos.mjs'
+
+const APP_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
 const raw = value => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 const html = value => raw(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -77,7 +80,7 @@ const jobStatus = job => {
   return `<aside class="import-status" role="status" aria-live="polite"><strong>${label}</strong>${!finished ? `${progress(job)}<p>Keeps running even if you leave this page.</p>${job.profileReady ? '<p>Your profile is ready; connections are still coming in.</p>' : ''}` : ''}${job.status === 'partial' ? `<p><a href="/settings">${rowsSkipped(job) ? 'Details' : 'Review in Settings'}</a></p>` : ''}${job.errorMessage ? `<p>${html(job.errorMessage)}</p>` : ''}</aside>`
 }
 const jobPill = job => { if (!knownJob(job) || terminalJob(job)) return ''; const value = jobProgress(job); return `<a class="pill" href="/profile" title="Importing keeps running even if you leave">${value ? `Importing · ${value.percent}%` : 'Importing…'}</a>` }
-const footer = ({ csrf, accountLabel }) => `<footer><span>unlinked · an open professional network</span><span><a href="https://www.unlinked.ai/meet" target="_blank" rel="noopener noreferrer">Meet someone in person ↗</a><a href="https://worldissuetracker.com/tracker/unlinked-ai" target="_blank" rel="noopener noreferrer">Feedback ↗</a><a href="/agents">For agents</a><a href="/llms.txt">llms.txt</a></span><span>Not affiliated with LinkedIn.</span>${csrf ? `<span class="account">${accountLabel ? `Signed in as ${html(accountLabel)} · ` : ''}<form class="sign-out" method="post" action="/logout">${csrfInput(csrf)}<button class="link-button">Sign out</button></form></span>` : ''}</footer>`
+const footer = ({ csrf, accountLabel }) => `<footer><span>unlinked · an open professional network · <span class="app-version">v${html(APP_VERSION)}</span></span><span><a href="https://www.unlinked.ai/meet" target="_blank" rel="noopener noreferrer">Meet someone in person ↗</a><a href="https://worldissuetracker.com/tracker/unlinked-ai" target="_blank" rel="noopener noreferrer">Feedback ↗</a><a href="/agents">For agents</a><a href="/llms.txt">llms.txt</a></span><span>Not affiliated with LinkedIn.</span>${csrf ? `<span class="account">${accountLabel ? `Signed in as ${html(accountLabel)} · ` : ''}<form class="sign-out" method="post" action="/logout">${csrfInput(csrf)}<button class="link-button">Sign out</button></form></span>` : ''}</footer>`
 // My Network and the notification bell. The runtime fills the slot per request
 // (fillNavAlerts) with live counts, and only when those features are configured;
 // an unfilled slot is an empty comment.
