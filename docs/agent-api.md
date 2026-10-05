@@ -272,9 +272,11 @@ whenever the published snapshot names its members.
 
 ### `GET /api/agent/v1/people/{id}?connectionsCursor` ⇄ `unlinked_get_profile`
 One published profile with its public connections page (50 per page).
-Response: `{ kind, revision, visibility: "public", profile: { id, name,
-headline?, location?, about?, positions, education, skills,
-connections: [...summaries], nextConnectionsCursor? } }`. Unknown id → `not_found`.
+Response: `{ kind, revision, visibility: "public", profile }`. The profile DTO
+fields and bounds are owned by `detailSchema` in
+`src/components/public-directory/contract.ts`; professional link sourcing and
+privacy are owned by [profile details](profile-details.md).
+Unknown id → `not_found`.
 
 ### `GET /api/agent/v1/connections?degree&q&cursor&limit` ⇄ `unlinked_list_connections`
 Deterministic owner-connections listing; see **Degree semantics**.

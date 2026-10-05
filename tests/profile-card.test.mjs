@@ -4,6 +4,13 @@ import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { privateId } from '../src/utils/private-import/job.mjs'
 import { PUBLIC_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+// Save the actual HTTP document for optional visual review of synthetic fixtures.
+async function profileEvidence(name, document) {
+  if (process.env.UNLINKED_PROFILE_TEST_EVIDENCE) await writeFile(join(process.env.UNLINKED_PROFILE_TEST_EVIDENCE, name), document)
+}
 
 const header = 'First Name,Last Name,URL,Company,Position\n'
 
@@ -41,6 +48,7 @@ function harness(t, overrides = {}) {
       getBackend: async value => { assert.deepEqual(value, owner); return backend },
       complete: async () => ({ matches: [] }),
       ownProfileId: overrides.ownProfileId, signupLookup: overrides.signupLookup,
+      lookupCompanyFacts: overrides.lookupCompanyFacts,
       issueAccountGrant: async () => ({ accessToken: 'synthetic' }), revokeAccountGrant: async () => {},
       readPublishedSnapshot: async () => { if (!snapshot.current) throw new Error('unavailable'); return snapshot.current },
       mcpEndpoint: `${baseUrl}/mcp` })
@@ -221,8 +229,54 @@ test('owner profiles retain upload facts before publication and use older addres
   html = await page()
   assert.match(html, /Boston/); assert.match(html, /New research/); assert.match(html, /href="https:\/\/www.linkedin.com\/in\/new-upload"/)
   assert.doesNotMatch(html, /legacy_profile_source_unavailable|signup_source_unavailable|confirmed-person|PRIVATE_EMAIL|PRIVATE_PHONE/)
+  await profileEvidence('owner-upload-fallback-unavailable.html', html)
   resources.get(assertionId).sourceOwnerId = 'different-owner'
   const rejected = await fetch(`${signed.endpoint}/profile`, { headers: { Cookie: signed.cookie } })
   assert.equal(rejected.status, 400)
   assert.doesNotMatch(await rejected.text(), /Boston|New research|PRIVATE_EMAIL|PRIVATE_PHONE/)
+})
+
+test('professional profile and company links work through anonymous and signed-in HTTP pages without exposing contacts', async t => {
+  const company = { name: 'Example Research', industry: 'Research', website: 'https://example.test',
+    linkedinUrl: 'https://www.linkedin.com/company/example-research', description: 'A synthetic professional company.' }
+  const fixture = harness(t, { lookupCompanyFacts: async name => name === company.name ? company : null })
+  const signed = await fixture.start()
+  fixture.snapshot.current = { state: 'published', complete: true, revision: 'professional-http-v1', connections: [], profiles: [
+    { id: 'professional-person', name: 'Alex Example', headline: 'Research Engineer', location: 'Boston', industry: 'Research',
+      company: company.name, linkedinUrl: 'https://www.linkedin.com/in/alex-example', website: 'https://portfolio.example.test',
+      about: 'A synthetic profile for professional-link verification.', positions: [{ title: 'Research Engineer', company: company.name, startDate: '2020', endDate: '2025', description: 'Building research tools.' }],
+      education: [{ institution: 'Example University', degree: 'BS', startDate: '2016', endDate: '2020' }], skills: ['Research'], email: 'PRIVATE_EMAIL', phone: 'PRIVATE_PHONE' },
+    { id: 'missing-links', name: 'No Address Person', positions: [], education: [], skills: [] },
+  ] }
+  for (const [label, headers] of [['anonymous', {}], ['member', { Cookie: signed.cookie }]]) {
+    const response = await fetch(`${signed.endpoint}/people/professional-person`, { headers })
+    assert.equal(response.status, 200)
+    const document = await response.text()
+    assert.match(document, /href="https:\/\/www.linkedin.com\/in\/alex-example" target="_blank" rel="noopener noreferrer"/)
+    assert.match(document, /href="https:\/\/portfolio.example.test\/"/)
+    assert.match(document, /href="\/companies\/Example%20Research"/)
+    for (const fact of ['Boston', 'Research', 'Building research tools.', 'Example University', '2020', '2025']) assert.ok(document.includes(fact))
+    assert.doesNotMatch(document, /PRIVATE_EMAIL|PRIVATE_PHONE/)
+    await profileEvidence(`professional-person-${label}.html`, document)
+  }
+  const api = await fetch(`${signed.endpoint}/api/people/professional-person`)
+  assert.equal(api.status, 200)
+  const data = await api.json()
+  assert.equal(data.profile.linkedinUrl, 'https://www.linkedin.com/in/alex-example')
+  assert.equal(data.profile.company, company.name)
+  assert.doesNotMatch(JSON.stringify(data), /PRIVATE_EMAIL|PRIVATE_PHONE/)
+  await profileEvidence('professional-person-api.json', JSON.stringify(data, null, 2))
+  const response = await fetch(`${signed.endpoint}/companies/${encodeURIComponent(company.name)}`)
+  assert.equal(response.status, 200)
+  const document = await response.text()
+  assert.match(document, /href="https:\/\/example.test\/"/)
+  assert.match(document, /href="https:\/\/www.linkedin.com\/company\/example-research"/)
+  assert.ok(document.indexOf('Website ↗') < document.indexOf('<h3>About'))
+  assert.ok(document.indexOf('LinkedIn page ↗') < document.indexOf('<h3>About'))
+  await profileEvidence('professional-company.html', document)
+  const missing = await fetch(`${signed.endpoint}/people/missing-links`)
+  assert.equal(missing.status, 200)
+  const missingDocument = await missing.text()
+  assert.doesNotMatch(missingDocument, /LinkedIn profile ↗|Website ↗|https:\/\/www.linkedin.com\/in\//)
+  await profileEvidence('person-without-retained-links.html', missingDocument)
 })

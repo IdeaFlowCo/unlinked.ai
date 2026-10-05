@@ -6,10 +6,30 @@ import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { PUBLIC_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 import { applyProfileDecisions } from '../src/utils/public-people/profile-decisions.mjs'
 import { renderPerson, renderCompany, renderOwnProfile } from '../mcp-server/private-onboarding-views.mjs'
+import { createNeo4jSignupProfileStore } from '../mcp-server/signup-profile-lookup.mjs'
 
 const person = { id: 'legacy', name: 'Test Person', positions: [], education: [], skills: [] }
 const sha = 'c'.repeat(64)
 const legacy = { state:'published', complete:true, revision:'legacy-public-v1:'+sha, profiles:[person], connections:[] }
+
+test('signup store read and public list derive links only from retained confirmed slugs', async () => {
+  let slug = 'confirmed-person', closes = 0
+  const values = () => ({ json: JSON.stringify(person), slug, id: 'signup-person', ownerId: 'owner', userId: 'user', receiptId: 'receipt' })
+  const driver = { session: () => ({ executeRead: work => work({ run: async () => ({ records: [{ get: key => values()[key] }] }) }), close: async () => { closes++ } }) }
+  const store = createNeo4jSignupProfileStore(driver)
+  for (const retained of ['confirmed-person', null, 'invalid/slug']) {
+    slug = retained
+    const own = await store.read({ ownerId: 'owner', userId: 'user' }), published = await store.list()
+    const expected = retained === 'confirmed-person' ? 'https://www.linkedin.com/in/confirmed-person' : undefined
+    assert.equal(own.profile.linkedinUrl, expected)
+    assert.equal(published[0].profile.linkedinUrl, expected)
+    const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => ({ ...legacy, profiles: [published[0].profile] }) })
+    const detail = (await reader.profile({ id: 'signup-person' })).profile
+    assert.equal(detail.linkedinUrl, expected)
+    assert.equal(detail.name, person.name)
+  }
+  assert.equal(closes, 6)
+})
 
 test('exact legacy manifest projects LinkedIn and industry without account metadata; mismatches cannot enrich', () => {
   const manifest = {sourceSha256:sha, profiles:[{legacyId:'legacy',linkedinSlug:'test-person',industry:'Research',legacyUserId:'private-user',email:'private-email'}]}
