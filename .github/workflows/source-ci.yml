@@ -15,7 +15,8 @@ concurrency:
 jobs:
   source:
     # This repository is public. Fork code runs only on disposable hosted runners.
-    runs-on: ubuntu-latest
+    # Pin the hosted image after ubuntu-latest failed to acquire a runner.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       NEXT_TELEMETRY_DISABLED: '1'
