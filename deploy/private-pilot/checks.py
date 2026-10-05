@@ -96,8 +96,6 @@ with tempfile.TemporaryDirectory(prefix='private-pilot-release-check-') as tempo
     ports = {'bolt': 9289, 'operations': 9022, 'browser': 9367, 'https': 443}
     original_listeners = pilot.listening_tcp_ports
     original_socket = pilot.socket.socket
-    pilot.listening_tcp_ports = lambda: {443}
-    refused(lambda: pilot.check_ports_available(ports))
     class ProbeSocket:
         def bind(self, address):
             if address[1] == 443:
@@ -111,8 +109,10 @@ with tempfile.TemporaryDirectory(prefix='private-pilot-release-check-') as tempo
         def __exit__(self, *_args):
             self.close()
     try:
-        pilot.listening_tcp_ports = lambda: set()
         pilot.socket.socket = ProbeSocket
+        pilot.listening_tcp_ports = lambda: {443}
+        refused(lambda: pilot.check_ports_available(ports))
+        pilot.listening_tcp_ports = lambda: set()
         pilot.check_ports_available(ports)
     finally:
         pilot.listening_tcp_ports = original_listeners
