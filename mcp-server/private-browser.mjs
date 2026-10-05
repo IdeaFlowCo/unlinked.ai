@@ -939,6 +939,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (!profile.name && legacy) Object.assign(profile, legacy.profile)
         const source = signupLookup ? await signupLookup.read(session.owner) : null
         if (!profile.name && source) Object.assign(profile, source.profile)
+        const hasStoredProfile = Boolean(profile.name)
         if (!profile.name) profile.name = session.displayName
         // The QR target is the owner's already-public profile URL: the linked
         // legacy profile id when one is confirmed, else the stable confirmed
@@ -971,15 +972,15 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           }
         }
         session.headline = profile.headline
-        return { profile, cardUrl, publicProfileUrl: cardUrl ? unlinkedProfileContext(decodeURIComponent(new URL(cardUrl).pathname.slice('/people/'.length))) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
+        return { profile, hasStoredProfile, cardUrl, publicProfileUrl: cardUrl ? unlinkedProfileContext(decodeURIComponent(new URL(cardUrl).pathname.slice('/people/'.length))) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
       }
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
         const jobs = await jobResources(), props = jobProps(jobs)
         if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
         // Reuse the card's snapshot-verified public context; private rows and
         // imported contact details never establish a cross-product recipient.
-        const { profile, publicProfileUrl } = await readOwnCard(jobs)
-        const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
+        const { profile, hasStoredProfile, publicProfileUrl } = await readOwnCard(jobs)
+        const offerLookup = Boolean(selfClaims && session.selfClaim && !hasStoredProfile)
         let testClaim = null
         if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await backend.readTestProfileClaim() } catch { testClaim = null } }
         if (!profile.name) profile.name = session.displayName
