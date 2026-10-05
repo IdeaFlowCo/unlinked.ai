@@ -116,4 +116,4 @@ in the standalone runtime footer and the Next.js public shell footer. The
 MCP package has its own release version; keep its package/lockfile metadata and
 legacy stdio server version aligned when releasing that package.
 
-Person profiles offer **Message with OpenChat**, opening an unsent profile-context draft with explicit recipient selection in OpenChat. Private-only profile fields stay in Unlinked. See [the handoff contract](docs/openchat-message.md).
+Person profiles offer **Message with OpenChat**; see [recipient selection and profile privacy](docs/openchat-message.md).

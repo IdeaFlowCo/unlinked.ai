@@ -3,8 +3,8 @@
 Every rendered person profile offers **Message with OpenChat** beside its profile
 controls: canonical `/people/:id` for signed-out and signed-in visitors, the
 member's `/profile`, and the retained Next.js public/private profile components.
-It opens OpenChat in a new tab; nothing is sent, no contact is added, and no
-account is linked by opening the action.
+It opens OpenChat in a new tab with `noopener noreferrer`; nothing is sent,
+no contact is added, and no account is linked by opening the action.
 
 The OpenChat-owned receiving contract is
 `https://chat.ideaflow.app/app/?intent=compose&source=unlinked`, with an optional
@@ -28,6 +28,10 @@ The canonical host and `/people/:id` grammar exclude private routes, contact
 card tokens, credentials, arbitrary destinations, query strings and fragments.
 Existing `/c/:token` card sharing and `/meet` confirmation remain unchanged.
 The receiving contract is owned by OpenChat's `docs/unlinked-compose-contract.md`.
+Unlinked merge and runtime rollout must wait until the coordinated OpenChat
+receiver has passed its gates, been deployed and been verified. The Unlinked
+release executor checks that dependency; Unlinked does not deploy or modify
+the receiver.
 
 Verification executes anonymous and synthetic signed-in HTTP profile flows,
 public-target removal, both Next.js profile renderers, and actual generated
