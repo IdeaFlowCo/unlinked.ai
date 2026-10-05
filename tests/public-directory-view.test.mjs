@@ -8,9 +8,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 // Execute the TSX component with the real React/Next renderer; CSS is presentation-only.
 const code = ts.transpileModule(await readFile(new URL('../src/components/public-directory/People.tsx', import.meta.url), 'utf8'), { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText
-const loaded = new Module(import.meta.filename), require = createRequire(import.meta.url)
+const filename = new URL('../src/components/public-directory/People.tsx', import.meta.url).pathname
+const loaded = new Module(filename), require = createRequire(filename)
 loaded.require = name => name.endsWith('.module.css') ? new Proxy({}, { get: (_target, key) => key === '__esModule' ? false : String(key) }) : require(name)
-loaded._compile(code, import.meta.filename)
+loaded._compile(code, filename)
 const { ProfileBody, PeopleList, DirectoryNotice } = loaded.exports
 const render = (component, props) => renderToStaticMarkup(React.createElement(component, props))
 

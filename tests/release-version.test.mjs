@@ -25,7 +25,7 @@ test('anonymous runtime pages expose the app release in their shared footer with
     resolveOwner: async () => null,
     getBackend: async () => { ownerReads++; throw Error('unexpected owner read') },
   })
-  assert.equal(appPackage.version, '0.3.0')
+  assert.equal(appPackage.version, '0.4.0')
   for (const path of ['/', '/agents', '/import-linkedin', '/meet']) {
     const response = await fetch(endpoint + path)
     assert.equal(response.status, 200)
@@ -68,7 +68,7 @@ test('legacy stdio initialize advertises the MCP package release and preserves i
   const client = new Client({ name: 'release-version-fixture', version: '1.0.0' })
   t.after(() => client.close())
   await client.connect(transport)
-  assert.equal(mcpPackage.version, '0.2.0')
+  assert.equal(mcpPackage.version, '0.3.0')
   assert.deepEqual(client.getServerVersion(), { name: 'unlinked', version: mcpPackage.version })
   const tools = (await client.listTools()).tools.map(tool => tool.name)
   assert.deepEqual(tools, ['unlinked_me', 'unlinked_search_contacts', 'unlinked_get_profile', 'unlinked_list_imports', 'unlinked_draft_intro'])

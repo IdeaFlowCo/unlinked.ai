@@ -115,3 +115,5 @@ The current app version is the root `package.json` version, shown unobtrusively
 in the standalone runtime footer and the Next.js public shell footer. The
 MCP package has its own release version; keep its package/lockfile metadata and
 legacy stdio server version aligned when releasing that package.
+
+Person profiles offer **Message with OpenChat**; see [recipient selection and profile privacy](docs/openchat-message.md).

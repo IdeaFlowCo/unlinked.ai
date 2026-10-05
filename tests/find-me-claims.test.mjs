@@ -91,7 +91,7 @@ test('a new account is offered the find-me step, a LinkedIn address finds the un
   assert.notEqual((await post('/claim-me', { csrf, candidate })).status, 303)
 })
 
-test('the rendered find-me skip link opens the member name-only profile directly', async t => {
+test('the rendered find-me skip link opens the name-only profile with a working lookup retry', async t => {
   const f = await start(t, { displayName: 'New Member' })
   const page = await f.signed('/find-me')
   assert.equal(page.status, 200)
@@ -101,7 +101,15 @@ test('the rendered find-me skip link opens the member name-only profile directly
   assert.equal(skip[1], '/profile')
   const profile = await f.signed(skip[1])
   assert.equal(profile.status, 200)
-  assert.ok((await profile.text()).includes('New Member'))
+  const profileHtml = await profile.text()
+  assert.ok(profileHtml.includes('New Member'))
+  const retry = profileHtml.match(/<form class="linkedin-lookup"[^>]*method="post" action="([^"]+)"[^>]*>(.*?)<\/form>/s)
+  assert.ok(retry, 'skipping preserves the profile lookup form')
+  const retryCsrf = retry[2].match(/name="csrf" value="([^"]+)"/)[1]
+  const result = await f.post(retry[1], { csrf: retryCsrf, linkedinUrl: 'https://www.linkedin.com/in/joshua-langsam-1352407/' })
+  assert.equal(result.status, 200)
+  assert.ok((await result.text()).includes('Is this you?'))
+  assert.deepEqual(f.calls.lookups, ['joshua-langsam-1352407'])
   assert.equal(f.calls.claims.length, 0)
 })
 
@@ -247,6 +255,11 @@ test('confirmed signup source supplies export, verified card target and owner de
   await service.confirm({ owner, slug: 'public-identity' })
   const f = await start(t, { displayName: 'Login Name', signupLookup: service })
   const [source] = await service.list()
+  const profile = await f.signed('/profile')
+  assert.equal(profile.status, 200)
+  const profileHtml = await profile.text()
+  assert.ok(profileHtml.includes('Public Identity'))
+  assert.ok(!profileHtml.includes('class="linkedin-lookup"'))
   const card = await (await f.signed('/card')).text()
   assert.ok(card.includes('Public Identity')); assert.ok(card.includes('Builder')); assert.ok(card.includes('Austin'))
   assert.ok(card.includes('/people/' + source.profile.id)); assert.ok(card.includes('<svg'))
