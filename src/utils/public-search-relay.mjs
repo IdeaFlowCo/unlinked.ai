@@ -38,7 +38,14 @@ export function createPublicSearchRelay({ fetchImpl = fetch, timeoutMs = 10000 }
       })
       if (upstream.status !== 200) {
         await upstream.body?.cancel()
-        return fail([400, 429, 503].includes(upstream.status) ? upstream.status : 503, 'public_search_unavailable')
+        const response = fail([400, 429, 503].includes(upstream.status) ? upstream.status : 503, 'public_search_unavailable')
+        const retryAfter = upstream.headers.get('retry-after')
+        if (upstream.status === 429 && retryAfter !== null
+          && ((/^\d{1,16}$/.test(retryAfter) && Number.isSafeInteger(Number(retryAfter)))
+            || (retryAfter.length === 29 && new Date(retryAfter).toUTCString() === retryAfter))) {
+          response.headers.set('Retry-After', retryAfter)
+        }
+        return response
       }
       if (upstream.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'text/html'
         || Number(upstream.headers.get('content-length')) > maxBytes) {

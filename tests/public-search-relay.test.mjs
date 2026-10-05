@@ -84,6 +84,31 @@ test('upstream failures, redirects and non-HTML never become results or leak ups
   assert.equal((await relay(request())).status, 503)
 })
 
+test('rate-limited GET and HEAD preserve validated backoff without upstream credentials or content', async () => {
+  for (const method of ['GET', 'HEAD']) {
+    for (const value of ['10', '0', '60', 'Wed, 21 Oct 2015 07:28:00 GMT', null, '', '-1', '1.5', 'soon', '9007199254740992', 'Wed, 32 Oct 2015 07:28:00 GMT']) {
+      const relay = createPublicSearchRelay({ fetchImpl: async () => new Response('private error', {
+        status: 429,
+        headers: { ...(value === null ? {} : { 'Retry-After': value }), 'Set-Cookie': 'private', Authorization: 'Bearer private' },
+      }) })
+      const result = await relay(request('', { method }))
+      assert.equal(result.status, 429)
+      assert.equal(result.headers.get('retry-after'), ['10', '0', '60', 'Wed, 21 Oct 2015 07:28:00 GMT'].includes(value) ? value : null)
+      assert.equal(result.headers.get('set-cookie'), null)
+      assert.equal(result.headers.get('authorization'), null)
+      assert.equal(result.headers.get('cache-control'), 'no-store')
+      if (method === 'HEAD') assert.equal(await result.text(), '')
+      else assert.deepEqual(await result.json(), { error: 'public_search_unavailable' })
+    }
+  }
+  for (const status of [200, 400, 503]) {
+    const relay = createPublicSearchRelay({ fetchImpl: async () => new Response('body', {
+      status, headers: { 'Retry-After': '10', 'Content-Type': 'text/html' },
+    }) })
+    assert.equal((await relay(request())).headers.get('retry-after'), null)
+  }
+})
+
 test('responses are bounded even when streamed without content-length', async () => {
   let cancelled = false
   const relay = createPublicSearchRelay({ fetchImpl: async () => html(new ReadableStream({
