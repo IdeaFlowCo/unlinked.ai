@@ -1329,7 +1329,7 @@
             "description": "Published People unavailable"
           }
         },
-        "description": "The alternate Vercel transport fetches this canonical public page anonymously, without caller credentials, redirects or stored results. Only q/mode/presence/cursor are accepted there; responses are capped at 256 KiB and upstream fetches at 10 seconds. HTTP success is not proof of ordinary ChatGPT reader access."
+        "description": "Experimental alternate transport restrictions and reader verification requirements are owned by docs/public-directory.md#alternate-public-transport in the repository."
       },
       "head": {
         "summary": "Probe public search status and HTML headers without a response body",
@@ -1362,7 +1362,7 @@
             "description": "Published People unavailable"
           }
         },
-        "description": "The alternate Vercel transport fetches this canonical public page anonymously, without caller credentials, redirects or stored results. Only q/mode/presence/cursor are accepted there; responses are capped at 256 KiB and upstream fetches at 10 seconds. HTTP success is not proof of ordinary ChatGPT reader access."
+        "description": "Experimental alternate transport restrictions and reader verification requirements are owned by docs/public-directory.md#alternate-public-transport in the repository."
       },
       "servers": [
         {

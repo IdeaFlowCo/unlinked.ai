@@ -1,4 +1,4 @@
-Unlinked helps people carry their network into useful introductions. The canonical beta at https://www.unlinked.ai runs the standalone Noos-backed runtime for sign-in, import, owner-network search, settings, scoped MCP and Meet. The Next.js public pages and legacy Supabase profile/API implementations remain source history and local reference.
+Unlinked helps people carry their network into useful introductions. The canonical beta at https://www.unlinked.ai runs the standalone Noos-backed runtime for sign-in, import, owner-network search, settings, scoped MCP and Meet. Next.js retains the historical public pages and legacy Supabase profile/API implementations, and hosts the [experimental alternate public search transport](docs/public-directory.md#alternate-public-transport).
 
 ## Meet someone
 
@@ -62,7 +62,7 @@ unlinked.ai exposes a canonical account-scoped MCP endpoint from the standalone 
 
 For public search without a connector or account, open [a search link](https://www.unlinked.ai/search-public?q=Stanford), replace Stanford with your query, and share the link with your web assistant. See [the public search contract](docs/public-directory.md#search-links-for-web-assistants) for scope and web-fetch verification requirements.
 
-An [experimental alternate public transport](https://unlinked-ideaflowco.vercel.app/search-public?q=Stanford) fetches the same live public page without forwarding credentials or storing results. Ordinary ChatGPT access is not established; see the same contract for limits and evidence.
+You can also try an [experimental alternate search link](https://unlinked-ideaflowco.vercel.app/search-public?q=Stanford). Ordinary ChatGPT access is not established; see the [alternate transport contract](docs/public-directory.md#alternate-public-transport) for limits and evidence.
 
 ## Getting Started
 
