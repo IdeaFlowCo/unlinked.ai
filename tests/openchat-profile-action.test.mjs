@@ -33,7 +33,7 @@ function loadComponent(path, stubs = {}) {
 }
 
 test('anonymous and signed-in runtime person profiles open the same context-only compose; own public context is verified', async t => {
-  let handler, ownerReads = 0, writes = 0, snapshotUnavailable = false
+  let handler, ownerReads = 0, writes = 0, snapshotUnavailable = false, signupSourceUnavailable = false
   const owner = { ownerId: 'synthetic-openchat-owner', userId: 'synthetic-openchat-user' }
   const snapshot = { state: 'published', complete: true, revision: 'synthetic-openchat-v1', profiles: [{ id: 'seed-person', name: 'Seed Person', presence: 'shadow', email: 'never-share@example.invalid', positions: [], education: [], skills: [] }], connections: [] }
   const server = createServer((req, res) => handler(req, res))
@@ -42,6 +42,7 @@ test('anonymous and signed-in runtime person profiles open the same context-only
   handler = createPrivateBrowserHandler({ baseUrl: endpoint.replace('http:', 'https:'), dataMode: 'synthetic',
     login: { begin: async () => ({ location: 'https://id.example.invalid/authorize', transaction: { state: 'synthetic-state' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: 'synthetic-subject', displayName: 'Seed Owner' }) },
     resolveOwner: async () => owner, signup: async () => owner,
+    signupLookup: { read: async () => { if (signupSourceUnavailable) throw new Error('synthetic signup source unavailable'); return null } },
     issueAccountGrant: async () => ({ accessToken: 'synthetic-fixture' }), revokeAccountGrant: async () => {},
     ownProfileId: async () => 'seed-person',
     getBackend: async () => { ownerReads++; return { adapter: {}, readLegacyProfile: async () => ({ profileId: 'seed-person', profile: { name: 'Seed Owner' } }), listImportIds: async () => [], listImportJobIds: async () => [], readResource: async () => null, writeResource: async () => { writes++ } } },
@@ -74,6 +75,13 @@ test('anonymous and signed-in runtime person profiles open the same context-only
   snapshotUnavailable = true
   const unavailableOwn = await request('/profile', session); assert.equal(unavailableOwn.status, 200)
   assert.deepEqual([...action(await unavailableOwn.text()).searchParams], [['intent', 'compose'], ['source', 'unlinked']])
+  signupSourceUnavailable = true
+  const unavailableSignup = await request('/profile', session); assert.equal(unavailableSignup.status, 200)
+  const unavailableSignupMarkup = await unavailableSignup.text()
+  assert.match(unavailableSignupMarkup, /Seed Owner/)
+  assert.deepEqual([...action(unavailableSignupMarkup).searchParams], [['intent', 'compose'], ['source', 'unlinked']])
+  const unavailableSignupCard = await request('/card', session); assert.equal(unavailableSignupCard.status, 200)
+  assert.match(await unavailableSignupCard.text(), /Seed Owner/)
   assert.equal(writes, 0, 'viewing/opening compose creates no message, conversation or cross-account link')
 })
 

@@ -937,7 +937,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         let legacy = null
         if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
         if (!profile.name && legacy) Object.assign(profile, legacy.profile)
-        const source = signupLookup ? await signupLookup.read(session.owner) : null
+        let source = null
+        // An optional signup source must not prevent a stored profile or card
+        // from rendering while that source is unavailable.
+        if (signupLookup) { try { source = await signupLookup.read(session.owner) } catch { source = null } }
         if (!profile.name && source) Object.assign(profile, source.profile)
         const hasStoredProfile = Boolean(profile.name)
         if (!profile.name) profile.name = session.displayName
