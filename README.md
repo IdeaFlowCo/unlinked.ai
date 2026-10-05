@@ -108,3 +108,8 @@ days even before sign-in. This records only opening the settings page, never a c
 request, account identity or the LinkedIn email’s arrival. Browser storage is
 best-effort localStorage; when storage is blocked, the checked state lasts only
 on the current page. The native outbound link works without JavaScript or storage.
+
+The current app version is the root `package.json` version, shown unobtrusively
+in the standalone runtime footer and the Next.js public shell footer. The
+MCP package has its own release version; keep its package/lockfile metadata and
+legacy stdio server version aligned when releasing that package.

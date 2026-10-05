@@ -14,7 +14,7 @@ import { z } from "zod";
 
 import { createApi, UnlinkedApiError, type UnlinkedApi, type UnlinkedConfig } from "./api.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 
 // ---- formatting helpers ----
 
