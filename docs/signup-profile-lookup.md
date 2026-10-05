@@ -146,8 +146,12 @@ profile.
 
 The browser `/profile` page and member card show the first available of: the
 uploaded profile, a live confirmed legacy profile, the active signup source, or
-the sign-in display name. The card's QR target must resolve in the published
-People snapshot. **Download everything** includes the confirmed source and its
+the sign-in display name. An unavailable optional signup source is skipped;
+it must not prevent an existing profile or card from rendering. Public card
+targets still require verification in the published People snapshot; a failed
+source read never supplies an unverified target. The HTTP regression in
+`tests/openchat-profile-action.test.mjs` covers this failure boundary.
+**Download everything** includes the confirmed source and its
 receipt, labeled as a self-asserted public profile. Account deletion erases the
 confirmed source and the stored lookup profile, invalidates unfinished lookups,
 and keeps only the hashed account key, attempt count and success flag. That
