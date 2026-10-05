@@ -1328,7 +1328,8 @@
           "503": {
             "description": "Published People unavailable"
           }
-        }
+        },
+        "description": "Experimental alternate transport restrictions and reader verification requirements are owned by docs/public-directory.md#alternate-public-transport in the repository."
       },
       "head": {
         "summary": "Probe public search status and HTML headers without a response body",
@@ -1360,8 +1361,19 @@
           "503": {
             "description": "Published People unavailable"
           }
+        },
+        "description": "Experimental alternate transport restrictions and reader verification requirements are owned by docs/public-directory.md#alternate-public-transport in the repository."
+      },
+      "servers": [
+        {
+          "url": "https://www.unlinked.ai",
+          "description": "Canonical standalone public search"
+        },
+        {
+          "url": "https://unlinked-ideaflowco.vercel.app",
+          "description": "Experimental anonymous relay for this path only; ordinary ChatGPT access is not established"
         }
-      }
+      ]
     }
   },
   "components": {

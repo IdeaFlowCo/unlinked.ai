@@ -131,4 +131,4 @@ Public People summaries expose detailLevel (basic or detailed), derived from vis
 
 ## Connector-free web search
 
-Connector-free public search and public HEAD behavior are owned by [docs/public-directory.md](docs/public-directory.md); renderer: `mcp-server/public-web-search.mjs`.
+Connector-free public search, public HEAD behavior and the experimental anonymous Vercel transport are owned by [docs/public-directory.md](docs/public-directory.md); renderer: `mcp-server/public-web-search.mjs`. Ordinary ChatGPT reader access requires separate evidence.

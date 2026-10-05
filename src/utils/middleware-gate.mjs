@@ -7,6 +7,8 @@ const backendIndependentPaths = new Set([
 ])
 
 const backendIndependentReadPaths = new Set([
+  '/search-public',
+  '/search-public/',
   '/network',
   '/network/',
   '/search',
