@@ -1,3 +1,4 @@
+import { validTimestamp, connectionDate } from '../network-order.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from './consent.mjs'
@@ -22,7 +23,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit' })
       const publication = await readImport(id, { signal })
       requireCombinedUploadConsent(publication.consent)
-      for (const row of publication.assertions) assertions.push(row)
+      for (const row of publication.assertions) assertions.push({ ...row, ...(publication.importedAt ? { importedAt: publication.importedAt } : {}), ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })
       indexed += publication.indexed ?? 0
       imports.push(id)
     }
@@ -47,7 +48,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       for (const value of await backend.readInviteConnections()) {
         if (assertions.length >= observationLimit) throw Error('account_observation_limit')
         assertions.push({ id: privateId(owner.ownerId, 'invite-connection', value.invitationId), ownerId: owner.ownerId, importId: networkId, sourceId: 'unlinked-invites', rowId: `invite:${value.invitationId}`, category: 'connections',
-          fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-invite', invitationId: value.invitationId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
+          ...(validTimestamp(value.connectedAt) ? { connectedAt: value.connectedAt } : {}), fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-invite', invitationId: value.invitationId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
       }
     }
     // Accepted connection requests ("Connect") connect two accounts the same way.
@@ -55,12 +56,12 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       for (const value of await backend.readMemberConnections()) {
         if (assertions.length >= observationLimit) throw Error('account_observation_limit')
         assertions.push({ id: privateId(owner.ownerId, 'member-connection', value.requestId), ownerId: owner.ownerId, importId: networkId, sourceId: 'unlinked-connections', rowId: `connection:${value.requestId}`, category: 'connections',
-          fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-connection', requestId: value.requestId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
+          ...(validTimestamp(value.connectedAt) ? { connectedAt: value.connectedAt } : {}), fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-connection', requestId: value.requestId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
       }
     }
     if(typeof backend.readLegacyObservations==='function'){
       const recovered=await backend.readLegacyObservations({signal,limit:observationLimit-assertions.length})
-      if(recovered){assertions.push(...recovered.assertions);indexed+=recovered.assertions.length}
+      if(recovered){assertions.push(...recovered.assertions.map(row => ({ ...row, ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })));indexed+=recovered.assertions.length}
     }
     return { legacyProfileId: legacy?.profileId, id: networkId, ownerId: owner.ownerId, imports, indexed, assertions, consent: COMBINED_UPLOAD_CONSENT }
   }

@@ -134,3 +134,7 @@ Public People summaries expose detailLevel (basic or detailed), derived from vis
 Connector-free public search, public HEAD behavior and the experimental anonymous Vercel transport are owned by [docs/public-directory.md](docs/public-directory.md); renderer: `mcp-server/public-web-search.mjs`. Ordinary ChatGPT reader access requires separate evidence.
 
 Profile **Message with OpenChat** context, explicit recipient choice and private-only fallback are documented in [docs/openchat-message.md](docs/openchat-message.md); link validator: `src/utils/openchat-profile-context.mjs`. Profile names/imported email never prove an OpenChat recipient.
+
+## People directory controls
+
+The standalone browser's progressive filtering, URL state, ordering and private date provenance are described in `docs/network-controls.md`. Browser ordering is not an agent API contract change; preserve existing agent defaults and keep owner relationship dates out of public profile projections.

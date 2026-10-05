@@ -31,7 +31,7 @@ test('the directory filters to members or shadows, binds the filter into the cur
 
 test('the filter control keeps the search and mode, marks the current choice, and explains an empty member list', () => {
   const content = renderPeople({ query: 'Ada & co', mode: 'exact', presence: 'member', everyone: [] }).content
-  assert.match(content, /<b aria-current="true">On Unlinked<\/b>/)
+  assert.match(content, /<a [^>]+aria-current="true">On Unlinked<\/a>/)
   assert.match(content, /<a href="\/network\?q=Ada%20%26%20co&amp;mode=exact">All<\/a>/)
   assert.match(content, /<a href="\/network\?q=Ada%20%26%20co&amp;mode=exact&amp;presence=shadow">Not yet on Unlinked<\/a>/)
   assert.match(content, /<h2>On Unlinked<\/h2>/); assert.match(content, /No one who joined matches that yet\. Most profiles here were imported/)
@@ -39,7 +39,7 @@ test('the filter control keeps the search and mode, marks the current choice, an
   const paged = renderPeople({ presence: 'shadow', everyone: [person('b', 'Bea Shadow')], nextCursor: 'next' }).content
   assert.match(paged, /href="\/network\?presence=shadow&amp;cursor=next">Show more/)
   const plain = renderPeople({ everyone: [person('a', 'Ada Member')] }).content
-  assert.match(plain, /<b aria-current="true">All<\/b>/); assert.match(plain, /<h2>Everyone on Unlinked<\/h2>/)
+  assert.match(plain, /<a [^>]+aria-current="true">All<\/a>/); assert.match(plain, /<h2>Everyone on Unlinked<\/h2>/)
   assert.doesNotMatch(renderPeople({ own: [] }).content, /aria-label="Who to show"/)
 })
 

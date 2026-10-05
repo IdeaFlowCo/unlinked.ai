@@ -202,8 +202,8 @@ export function createConnectionRequests({ store, notifications = null, now = Da
     async connections(member) {
       owner(member)
       return (await store.listAccepted(member)).map(record => same(senderOf(record), member)
-        ? { requestId: record.id, other: recipientOf(record), name: record.recipientName }
-        : { requestId: record.id, other: senderOf(record), name: record.senderName })
+        ? { requestId: record.id, connectedAt: record.respondedAt, other: recipientOf(record), name: record.recipientName }
+        : { requestId: record.id, connectedAt: record.respondedAt, other: senderOf(record), name: record.senderName })
     },
     // Every accepted request, for the shared public graph.
     async accepted() { return (await store.listAccepted(null)).map(record => ({ requestId: record.id, sender: senderOf(record), recipient: recipientOf(record) })) },
