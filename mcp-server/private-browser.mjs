@@ -961,6 +961,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // from rendering while that source is unavailable.
         if (signupLookup) { try { source = await signupLookup.read(session.owner) } catch { source = null } }
         if (!profile.name && source) Object.assign(profile, source.profile)
+        for (const key of ['linkedinUrl', 'website']) {
+          const value = legacy?.profile?.[key] || source?.profile?.[key]
+          if (!profile[key] && value) profile[key] = value
+        }
         const hasStoredProfile = Boolean(profile.name)
         if (!profile.name) profile.name = session.displayName
         // The QR target is the owner's already-public profile URL: the linked
@@ -1021,7 +1025,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const photo = mine ? profilePhotos?.urlFor(mine) : null
           if (photo) profile.photo = photo
           const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
-          for (const key of ['linkedinUrl', 'website', 'company', 'industry']) if (published?.profile?.[key]) profile[key] = published.profile[key]
+          for (const key of ['linkedinUrl', 'website', 'company', 'industry', 'location']) if (!profile[key] && published?.profile?.[key] && (key !== 'company' || !profile.positions?.length)) profile[key] = published.profile[key]
         }
         journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }

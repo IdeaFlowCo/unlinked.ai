@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+import { privateId } from '../src/utils/private-import/job.mjs'
 import { PUBLIC_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 
 const header = 'First Name,Last Name,URL,Company,Position\n'
@@ -39,6 +40,7 @@ function harness(t, overrides = {}) {
       resolveOwner: async () => owner, signup: async () => owner,
       getBackend: async value => { assert.deepEqual(value, owner); return backend },
       complete: async () => ({ matches: [] }),
+      ownProfileId: overrides.ownProfileId,
       issueAccountGrant: async () => ({ accessToken: 'synthetic' }), revokeAccountGrant: async () => {},
       readPublishedSnapshot: async () => { if (!snapshot.current) throw new Error('unavailable'); return snapshot.current },
       mcpEndpoint: `${baseUrl}/mcp` })
@@ -174,4 +176,47 @@ test('the search bar QR button opens a scan sheet: Scan for anyone, My card for 
   }
   // The card page's own scan link now leads to the scan sheet.
   assert.match(await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text(), /href="\/scan">Scan someone’s card/)
+})
+
+
+test('owner profiles retain upload facts before publication and use older addresses only as fallback', async t => {
+  let confirmed = null
+  const fixture = harness(t, { ownProfileId: async () => 'confirmed-person', backend: { readLegacyProfile: async () => confirmed } })
+  const signed = await fixture.start(), { owner, resources } = fixture
+  const id = 'a'.repeat(64), sourceId = 'b'.repeat(64), rowId = 'profile-row'
+  const assertionId = privateId(owner.ownerId, 'assertion', sourceId, rowId), chunkId = privateId(owner.ownerId, 'index-chunk', id, 0)
+  const fields = { 'first name': 'Uploaded', 'last name': 'Person', headline: 'New headline', location: 'Boston', industry: 'New research',
+    'public profile url': 'https://www.linkedin.com/in/new-upload', email: 'PRIVATE_EMAIL', phone: 'PRIVATE_PHONE', website: 'https://private-card.example.test' }
+  resources.set(assertionId, { type: 'assertion', sourceId: assertionId, sourceOwnerId: owner.ownerId, payload: {
+    id: assertionId, ownerId: owner.ownerId, importId: id, sourceId, rowId, category: 'profile', fields } })
+  resources.set(chunkId, { type: 'import', sourceId: chunkId, sourceOwnerId: owner.ownerId, payload: {
+    kind: 'private_observation_chunk', ownerId: owner.ownerId, importId: id, ordinal: 0, indexedCount: 1, assertionIds: [assertionId], profileAssertionIds: [assertionId] } })
+  resources.set(id, { type: 'import', sourceId: id, sourceOwnerId: owner.ownerId, sourceRevision: 1, payload: {
+    id, ownerId: owner.ownerId, filename: 'Archive.zip', archiveSha256: 'e'.repeat(64), createdAt: 100, backgroundVersion: 'profile-first-v1', status: 'indexing',
+    progress: { profileReady: true }, stagedChunks: [chunkId], profileChunkCount: 1, counts: { accepted: 10, indexed: 1 }, consent: { ...PUBLIC_UPLOAD_CONSENT } } })
+  const page = async () => {
+    const response = await fetch(`${signed.endpoint}/profile`, { headers: { Cookie: signed.cookie } })
+    assert.equal(response.status, 200)
+    return response.text()
+  }
+  let html = await page()
+  assert.match(html, /Boston/); assert.match(html, /New research/); assert.match(html, /href="https:\/\/www.linkedin.com\/in\/new-upload"/)
+  assert.doesNotMatch(html, /PRIVATE_EMAIL|PRIVATE_PHONE|private-card.example.test/)
+  fixture.snapshot.current = { state: 'published', complete: true, revision: 'older-public-profile', profiles: [{ id: 'confirmed-person', name: 'Older Person',
+    headline: 'Old headline', location: 'Old city', industry: 'Old industry', linkedinUrl: 'https://www.linkedin.com/in/older-person', positions: [], education: [], skills: [] }], connections: [] }
+  html = await page()
+  assert.match(html, /Boston/); assert.match(html, /New research/); assert.match(html, /new-upload/)
+  assert.doesNotMatch(html, /Old city|Old industry|older-person/)
+  delete fields['public profile url']
+  html = await page()
+  assert.match(html, /href="https:\/\/www.linkedin.com\/in\/older-person"/); assert.match(html, /Boston/)
+  confirmed = { profile: { name: 'Confirmed Person', linkedinUrl: 'https://www.linkedin.com/in/confirmed-person', location: 'Confirmed city' } }
+  fixture.snapshot.current = null
+  html = await page()
+  assert.match(html, /href="https:\/\/www.linkedin.com\/in\/confirmed-person"/); assert.match(html, /Boston/)
+  assert.doesNotMatch(html, /Confirmed city/)
+  resources.get(assertionId).sourceOwnerId = 'different-owner'
+  const rejected = await fetch(`${signed.endpoint}/profile`, { headers: { Cookie: signed.cookie } })
+  assert.equal(rejected.status, 400)
+  assert.doesNotMatch(await rejected.text(), /Boston|New research|PRIVATE_EMAIL|PRIVATE_PHONE/)
 })

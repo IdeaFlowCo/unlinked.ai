@@ -62,7 +62,14 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     if (enrichment) {
       if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(ENRICHMENT_DATASET + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length) throw Error('public_enrichment_invalid')
       const positions = new Map(profiles.map((value, index) => [value.id, index]))
-      for (const row of enrichment.profiles) { const index = positions.get(row.id); if (index !== undefined) profiles[index] = { ...profiles[index], ...row } }
+      for (const row of enrichment.profiles) {
+        const index = positions.get(row.id)
+        if (index !== undefined) {
+          const supplemental = {}
+          for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profiles[index][key]) supplemental[key] = profiles[index][key]
+          profiles[index] = { ...row, ...supplemental }
+        }
+      }
       revisions.push(enrichment.revision)
     }
     const signupSources = typeof readSignupProfiles === 'function' ? await readSignupProfiles() : []

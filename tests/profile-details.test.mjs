@@ -82,3 +82,20 @@ test('identity merges preserve a retained LinkedIn address', async () => {
   const merged=applyProfileDecisions({...legacy,profiles:[person,{...linked,id:'imported'}]},[{id:'merge',kind:'merge',profileId:'imported',survivorId:'legacy'}])
   assert.equal(merged.profiles[0].linkedinUrl,linked.linkedinUrl)
 })
+
+
+test('operator replacement clears stale content and retains only supplemental professional fields', async () => {
+  const original = { ...person, headline: 'Obsolete headline', about: 'Obsolete biography', location: 'Old location', company: 'Old company',
+    positions: [{ title: 'Old role', company: 'Old company' }], education: [{ institution: 'Old school' }], skills: ['Old skill'],
+    linkedinUrl: 'https://www.linkedin.com/in/test-person', website: 'https://example.test', industry: 'Research' }
+  let replacement = { ...person, name: 'Updated Person' }
+  const read = createMemberPublicIndex({ includeDetails: true, discover: async () => [], readLegacy: async () => ({ ...legacy, profiles: [original] }),
+    publicPeople: { read: async () => ({ state: 'published', complete: true, revision: 'curated-enrichment-v1:replacement', profiles: [replacement], connections: [] }) } })
+  const result = (await read()).profiles[0]
+  assert.deepEqual(result, { ...replacement, linkedinUrl: original.linkedinUrl, website: original.website, industry: original.industry })
+  assert.equal(result.headline, undefined); assert.equal(result.about, undefined); assert.equal(result.location, undefined); assert.equal(result.company, undefined)
+  assert.deepEqual(result.positions, []); assert.deepEqual(result.education, []); assert.deepEqual(result.skills, [])
+  replacement = { ...replacement, linkedinUrl: 'https://www.linkedin.com/in/new-person', website: 'https://new.example.test', industry: 'New industry' }
+  assert.deepEqual((await read()).profiles[0], replacement)
+  assert.equal(original.headline, 'Obsolete headline')
+})
