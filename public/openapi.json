@@ -815,7 +815,7 @@
         },
         "responses": {
           "200": {
-            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } \u2014 token only in this response body, never logged"
+            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } — token only in this response body, never logged"
           },
           "400": {
             "description": "invalid_input"
@@ -833,7 +833,7 @@
             "description": "rate_limited (per-client budget; Retry-After)"
           },
           "503": {
-            "description": "upstream_unavailable (including an unavailable audit sink \u2014 provisioning fails closed rather than going unaudited)"
+            "description": "upstream_unavailable (including an unavailable audit sink — provisioning fails closed rather than going unaudited)"
           }
         }
       }
@@ -1374,6 +1374,48 @@
           "description": "Experimental anonymous relay for this path only; ordinary ChatGPT access is not established"
         }
       ]
+    },
+    "/api/messaging/v1/recipient": {
+      "post": {
+        "summary": "Confidential OpenChat recipient resolver",
+        "description": "Dedicated service credential only; not an account grant or browser API. Resolves published ownership using the active Ideaflow binding. No message is sent.",
+        "security": [
+          {
+            "messagingService": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "profileId"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "profileId": {
+                    "type": "string",
+                    "maxLength": 160
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member identity (server only), unclaimed, or unavailable."
+          },
+          "401": {
+            "description": "Service credential required."
+          },
+          "503": {
+            "description": "Messaging unavailable; retry."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1400,12 +1442,17 @@
             "authorizationUrl": "https://www.unlinked.ai/oauth/authorize",
             "tokenUrl": "https://www.unlinked.ai/oauth/token",
             "scopes": {
-              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile\u2019s recorded paths, and (where available) your connection requests and notifications.",
+              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile’s recorded paths, and (where available) your connection requests and notifications.",
               "people": "Search and read the published People index on Unlinked (public professional profiles only).",
               "connections": "Send connection requests to members, and accept, ignore or withdraw your connection requests, under the same rules and daily limits as the site."
             }
           }
         }
+      },
+      "messagingService": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Dedicated OpenChat server credential; never a browser or MCP credential."
       }
     }
   }

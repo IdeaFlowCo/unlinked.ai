@@ -13,7 +13,7 @@ const list = value => Array.isArray(value) ? value : []
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString('en-US') : '—'
 const csrfInput = csrf => `<input type="hidden" name="csrf" value="${html(csrf)}">`
 const openChatAction = profileUrl => `<a class="button sec sm" href="${html(openChatProfileMessageUrl(profileUrl))}" target="_blank" rel="noopener noreferrer">Message with OpenChat ↗</a>`
-const openChatNote = profileUrl => `<p class="small openchat-note">${profileUrl ? 'Choose a recipient in OpenChat; this profile is context, not a linked OpenChat account.' : 'Choose a recipient in OpenChat. Your private profile details stay here.'}</p>`
+const openChatNote = profileUrl => `<p class="small openchat-note">${profileUrl ? 'Message this person using your shared Ideaflow account.' : 'Start a conversation with your shared Ideaflow account.'}</p>`
 const LINKEDIN_EXPORT = 'https://www.linkedin.com/mypreferences/d/download-my-data'
 const exportHelp = () => `<div class="export-help"><p class="small"><a data-linkedin-export href="${LINKEDIN_EXPORT}" target="_blank" rel="noopener noreferrer">Don't have your LinkedIn export yet? Request it now ↗</a></p><p class="small">The complete archive (recommended) is usually ready in about a day; Connections can take up to 48 hours. Sign up while you wait. Download your file within 3 days of LinkedIn’s email, then upload it here.</p></div>`
 // Browser-only progress: opening LinkedIn is remembered, never asserted as a

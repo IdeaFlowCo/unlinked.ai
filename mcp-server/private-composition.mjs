@@ -1,3 +1,4 @@
+import { createMessagingResolver } from './messaging.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
@@ -401,6 +402,18 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),
       readPublishedSnapshot,
+      messagingSecret: process.env.UNLINKED_MESSAGING_SECRET || undefined,
+      resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner: async owner => {
+        const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+        try {
+          const result = await session.executeRead(tx => tx.run(`MATCH (b:OperationalOwner {namespace:'unlinked',sourceOwnerId:$ownerId,userId:$userId})
+            WHERE coalesce(b.active,true)=true
+            MATCH (i:OperationalIdentity {namespace:'unlinked',sourceOwnerId:$ownerId,userId:$userId})
+            WHERE i.issuer=b.identityIssuer AND i.subject=b.identitySubject
+            RETURN i.issuer AS issuer,i.subject AS subject LIMIT 2`, owner))
+          return result.records.length === 1 ? { issuer:result.records[0].get('issuer'), subject:result.records[0].get('subject') } : null
+        } finally { await session.close() }
+      } }),
       // Operator-published photos (publish-profile-photos.mjs), read-only here.
       // No member hide-photo choice exists yet; when it does, pass it as
       // `hidden` so it outranks the operator set (docs/profile-photos.md).

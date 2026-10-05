@@ -151,7 +151,10 @@ test('typed failures hide adapter contents and allow only two retries, with no s
   assert.equal(new ProfileLookupError('other').code, 'unavailable')
 })
 
-test('the lookup deadline holds even when an adapter ignores its abort signal', async () => {
+test('the lookup deadline holds even when an adapter ignores its abort signal', async t => {
+  // The production HTTP server keeps the loop alive; AbortSignal.timeout does not.
+  const serverLifetime = setInterval(() => {}, 1000)
+  t.after(() => clearInterval(serverLifetime))
   let seen
   const f = fixture({ settings: profileLookupSettings({ ...env, UNLINKED_PROFILE_LOOKUP_TIMEOUT_MS: '1000' }), lookupImpl: (slug, { signal }) => { seen = signal; return new Promise(() => {}) } })
   const started = Date.now(), result = await f.lookup()
