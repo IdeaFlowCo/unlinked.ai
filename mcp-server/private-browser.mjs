@@ -1,3 +1,4 @@
+import { unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
@@ -930,37 +931,6 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         render(response, 'Import your LinkedIn archive', `${signup ? accountNav : ''}<p>Complete archive preferred. Connections-only ZIP or CSV also works. Re-uploading the same named archive returns its durable receipt.</p><form method="post" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>LinkedIn export ZIP or CSV <input required type="file" name="archive" accept=".zip,.csv"></label><small>Maximum 64 MiB and 100,000 parser records. Larger imports fail explicitly and do not publish observations.</small><p>By importing, your profile and connections join your Unlinked network, searchable by you and by any agent you connect. Contact details stay private.</p>${dataMode === 'synthetic' ? '<label><input required type="checkbox" name="syntheticConsent" value="yes"> This file contains synthetic test data only.</label>' : ''}<button>Import archive</button></form>${signup ? `<h2>Your imports</h2>${jobs.filter(job => job && !job.deleted && job.sourceOwnerId === session.owner.ownerId).map(job => `<article><a href="/imports/${html(job.sourceId)}">${html(job.payload.filename)}</a><p>${html(job.payload.counts?.indexed ?? 0)} observations indexed</p></article>`).join('') || '<p>Your first upload will appear here.</p>'}` : ''}`)
         return
       }
-      if (signup && request.method === 'GET' && url.pathname === '/profile') {
-        const jobs = await jobResources(), props = jobProps(jobs)
-        if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
-        const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs: profileJobs(jobs), backend }))
-        if (!profile.name && typeof backend.readLegacyProfile === 'function') {
-          const legacy = await backend.readLegacyProfile()
-          if (legacy) Object.assign(profile, legacy.profile)
-        }
-        if (!profile.name && signupLookup) { const source = await signupLookup.read(session.owner); if (source) Object.assign(profile, source.profile) }
-        session.headline = profile.headline
-        const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
-        let testClaim = null
-        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await backend.readTestProfileClaim() } catch { testClaim = null } }
-        if (!profile.name) profile.name = session.displayName
-        let contacts = [], connectionCount
-        // Start reading the public index now; the contact lookup below joins it.
-        const warming = typeof readPublishedSnapshot === 'function' ? publicReader.lookup({ ids: [] }).catch(() => null) : null
-        try {
-          const connections = (await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()).assertions.filter(row => row.category === 'connections')
-          connectionCount = connections.length
-          contacts = await contactRows(connections.slice(0, 10))
-        } catch { /* The profile stands on its own while the network is still being read. */ }
-        await warming
-        // The photo published for this member's public profile, when there is one.
-        if (profilePhotos && typeof ownProfileId === 'function') {
-          const mine = await ownProfileId(session.owner).catch(() => null)
-          const photo = mine ? profilePhotos.urlFor(mine) : null
-          if (photo) profile.photo = photo
-        }
-        journey(response, renderOwnProfile({ ...props, profile, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
-      }
       // The member's own card identity and the public profile URL its QR opens.
       const readOwnCard = async jobs => {
         const profile = profileFromRows(await readOwnerProfileRows({ ownerId: session.owner.ownerId, jobs: profileJobs(jobs), backend }))
@@ -1001,7 +971,34 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
           }
         }
         session.headline = profile.headline
-        return { profile, cardUrl, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
+        return { profile, cardUrl, publicProfileUrl: cardUrl ? unlinkedProfileContext(decodeURIComponent(new URL(cardUrl).pathname.slice('/people/'.length))) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
+      }
+      if (signup && request.method === 'GET' && url.pathname === '/profile') {
+        const jobs = await jobResources(), props = jobProps(jobs)
+        if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
+        // Reuse the card's snapshot-verified public context; private rows and
+        // imported contact details never establish a cross-product recipient.
+        const { profile, publicProfileUrl } = await readOwnCard(jobs)
+        const offerLookup = Boolean(selfClaims && session.selfClaim && !profile.name)
+        let testClaim = null
+        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await backend.readTestProfileClaim() } catch { testClaim = null } }
+        if (!profile.name) profile.name = session.displayName
+        let contacts = [], connectionCount
+        // Start reading the public index now; the contact lookup below joins it.
+        const warming = typeof readPublishedSnapshot === 'function' ? publicReader.lookup({ ids: [] }).catch(() => null) : null
+        try {
+          const connections = (await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()).assertions.filter(row => row.category === 'connections')
+          connectionCount = connections.length
+          contacts = await contactRows(connections.slice(0, 10))
+        } catch { /* The profile stands on its own while the network is still being read. */ }
+        await warming
+        // The photo published for this member's public profile, when there is one.
+        if (profilePhotos && typeof ownProfileId === 'function') {
+          const mine = await ownProfileId(session.owner).catch(() => null)
+          const photo = mine ? profilePhotos.urlFor(mine) : null
+          if (photo) profile.photo = photo
+        }
+        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
       // The contact version of the card, for its owner: the details, their show
       // switches, and the link and QR once something is shown.

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { PublicPerson, PublicProfile } from './contract'
 import styles from './Directory.module.css'
+import { unlinkedProfileContext, openChatProfileMessageUrl } from '../../utils/openchat-profile-context.mjs'
 
 export function PeopleList({ people }: { people: PublicPerson[] }) {
   return <ul className={styles.people}>{people.map(person => <li key={person.id}><Link href={`/people/${encodeURIComponent(person.id)}`}><span className={styles.avatar} aria-hidden="true">{person.name.split(/\s+/).slice(0, 2).map(word => word[0]).join('')}</span><div><h3>{person.name}</h3>{person.headline && <p>{person.headline}</p>}{person.location && <small>{person.location}</small>}</div><span aria-hidden="true">→</span></Link></li>)}</ul>
@@ -12,7 +13,7 @@ export function DirectoryNotice({ kind }: { kind: 'unavailable' | 'empty' | 'not
 export function ProfileBody({ profile }: { profile: PublicProfile }) {
   const date = (start?: string, end?: string) => [start, end].filter(Boolean).join(' – ')
   return <div className={styles.profileGrid}><div>
-    <section className={styles.profileHeader}><span className={styles.avatar} aria-hidden="true">{profile.name[0]}</span><p className={styles.eyebrow}>Public profile</p><h1>{profile.name}</h1>{profile.headline && <p className={styles.lead}>{profile.headline}</p>}{profile.location && <p>{profile.location}</p>}</section>
+    <section className={styles.profileHeader}><span className={styles.avatar} aria-hidden="true">{profile.name[0]}</span><p className={styles.eyebrow}>Public profile</p><h1>{profile.name}</h1>{profile.headline && <p className={styles.lead}>{profile.headline}</p>}{profile.location && <p>{profile.location}</p>}<a className={styles.button} href={openChatProfileMessageUrl(unlinkedProfileContext(profile.id))} target="_blank" rel="noopener noreferrer">Message with OpenChat ↗</a><p>Choose a recipient in OpenChat; this profile is context, not a linked OpenChat account.</p></section>
     {profile.about && <section className={styles.section}><h2>About</h2><p>{profile.about}</p></section>}
     <section className={styles.section}><h2>Experience</h2>{profile.positions.length ? profile.positions.map((position, index) => <article key={index}><h3>{position.title}</h3><p>{position.company}</p>{date(position.startDate, position.endDate) && <small>{date(position.startDate, position.endDate)}</small>}{position.description && <p>{position.description}</p>}</article>) : <p>No experience has been shared on this profile.</p>}</section>
     <section className={styles.section}><h2>Education</h2>{profile.education.length ? profile.education.map((education, index) => <article key={index}><h3>{education.institution}</h3>{education.degree && <p>{education.degree}</p>}{date(education.startDate, education.endDate) && <small>{date(education.startDate, education.endDate)}</small>}</article>) : <p>No education has been shared on this profile.</p>}</section>

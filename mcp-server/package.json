@@ -1,6 +1,6 @@
 {
   "name": "@unlinked/mcp-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Model Context Protocol server for unlinked.ai \u2014 lets Claude / Cursor / any MCP client search your network, look up profiles, draft intros, and list your LinkedIn imports via the unlinked.ai agent API.",
   "type": "module",
   "private": true,
