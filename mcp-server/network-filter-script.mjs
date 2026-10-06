@@ -13,7 +13,7 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
   const focusables='a,button,input:not([type="hidden"]),select,textarea,summary,[tabindex],[contenteditable="true"]';
   const focusKey=element=>{if(element.id)return JSON.stringify(['id',element.id]);const section=element.closest('section[aria-label]');const form=element.closest('form'),row=element.closest('article'),person=row?.querySelector('a[href^="/people/"]');return JSON.stringify([section?.getAttribute('class')||section?.getAttribute('aria-label'),row?.getAttribute('data-network-row'),element.tagName,form?.getAttribute('action'),form?.querySelector('input[name="profileId"],input[name="id"]')?.value,person?.getAttribute('href'),element.name,element.type,element.tagName==='BUTTON'?element.value:null,['A','BUTTON','SUMMARY'].includes(element.tagName)?element.textContent.trim():null])};
   const busy=value=>root.querySelector('[data-network-results]')?.setAttribute('aria-busy',String(value));
-  async function load(url,{historyMode='push'}={}){
+  async function load(url,{historyMode='push',typing=false}={}){
     cancel();pendingURL=new URL(url);syncControls();const current=version;controller=new AbortController();busy(true);
     try{
       const response=await fetch(url,{credentials:'same-origin',signal:controller.signal,headers:{'Accept':'text/html'}});
@@ -25,7 +25,7 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
       const oldInput=root.querySelector('#network-query');const start=oldInput.selectionStart,end=oldInput.selectionEnd;
       if(active===oldInput){oldInput.value=next.querySelector('#network-query').value;next.querySelector('#network-query').replaceWith(oldInput);}
       root.replaceWith(next);root=next;renderedURL=new URL(url);ready();
-      if(historyMode==='push')history.pushState(null,'',url);else if(historyMode==='replace')history.replaceState(null,'',url);
+      if(historyMode==='push'){history.pushState(null,'',url);if(typing)typingEntry=true}else if(historyMode==='replace')history.replaceState(null,'',url);
       document.title=doc.title;
       for(const details of root.querySelectorAll('details')){const summary=details.querySelector('summary');if(summary&&openDisclosures.includes(focusKey(summary)))details.open=true}
       if(focused){const target=[...root.querySelectorAll(focusables)].find(element=>focusKey(element)===focused);target?.focus({preventScroll:true});if(target===oldInput)try{target.setSelectionRange(start,end)}catch{}}
@@ -40,7 +40,7 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
   document.addEventListener('input',event=>{
     if(!enhanced||event.target.id!=='network-query'||!root.contains(event.target))return;
     cancel();busy(true);if(composing)return;
-    timer=setTimeout(()=>{const mode=typingEntry?'replace':'push';typingEntry=true;load(formURL(),{historyMode:mode})},300);
+    timer=setTimeout(()=>{const mode=typingEntry?'replace':'push';load(formURL(),{historyMode:mode,typing:true})},300);
   });
   document.addEventListener('compositionstart',event=>{if(event.target.id==='network-query'){composing=true;cancel()}});
   document.addEventListener('compositionend',event=>{if(event.target.id==='network-query'){composing=false;event.target.dispatchEvent(new Event('input',{bubbles:true}))}});

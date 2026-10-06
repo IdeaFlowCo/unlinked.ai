@@ -5,6 +5,14 @@ import { NETWORK_FILTER_SCRIPT } from '../mcp-server/network-filter-script.mjs'
 
 function browser(initial='https://unlinked.invalid/network') {
   const listeners = new Map(), pending = [], location = { origin: 'https://unlinked.invalid', href: initial }
+  const historyEntries = ['https://unlinked.invalid/before-directory', initial]
+  let historyIndex = 1
+  const history = {
+    pushState(_, __, url) { historyEntries.splice(historyIndex + 1); historyEntries.push(String(url)); historyIndex++; location.href = String(url) },
+    replaceState(_, __, url) { historyEntries[historyIndex] = String(url); location.href = String(url) },
+    back() { if (historyIndex > 0) { location.href = historyEntries[--historyIndex]; listeners.get('popstate')() } },
+    forward() { if (historyIndex + 1 < historyEntries.length) { location.href = historyEntries[++historyIndex]; listeners.get('popstate')() } },
+  }
   const document = {
     activeElement: null,
     createElement: tag => ({ tagName: tag.toUpperCase(), value: '' }),
@@ -80,9 +88,9 @@ function browser(initial='https://unlinked.invalid/network') {
   runInNewContext(NETWORK_FILTER_SCRIPT, {
     document, URL, URLSearchParams, AbortController,
     FormData: class { constructor() { return [['q', current.querySelector('#network-query').value], ['sort', current.querySelector('#network-sort').value], ...[...current.querySelector('#network-filters').fields.values()].map(field => [field.name, field.value])] } },
-    fetch: url => new Promise((resolve, reject) => pending.push({ resolve, reject, url: new URL(url) })),
+    fetch: (url, options) => new Promise((resolve, reject) => pending.push({ resolve, reject, signal: options.signal, url: new URL(url) })),
     DOMParser: class { parseFromString() { const next = makeRoot(pending.at(-1).url); return { title: 'People', querySelector: () => next } } },
-    history: { pushState(_, __, url) { location.href = String(url) }, replaceState(_, __, url) { location.href = String(url) } },
+    history,
     location,
     addEventListener: (name, callback) => listeners.set(name, callback),
     clearTimeout, setTimeout,
@@ -92,7 +100,7 @@ function browser(initial='https://unlinked.invalid/network') {
     listeners.get(type)(event)
     return event
   }
-  return { document, pending, dispatch, location, root: () => current }
+  return { document, pending, dispatch, location, history, historyEntries, root: () => current }
 }
 
 const flush = () => new Promise(resolve => setImmediate(resolve))
@@ -370,4 +378,75 @@ test('duplicate imported rows restore only the second open disclosure and confir
   assert.equal(b.root().querySelector('#remove-ada').disclosure.open, false)
   assert.equal(b.root().querySelector('#remove-ada-second-import').disclosure.open, true)
   assert.equal(b.document.activeElement, b.root().querySelector('#remove-ada-second-import'))
+})
+
+const typeQuery = async (b, query) => {
+  const input = b.root().querySelector('#network-query')
+  input.value = query
+  b.dispatch('input', input)
+  await new Promise(resolve => setTimeout(resolve, 350))
+}
+const finishLatest = async b => {
+  b.pending.at(-1).resolve({ ok: true, redirected: false, text: async () => '<page>' })
+  await flush()
+}
+
+test('cancelled first typing fetch preserves the original history entry and Back target', async () => {
+  const initial = 'https://unlinked.invalid/network?presence=member'
+  const b = browser(initial)
+  await typeQuery(b, 'Ada')
+  assert.equal(b.historyEntries.length, 2)
+  const first = b.pending[0]
+  await typeQuery(b, 'Grace')
+  assert.equal(first.signal.aborted, true)
+  await finishLatest(b)
+  assert.equal(b.historyEntries.length, 3)
+  assert.equal(b.historyEntries[1], initial)
+  assert.equal(new URL(b.historyEntries[2]).searchParams.get('q'), 'Grace')
+  first.resolve({ ok: true, redirected: false, text: async () => '<stale>' })
+  await flush()
+  await typeQuery(b, 'Grace Hopper')
+  await finishLatest(b)
+  assert.equal(b.historyEntries.length, 3)
+  assert.equal(new URL(b.historyEntries[2]).searchParams.get('q'), 'Grace Hopper')
+  b.history.back()
+  assert.equal(b.location.href, initial)
+  await finishLatest(b)
+  assert.equal(b.root().querySelector('#network-query').value, '')
+  assert.equal(b.pending.at(-1).url.searchParams.get('presence'), 'member')
+  b.history.forward()
+  await finishLatest(b)
+  assert.equal(b.root().querySelector('#network-query').value, 'Grace Hopper')
+})
+
+for (const boundary of ['link', 'sort', 'submit', 'popstate']) {
+  test(`typing starts a new history entry after ${boundary}`, async () => {
+    const b = browser()
+    await typeQuery(b, 'Ada')
+    await finishLatest(b)
+    if (boundary === 'link') b.dispatch('click', b.root().querySelector('#member'))
+    else if (boundary === 'sort') {
+      b.root().querySelector('#network-sort').value = 'name'
+      b.dispatch('change', b.root().querySelector('#network-sort'))
+    } else if (boundary === 'submit') b.dispatch('submit', b.root().querySelector('#network-filters'))
+    else b.history.back()
+    await finishLatest(b)
+    const previous = b.location.href
+    await typeQuery(b, 'Grace')
+    await finishLatest(b)
+    assert.equal(new URL(b.location.href).searchParams.get('q'), 'Grace')
+    b.history.back()
+    assert.equal(b.location.href, previous)
+    await finishLatest(b)
+  })
+}
+
+test('failed first typing fetch leaves committed history unchanged', async () => {
+  const b = browser('https://unlinked.invalid/network?presence=member')
+  const original = [...b.historyEntries]
+  await typeQuery(b, 'Ada')
+  b.pending[0].reject(Error('offline'))
+  await flush()
+  assert.deepEqual(b.historyEntries, original)
+  assert.equal(b.location.href, original.at(-1))
 })
