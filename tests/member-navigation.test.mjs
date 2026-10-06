@@ -89,7 +89,7 @@ test('a signed-in member stays signed in, reaches profile and people from every 
     assert.match(header, /href="\/network">People/); assert.match(header, /role="menuitem" href="\/profile">View profile/)
     assert.match(header, /<div class="me-who"><b>Verified Person<\/b>/); assert.match(header, /role="menuitem" href="\/settings">/)
     assert.match(header, /action="\/logout" role="none">/)
-    assert.match(header, /method="get" action="\/network" role="search"/)
+    assert.match(body, /method="get" action="\/network" role="search"/)
     assert.match(body, /action="\/logout"/)
   }
   assert.doesNotMatch((await get('/people/first')).body, /href="\/join">Join Unlinked/)

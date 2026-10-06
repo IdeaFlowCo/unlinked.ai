@@ -106,8 +106,8 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = null, o
     async connections(member) {
       owner(member)
       return (await store.listAccepted(member)).map(record => record.inviterOwnerId === member.ownerId && record.inviterUserId === member.userId
-        ? { invitationId: record.id, other: { ownerId: record.responderOwnerId, userId: record.responderUserId }, name: record.responderName ?? record.inviteeName }
-        : { invitationId: record.id, other: { ownerId: record.inviterOwnerId, userId: record.inviterUserId }, name: record.inviterName })
+        ? { invitationId: record.id, connectedAt: record.respondedAt, other: { ownerId: record.responderOwnerId, userId: record.responderUserId }, name: record.responderName ?? record.inviteeName }
+        : { invitationId: record.id, connectedAt: record.respondedAt, other: { ownerId: record.inviterOwnerId, userId: record.inviterUserId }, name: record.inviterName })
     },
     // Every accepted invitation, for the shared public graph.
     async accepted() { return (await store.listAccepted(null)).map(record => ({ invitationId: record.id, inviter: { ownerId: record.inviterOwnerId, userId: record.inviterUserId }, invitee: { ownerId: record.responderOwnerId, userId: record.responderUserId } })) },

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { PUBLIC_NETWORK_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 
@@ -197,19 +198,19 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   }
   return {
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence } = requestValue(request)
-      if (!SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
+      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false } = requestValue(request)
+      if (!PUBLIC_NETWORK_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
       // The presence filter is part of the cursor scope, so a page never mixes filters.
-      const filter = presence ? `${presence}:` : ''
+      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}`
       const scope = matcher ? `list:${filter}${mode}:${normalizedQuery}` : `list:${filter}`
       const decodedCursor = cursorValue(cursor, scope), data = await snapshot(signal)
       // A snapshot that does not name its members has no presence, so it matches no filter.
       const people = presence ? data.ordered.filter(person => person.presence === presence) : data.ordered
-      if (!matcher) return { ...page(people, decodedCursor, scope, data.revision), ...(presence ? { total: people.length } : {}) }
+      if (!matcher) return { ...page(orderNetwork(people, sort), decodedCursor, scope, data.revision), ...(presence || includeTotal ? { total: people.length } : {}) }
       // `match` says whether the rows have every word ('all') or only some of them.
       const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id))
-      return { ...page(ranked.rows, decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
+      return { ...page(orderNetwork(ranked.rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
     },
     async profile(request = {}) {
       const { id, cursor, signal, query = '', sort = 'name' } = requestValue(request)

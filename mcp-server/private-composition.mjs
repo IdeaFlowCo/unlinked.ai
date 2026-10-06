@@ -1,3 +1,4 @@
+import { validTimestamp } from '../src/utils/network-order.mjs'
 import { createMessagingResolver, createMessagingSession } from './messaging.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
@@ -27,6 +28,16 @@ import { CLIENT_ID_PATTERN } from './account-api.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
 import { createArchiveWorker } from '../src/utils/private-import/background-job.mjs'
+
+export function earliestConnectionDates(invitations, requests) {
+  const key = value => JSON.stringify([value.other.ownerId, value.other.userId])
+  const dates = new Map()
+  for (const value of [...invitations, ...requests]) {
+    const at = validTimestamp(value.connectedAt)
+    if (at) dates.set(key(value), Math.min(at, dates.get(key(value)) ?? at))
+  }
+  return invitations.map(value => dates.has(key(value)) ? { ...value, connectedAt: dates.get(key(value)) } : value)
+}
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -260,7 +271,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // People this account is connected to through accepted invites.
       const readInviteConnections = memberInvitations ? async () => {
         const resolve = publicProfileResolver(), rows = []
-        for (const value of await memberInvitations.connections(owner)) rows.push({ ...value, publicProfileId: await resolve(value.other) })
+        const invited = earliestConnectionDates(await memberInvitations.connections(owner), memberConnections ? await memberConnections.connections(owner) : [])
+        for (const value of invited) rows.push({ ...value, publicProfileId: await resolve(value.other) })
         return rows
       } : undefined
       // People this account is connected to through accepted connection
