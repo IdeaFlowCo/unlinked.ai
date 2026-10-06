@@ -76,6 +76,17 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   assert.equal((await go('/network?connected=1&sort=bogus', cookie)).status, 400)
   const anonymous = await (await go('/api/people/p119')).json()
   assert.equal(anonymous.profile.connectedAt, undefined); assert.equal(anonymous.profile.importedAt, undefined)
+  // A full match excluded by membership must not suppress eligible partial matches.
+  const shadowId = '5'.repeat(64)
+  resources.get(importId).payload.assertionIds.push(shadowId)
+  Object.assign(resources.get(importId).payload.counts, { accepted: 2, indexed: 2 })
+  resources.set(shadowId, { sourceOwnerId: owner.ownerId, deleted: false, payload: { id: shadowId, ownerId: owner.ownerId, importId, category: 'connections', fields: { 'first name': 'Person', 'last name': 'Engineer', position: 'engineer' } } })
+  const partial = await (await go('/network?presence=member&q=Person%20engineer', cookie)).text()
+  const ownSection = partial.match(/<section[^>]*aria-label="People you know"[^>]*>([\s\S]*?)<\/section>/)?.[1]
+  assert.ok(ownSection, partial.replace(/<style>[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/g, ''))
+  assert.match(ownSection, /href="\/people\/p119"/)
+  assert.doesNotMatch(ownSection, /Person Engineer/)
+
 })
 
 test('an imported connection retains original connected-on separately from the batch creation date', async () => {
