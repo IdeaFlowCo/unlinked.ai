@@ -463,7 +463,7 @@ export function renderPeople({ accountLabel, displayName, csrf, query = '', mode
     const at = sort === 'connected' ? value.connectedAt : sort === 'imported' ? value.importedAt : undefined
     const date = Number.isSafeInteger(at) && at > 0 && at <= 8640000000000000 ? new Date(at).toISOString().slice(0, 10) : null
     const dateLabel = ['connected', 'imported'].includes(sort) ? `<p class="small network-date">${sort === 'connected' ? 'Connected' : 'Imported'} ${date ? `<time datetime="${date}">${date}</time>` : 'date unknown'}</p>` : ''
-    return render(value).replace('</div></article>', `${dateLabel}${controls(value)}</div></article>`)
+    return render(value).replace('<article ', `<article ${typeof value.sourceRowId === 'string' ? `data-network-row="${html(value.sourceRowId)}" ` : ''}`).replace('</div></article>', `${dateLabel}${controls(value)}</div></article>`)
   }
   const filters = [kept ? `presence=${kept}` : '', connectedView ? 'connected=1' : '', sort !== 'best' ? `sort=${sort}` : ''].filter(Boolean).join('&')
   const searched = `q=${encodeURIComponent(raw(query))}${filters ? `&${filters}` : ''}`

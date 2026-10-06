@@ -56,17 +56,19 @@ function browser(initial='https://unlinked.invalid/network') {
       ['connect-grace', '/connections/request', 'grace', 'Connect', '', ''],
       ['connect-ada-everyone', '/connections/request', 'ada', 'Connect', '', ''],
       ['remove-ada', '/connections/remove', 'ada', 'Confirm removal', '', ''],
+      ['remove-ada-second-import', '/connections/remove', 'ada', 'Confirm removal', '', ''],
     ]) {
       const section = { getAttribute: () => id.endsWith('-everyone') ? 'everyone-group' : 'own-group' }
       const form = { getAttribute: () => action, querySelector: () => profileId ? { value: profileId } : null }
-      const button = { id: '', tagName: 'BUTTON', name, value, type: 'submit', textContent, closest: selector => selector === 'form' ? form : selector === 'section[aria-label]' ? section : null, focus: () => { if (!button.disclosure || button.disclosure.open) document.activeElement = button } }
+      const row = { getAttribute: name => name === 'data-network-row' ? (id === 'remove-ada-second-import' ? 'second-assertion' : 'first-assertion') : null, querySelector: () => profileId ? { getAttribute: () => '/people/' + profileId } : null }
+      const button = { id: '', tagName: 'BUTTON', name, value, type: 'submit', textContent, closest: selector => selector === 'form' ? form : selector === 'section[aria-label]' ? section : selector === 'article' ? row : null, focus: () => { if (!button.disclosure || button.disclosure.open) document.activeElement = button } }
       elements.set('#' + id, button)
-      if (id === 'remove-ada') {
+      if (id.startsWith('remove-ada')) {
         const summary = { ...button, tagName: 'SUMMARY', textContent: 'Remove connection', focus: () => { document.activeElement = summary } }
         const details = { open: false, querySelector: () => summary }
         button.disclosure = details
         disclosures.push(details)
-        elements.set('#remove-summary', summary)
+        elements.set(id === 'remove-ada' ? '#remove-summary' : '#remove-summary-second-import', summary)
       }
     }
     elements.set('#network-search-help', { textContent: '' })
@@ -356,3 +358,16 @@ for (const clear of ['clear-search', 'clear-filters']) {
     assert.equal(b.pending[1].url.searchParams.has('cursor'), false)
   })
 }
+
+test('duplicate imported rows restore only the second open disclosure and confirmation focus', async () => {
+  const b = browser()
+  b.dispatch('click', b.root().querySelector('#member'))
+  const second = b.root().querySelector('#remove-ada-second-import')
+  second.disclosure.open = true
+  second.focus()
+  b.pending[0].resolve({ ok: true, redirected: false, text: async () => '<page>' })
+  await flush()
+  assert.equal(b.root().querySelector('#remove-ada').disclosure.open, false)
+  assert.equal(b.root().querySelector('#remove-ada-second-import').disclosure.open, true)
+  assert.equal(b.document.activeElement, b.root().querySelector('#remove-ada-second-import'))
+})

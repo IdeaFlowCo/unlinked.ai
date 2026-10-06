@@ -87,6 +87,19 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   assert.match(ownSection, /href="\/people\/p119"/)
   assert.doesNotMatch(ownSection, /Person Engineer/)
 
+  const duplicateId = '6'.repeat(64)
+  resources.get(importId).payload.assertionIds.push(duplicateId)
+  Object.assign(resources.get(importId).payload.counts, { accepted: 3, indexed: 3 })
+  const duplicate = structuredClone(resources.get(rowId))
+  duplicate.payload.id = duplicateId
+  resources.set(duplicateId, duplicate)
+  const duplicatesPage = await (await go('/network?presence=member&q=119', cookie)).text()
+  const duplicatesSection = duplicatesPage.match(/<section[^>]*aria-label="People you know"[^>]*>([\s\S]*?)<\/section>/)?.[1]
+  const rows = [...duplicatesSection.matchAll(/<article[^>]*data-network-row="([^"]+)"[^>]*>([\s\S]*?)<\/article>/g)]
+  assert.deepEqual(rows.map(row => row[1]), [rowId, duplicateId])
+  for (const row of rows) assert.match(row[2], /href="\/people\/p119"/)
+  assert.doesNotMatch(await (await go('/network')).text(), /data-network-row=/)
+
 })
 
 test('an imported connection retains original connected-on separately from the batch creation date', async () => {
@@ -144,4 +157,10 @@ test('empty-query default selection preserves the existing order contract', () =
   const content = renderPeople({ everyone: [{ id: 'ten', name: 'Person 10' }, { id: 'two', name: 'Person 2' }] }).content
   assert.match(content, /value="best" selected>Default order/)
   assert.ok(content.indexOf('Person 10') < content.indexOf('Person 2'))
+})
+
+test('private row identities are escaped independently of public profile links', () => {
+  const { content } = renderPeople({ own: [{ id: 'p119', sourceRowId: 'import"<&', name: 'Person 119' }] })
+  assert.match(content, /data-network-row="import&quot;&lt;&amp;"/)
+  assert.match(content, /href="\/people\/p119"/)
 })
