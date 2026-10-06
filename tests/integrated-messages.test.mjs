@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMessagingSession } from '../mcp-server/messaging.mjs'
-import { renderMessages, renderPerson } from '../mcp-server/private-onboarding-views.mjs'
+import { renderMessages, renderPerson, renderPeople } from '../mcp-server/private-onboarding-views.mjs'
 
 test('membership is visible and unclaimed profiles invite instead of pretending to be recipients', () => {
   const base = { id: 'person', name: 'Avery', positions: [], education: [], skills: [] }
@@ -52,4 +52,33 @@ test('embedded session requires browser login, same origin, CSRF, and cannot sel
   assert.equal((await post(`csrf=${csrf}&subject=victim`)).status, 403)
   assert.equal(calls, 0)
   const good = await post(`csrf=${csrf}`); assert.equal(good.status, 200); assert.equal(good.headers.get('cache-control'), 'no-store'); assert.equal((await good.json()).user.userId, 'inbox'); assert.equal(calls, 1)
+})
+
+
+test('profile compose context survives embedding and opening standalone OpenChat', () => {
+  const profile = 'https://www.unlinked.ai/people/faisal-fixture'
+  const markup = renderMessages({ profile, csrf: 'fixture' }).content
+  const src = new URL(/id="messages-frame"[^>]*src="([^"]+)"/.exec(markup)[1].replaceAll('&amp;', '&'))
+  assert.deepEqual(Object.fromEntries(src.searchParams), { embed: 'unlinked', intent: 'compose', source: 'unlinked', profile })
+  const link = new URL(/href="([^"]+)"[^>]*>OpenChat ↗/.exec(markup)[1].replaceAll('&amp;', '&'))
+  assert.equal(link.searchParams.get('profile'), profile)
+  assert.equal(link.searchParams.get('intent'), 'compose')
+  assert.equal(link.searchParams.has('embed'), false)
+})
+
+test('people search offers an addressed Message for members and one invite for nonmembers', () => {
+  const people = [
+    { id: 'faisal-fixture', name: 'Faisal', presence: 'member', connect: { state: 'none' } },
+    { id: 'shadow', name: 'Imported', presence: 'shadow', connect: { state: 'invite' } },
+    { id: 'unknown', name: 'Private contact' },
+    { id: 'self', name: 'Me', presence: 'member', connect: { state: 'self' } },
+  ]
+  for (const group of [{ everyone: people }, { own: people }, { aiMatches: people }, { connectedView: { rows: people, total: 4 } }]) {
+    const markup = renderPeople({ csrf: 'fixture', query: 'Faisal', ...group }).content
+    const links = [...markup.matchAll(/href="(\/messages\?profile=[^"]+)"/g)].map(match => match[1])
+    assert.deepEqual(links, ['/messages?profile=https%3A%2F%2Fwww.unlinked.ai%2Fpeople%2Ffaisal-fixture'])
+    assert.equal((markup.match(/>Invite to Unlinked</g) ?? []).length, 1)
+  }
+  const anonymous = renderPeople({ everyone: [{ id: 'member', name: 'Member', presence: 'member' }] }).content
+  assert.match(anonymous, /href="\/messages\?profile=/)
 })
