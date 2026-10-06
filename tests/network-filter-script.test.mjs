@@ -7,17 +7,18 @@ function browser(initial='https://unlinked.invalid/network') {
   const listeners = new Map(), pending = [], location = { origin: 'https://unlinked.invalid', href: initial }
   const document = {
     activeElement: null,
+    createElement: tag => ({ tagName: tag.toUpperCase(), value: '' }),
     addEventListener: (name, callback) => listeners.set(name, callback),
     querySelector: () => current,
   }
   const makeRoot = (url = new URL(initial)) => {
-    const attributes = new Map(), elements = new Map()
+    const attributes = new Map(), elements = new Map(), hidden = new Map(), disclosures = []
     const root = {
       setAttribute: (key, value) => attributes.set(key, value),
       removeAttribute: key => attributes.delete(key),
       contains: element => [...elements.values()].includes(element),
       querySelector: selector => elements.get(selector),
-      querySelectorAll: () => [...elements.values()].filter(e => e.focus),
+      querySelectorAll: selector => selector === 'details' ? disclosures : selector === 'details[open]' ? disclosures.filter(d => d.open) : [...elements.values()].filter(e => e.focus),
       replaceWith: next => {
         if (root.contains(document.activeElement)) document.activeElement = null
         current = next
@@ -32,6 +33,14 @@ function browser(initial='https://unlinked.invalid/network') {
         setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end },
       })
     }
+    const sort = elements.get('#network-sort')
+    sort.options = ['best', 'name', 'name-desc'].map(value => ({ value }))
+    sort.append = option => sort.options.push(option)
+    const form = elements.get('#network-filters')
+    form.querySelector = selector => hidden.get(selector.match(/name="([^"]+)"/)?.[1])
+    form.append = field => { hidden.set(field.name, field); field.remove = () => hidden.delete(field.name) }
+    form.fields = hidden
+    for (const key of ['presence', 'connected', 'mode', 'scope']) if (url.searchParams.has(key)) form.append({ name: key, value: url.searchParams.get(key) })
     for (const [id, textContent, path] of [['member', 'On Unlinked', '?presence=member'], ['all', 'All', ''], ['more', 'Show more', '?page=1&cursor=old']]) {
       const link = { id: '', tagName: 'A', textContent, href: 'https://unlinked.invalid/network' + path, classList: { contains: () => false }, closest: selector => selector === 'a' ? link : selector === '.network-segments' && ['member', 'all'].includes(id) ? {} : null, focus: () => { document.activeElement = link } }
       elements.set('#' + id, link)
@@ -40,10 +49,20 @@ function browser(initial='https://unlinked.invalid/network') {
       ['ask-ai', '/search-account', null, 'Ask AI across everyone', 'scope', 'everyone'],
       ['connect-ada', '/connections/request', 'ada', 'Connect', '', ''],
       ['connect-grace', '/connections/request', 'grace', 'Connect', '', ''],
+      ['connect-ada-everyone', '/connections/request', 'ada', 'Connect', '', ''],
+      ['remove-ada', '/connections/remove', 'ada', 'Confirm removal', '', ''],
     ]) {
+      const section = { getAttribute: () => id.endsWith('-everyone') ? 'everyone-group' : 'own-group' }
       const form = { getAttribute: () => action, querySelector: () => profileId ? { value: profileId } : null }
-      const button = { id: '', tagName: 'BUTTON', name, value, type: 'submit', textContent, closest: selector => selector === 'form' ? form : null, focus: () => { document.activeElement = button } }
+      const button = { id: '', tagName: 'BUTTON', name, value, type: 'submit', textContent, closest: selector => selector === 'form' ? form : selector === 'section[aria-label]' ? section : null, focus: () => { if (!button.disclosure || button.disclosure.open) document.activeElement = button } }
       elements.set('#' + id, button)
+      if (id === 'remove-ada') {
+        const summary = { ...button, tagName: 'SUMMARY', textContent: 'Remove connection', focus: () => { document.activeElement = summary } }
+        const details = { open: false, querySelector: () => summary }
+        button.disclosure = details
+        disclosures.push(details)
+        elements.set('#remove-summary', summary)
+      }
     }
     elements.set('#network-search-help', { textContent: '' })
     elements.set('.network-count', { textContent: '' })
@@ -53,7 +72,7 @@ function browser(initial='https://unlinked.invalid/network') {
   let current = makeRoot()
   runInNewContext(NETWORK_FILTER_SCRIPT, {
     document, URL, URLSearchParams, AbortController,
-    FormData: class { constructor() { return [['q', current.querySelector('#network-query').value], ['sort', current.querySelector('#network-sort').value]] } },
+    FormData: class { constructor() { return [['q', current.querySelector('#network-query').value], ['sort', current.querySelector('#network-sort').value], ...[...current.querySelector('#network-filters').fields.values()].map(field => [field.name, field.value])] } },
     fetch: url => new Promise((resolve, reject) => pending.push({ resolve, reject, url: new URL(url) })),
     DOMParser: class { parseFromString() { const next = makeRoot(pending.at(-1).url); return { title: 'People', querySelector: () => next } } },
     history: { pushState(_, __, url) { location.href = String(url) }, replaceState(_, __, url) { location.href = String(url) } },
@@ -203,4 +222,60 @@ test('membership can return to rendered All before the first fetch completes', a
   assert.equal(b.pending[1].url.searchParams.has('presence'), false)
   b.pending[1].resolve({ ok: true, redirected: false, text: async () => '<page>' })
   await flush()
+})
+
+for (const path of ['/ask', '/search-account']) {
+  test(`live filtering from ${path} submits to the native directory action`, () => {
+    const b = browser('https://unlinked.invalid' + path + '?q=Ada&presence=member')
+    b.root().querySelector('#network-query').value = 'Grace'
+    b.dispatch('submit', b.root().querySelector('#network-filters'))
+    assert.equal(b.pending[0].url.pathname, '/network')
+    assert.equal(b.pending[0].url.searchParams.get('presence'), 'member')
+    assert.equal(b.pending[0].url.searchParams.get('q'), 'Grace')
+  })
+}
+
+test('duplicate profile actions retain focus in the same result section', async () => {
+  const b = browser()
+  b.dispatch('click', b.root().querySelector('#member'))
+  b.document.activeElement = b.root().querySelector('#connect-ada-everyone')
+  b.pending[0].resolve({ ok: true, redirected: false, text: async () => '<page>' })
+  await flush()
+  assert.equal(b.document.activeElement, b.root().querySelector('#connect-ada-everyone'))
+})
+
+test('surviving open removal disclosure remains open and keeps confirmation focus', async () => {
+  const b = browser()
+  b.dispatch('click', b.root().querySelector('#member'))
+  const button = b.root().querySelector('#remove-ada')
+  button.disclosure.open = true
+  button.focus()
+  b.pending[0].resolve({ ok: true, redirected: false, text: async () => '<page>' })
+  await flush()
+  const next = b.root().querySelector('#remove-ada')
+  assert.equal(next.disclosure.open, true)
+  assert.equal(b.document.activeElement, next)
+})
+
+test('failed membership change preserves pending fields for native retry', async () => {
+  const b = browser()
+  b.dispatch('click', b.root().querySelector('#member'))
+  b.pending[0].reject(Error('offline'))
+  await flush()
+  const form = b.root().querySelector('#network-filters')
+  assert.equal(b.dispatch('submit', form).defaultPrevented, false)
+  assert.equal(form.fields.get('presence').value, 'member')
+})
+
+test('history failure retains a private date sort in native retry even before options arrive', async () => {
+  const b = browser()
+  b.location.href = 'https://unlinked.invalid/network?connected=1&sort=connected'
+  b.dispatch('popstate', null)
+  b.pending[0].reject(Error('offline'))
+  await flush()
+  const form = b.root().querySelector('#network-filters'), sort = b.root().querySelector('#network-sort')
+  assert.equal(b.dispatch('submit', form).defaultPrevented, false)
+  assert.equal(form.fields.get('connected').value, '1')
+  assert.equal(sort.value, 'connected')
+  assert.ok(sort.options.some(option => option.value === 'connected'))
 })
