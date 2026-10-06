@@ -38,3 +38,5 @@ Grant catalog v4 adds optional `owner_network_and_public_and_write`: `unlinked_s
 Public People summaries expose detailLevel (basic or detailed), derived from visible content independently of membership. Profile pages link to /people/{id}/connections for search and richer-first or alphabetical browsing of published connections. See docs/connection-browsing.md in source.
 
 OpenChat messaging uses the same Ideaflow account. Profile recipients resolve on the server; unclaimed people use an invitation. `/api/messaging/v1/recipient` is a confidential service endpoint, not available to browser sessions or agent grants. Messages require an explicit Send; public profile publication remains opt-in.
+
+Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.

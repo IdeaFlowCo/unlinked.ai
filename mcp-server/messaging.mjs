@@ -45,3 +45,24 @@ export function createMessagingHandler({ origin, secret, resolveRecipient }) {
     } catch { return send(503, { error: 'messaging_unavailable' }) }
   }
 }
+
+// The session's owner is resolved from the HttpOnly Unlinked cookie by the
+// browser handler. Names/email from the browser never select an identity.
+export function createMessagingSession({ secret, identityForOwner, fetchImpl = fetch }) {
+  return async ({ owner, displayName }) => {
+    if (!secret || secret.length < 32) throw Error('messaging_unavailable')
+    const identity = await identityForOwner(owner)
+    if (!identity || identity.issuer !== IDEAFLOW_ISSUER || typeof identity.subject !== 'string' || !identity.subject) throw Error('messaging_unavailable')
+    const response = await fetchImpl('https://chat.ideaflow.app/api/unlinked/session', {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ issuer: identity.issuer, subject: identity.subject, name: String(displayName || 'Unlinked member').slice(0, 160) }),
+    })
+    if (!response.ok) throw Error('messaging_unavailable')
+    const text = await response.text()
+    if (text.length > 12000) throw Error('messaging_unavailable')
+    const value = JSON.parse(text)
+    if (typeof value?.token !== 'string' || !value.token || typeof value?.user?.userId !== 'string') throw Error('messaging_unavailable')
+    return value
+  }
+}

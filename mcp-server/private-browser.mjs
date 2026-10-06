@@ -1,6 +1,7 @@
+import { messagesScript } from './messages-view.mjs'
+import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { NETWORK_FILTER_SCRIPT } from './network-filter-script.mjs'
-import { unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
@@ -28,7 +29,7 @@ import { createConnectionActions } from './connection-actions.mjs'
 import { ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
@@ -71,7 +72,7 @@ export const autoSignInEnabled = env => !/^(?:off|false|0|no)$/i.test(String(env
 // the sign-in, callback, sign-out, join, invitation, confirmation (legacy
 // account, find-me, claim), unsubscribe or contact-card token routes, assets,
 // photos, APIs, /mcp, /oauth/* or /.well-known/*.
-const AUTO_SIGNIN_PAGES = new Set(['/', '/people', '/network', '/profile', '/card', '/settings', '/import', '/invites', '/invitations', '/notifications', '/people/add', '/scan', '/meet', '/agents', '/import-linkedin'])
+const AUTO_SIGNIN_PAGES = new Set(['/', '/messages', '/people', '/network', '/profile', '/card', '/settings', '/import', '/invites', '/invitations', '/notifications', '/people/add', '/scan', '/meet', '/agents', '/import-linkedin'])
 export const autoSignInPage = pathname => typeof pathname === 'string' && (AUTO_SIGNIN_PAGES.has(pathname) ||
   /^\/people\/[^/]{1,480}$/.test(pathname) || /^\/companies\/[^/]{1,200}$/.test(pathname))
 // Header guards (server side): a real top-level document navigation asking for
@@ -153,7 +154,7 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -184,7 +185,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // Pages a sign-in may return to. Everything else lands on the home route.
   // An OAuth connector authorization request returns to its own validated
   // consent page (the query is re-validated there, never trusted).
-  const returnPath = value => typeof value === 'string' && (/^\/(?:profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -297,7 +298,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     // whose redirect chain ends at the configured Ideaflow ID origin.
     const signInFormAction = authorizationOrigin ? ` ${authorizationOrigin}` : ''
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
-    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'${view.messaging ? '; frame-src https://chat.ideaflow.app' : ''}`)
+    if (view.messaging) response.setHeader('Permissions-Policy', 'camera=(self \"https://chat.ideaflow.app\"), microphone=(self \"https://chat.ideaflow.app\")')
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
     script = `${TOP_BAR_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
@@ -789,9 +791,26 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         if (request.method === 'GET' && url.pathname === '/') journey(response, renderLanding({ inApp: inAppBrowser(request.headers['user-agent']) }))
         else if (request.method === 'GET' && url.pathname === '/join') journey(response, renderJoin())
         else if (request.method === 'GET' && url.pathname === '/scan') journey(response, renderScan({ tab: url.searchParams.get('tab') }))
-        else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(url.pathname) }), null, '', 401)
+        else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(url.pathname === '/messages' ? url.pathname + url.search : url.pathname) }), null, '', 401)
         else if (connectionPost(request)) connectionFailure(response, 'Your session has expired. Sign in, then send your connection request again.', 401)
         else render(response, 'Sign in required', '<a class="action" href="/login">Sign in with Ideaflow</a>', 401)
+        return
+      }
+      if (request.method === 'GET' && url.pathname === '/messages') {
+        const profile = parseUnlinkedProfileContext(url.searchParams.get('profile'))
+        journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, profile }), null, messagesScript(session.csrf)); return
+      }
+      if (request.method === 'POST' && url.pathname === '/messages/session') {
+        const input = new URLSearchParams((await body(request, 2048)).toString())
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => key !== 'csrf')) { response.writeHead(403).end(); return }
+        // Bound refreshes per browser session; failed lookups are not membership.
+        if (session.messagingAt && Date.now() - session.messagingAt < 3000) { response.writeHead(429).end(); return }
+        session.messagingAt = Date.now()
+        try {
+          if (!createMessagingSession) throw Error('messaging_unavailable')
+          const result = await createMessagingSession(session)
+          response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
+        } catch { response.writeHead(503, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'messaging_unavailable' })) }
         return
       }
       if (request.method === 'GET' && url.pathname === '/join') { redirect(response, '/'); return }

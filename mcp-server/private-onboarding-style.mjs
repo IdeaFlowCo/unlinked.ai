@@ -3,6 +3,23 @@
 export const ONBOARDING_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap'
 export const ONBOARDING_STYLE = `
 html{-webkit-text-size-adjust:100%}
+.membership-member{display:inline-flex;font-size:12px;font-weight:600;color:#27634a;background:#e8f4ed;border-radius:99px;padding:2px 8px;margin-left:8px;vertical-align:middle}
+.unlinked-onboarding .messages-page{padding:24px 0 0}
+.unlinked-onboarding .messages-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+.unlinked-onboarding .messages-heading h1{font-size:27px;letter-spacing:-.04em;line-height:1.2}
+.unlinked-onboarding .messages-heading p{font-size:14px;color:var(--muted);margin:5px 0 0}
+.unlinked-onboarding .messages-heading>a{white-space:nowrap}
+.unlinked-onboarding .messages-connection{display:flex;gap:12px;font-size:14px;color:var(--muted)}
+.unlinked-onboarding .messages-connection:has([hidden]):not(:has(:not([hidden]))){display:none}
+.unlinked-onboarding #messages-frame{display:block;width:100%;flex:1;min-height:0;height:auto;border:1px solid var(--line);border-radius:14px;background:white;box-shadow:0 8px 28px #22254c08}
+body:has(.messages-page) .unlinked-onboarding{max-width:1480px;height:100dvh;display:flex;flex-direction:column;padding-bottom:16px}
+body:has(.messages-page) .journey{flex:1;min-height:0}
+body:has(.messages-page) header{flex-shrink:0}
+body:has(.messages-page) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
+.unlinked-onboarding .messages-page{height:100%;display:flex;flex-direction:column}
+body:has(.messages-page) footer{display:none}
+@media(max-width:600px){.unlinked-onboarding .messages-page{padding-top:16px}.unlinked-onboarding .messages-heading{margin-bottom:12px}.unlinked-onboarding .messages-heading p{max-width:26ch;font-size:12px}.unlinked-onboarding #messages-frame{border-radius:10px}}
+
 body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17px/1.55 "Public Sans",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .unlinked-onboarding{--brand:#4349c4;--brand-d:#32379c;--tint:#eceefc;--page:#f5f6fc;--fg:#16181d;--muted:#667085;--line:#e6e8ec;--line2:#c4c9d2;--r:8px;max-width:1180px;margin:0 auto;padding:0 28px 30px;color:var(--fg)}
 .unlinked-onboarding *{box-sizing:border-box}
