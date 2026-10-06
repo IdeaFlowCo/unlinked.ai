@@ -458,7 +458,13 @@ const externalCompany = value => { try { const url = new URL(raw(value)); return
 
 export function renderPeople({ accountLabel, displayName, csrf, query = '', mode = 'best', presence, sort = 'best', total, added = false, match, everyone, own, contacts, searchResults, aiMatches, aiNote, aiError, anonymousAi = false, nextCursor, nextContactPage, state = 'ready', importJob, publicProfessionalSearch, connectedCounts, connectedView, scope, returnTo = '/network', notice }) {
   const exact = mode === 'exact', kept = presence === 'member' || presence === 'shadow' ? presence : undefined
-  const controls = value => value.connect ? `<div class="connection-actions">${connectControl({ connect: value.connect, csrf, id: value.id, name: value.name, next: returnTo, row: true })}</div>` : ''
+  const controls = value => {
+    const context = unlinkedProfileContext(value.id)
+    const message = value.presence === 'member' && context && value.connect?.state !== 'self' ? openChatAction(context) : ''
+    const invite = value.presence === 'shadow' && value.connect?.state !== 'invite' ? '<a class="button sec sm" href="/invites">Invite to Unlinked</a>' : ''
+    const connection = connectControl({ connect: value.connect, csrf, id: value.id, name: value.name, next: returnTo, row: true })
+    return message || invite || connection ? `<div class="connection-actions">${message}${invite}${connection}</div>` : ''
+  }
   const row = (value, render) => {
     const at = sort === 'connected' ? value.connectedAt : sort === 'imported' ? value.importedAt : undefined
     const date = Number.isSafeInteger(at) && at > 0 && at <= 8640000000000000 ? new Date(at).toISOString().slice(0, 10) : null
@@ -623,6 +629,7 @@ export function renderMessages({ accountLabel, displayName, csrf, profile } = {}
   const src = new URL('https://chat.ideaflow.app/app/')
   src.searchParams.set('embed', 'unlinked')
   if (profile) { src.searchParams.set('intent', 'compose'); src.searchParams.set('source', 'unlinked'); src.searchParams.set('profile', profile) }
-  const view = base('Messages', `<section class="messages-page"><div class="messages-heading"><div><h1>Messages</h1><p>Your OpenChat inbox, right here.</p></div><a class="small" href="https://chat.ideaflow.app/app/" target="_blank" rel="noopener noreferrer">OpenChat ↗</a></div><div class="messages-connection"><span id="messages-status" role="status">Connecting your inbox…</span><button id="messages-retry" class="link-button" hidden>Try again</button></div><iframe id="messages-frame" title="Your messages" src="${html(src.href)}" allow="microphone; camera; clipboard-write" referrerpolicy="strict-origin"></iframe><noscript><p><a href="https://chat.ideaflow.app/app/">Open messages in OpenChat</a></p></noscript></section>`, { accountLabel, displayName, csrf })
+  const standalone = new URL(src); standalone.searchParams.delete('embed')
+  const view = base('Messages', `<section class="messages-page"><div class="messages-heading"><div><h1>Messages</h1><p>Your OpenChat inbox, right here.</p></div><a class="small" href="${html(standalone.href)}" target="_blank" rel="noopener noreferrer">OpenChat ↗</a></div><div class="messages-connection"><span id="messages-status" role="status">Connecting your inbox…</span><button id="messages-retry" class="link-button" hidden>Try again</button></div><iframe id="messages-frame" title="Your messages" src="${html(src.href)}" allow="microphone; camera; clipboard-write" referrerpolicy="strict-origin"></iframe><noscript><p><a href="${html(standalone.href)}">Open messages in OpenChat</a></p></noscript></section>`, { accountLabel, displayName, csrf })
   return { ...view, messaging: true }
 }
