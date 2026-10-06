@@ -26,11 +26,11 @@ Only these DTO fields are copied; email, phone, raw imports, notes, auth metadat
 The publication provider must separately sanitize the contents of public biography/professional text, since a whitelist cannot prove free text contains no private information.
 Connections are `{fromId,toId}` and remain directed; reciprocal relationships and mutual status are not inferred.
 
-`reader.list({query,cursor,signal?})` returns `{profiles:[{id,name,headline?,location?}],nextCursor?}`.
+`reader.list({query?,mode?,presence?,sort?,includeTotal?,cursor?,signal?})` returns `{profiles:[{id,name,headline?,location?}],nextCursor?}` with `match` and `total` for a nonempty query, and `total` for a presence filter or explicit `includeTotal: true`.
 `reader.profile({id,cursor,signal?})` returns `{profile:{...summary,about?,positions,education,skills,connections,nextConnectionsCursor?}}`, or null for an unknown/unpublished profile in an otherwise valid published snapshot.
 A profile's connections are its edges from both ends: an edge is stored only from the person whose export listed it, and an edge recorded by both people appears once.
 When the snapshot carries `members` (profile IDs supplied by the shared index), every summary and detail adds `presence: 'member'|'shadow'` and `connectionCount` (both directions). See [signup source precedence](signup-profile-lookup.md#public-projection-and-export-precedence) for member identity sources. Snapshots without `members` add neither field. A member ID missing from the profiles is a malformed snapshot (503).
-`reader.list({query?,mode?,presence?,cursor?,signal?})` accepts `presence: 'member'|'shadow'` and then also returns the filtered `total`; the filter is part of the cursor scope, so a cursor never pages a different filter. A snapshot without `members` matches neither filter; any other value is a 400.
+The list accepts `presence: 'member'|'shadow'`; the filter is part of the cursor scope, so a cursor never pages a different filter. A snapshot without `members` matches neither filter; any other value is a 400. List `sort` accepts `best` (default), `name` and `name-desc`; other values are a 400. Nondefault sorts also bind into cursor scope. The `/api/people` route keeps default ordering and does not opt into unfiltered totals; existing agent defaults are unchanged. Browser use is owned by [People filtering and ordering](network-controls.md).
 `reader.lookup({ids,signal?})` takes at most 1000 IDs and returns a `Map` of the summaries that are published, in request order; unknown IDs are omitted.
 Overlapping reads without their own signal share one snapshot build. A request-scoped reader may use `reuse: true` to keep one coherent snapshot for that request. Across requests, compiled public indexes are reused only when the trusted source sets `revisionIdentifiesContent: true` and the revision and configured limits match; every request still reads the source and validates its publication envelope. Signed-in viewer-scoped sources never use the shared cache. Returned cached rows are frozen.
 
@@ -46,7 +46,7 @@ Requests must be plain data objects. Invalid request shapes, signals, queries, I
 No HTTP route is implemented by this module; the standalone runtime maps it to anonymous `/network`, `/people`, `/people/:id`, `/api/people` and `/api/people/:id`.
 
 Reader search is plain normalized name/headline/company term matching. Member Everyone AI search uses `createSharedPeopleSearch()` on top of the same published snapshot, while owner-private AI search remains in the owner-scoped controller.
-Profiles and connection pages sort by Unicode NFKC/lowercase name and binary ID as tie-breaker, independent of provider order and machine locale.
+The default list order without a query sorts by Unicode NFKC/lowercase name and binary ID as tie-breaker, independent of provider order and machine locale; queried default lists use lexical relevance. Explicit list name ordering uses an English collator with base sensitivity, numeric comparison and ignored punctuation, then an ID tie-breaker, before pagination. Profile connection ordering is owned by [connection browsing](connection-browsing.md).
 Pages contain at most100rows, default50.
 Cursors bind offset to normalized query/profile scope and publication revision, and contain no profile names or emails.
 A stale publication cursor returns503 so the caller can restart against the new revision; a cursor from another query/profile is invalid400.

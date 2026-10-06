@@ -36,7 +36,7 @@ See the [private archive foundation contract](docs/private-archive-import.md) fo
 Signed-in People rows offer state-aware connection controls. Open
 [`/network?connected=1&presence=member`](https://www.unlinked.ai/network?connected=1&presence=member)
 for your connections who have joined Unlinked. See the [member connection guide](docs/member-connections.md)
-for controls, confirmed removal and preservation of imported observations.
+for controls, confirmed removal and preservation of imported observations. For live filtering and ordering in People, see [People filtering and ordering](docs/network-controls.md).
 
 ## Core Features & Technologies
 

@@ -93,7 +93,8 @@ test('browser rows and member-only filter count both graph directions; removal i
   const page=async s=>await(await p.go('/network',{headers:{Cookie:s.cookie}})).text()
   assert.match(await page(sa),/action="\/connections\/request"/)
   assert.match(await page(sa),/href="\/invites">Invite to Unlinked<\/a>/)
-  const sent=await p.post(sa,'/connections/request',{profileId:'b',next:'/network?presence=member'});assert.equal(sent.headers.get('location'),'/network?presence=member&notice=sent')
+  const returnTo='/network?presence=member&connected=1&sort=name-desc&q=Person&mode=exact&page=1'
+  const sent=await p.post(sa,'/connections/request',{profileId:'b',next:returnTo});assert.equal(sent.headers.get('location'),returnTo+'&notice=sent')
   assert.match(await page(sa),/Pending.*?Withdraw/s);assert.match(await page(sb),/Accept invitation.*?Ignore/s)
   const id=(await p.connections.received(b))[0].id
   await p.post(sb,'/connections/respond',{id,action:'accept'})
