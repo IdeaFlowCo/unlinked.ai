@@ -31,7 +31,7 @@
         "people",
         "connections"
       ],
-      "revocation": "Settings → Connected apps, or RFC 7009 at /oauth/revoke"
+      "revocation": "Settings \u2192 Connected apps, or RFC 7009 at /oauth/revoke"
     }
   },
   "tools": [
@@ -359,6 +359,12 @@
     "identity": "shared Ideaflow account",
     "documentation": "https://www.unlinked.ai/AGENTS.md",
     "agentSending": false,
-    "confidentialRecipientResolver": "/api/messaging/v1/recipient"
+    "confidentialRecipientResolver": "/api/messaging/v1/recipient",
+    "webInbox": "/messages",
+    "browserSessionExchange": {
+      "path": "/messages/session",
+      "authorization": "browser-session-and-csrf",
+      "agentAccess": false
+    }
   }
 }

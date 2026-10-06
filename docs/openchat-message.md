@@ -1,9 +1,10 @@
 # Message with OpenChat
 
 Unlinked and OpenChat share an Ideaflow account. OpenChat is the messaging inbox;
-Unlinked is the professional network. The eventual web Messages surface will use
-exactly the same OpenChat conversations, history and unread state, not copies.
-This release opens the OpenChat composer from a person's Unlinked profile.
+Unlinked is the professional network. The web **Messages** surface at `/messages` embeds the canonical responsive
+OpenChat client and uses the same conversations, history and read state.
+Member profiles open a named composer inside Unlinked; unclaimed profiles show
+**Not on Unlinked** and an invitation.
 
 The public action passes only the canonical public profile URL. OpenChat resolves
 its recipient server-to-server through `POST /api/messaging/v1/recipient`, sending
@@ -36,3 +37,15 @@ this endpoint is not an MCP or account-grant tool.
 The strict link grammar lives in `src/utils/openchat-profile-context.mjs`;
 private-only/historical profiles use generic compose without exporting their IDs.
 OpenChat owns `docs/unlinked-compose-contract.md` and sign-in continuation.
+
+
+The signed-in `/messages/session` POST requires same origin and CSRF. It reads
+the authenticated owner's live binding, then calls OpenChat's confidential
+`/api/unlinked/session` with the dedicated service secret. A short-lived session
+travels to the exact OpenChat iframe via an origin/window/nonce-bound handshake,
+never a URL, persisted browser credential or agent tool. Renewal rechecks the
+Unlinked session. Errors show Retry and an OpenChat fallback; private pages and
+responses stay no-store. CSP permits only the canonical OpenChat frame.
+
+LinkedIn messaging remains plan-only; the coordinated OpenChat repository owns
+`docs/linkedin-messaging-plan.md` (Unipile, Beeper, and existing bridge options).
