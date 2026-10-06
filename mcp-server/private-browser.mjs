@@ -1239,10 +1239,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             connectedView: { rows, total: ranked.rows.length, ...(ranked.rows.length > (index + 1) * 100 ? { nextPage: index + 1 } : {}) } })
           journey(response, view, props.importJob); return
         }
-        const ownMatches = matcher ? rankMatches(connections, matcher, row => ({ name: words([row.fields['first name'], row.fields['last name']].filter(Boolean).join(' ')), text: words([row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].filter(Boolean).join(' ')) })) : { rows: connections, match: 'none' }
-        const rows = orderNetwork(ownMatches.rows, sort, row => [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '))
-        const linking = contactRows(rows, reader)
-        let everyone, nextCursor, total, state = 'ready', match = ownMatches.match
+        const linking = contactRows(connections, reader)
+        let everyone, nextCursor, total, state = 'ready', match = 'none'
         if (publicProfessionalSearch) {
           everyone = []
           try { const result = await reader.list({ query: filter, mode, presence, sort, includeTotal: true, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; total = result.total; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
@@ -1251,7 +1249,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
         // The contact lookup ran alongside the public list and shares its snapshot read.
-        const matchingContacts = (await linking).filter(value => !presence || value.presence === presence)
+        const eligibleContacts = (await linking).filter(value => !presence || value.presence === presence)
+        const ownMatches = matcher ? rankMatches(eligibleContacts, matcher, row => ({ name: words(row.name), text: words([row.name, row.company, row.headline].filter(Boolean).join(' ')) })) : { rows: eligibleContacts, match: 'none' }
+        if (ownMatches.match === 'all' || (ownMatches.match === 'some' && match !== 'all')) match = ownMatches.match
+        const matchingContacts = orderNetwork(ownMatches.rows, sort)
         const contacts = await withConnect(session.owner, matchingContacts.slice(index * 100, (index + 1) * 100), reader)
         everyone = await withConnect(session.owner, everyone, reader)
         const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
