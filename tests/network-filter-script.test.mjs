@@ -34,15 +34,20 @@ function browser(initial='https://unlinked.invalid/network') {
       })
     }
     const sort = elements.get('#network-sort')
-    sort.options = ['best', 'name', 'name-desc'].map(value => ({ value }))
-    sort.append = option => sort.options.push(option)
+    const selectedSort = sort.value
+    sort.options = []
+    sort.append = option => { sort.options.push(option); option.remove = () => { sort.options = sort.options.filter(item => item !== option) } }
+    for (const value of ['best', 'name', 'name-desc', ...(url.searchParams.get('connected') === '1' ? ['connected', 'imported'] : [])]) sort.append({ value })
+    let sortValue = ''
+    Object.defineProperty(sort, 'value', { get: () => sort.options.some(option => option.value === sortValue) ? sortValue : '', set: value => { sortValue = sort.options.some(option => option.value === value) ? value : '' } })
+    sort.value = selectedSort
     const form = elements.get('#network-filters')
     form.querySelector = selector => hidden.get(selector.match(/name="([^"]+)"/)?.[1])
     form.append = field => { hidden.set(field.name, field); field.remove = () => hidden.delete(field.name) }
     form.fields = hidden
     for (const key of ['presence', 'connected', 'mode', 'scope']) if (url.searchParams.has(key)) form.append({ name: key, value: url.searchParams.get(key) })
-    for (const [id, textContent, path] of [['member', 'On Unlinked', '?presence=member'], ['all', 'All', ''], ['more', 'Show more', '?page=1&cursor=old']]) {
-      const link = { id: '', tagName: 'A', textContent, href: 'https://unlinked.invalid/network' + path, classList: { contains: () => false }, closest: selector => selector === 'a' ? link : selector === '.network-segments' && ['member', 'all'].includes(id) ? {} : null, focus: () => { document.activeElement = link } }
+    for (const [id, textContent, path] of [['member', 'On Unlinked', '?presence=member'], ['all', 'All', ''], ['more', 'Show more', '?page=1&cursor=old'], ['everyone', 'Everyone', ''], ['connections', 'My connections', '?connected=1'], ['clear-search', 'Clear search', ''], ['clear-filters', 'Clear filters', '']]) {
+      const link = { id: '', tagName: 'A', textContent, href: 'https://unlinked.invalid/network' + path, classList: { contains: name => name === 'network-reset' && id === 'clear-filters' }, closest: selector => selector === 'a' ? link : selector === '.network-segments' && ['member', 'all'].includes(id) ? {} : selector === '.network-scopes' && ['everyone', 'connections'].includes(id) ? {} : null, focus: () => { document.activeElement = link } }
       elements.set('#' + id, link)
     }
     for (const [id, action, profileId, textContent, name, value] of [
@@ -279,3 +284,75 @@ test('history failure retains a private date sort in native retry even before op
   assert.equal(sort.value, 'connected')
   assert.ok(sort.options.some(option => option.value === 'connected'))
 })
+
+for (const sort of ['connected', 'imported']) {
+  for (const interaction of ['membership', 'typing']) {
+    test(`history synchronizes ${sort} options before pending ${interaction}`, async () => {
+      const b = browser()
+      b.location.href = `https://unlinked.invalid/network?connected=1&sort=${sort}`
+      b.dispatch('popstate', null)
+      assert.equal(b.root().querySelector('#network-sort').value, sort)
+      if (interaction === 'membership') b.dispatch('click', b.root().querySelector('#member'))
+      else {
+        b.root().querySelector('#network-query').value = 'Ada'
+        b.dispatch('input', b.root().querySelector('#network-query'))
+        await new Promise(resolve => setTimeout(resolve, 350))
+      }
+      assert.equal(b.pending[1].url.searchParams.get('sort'), sort)
+      assert.equal(b.pending[1].url.searchParams.get('connected'), '1')
+      b.pending[1].resolve({ ok: true, redirected: false, text: async () => '<page>' })
+      await flush()
+      assert.equal(b.root().querySelector('#network-sort').value, sort)
+      assert.equal(b.root().querySelector('#network-sort').options.some(option => option.value === 'imported'), true)
+    })
+  }
+}
+
+for (const clear of ['clear-search', 'clear-filters']) {
+  test(`${clear} preserves pending connection scope and resets pagination`, () => {
+    const b = browser('https://unlinked.invalid/network?q=Ada&mode=exact&page=2&cursor=old')
+    b.dispatch('click', b.root().querySelector('#connections'))
+    b.dispatch('click', b.root().querySelector('#member'))
+    b.root().querySelector('#network-sort').value = 'imported'
+    b.dispatch('change', b.root().querySelector('#network-sort'))
+    b.root().querySelector('#network-query').value = 'Grace'
+    b.dispatch('click', b.root().querySelector('#' + clear))
+    assert.deepEqual(Object.fromEntries(b.pending.at(-1).url.searchParams), clear === 'clear-search' ? { sort: 'imported', connected: '1', presence: 'member' } : { connected: '1' })
+    assert.equal(b.root().querySelector('#network-query').value, '')
+    assert.equal(b.root().querySelector('#network-sort').value, clear === 'clear-search' ? 'imported' : 'best')
+  })
+
+  test(`${clear} preserves pending Everyone scope over rendered connections`, () => {
+    const b = browser('https://unlinked.invalid/network?connected=1&q=Ada&presence=member&sort=connected')
+    b.dispatch('click', b.root().querySelector('#everyone'))
+    b.root().querySelector('#network-sort').value = 'name-desc'
+    b.dispatch('click', b.root().querySelector('#' + clear))
+    assert.deepEqual(Object.fromEntries(b.pending.at(-1).url.searchParams), clear === 'clear-search' ? { presence: 'member', sort: 'name-desc' } : {})
+  })
+}
+
+test('successful history navigation restores date options and subsequent sorting', async () => {
+  const b = browser()
+  b.location.href = 'https://unlinked.invalid/network?connected=1&sort=connected'
+  b.dispatch('popstate', null)
+  b.pending[0].resolve({ ok: true, redirected: false, text: async () => '<page>' })
+  await flush()
+  const sort = b.root().querySelector('#network-sort')
+  assert.equal(sort.value, 'connected')
+  sort.value = 'imported'
+  b.dispatch('change', sort)
+  assert.equal(b.pending[1].url.searchParams.get('sort'), 'imported')
+  assert.equal(b.pending[1].url.searchParams.get('connected'), '1')
+})
+
+for (const clear of ['clear-search', 'clear-filters']) {
+  test(`${clear} resets pending pagination`, () => {
+    const b = browser('https://unlinked.invalid/network?q=Ada&presence=member&sort=name')
+    b.dispatch('click', b.root().querySelector('#more'))
+    assert.equal(b.pending[0].url.searchParams.get('page'), '1')
+    assert.equal(b.pending[0].url.searchParams.get('cursor'), 'old')
+    b.dispatch('click', b.root().querySelector('#' + clear))
+    assert.equal(b.pending[1].url.searchParams.has('page'), false)
+    assert.equal(b.pending[1].url.searchParams.has('cursor'), false)
+  })
+}

@@ -9,11 +9,12 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
   const cancel=()=>{clearTimeout(timer);controller?.abort();version++};
   const value=(u,key)=>u.searchParams.get(key)||(['sort','mode'].includes(key)?'best':'');
   const formURL=()=>{const form=root.querySelector('#network-filters'),fields=new URLSearchParams(new FormData(form)),url=new URL(form.action);url.search=pendingURL.search;for(const key of ['q','sort']){const live=fields.get(key)||value(new URL(form.action),key);if(live)url.searchParams.set(key,live);else url.searchParams.delete(key)}url.searchParams.delete('page');url.searchParams.delete('cursor');return url};
+  const syncControls=()=>{const sort=root.querySelector('#network-sort'),wantedSort=value(pendingURL,'sort');for(const [key,label] of [['connected','Recently connected'],['imported','Recently imported']]){const option=[...sort.options].find(option=>option.value===key);if(pendingURL.searchParams.get('connected')==='1'){if(!option){const added=document.createElement('option');added.value=key;added.textContent=label;sort.append(added)}}else option?.remove()}sort.value=wantedSort;const query=root.querySelector('#network-query'),wantedQuery=value(pendingURL,'q');if(query.value!==wantedQuery)query.value=wantedQuery};
   const focusables='a,button,input:not([type="hidden"]),select,textarea,summary,[tabindex],[contenteditable="true"]';
   const focusKey=element=>{if(element.id)return JSON.stringify(['id',element.id]);const section=element.closest('section[aria-label]');const form=element.closest('form'),person=element.closest('article')?.querySelector('a[href^="/people/"]');return JSON.stringify([section?.getAttribute('class')||section?.getAttribute('aria-label'),element.tagName,form?.getAttribute('action'),form?.querySelector('input[name="profileId"],input[name="id"]')?.value,person?.getAttribute('href'),element.name,element.type,element.tagName==='BUTTON'?element.value:null,['A','BUTTON','SUMMARY'].includes(element.tagName)?element.textContent.trim():null])};
   const busy=value=>root.querySelector('[data-network-results]')?.setAttribute('aria-busy',String(value));
   async function load(url,{historyMode='push'}={}){
-    cancel();pendingURL=new URL(url);for(const [key,id] of [['q','network-query'],['sort','network-sort']]){const control=root.querySelector('#'+id),nextValue=value(pendingURL,key);if(control.value!==nextValue)control.value=nextValue}const current=version;controller=new AbortController();busy(true);
+    cancel();pendingURL=new URL(url);syncControls();const current=version;controller=new AbortController();busy(true);
     try{
       const response=await fetch(url,{credentials:'same-origin',signal:controller.signal,headers:{'Accept':'text/html'}});
       if(!response.ok||response.redirected)throw Error('network_filter_failed');
@@ -28,8 +29,7 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
       document.title=doc.title;
       for(const details of root.querySelectorAll('details')){const summary=details.querySelector('summary');if(summary&&openDisclosures.includes(focusKey(summary)))details.open=true}
       if(focused){const target=[...root.querySelectorAll(focusables)].find(element=>focusKey(element)===focused);target?.focus({preventScroll:true});if(target===oldInput)try{target.setSelectionRange(start,end)}catch{}}
-    }catch(error){if(current!==version||error.name==='AbortError')return;const status=root.querySelector('.network-count');if(status)status.textContent='Could not update results. Press Enter or Apply to try again.';const form=root.querySelector('#network-filters'),sort=root.querySelector('#network-sort'),wantedSort=value(pendingURL,'sort');
-      if(![...sort.options].some(option=>option.value===wantedSort)){const option=document.createElement('option');option.value=wantedSort;option.textContent=wantedSort==='connected'?'Recently connected':'Recently imported';sort.append(option)}sort.value=wantedSort;
+    }catch(error){if(current!==version||error.name==='AbortError')return;const status=root.querySelector('.network-count');if(status)status.textContent='Could not update results. Press Enter or Apply to try again.';const form=root.querySelector('#network-filters');syncControls();
       for(const key of ['presence','connected','mode','scope','page','cursor']){
         let field=form.querySelector('input[name="'+key+'"]');const wanted=pendingURL.searchParams.get(key);
         if(wanted===null){field?.remove();continue}if(!field){field=document.createElement('input');field.type='hidden';field.name=key;form.append(field)}field.value=wanted;
@@ -50,9 +50,10 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
     const link=event.target.closest('a');if(!enhanced||!link||!root.contains(link)||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.altKey||event.shiftKey||link.target)return;
     const destination=new URL(link.href);if(destination.origin!==location.origin||destination.pathname!=='/network')return;
     const clear=link.classList.contains('network-reset')||link.textContent==='Clear search';
-    let url=destination;
-    if(!clear){
-      url=formURL();
+    let url=formURL();
+    if(clear){
+      for(const key of link.classList.contains('network-reset')?['q','mode','presence','sort']:['q','mode'])url.searchParams.delete(key);
+    }else{
       const keys=['q','sort','mode','presence','connected','scope'];
       const changed=keys.some(key=>value(url,key)!==value(renderedURL,key));
       const intentKeys=link.closest('.network-segments')?['presence']:link.closest('.network-scopes')?['connected']:link.closest('.modes')?['mode']:['mode','presence','connected','scope'].filter(key=>value(destination,key)!==value(renderedURL,key));
