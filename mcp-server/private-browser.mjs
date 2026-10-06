@@ -146,7 +146,10 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
     return slug ? usable(await Promise.resolve(lookupSlug(slug)).catch(() => null)) : null
   }
   const candidates = await Promise.all(rows.map(async row => [usable(publicTarget(row)), await bySlug(row)]))
-  const found = await lookup([...new Set(candidates.flat().filter(Boolean))].slice(0, 1000))
+  const targets = [...new Set(candidates.flat().filter(Boolean))], found = new Map()
+  for (let start = 0; start < targets.length; start += 1000) {
+    for (const [id, summary] of await lookup(targets.slice(start, start + 1000))) found.set(id, summary)
+  }
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
@@ -214,14 +217,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // connects to its own profile. Its own profile is never listed.
   async function connectedProfiles(owner, network, reader) {
     const assertions = network.assertions.filter(row => row.category === 'connections')
-    const targets = [...new Set(assertions.map(publicTarget).map(usableTarget).filter(Boolean))]
+    const matches = await publishedPeopleFor(assertions, { publicTarget, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : null, lookup: ids => reader.lookup({ ids }) })
     const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner).catch(() => null) : null
-    const found = new Map(), resolved = new Map()
-    for (let start = 0; start < targets.length; start += 1000) {
-      for (const [sourceId, summary] of await reader.lookup({ ids: targets.slice(start, start + 1000) })) {
-        resolved.set(sourceId, summary.id); found.set(summary.id, summary)
-      }
-    }
+    const found = new Map()
+    for (const summary of matches) if (summary) found.set(summary.id, summary)
     if (mine) {
       for (const summary of await reader.neighbors({ id: mine })) found.set(summary.id, summary)
       const self = (await reader.lookup({ ids: [mine] })).get(mine)
@@ -229,8 +228,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     }
     // Deduplication retains the earliest known date, so reimporting a contact
     // does not make an old connection look newly imported or newly connected.
-    for (const row of assertions) {
-      const id = resolved.get(publicTarget(row)), profile = found.get(id)
+    for (const [index, row] of assertions.entries()) {
+      const id = matches[index]?.id, profile = found.get(id)
       if (!profile) continue
       const dates = {}
       for (const key of ['connectedAt', 'importedAt']) {
@@ -307,9 +306,9 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="/public-assets/connection-feedback.js"></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${feedbackWidgetTag(nonce)}</html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
-  // `silentBack` (automatic sign-in) signs in only an existing owner with
-  // nothing left to confirm, and returns to that page. It never provisions an
-  // account or opens an onboarding/confirmation step; it answers why not instead.
+  // `silentBack` (automatic sign-in) returns to the original page without
+  // publishing a profile or opening an onboarding/confirmation step. A verified
+  // Ideaflow identity receives its private account, just as in OpenChat.
   async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null) {
     let claimed
     let owner = await resolveOwner(identity)
@@ -324,7 +323,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
       if (!claimed || typeof claimed.ownerId !== 'string' || !claimed.ownerId || typeof claimed.userId !== 'string' || !claimed.userId) throw new Error('private_owner_recovery_required')
     }
     if (invitationToken) owner = await resolveOwner(identity)
-    if (silentBack !== null && (invitationToken || !owner)) return 'no_account'
+    if (silentBack !== null && invitationToken) return 'no_account'
     if (!owner && !invitationToken && typeof signup === 'function') {
       const provisioned = await signup({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId,
         verifiedAt: identity.verifiedAt, provenanceReceiptId: identity.provenanceReceiptId, newProfileIntent: true })
@@ -345,7 +344,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
     const accountLabel = identity.verifiedEmail ?? identity.subject
     // Keep the sign-in address private for member email and invite Reply-To.
-    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner }), false)
+    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner && silentBack === null }), false)
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
@@ -1236,8 +1235,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const matchingContacts = (await linking).filter(value => !presence || value.presence === presence)
         const contacts = await withConnect(session.owner, matchingContacts.slice(index * 100, (index + 1) * 100), reader)
         everyone = await withConnect(session.owner, everyone, reader)
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, total, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
-        if (matchingContacts.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}${presence ? `&presence=${presence}` : ''}&sort=${sort}">Next contacts</a></p>`)
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
         journey(response, view, props.importJob)
         return
       }

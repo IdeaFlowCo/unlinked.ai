@@ -30,7 +30,7 @@ async function site(t, { autoSignIn = true, owner = { ownerId: 'auto-owner', use
         if (finish) return finish(url, transaction)
         return { issuer: ISSUER_ORIGIN, subject: 'auto-subject', verifiedEmail: 'member@example.invalid', emailEvidence: 'signed-ideaflow-beta-v1', clientId: 'client', verifiedAt: 1 }
       } },
-    resolveOwner: async () => owner, signup: async () => { signups.push(true); return owner },
+    resolveOwner: async () => owner, signup: async () => { signups.push(true); owner ??= { ownerId: 'new-shared-owner', userId: 'new-shared-user' }; return owner },
     getBackend: async () => ({ adapter: {}, readResource: async () => null, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => [] }),
     issueAccountGrant: async () => 'grant', revokeAccountGrant: async () => {},
     sessionStore: createMemorySessionStore(),
@@ -122,15 +122,15 @@ test('a prompt=none answer whose attempt is gone goes home signed out; explicit 
   assert.equal(s.finishes.length, 0)
 })
 
-test('a silent attempt never creates an account; the explicit sign-in still does', async t => {
+test('a verified Ideaflow session opens a private shared account without a public profile or onboarding', async t => {
   const s = await site(t, { owner: null })
   const hop = await s.visit('/people/someone')
   const back = await s.go('/auth/callback/ideaflow?code=c&state=state-1', { headers: { Cookie: `${s.pair(hop, AUTO_SIGNIN_COOKIE)}; ${s.pair(hop, '__Host-ul-login')}` } })
   assert.equal(back.status, 303)
   assert.equal(back.headers.get('location'), '/people/someone')
-  assert.equal(s.cookieFrom(back, '__Host-ul-session'), undefined)
-  assert.equal(s.signups.length, 0)
-  assert.deepEqual(s.audits.filter(event => event.event === 'auth_silent_signin').map(event => event.outcome), ['no_account'])
+  assert.ok(s.cookieFrom(back, '__Host-ul-session'))
+  assert.equal(s.signups.length, 1)
+  assert.deepEqual(s.audits.filter(event => event.event === 'auth_silent_signin').map(event => event.outcome), ['signed_in'])
 })
 
 test('an unconfirmed old-account match is left for the explicit sign-in', async t => {

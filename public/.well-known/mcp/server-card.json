@@ -31,7 +31,7 @@
         "people",
         "connections"
       ],
-      "revocation": "Settings \u2192 Connected apps, or RFC 7009 at /oauth/revoke"
+      "revocation": "Settings → Connected apps, or RFC 7009 at /oauth/revoke"
     }
   },
   "tools": [
@@ -353,5 +353,12 @@
       "scope": "same live canonical public page; no credentials forwarded or stored publication",
       "readerVerification": "ordinary ChatGPT access not established"
     }
+  },
+  "messaging": {
+    "provider": "OpenChat",
+    "identity": "shared Ideaflow account",
+    "documentation": "https://www.unlinked.ai/AGENTS.md",
+    "agentSending": false,
+    "confidentialRecipientResolver": "/api/messaging/v1/recipient"
   }
 }

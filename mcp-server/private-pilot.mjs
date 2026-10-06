@@ -1,3 +1,4 @@
+import { createMessagingHandler, MESSAGING_PATH } from './messaging.mjs'
 import { createServer } from 'node:http'
 import { hkdfSync } from 'node:crypto'
 import { generateKeyPair } from 'jose'
@@ -14,7 +15,7 @@ import { warmPublicPeopleIndex } from './public-people-warmup.mjs'
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
 // invocation; no operational credential or provider token is sent to clients.
-export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos, autoSignIn = false }) {
+export async function startPrivatePilot({ messagingSecret, resolveMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos, autoSignIn = false }) {
   const base = new URL(baseUrl)
   const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : networkMode === 'isolated-container' && host === '0.0.0.0' && ['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) && port === 9367
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !Number.isSafeInteger(port) || port < 7000 || port > 9999 || !privateHost || typeof complete !== 'function') throw new Error('explicit_isolated_pilot_configuration_required')
@@ -47,10 +48,11 @@ export async function startPrivatePilot({ baseUrl, login, resolveOwner, claimInv
   // a non-empty allow list (see docs/agent-api.md, "Grant provisioning").
   const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit } : undefined
   const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin, provisioning }) : null
+  const messaging = createMessagingHandler({ origin: base.origin, secret: messagingSecret, resolveRecipient: resolveMessagingRecipient })
   const server = createServer((request, response) => {
     let pathname
     try { pathname = new URL(request.url, base).pathname } catch { response.writeHead(400).end(); return }
-    void (pathname === '/mcp' ? mcp(request, response) : oauth?.isEndpoint(pathname) ? oauth.handle(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(() => {
+    void (pathname === MESSAGING_PATH ? messaging(request, response) : pathname === '/mcp' ? mcp(request, response) : oauth?.isEndpoint(pathname) ? oauth.handle(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(() => {
       if (!response.headersSent) response.writeHead(503).end()
       else response.end()
     })

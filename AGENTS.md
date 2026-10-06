@@ -111,7 +111,7 @@ Member-to-member connection requests (Connect, `/invitations`) and the per-accou
 
 The versioned agent tool contract — hosted MCP tools plus the grant-authenticated HTTP JSON API under `/api/agent/v1/` (`mcp-server/account-tools.mjs`, `account-api.mjs`), typed error codes, grant-scope version catalog and old-grant compatibility — is `docs/agent-api.md`. Grant tool lists are versioned in `ACCOUNT_GRANT_TOOL_VERSIONS` (`mcp-server/account-grants.mjs`): add a new version to add tools; never mutate an existing version's list.
 
-Sign-in is one "Sign in with Ideaflow" control with silent SSO; only an explicit sign-out, Switch account or an invitation binding asks Ideaflow ID for `prompt=select_account` (`docs/ideaflow-sign-in.md`). Do not add other sign-in options or `prompt=login`. Signed-out page views make one silent `prompt=none` hop per browser session (automatic sign-in; kill switch `UNLINKED_AUTO_SIGNIN=off`); a silent attempt never creates an account or opens a confirmation step (same doc).
+Sign-in is one "Sign in with Ideaflow" control with silent SSO; only an explicit sign-out, Switch account or an invitation binding asks Ideaflow ID for `prompt=select_account` (`docs/ideaflow-sign-in.md`). Do not add other sign-in options or `prompt=login`. Signed-out page views make one silent `prompt=none` hop per browser session (automatic sign-in; kill switch `UNLINKED_AUTO_SIGNIN=off`); a silent attempt creates only the private app record, never a public profile or confirmation step (same doc).
 
 MCP clients connect with OAuth ("paste the URL and sign in"): `mcp-server/oauth-server.mjs` is the authorization server for `/mcp` (RFC 9728/8414 metadata, CIMD for three exact published client ids (Claude, Claude Code, ChatGPT) plus stateless HMAC-signed DCR client ids, redirect URIs limited to the Claude/ChatGPT callbacks and loopback, PKCE S256, consent at `/oauth/authorize` in `private-browser.mjs`). Its access token is an ordinary account grant carrying `payload.connection`; connection grants are never reused as the copyable Settings credential, survive Regenerate, and revoking one never tombstones the automatic grant. Contract: `docs/agent-api.md` ("OAuth connector").
 
@@ -133,7 +133,9 @@ Public People summaries expose detailLevel (basic or detailed), derived from vis
 
 Connector-free public search, public HEAD behavior and the experimental anonymous Vercel transport are owned by [docs/public-directory.md](docs/public-directory.md); renderer: `mcp-server/public-web-search.mjs`. Ordinary ChatGPT reader access requires separate evidence.
 
-Profile **Message with OpenChat** context, explicit recipient choice and private-only fallback are documented in [docs/openchat-message.md](docs/openchat-message.md); link validator: `src/utils/openchat-profile-context.mjs`. Profile names/imported email never prove an OpenChat recipient.
+Profile **Message with OpenChat** shared identity resolution, explicit Send and private-only fallback are documented in [docs/openchat-message.md](docs/openchat-message.md); link validator: `src/utils/openchat-profile-context.mjs`. Profile names/imported email never prove an OpenChat recipient.
+
+Unlinked is the network and OpenChat its messenger. The confidential `/api/messaging/v1/recipient` service resolves published-profile ownership to a shared Ideaflow identity; it is not a browser/agent-grant endpoint. See docs/openchat-message.md.
 
 ## People directory controls
 

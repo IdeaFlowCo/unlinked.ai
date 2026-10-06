@@ -61,11 +61,11 @@ fragment, so browsers carry the page's `#hash` across every hop.
   normal callback signs in and returns to the same path and query.
 - **`login_required`** (or any other provider error, or no code): back to the
   same page, signed out, no error copy and no query added.
-- **No Unlinked account yet** for that Ideaflow identity: back to the page
-  signed out. A silent attempt never creates an account or opens `/find-me`:
-  someone reading a public profile is not pulled into onboarding. The explicit
-  **Sign in with Ideaflow** button still creates the account and lands on
-  `/find-me`.
+- **No Unlinked app record yet** for that verified Ideaflow identity: create the
+  private app record and sign in on the same page. OpenChat and Unlinked share
+  one account; this does not publish a public profile, claim an imported person,
+  import contacts or open `/find-me`. The explicit sign-in may still offer the
+  optional profile setup.
 - **An unconfirmed old-account match** (`/legacy-account`), a failed code
   exchange or any other app-level failure: back to the page signed out, no
   error page. The explicit sign-in keeps its full flow and errors.
