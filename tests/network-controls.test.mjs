@@ -96,7 +96,10 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   const duplicatesPage = await (await go('/network?presence=member&q=119', cookie)).text()
   const duplicatesSection = duplicatesPage.match(/<section[^>]*aria-label="People you know"[^>]*>([\s\S]*?)<\/section>/)?.[1]
   const rows = [...duplicatesSection.matchAll(/<article[^>]*data-network-row="([^"]+)"[^>]*>([\s\S]*?)<\/article>/g)]
-  assert.deepEqual(rows.map(row => row[1]), [rowId, duplicateId])
+  // Both imported assertions and the accepted member connection remain distinct.
+  assert.deepEqual(rows.slice(0, 2).map(row => row[1]), [rowId, duplicateId])
+  assert.equal(rows.length, 3)
+  assert.equal(new Set(rows.map(row => row[1])).size, 3)
   for (const row of rows) assert.match(row[2], /href="\/people\/p119"/)
   assert.doesNotMatch(await (await go('/network')).text(), /data-network-row=/)
 
