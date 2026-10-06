@@ -146,7 +146,10 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
     return slug ? usable(await Promise.resolve(lookupSlug(slug)).catch(() => null)) : null
   }
   const candidates = await Promise.all(rows.map(async row => [usable(publicTarget(row)), await bySlug(row)]))
-  const found = await lookup([...new Set(candidates.flat().filter(Boolean))].slice(0, 1000))
+  const targets = [...new Set(candidates.flat().filter(Boolean))], found = new Map()
+  for (let start = 0; start < targets.length; start += 1000) {
+    for (const [id, summary] of await lookup(targets.slice(start, start + 1000))) found.set(id, summary)
+  }
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
@@ -214,14 +217,10 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
   // connects to its own profile. Its own profile is never listed.
   async function connectedProfiles(owner, network, reader) {
     const assertions = network.assertions.filter(row => row.category === 'connections')
-    const targets = [...new Set(assertions.map(publicTarget).map(usableTarget).filter(Boolean))]
+    const matches = await publishedPeopleFor(assertions, { publicTarget, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : null, lookup: ids => reader.lookup({ ids }) })
     const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner).catch(() => null) : null
-    const found = new Map(), resolved = new Map()
-    for (let start = 0; start < targets.length; start += 1000) {
-      for (const [sourceId, summary] of await reader.lookup({ ids: targets.slice(start, start + 1000) })) {
-        resolved.set(sourceId, summary.id); found.set(summary.id, summary)
-      }
-    }
+    const found = new Map()
+    for (const summary of matches) if (summary) found.set(summary.id, summary)
     if (mine) {
       for (const summary of await reader.neighbors({ id: mine })) found.set(summary.id, summary)
       const self = (await reader.lookup({ ids: [mine] })).get(mine)
@@ -229,8 +228,8 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
     }
     // Deduplication retains the earliest known date, so reimporting a contact
     // does not make an old connection look newly imported or newly connected.
-    for (const row of assertions) {
-      const id = resolved.get(publicTarget(row)), profile = found.get(id)
+    for (const [index, row] of assertions.entries()) {
+      const id = matches[index]?.id, profile = found.get(id)
       if (!profile) continue
       const dates = {}
       for (const key of ['connectedAt', 'importedAt']) {
@@ -1236,8 +1235,7 @@ export function createPrivateBrowserHandler({ baseUrl, login, resolveOwner, clai
         const matchingContacts = (await linking).filter(value => !presence || value.presence === presence)
         const contacts = await withConnect(session.owner, matchingContacts.slice(index * 100, (index + 1) * 100), reader)
         everyone = await withConnect(session.owner, everyone, reader)
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, total, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
-        if (matchingContacts.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}${presence ? `&presence=${presence}` : ''}&sort=${sort}">Next contacts</a></p>`)
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
         journey(response, view, props.importJob)
         return
       }
