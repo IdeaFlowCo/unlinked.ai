@@ -14,12 +14,11 @@ const evidence = async (name, markup) => {
   if (process.env.OPENCHAT_PROFILE_EVIDENCE) await writeFile(`${process.env.OPENCHAT_PROFILE_EVIDENCE}/${name}.html`, markup)
 }
 const action = markup => {
-  const link = /<a\b[^>]*href="([^"]+)"[^>]*>Message with OpenChat ↗<\/a>/.exec(markup)
+  const link = /<a\b[^>]*href="([^"]+)"[^>]*>(?:Message|Message with OpenChat ↗)<\/a>/.exec(markup)
   const href = link?.[1]
   assert.ok(href, 'visible Message with OpenChat action')
-  assert.match(link[0], /target="_blank"/)
-  assert.match(link[0], /rel="noopener noreferrer"/)
-  return new URL(href.replaceAll('&amp;', '&'))
+  if (href.startsWith('https:')) { assert.match(link[0], /target="_blank"/); assert.match(link[0], /rel="noopener noreferrer"/) }
+  return new URL(href.replaceAll('&amp;', '&'), 'https://www.unlinked.ai')
 }
 
 function loadComponent(path, stubs = {}) {
@@ -35,7 +34,7 @@ function loadComponent(path, stubs = {}) {
 test('anonymous and signed-in runtime person profiles open the same shared-inbox entry; own public context is verified', async t => {
   let handler, ownerReads = 0, writes = 0, snapshotUnavailable = false, signupSourceUnavailable = false
   const owner = { ownerId: 'synthetic-openchat-owner', userId: 'synthetic-openchat-user' }
-  const snapshot = { state: 'published', complete: true, revision: 'synthetic-openchat-v1', profiles: [{ id: 'seed-person', name: 'Seed Person', presence: 'shadow', email: 'never-share@example.invalid', positions: [], education: [], skills: [] }], connections: [] }
+  const snapshot = { state: 'published', complete: true, revision: 'synthetic-openchat-v1', profiles: [{ id: 'seed-person', name: 'Seed Person', presence: 'member', email: 'never-share@example.invalid', positions: [], education: [], skills: [] }], connections: [] }
   const server = createServer((req, res) => handler(req, res))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
   const endpoint = `http://127.0.0.1:${server.address().port}`
@@ -52,7 +51,7 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
   const anonymous = await request('/people/seed-person'); assert.equal(anonymous.status, 200)
   const anonymousMarkup = await anonymous.text()
   const anonymousAction = action(anonymousMarkup); assert.equal(anonymousAction.searchParams.get('profile'), publicUrl)
-  assert.deepEqual([...anonymousAction.searchParams], [['intent', 'compose'], ['source', 'unlinked'], ['profile', publicUrl]])
+  assert.deepEqual([...anonymousAction.searchParams], [['profile', publicUrl]])
   await evidence('anonymous-person', anonymousMarkup)
   assert.equal(ownerReads, 0)
   const start = await request('/login'); const transaction = start.headers.getSetCookie().find(c => c.startsWith('__Host-ul-login=')).split(';')[0]
@@ -70,16 +69,16 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
   snapshot.profiles = []
   const privateOwn = await request('/profile', session); assert.equal(privateOwn.status, 200)
   const privateMarkup = await privateOwn.text()
-  assert.deepEqual([...action(privateMarkup).searchParams], [['intent', 'compose'], ['source', 'unlinked']])
+  assert.deepEqual([...action(privateMarkup).searchParams], [])
   await evidence('own-private-fallback', privateMarkup)
   snapshotUnavailable = true
   const unavailableOwn = await request('/profile', session); assert.equal(unavailableOwn.status, 200)
-  assert.deepEqual([...action(await unavailableOwn.text()).searchParams], [['intent', 'compose'], ['source', 'unlinked']])
+  assert.deepEqual([...action(await unavailableOwn.text()).searchParams], [])
   signupSourceUnavailable = true
   const unavailableSignup = await request('/profile', session); assert.equal(unavailableSignup.status, 200)
   const unavailableSignupMarkup = await unavailableSignup.text()
   assert.match(unavailableSignupMarkup, /Seed Owner/)
-  assert.deepEqual([...action(unavailableSignupMarkup).searchParams], [['intent', 'compose'], ['source', 'unlinked']])
+  assert.deepEqual([...action(unavailableSignupMarkup).searchParams], [])
   await evidence('own-unavailable-source-fallback', unavailableSignupMarkup)
   const unavailableSignupCard = await request('/card', session); assert.equal(unavailableSignupCard.status, 200)
   assert.match(await unavailableSignupCard.text(), /Seed Owner/)
@@ -103,14 +102,14 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
 
 test('private-only own profile never exports its name, imported email, account id or private profile id', () => {
   const page = renderOwnProfile({ csrf: 'c', profile: { id: 'private-person-id', name: 'Private Person', email: 'private@example.invalid' } })
-  assert.deepEqual([...action(page.content).searchParams], [['intent', 'compose'], ['source', 'unlinked']])
-  assert.match(page.content, /shared Ideaflow account/)
+  assert.deepEqual([...action(page.content).searchParams], [])
+  assert.equal(action(page.content).pathname, '/messages')
 })
 
 test('rendered public action escapes RFC3986 profile ids and never exports profile fields', () => {
   const page = renderPerson({ profile: { id: "é!'()*<seed>", name: '<script>private-name</script>', email: 'private@example.invalid', user_id: 'not-a-recipient', positions: [], education: [], skills: [] } })
   assert.equal(action(page.content).searchParams.get('profile'), 'https://www.unlinked.ai/people/%C3%A9%21%27%28%29%2A%3Cseed%3E')
-  assert.deepEqual([...action(page.content).searchParams.keys()], ['intent', 'source', 'profile'])
+  assert.deepEqual([...action(page.content).searchParams.keys()], ['profile'])
   assert.ok(!page.content.includes('<script>private-name</script>'))
 })
 

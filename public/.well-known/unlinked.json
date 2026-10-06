@@ -85,7 +85,7 @@
       "scope_not_granted",
       "upstream_unavailable"
     ],
-    "grantProvisioning": "POST /api/agent/v1/provision-grant — server-to-server, allow-listed confidential clients only (client_secret_basic), keyed on verified OIDC issuer+subject, never email; disabled unless operator-configured; contract v1.1 in docs/agent-api.md"
+    "grantProvisioning": "POST /api/agent/v1/provision-grant \u2014 server-to-server, allow-listed confidential clients only (client_secret_basic), keyed on verified OIDC issuer+subject, never email; disabled unless operator-configured; contract v1.1 in docs/agent-api.md"
   },
   "agentSetupAutomatic": true,
   "meet": "https://www.unlinked.ai/meet",
@@ -127,6 +127,12 @@
     "identity": "shared Ideaflow account",
     "documentation": "https://www.unlinked.ai/AGENTS.md",
     "agentSending": false,
-    "confidentialRecipientResolver": "/api/messaging/v1/recipient"
+    "confidentialRecipientResolver": "/api/messaging/v1/recipient",
+    "webInbox": "/messages",
+    "browserSessionExchange": {
+      "path": "/messages/session",
+      "authorization": "browser-session-and-csrf",
+      "agentAccess": false
+    }
   }
 }
