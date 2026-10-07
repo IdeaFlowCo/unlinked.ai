@@ -12,13 +12,15 @@ import { COMPANY_DATASET } from '../mcp-server/company-metadata.mjs'
 import { encode, decode, digest, exportGraph, exportSharedGraph, importGraph, restoreIsolatedGraph, verifyGraph, rollbackGraph, validateSnapshot } from '../deploy/private-pilot/graph-migration.mjs'
 
 const enabled = process.env.UNLINKED_MIGRATION_TEST === 'isolated-fixture'
+const sourceUri = process.env.MIGRATION_TEST_SOURCE_URI || 'bolt://127.0.0.1:8967'
+const targetUri = process.env.MIGRATION_TEST_TARGET_URI || 'bolt://127.0.0.1:8968'
 let neo4j, source, target
 before(async () => {
   if (!enabled) return
   neo4j = createRequire(process.env.MIGRATION_NEO4J_MODULE_ROOT + '/package.json')('neo4j-driver')
   const auth = neo4j.auth.basic('neo4j', 'unlinked-s21-fixture')
-  source = neo4j.driver('bolt://127.0.0.1:8967', auth)
-  target = neo4j.driver('bolt://127.0.0.1:8968', auth)
+  source = neo4j.driver(sourceUri, auth)
+  target = neo4j.driver(targetUri, auth)
   await source.verifyConnectivity(); await target.verifyConnectivity()
   for (const [driver, version] of [[source, '5.26.'], [target, '5.15.']]) {
     const component = await query(driver, "CALL dbms.components() YIELD name,versions WHERE name='Neo4j Kernel' RETURN versions[0] AS version")
@@ -272,7 +274,7 @@ check('operator CLI exports private shared snapshots and refuses overwrite or sy
   const snapshot = await exportGraph(source, neo4j)
   await importGraph(target, neo4j, snapshot, 'fixture-cli')
   const file = join(directory, 'reverse.private.json')
-  const env = { ...process.env, MIGRATION_NEO4J_URI: 'bolt://127.0.0.1:8968', MIGRATION_NEO4J_USER: 'neo4j', MIGRATION_NEO4J_PASSWORD: 'unlinked-s21-fixture' }
+  const env = { ...process.env, MIGRATION_NEO4J_URI: targetUri, MIGRATION_NEO4J_USER: 'neo4j', MIGRATION_NEO4J_PASSWORD: 'unlinked-s21-fixture' }
   const run = (...args) => promisify(execFile)(process.execPath, ['deploy/private-pilot/graph-migration-cli.mjs', ...args], { env })
   const exported = await run('export-shared', file, 'fixture-cli')
   assert.deepEqual(Object.keys(JSON.parse(exported.stdout)).sort(), ['action', 'manifestHash', 'nodes'])
