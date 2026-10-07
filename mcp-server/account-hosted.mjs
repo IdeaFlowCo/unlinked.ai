@@ -42,7 +42,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || ![authenticateGrant, getBackend, complete].every(x => typeof x === 'function')) throw new Error('account_host_configuration_required')
   const toolService = service ?? createAccountToolService({ getBackend, complete, readPublishedSnapshot })
-  return async (request, response) => {
+  return async (request, response, parsedBody) => {
     response.setHeader('Cache-Control', 'no-store')
     if (request.headers.host !== base.host || request.headers.origin && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
     // Unauthenticated requests get the OAuth challenge (RFC 9728) whatever the
@@ -57,6 +57,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
     const server = new McpServer({ name: 'unlinked-account-network', version: '1.0.0' })
     server.registerTool('unlinked_search_network', {
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       description: 'Search all currently published LinkedIn observations owned by your authenticated Unlinked account. Every result retains archive provenance. With degree1/2 (or a second-degree query), read recorded public connection paths from your explicitly linked legacy profile. Unknown identity/relationship matches are not invented; no other owner/private fields are accessed.',
       inputSchema: { query: z.string().min(1).max(1024), degree: z.union([z.literal(1), z.literal(2)]).optional(), cursor: z.string().max(2048).optional() },
     }, async ({ query, degree, cursor }) => {
@@ -77,6 +78,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       } catch (error) { return typedToolFailure(error) }
     })
     if (grant.tools.includes('unlinked_search_everyone') && typeof readPublishedSnapshot === 'function') server.registerTool('unlinked_search_everyone', {
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       description: 'Search the complete published professional People index, including recovered public Unlinked profiles. No personal archive is required. All profiles are considered for bounded index retrieval before AI ranks up to200 professional candidates. Raw archives, contact email/phone and private imports are excluded.',
       inputSchema: { query: z.string().min(1).max(1024) },
     }, async ({ query }) => {
@@ -114,6 +116,6 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     response.once('close', () => { void transport.close(); void server.close() })
     await server.connect(transport)
-    await transport.handleRequest(request, response)
+    await transport.handleRequest(request, response, parsedBody)
   }
 }
