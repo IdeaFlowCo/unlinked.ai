@@ -1,5 +1,20 @@
 # Unlinked
 
+## Connect or search now
+
+The default is one **Ideaflow connection** for Unlinked, OpenChat and Thoughtstream Vision, with separate app permissions. Start at https://id.ideaflow.app/agents?app=unlinked and read https://id.ideaflow.app/agents/guide. Shared MCP: https://id.ideaflow.app/mcp. Client routes and evidence status: https://id.ideaflow.app/agents/clients.json.
+
+- **Public people search:** https://www.unlinked.ai/search-public or GET https://www.unlinked.ai/api/people?q=QUERY. No login, agent credential or LinkedIn export required. Verify the actual response before claiming the host can read it; reader compatibility is not established for every agent.
+- **Private network:** reuse an existing connection; otherwise use the host's supported installation and authorization flow. Check identity and available data before suggesting an import. No export is required to establish a connection.
+- **ChatGPT / dots:** install and enable the shared OAuth MCP plugin through the host's supported plugin flow. Reading a URL or pasting an API key into chat does not install a plugin. If the agent has no installation tool, identify the exact host setup step. See the shared guide; directory publication and actual dot acceptance are not established.
+- **Meta Muse:** ask it to create a custom API connector from https://www.unlinked.ai/openapi.json. For private access use your Unlinked grant through its supported credential setup, with Authorization: Bearer on this origin only. First GET /api/agent/v1/whoami, then a read-only query. This is a documented integration approach, not a verified Muse installation. Native Muse MCP support is not assumed.
+- **Claude, Claude Code, Codex, Gemini CLI, Cursor, Hermes and other agents:** use the exact host guide above. Prefer shared OAuth where compatible; scoped per-app API credentials remain alternatives. A model/brand name alone does not identify the host's tools or permissions.
+
+Connection progress is: guide read → integration available in host → account authorized → read query verified. Report the actual stopping point; do not claim connected after copying configuration. In shared MCP, call get_profile and get_connection_status, then a consented app read. For Unlinked tools the shared prefix is unlinked__ (for example unlinked__unlinked_whoami); use tools/list for exact names. Direct Unlinked MCP tool names below have no shared prefix.
+
+Keep missing authorization, permission denial, a missing app account, pending import, empty data, and zero query matches distinct. An import count of zero does not rule out recovered connections. If readiness is unknown, say so; never infer an empty network from one unsuccessful query. Honor cancellation and revocation. Never send messages or modify shared notes as a setup test. Supply credentials through the host's supported credential flow, not a copied setup prompt.
+
+
 For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository. An experimental alternate public transport is https://unlinked-ideaflowco.vercel.app/search-public?q=gaming%20investors. Ordinary ChatGPT reader access is not established; see the alternate transport section of that contract.
 
 > Import a LinkedIn export, search your own network and connect your agent.
@@ -13,7 +28,7 @@ Own-network AI search reads only the signed-in owner's published imports plus sa
 Owner-network AI search requires supplied title/position evidence for a requested role, omits domain-only matches, and gives short conversational reasons grounded in supplied fields, stating when sector focus is unknown; response shapes and grant versions are unchanged.
 Manual keys: open [Settings → API keys](https://www.unlinked.ai/settings#api-keys) for **Copy API key** or **Copy agent setup**. See [key management](https://www.unlinked.ai/agents) for setup and Muse field formats; the lifecycle and release contract is `docs/agent-key-settings.md` in the repository.
 Contact emails, phone numbers and original archive bytes are excluded from agent search.
-Connect Claude or ChatGPT with OAuth (primary): add a custom connector with the URL https://www.unlinked.ai/mcp, choose Connect, sign in to Unlinked and Allow — no token to copy. Claude: Settings → Connectors → Add custom connector. ChatGPT: developer-mode connector with OAuth. Claude Code: `claude mcp add --transport http unlinked https://www.unlinked.ai/mcp`, then `/mcp` to sign in. Discovery: /mcp answers 401 with `WWW-Authenticate: Bearer resource_metadata="https://www.unlinked.ai/.well-known/oauth-protected-resource/mcp"`; authorization server metadata at /.well-known/oauth-authorization-server (PKCE S256, public clients, Client ID Metadata Documents for Claude's, Claude Code's and ChatGPT's published client ids, or dynamic registration at /oauth/register; redirect URIs limited to the Claude/ChatGPT connector callbacks and http://localhost / 127.0.0.1 loopback). Scopes: `network`, `people`, and optional `connections` (unchecked by default on consent). Each connection is a revocable account grant listed under Settings → Connected apps; tokens do not expire and are revoked there or at /oauth/revoke.
+Optional direct Unlinked-only OAuth (shared Ideaflow setup above is the default): add a custom connector with the URL https://www.unlinked.ai/mcp, choose Connect, sign in to Unlinked and Allow — no token to copy. Claude: Settings → Connectors → Add custom connector. ChatGPT: developer-mode connector with OAuth. Claude Code: `claude mcp add --transport http unlinked https://www.unlinked.ai/mcp`, then `/mcp` to sign in. Discovery: /mcp answers 401 with `WWW-Authenticate: Bearer resource_metadata="https://www.unlinked.ai/.well-known/oauth-protected-resource/mcp"`; authorization server metadata at /.well-known/oauth-authorization-server (PKCE S256, public clients, Client ID Metadata Documents for Claude's, Claude Code's and ChatGPT's published client ids, or dynamic registration at /oauth/register; redirect URIs limited to the Claude/ChatGPT connector callbacks and http://localhost / 127.0.0.1 loopback). Scopes: `network`, `people`, and optional `connections` (unchecked by default on consent). Each connection is a revocable account grant listed under Settings → Connected apps; tokens do not expire and are revoked there or at /oauth/revoke.
 Header alternative for clients that cannot sign in: Streamable HTTP with header `Authorization: Bearer <grant>`. Claude Desktop/claude.ai: custom connector (Customize → Connectors, Authentication "No sign in", request header Authorization). claude_desktop_config.json accepts only local stdio servers, so use `{"command":"npx","args":["-y","mcp-remote@0.1.38","https://www.unlinked.ai/mcp","--header","Authorization:${UNLINKED_AUTH_HEADER}"],"env":{"UNLINKED_AUTH_HEADER":"Bearer <grant>"}}` there, never a url/headers entry. Claude Code: `claude mcp add --transport http unlinked https://www.unlinked.ai/mcp --header "Authorization: Bearer <grant>"`.
 
 ## Entry and discovery
@@ -53,20 +68,9 @@ OpenChat messaging uses the same Ideaflow account. Profile recipients resolve on
 
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
-## OpenChat + Unlinked agent setup
+## Direct app API alternatives
 
-Start at https://chat.globalbr.ai/agents for the shared setup hub: API keys,
-MCP configurations, REST examples, conversation Context and troubleshooting.
-OpenChat and Unlinked share an Ideaflow identity and inbox; agent credentials
-are currently separate. An Unlinked grant does not send messages. Use an
-OpenChat `oc_` key for both messages and Context with read/write scopes and
-conversation membership. In OpenChat: Settings → Agent keys → New API key.
-Existing keys can be revealed and copied repeatedly; Copy setup with this key
-reuses the selected key. Settings → Copy agent setup creates a fresh key.
-OpenChat machine-readable docs: https://chat.globalbr.ai/AGENTS.md and
-https://chat.globalbr.ai/api/openapi.json. The maintained OpenChat MCP adapter
-is in https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server (local
-stdio, same API key); OpenChat has no live hosted /mcp endpoint.
+The shared connection above is the default. Existing direct Unlinked grants and OpenChat `oc_` keys remain service-specific. An Unlinked grant cannot send OpenChat messages. OpenChat direct API and Context documentation: https://chat.ideaflow.app/agents. Never send one app's credential to another app. Original archive files remain browser-only.
 
 ## Shared Ideaflow connector
 

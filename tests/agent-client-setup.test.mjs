@@ -75,11 +75,15 @@ test('Settings shows a Claude connector, a valid claude_desktop_config.json entr
   assert.doesNotMatch(content, /<script|onclick=/)
 })
 
-test('the public agents page leads with connector sign-in, and the config file only via mcp-remote', () => {
+test('public setup offers shared host guides, public search and a separate direct fallback', () => {
   const { content } = renderAgents({})
-  assert.match(content, /Settings → Connectors → Add custom connector<\/b>, paste this address, choose <b>Connect<\/b>, sign in to Unlinked/)
-  assert.match(content, /claude mcp add --transport http unlinked https:\/\/www\.unlinked\.ai\/mcp/)
-  assert.match(content, /claude_desktop_config.json<\/code> \(via <code>mcp-remote<\/code>\)/)
+  const links = [...content.matchAll(/href="([^"]+)"/g)].map(match => match[1])
+  assert.ok(links.includes('https://id.ideaflow.app/agents?app=unlinked'))
+  assert.ok(links.includes('/search-public'))
+  assert.ok(links.includes('https://id.ideaflow.app/agents#muse'))
+  assert.ok(links.includes('https://id.ideaflow.app/agents#chatgpt'))
+  assert.ok(links.includes('/settings'))
+  assert.ok(links.includes('/openapi.json'))
 })
 
 test('with the OAuth connector, Settings leads with "paste the URL and sign in" and lists connected apps', () => {

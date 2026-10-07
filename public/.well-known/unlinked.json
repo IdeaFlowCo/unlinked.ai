@@ -3,7 +3,7 @@
   "homepage": "https://www.unlinked.ai",
   "login": "https://www.unlinked.ai/login",
   "importInstructions": "https://www.unlinked.ai/import-linkedin",
-  "agentSetup": "https://www.unlinked.ai/settings",
+  "agentSetup": "https://id.ideaflow.app/agents?app=unlinked",
   "authentication": {
     "browser": "Ideaflow ID issuer/subject",
     "mcp": "revocable account-scoped bearer grant",
@@ -153,5 +153,25 @@
       "unlinked:read",
       "unlinked:write"
     ]
+  },
+  "directAgentSetup": "https://www.unlinked.ai/settings",
+  "agentGuide": "https://id.ideaflow.app/agents/guide",
+  "clientCompatibility": "https://id.ideaflow.app/agents/clients.json",
+  "onboarding": {
+    "importRequiredToConnect": false,
+    "publicSearch": {
+      "url": "https://www.unlinked.ai/search-public",
+      "authentication": "none",
+      "hostReaderVerified": false
+    },
+    "defaultConnection": "shared_ideaflow_oauth",
+    "muse": {
+      "route": "custom_api",
+      "spec": "https://www.unlinked.ai/openapi.json",
+      "credentialSetup": "https://www.unlinked.ai/settings",
+      "verification": "not_verified",
+      "firstRead": "https://www.unlinked.ai/api/agent/v1/whoami"
+    },
+    "completion": "successful authenticated read in the actual host"
   }
 }

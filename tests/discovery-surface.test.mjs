@@ -61,7 +61,11 @@ test('public/.well-known/unlinked.json product descriptor is valid', () => {
   assert.equal(descriptor.homepage, 'https://www.unlinked.ai');
   assert.equal(descriptor.login, 'https://www.unlinked.ai/login');
   assert.equal(descriptor.importInstructions, 'https://www.unlinked.ai/import-linkedin');
-  assert.equal(descriptor.agentSetup, 'https://www.unlinked.ai/settings');
+  assert.equal(descriptor.agentSetup, 'https://id.ideaflow.app/agents?app=unlinked');
+  assert.equal(descriptor.directAgentSetup, 'https://www.unlinked.ai/settings');
+  assert.equal(descriptor.onboarding.importRequiredToConnect, false);
+  assert.equal(descriptor.onboarding.publicSearch.authentication, 'none');
+  assert.equal(descriptor.onboarding.muse.verification, 'not_verified');
   assert.equal(descriptor.authentication.browser, 'Ideaflow ID issuer/subject');
   assert.equal(descriptor.authentication.mcp, 'revocable account-scoped bearer grant');
   assert.equal(descriptor.data.ownNetwork, true);

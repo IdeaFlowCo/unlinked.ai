@@ -3,7 +3,7 @@
   "info": {
     "title": "Unlinked canonical beta",
     "version": "1.0.0",
-    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository."
+    "description": "Public People reads require no account or import. Private agent routes require a revocable Unlinked account grant supplied through the host credential flow. Shared Ideaflow OAuth is the default setup; this specification describes the direct Unlinked API fallback, including the documented but unverified Muse custom-connector route. A successful whoami and read-only query confirm direct access. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository."
   },
   "servers": [
     {
@@ -1501,7 +1501,7 @@
     }
   },
   "externalDocs": {
-    "description": "Shared Ideaflow connector for Unlinked, OpenChat and Thoughtstream Vision",
-    "url": "https://id.ideaflow.app/agents"
+    "description": "Shared agent setup and client-specific guidance",
+    "url": "https://id.ideaflow.app/agents/guide"
   }
 }

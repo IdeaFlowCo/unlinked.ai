@@ -376,5 +376,11 @@
       "unlinked:read",
       "unlinked:write"
     ]
+  },
+  "recommendedSetup": {
+    "url": "https://id.ideaflow.app/agents?app=unlinked",
+    "mcp": "https://id.ideaflow.app/mcp",
+    "guide": "https://id.ideaflow.app/agents/guide",
+    "note": "This server card describes the optional direct Unlinked MCP endpoint. Shared setup is the default; preserve existing direct connections."
   }
 }
