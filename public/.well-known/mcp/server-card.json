@@ -31,7 +31,7 @@
         "people",
         "connections"
       ],
-      "revocation": "Settings \u2192 Connected apps, or RFC 7009 at /oauth/revoke"
+      "revocation": "Settings → Connected apps, or RFC 7009 at /oauth/revoke"
     }
   },
   "tools": [
@@ -365,6 +365,8 @@
       "path": "/messages/session",
       "authorization": "browser-session-and-csrf",
       "agentAccess": false
-    }
+    },
+    "agentSetup": "https://chat.globalbr.ai/agents",
+    "agentCredential": "Separate OpenChat oc_ key for messages and Context; Unlinked grants cannot send messages."
   }
 }

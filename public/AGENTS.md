@@ -31,7 +31,7 @@ Legacy Supabase APIs and legacy stdio tools remain historical code, not current 
 
 Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
 
-Grant catalog v4 adds optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing grants and default issuance remain read-only. Agents can never send messages or post. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
+Grant catalog v4 adds optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing grants and default issuance remain read-only. Unlinked grants cannot send messages or post; connect OpenChat separately for messaging and Context. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
 
 ## Connection browsing and page depth
 
@@ -40,3 +40,18 @@ Public People summaries expose detailLevel (basic or detailed), derived from vis
 OpenChat messaging uses the same Ideaflow account. Profile recipients resolve on the server; unclaimed people use an invitation. `/api/messaging/v1/recipient` is a confidential service endpoint, not available to browser sessions or agent grants. Messages require an explicit Send; public profile publication remains opt-in.
 
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
+
+## OpenChat + Unlinked agent setup
+
+Start at https://chat.globalbr.ai/agents for the shared setup hub: API keys,
+MCP configurations, REST examples, conversation Context and troubleshooting.
+OpenChat and Unlinked share an Ideaflow identity and inbox; agent credentials
+are currently separate. An Unlinked grant does not send messages. Use an
+OpenChat `oc_` key for both messages and Context with read/write scopes and
+conversation membership. In OpenChat: Settings → Agent keys → New API key.
+Existing keys can be revealed and copied repeatedly; Copy setup with this key
+reuses the selected key. Settings → Copy agent setup creates a fresh key.
+OpenChat machine-readable docs: https://chat.globalbr.ai/AGENTS.md and
+https://chat.globalbr.ai/api/openapi.json. The maintained OpenChat MCP adapter
+is in https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server (local
+stdio, same API key); OpenChat has no live hosted /mcp endpoint.
