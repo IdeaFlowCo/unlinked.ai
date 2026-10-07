@@ -1,6 +1,8 @@
 # Durable Sessions
 
-Browser sessions for the private pilot are backed by Neo4j (`sessionStore`), so members stay signed in across runtime restarts and deployments. 
+Browser sessions for the private pilot are backed by Neo4j (`sessionStore`), so members stay signed in across runtime restarts and deployments.
+
+Sessions expire thirty days after creation; sign-out removes the current session, and account deletion removes the owner’s sessions. A deployment without a durable `sessionStore` loses sessions on restart.
 
 ## Design
 

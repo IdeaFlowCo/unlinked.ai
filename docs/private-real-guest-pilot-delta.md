@@ -19,7 +19,7 @@ DNS/TLS/routing and runtime installation are approval operations; no change has 
 ## Runtime/data separation
 
 Proposed new private owner-controlled root: /srv/unlinked-private-guest-pilot-20261001 (mode700).
-It is separate from every synthetic staging root and existing Noos graph/data volume.
+The base isolated-container layout is separate from every synthetic staging root and existing Noos graph/data volume; the [release packet](../deploy/private-pilot/README.md#verified-shared-noos-graph-cutover) owns the opt-in shared graph topology, migration and recovery contract.
 Subdirectories: runtime/ (reviewed source SHAs), neo4j-data/ (dedicated database), assets/ (700/600 private blobs), identity-state/ (separately persisted identity adapter state), invitations/ (operator recovery bundles), backups/ (paired private snapshots), and audit/ (non-token consent/identity provenance).
 A dedicated1GiB Neo4j container uses only the internal backend bridge at `graph:7687`; the operational API binds runtime loopback9022, and browser/MCP binds only the unpublished runtime listener 9367 behind the new443 ingress.
 The runtime container overlays only the root parent as an operator-owned mode700 tmpfs so Docker cannot synthesize a root-owned 755 parent; durable state remains in the explicit child binds for runtime, assets and audit, with graph, backups and invitations excluded from app mounts.
@@ -28,7 +28,7 @@ No generic graph-query route, raw asset route or operational token is public.
 The checked-in release packet is `deploy/private-pilot/`; `pilot.py` plans/preflights/starts/stops/backs up/restores only that exact root and labeled three-service composition, restores only to new canonical `backups/rehearsal-*` targets under the operator-owned mode-700 backup root, uses only the existing noninteractive `sudo -n docker` route for Docker operations, and preserves only the validated origin, UID/GID plus the three approved image variables for Compose.
 `runtime.mjs` refuses to launch without reviewed mode600 wiring.
 Open account signup is the proposed initial cohort path. The exact verified production issuer/subject resolves an existing active private owner or atomically creates one through the reviewed private signup capability before upload is enabled. The runtime must include the reviewed background import worker and Noos pending-job/job-history discovery before accepting real archives.
-Every import/index/source/receipt/grant is keyed to that immutable owner UUID in the dedicated graph.
+Every import/index/source/receipt/grant is keyed to that immutable owner UUID in the configured operational store.
 Prior legacy IDs/data remain unchanged and unlinked; no prior owner or data is imported implicitly.
 Storage retains immutable originals and receipts for recovery. No automatic physical deletion is promised.
 At pilot closure/guest withdrawal ingress and grants are disabled; any physical purge is a separately consented, owner-verified operation, including backups.
@@ -53,7 +53,7 @@ An actual existing legacy account still needs independent supported legacy-owner
 
 Public ingress exposes only sign-in/account setup; all receipts/uploads/search are session/CSRF/same-origin and exact owner gated.
 Ingress uses `Referrer-Policy: strict-origin` so provider navigation keeps the Origin header without sending sensitive paths in referrers. Invitation mode, when used, permits only the exact HTTPS identity provider in CSP `form-action`; subsequent private forms remain self-only.
-Secure HttpOnly SameSite cookies contain random session IDs, not identity/access tokens. A session lasts thirty days, or until sign-out or a runtime restart.
+Secure HttpOnly SameSite cookies contain random session IDs, not identity/access tokens. Session lifetime and restart persistence are owned by [Durable Sessions](durable-sessions.md).
 One combined upload disclosure/action authorizes private archive retention and bounded OpenAI processing of queries and observed name/company/position/date fields for browser and search-only scoped agent searches; no separate production consent checkbox is required. New production uploads record `public-professional-archive-openai-v2` for shared People eligibility, while older private-v1 and synthetic imports remain excluded. Immutable import/source receipts retain versioned consent. Older imports without this disclosure fail closed for owner search and grants; replay never upgrades prior consent.
 The [agent API contract](agent-api.md) owns account grant provisioning, Settings/OAuth consent, tools and degree semantics.
 Operational/provider tokens, raw recovery APIs and recovered original-file downloads are never delegated to the agent.

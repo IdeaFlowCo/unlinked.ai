@@ -26,7 +26,7 @@ The separate real guest packet fixes its root at `/srv/unlinked-private-guest-pi
 Inside the runtime container, that root parent is an ephemeral mode-700 tmpfs owned by the explicit operator UID/GID; only the `runtime/`, `assets/` and `audit/` child mounts are bound into the app, preserving their read-only/write boundaries and preventing a Docker-created root-owned 755 parent from bypassing the privacy guard.
 Its helper runs as the private file-owning release operator and uses only the existing noninteractive `sudo -n docker` route for Docker operations, preserving only the manifest-derived origin, UID/GID and three image variables needed by Compose.
 The graph service keeps the pinned Neo4j image startup path and `tini`, but sets `umask 077` before launch so newly created graph directories/files satisfy the private 700/600 recovery policy.
-The operational service must use the dedicated driver/database and must never mount the legacy generic query API.
+The operational service must use the reviewed configured graph driver and must never mount the legacy generic query API. The [release packet](../deploy/private-pilot/README.md#verified-shared-noos-graph-cutover) owns the opt-in shared graph migration and recovery contract.
 Private archive/source/oversized-observation bytes use `assets/`, with owner-hashed paths, immutable SHA-256 names and modes 700/600.
 Paired quiesced backups use `backups/` and include graph resources, owner/identity bindings, every referenced blob, integrity manifest and tombstones; restore rehearsals must use a new canonical `backups/rehearsal-*` target under that operator-owned mode-700 backup root.
 Existing storage backends remain replaceable; binary ZIP bytes are not graph properties.
@@ -66,7 +66,7 @@ Publication rollback is an irreversible tombstone for that publication; it retai
 A quiesced paired restore must restore journal rows before final publication fences and preserve owner mappings, source IDs, immutable receipt history and grant/publication tombstones.
 The synthetic harness rehearses this pair; power-loss/directory-fsync durability, operational backup ownership/retention and historical live-writer fencing remain separate release evidence.
 
-The private container recipe uses a frontend bridge for nginx/runtime and a separate internal runtime/graph bridge.
+The base private container recipe uses a frontend bridge for nginx/runtime and a separate internal runtime/graph bridge.
 Only non-root nginx publishes 443 to container 8443; neither app nor graph has a published port, and operations remains container loopback.
 The runtime's private parent tmpfs is part of that recipe; graph, backups and invitation trees are not broadly mounted into the app.
 The process default remains host loopback; exact isolated-container mode and private service addresses must be explicitly selected.
