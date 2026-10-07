@@ -46,6 +46,13 @@ export function decode(value, neo4j) {
   throw new Error('unsupported_encoded_type')
 }
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const METADATA_LABELS = ['UnlinkedGraphMigration', 'UnlinkedGraphMigrationRecord']
+const privateLabel = label => label.startsWith('Unlinked') || label.startsWith('Operational')
+const unknownPrivateLabel = label => privateLabel(label) && !LABELS.includes(label) && !METADATA_LABELS.includes(label)
+async function requireBoundedDomain(session, neo4j) {
+  const result = await session.run("MATCH (n) WHERE any(label IN labels(n) WHERE (label STARTS WITH 'Unlinked' OR label STARTS WITH 'Operational') AND NOT label IN $allowed) RETURN count(n) AS count", { allowed: [...LABELS, ...METADATA_LABELS] })
+  if (!result.records[0].get('count').equals(neo4j.int(0))) throw new Error('unexpected_private_domain_label')
+}
 const quote = name => '`' + name.replaceAll('`', '``') + '`'
 function validateSchema(schema) {
   if (!Array.isArray(schema)) throw new Error('invalid_schema')
@@ -80,6 +87,7 @@ async function exportDomain(driver, neo4j, migrationId) {
   try {
     const nodes = await session.executeRead(async tx => {
       if (shared) {
+        await requireBoundedDomain(tx, neo4j)
         const receipt = await tx.run('MATCH (m:UnlinkedGraphMigration {id:$id}) RETURN m.status AS status', { id: migrationId })
         if (receipt.records.length !== 1 || receipt.records[0].get('status') !== 'verified') throw new Error('shared_export_verified_migration_required')
       }
@@ -99,7 +107,9 @@ async function exportDomain(driver, neo4j, migrationId) {
     })
     const constraints = await session.run('SHOW CONSTRAINTS YIELD name, type, entityType, labelsOrTypes, properties RETURN name, type, entityType, labelsOrTypes, properties')
     const indexes = await session.run("SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, owningConstraint WHERE owningConstraint IS NULL AND type <> 'LOOKUP' RETURN name, type, entityType, labelsOrTypes, properties")
-    const schema = [...constraints.records, ...indexes.records].map(r => r.toObject())
+    const allSchema = [...constraints.records, ...indexes.records].map(r => r.toObject())
+    if (shared && allSchema.some(entry => entry.labelsOrTypes.some(unknownPrivateLabel))) throw new Error('unsupported_schema')
+    const schema = allSchema
       .filter(entry => !shared || entry.labelsOrTypes.some(label => LABELS.includes(label)))
       .sort((a, b) => a.name.localeCompare(b.name))
     const payload = { version: 1, nodes, schema, relationshipCount: 0 }
@@ -140,6 +150,7 @@ async function checkSchema(session, expected, requireAll = false) {
   const current = new Map([...c.records, ...i.records].map(r => [r.get('name'), r.toObject()]))
   const approved = new Map(expected.map(entry => [entry.name, entry]))
   for (const entry of current.values()) {
+    if (entry.labelsOrTypes.some(unknownPrivateLabel)) throw new Error('target_schema_conflict')
     if (entry.labelsOrTypes.some(label => LABELS.includes(label)) &&
         JSON.stringify(entry) !== JSON.stringify(approved.get(entry.name))) throw new Error('target_schema_conflict')
   }
@@ -153,6 +164,7 @@ export async function importGraph(driver, neo4j, snapshot, id, { recoveryProtect
   const manifestHash = validateSnapshot(snapshot); validateRunId(id)
   const session = driver.session({ database: 'neo4j' })
   try {
+    await requireBoundedDomain(session, neo4j)
     await session.run('CREATE CONSTRAINT unlinked_graph_migration_key IF NOT EXISTS FOR (m:UnlinkedGraphMigration) REQUIRE m.id IS UNIQUE')
     await session.run('CREATE CONSTRAINT unlinked_graph_migration_record_key IF NOT EXISTS FOR (m:UnlinkedGraphMigrationRecord) REQUIRE (m.migrationId,m.sourceId) IS UNIQUE')
     await session.executeWrite(async tx => {
@@ -178,7 +190,7 @@ export async function importGraph(driver, neo4j, snapshot, id, { recoveryProtect
         }
       })
     }
-    await verifyGraph(driver, neo4j, snapshot, id)
+    await verifyGraphState(driver, neo4j, snapshot, id, true)
     await session.executeWrite(async tx => {
       await requireCopying(tx, id, manifestHash)
       await tx.run("MATCH (m:UnlinkedGraphMigration {id:$id,manifestHash:$hash}) SET m.status='verified',m.verifiedAt=$now,m.recordCount=$count", { id, hash: manifestHash, now: new Date().toISOString(), count: neo4j.int(snapshot.nodes.length) })
@@ -191,11 +203,33 @@ async function requireCopying(tx, id, hash) {
   if (result.records.length !== 1 || result.records[0].get('status') !== 'copying' || result.records[0].get('activatedAt') !== null) throw new Error('migration_conflict')
 }
 export async function verifyGraph(driver, neo4j, snapshot, id) {
+  return verifyGraphState(driver, neo4j, snapshot, id, false)
+}
+async function verifyGraphState(driver, neo4j, snapshot, id, allowCopying) {
   validateSnapshot(snapshot); validateRunId(id)
   const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
   try {
+    await requireBoundedDomain(session, neo4j)
+    const receipt = await session.run('MATCH (m:UnlinkedGraphMigration {id:$id}) RETURN labels(m) AS labels,m.manifestHash AS hash,m.status AS status', { id })
+    if (receipt.records.length !== 1 || JSON.stringify(receipt.records[0].get('labels')) !== JSON.stringify(['UnlinkedGraphMigration']) ||
+        receipt.records[0].get('hash') !== snapshot.manifestHash || ![...(allowCopying ? ['copying'] : []), 'verified'].includes(receipt.records[0].get('status'))) throw new Error('migration_checkpoint_invalid')
     await checkSchema(session, snapshot.schema, true)
-    const rows = await session.run('MATCH (m:UnlinkedGraphMigrationRecord {migrationId:$id})-[:UNLINKED_IMPORTED_RECORD]->(n) RETURN m.sourceId AS sourceId, labels(n) AS labels,properties(n) AS properties ORDER BY m.sourceId', { id })
+    const edges = await session.run(`MATCH (a)-[r]->(b) WHERE
+      any(label IN labels(a) WHERE label IN $labels) OR any(label IN labels(b) WHERE label IN $labels) OR
+      (a:UnlinkedGraphMigrationRecord AND a.migrationId=$id) OR (b:UnlinkedGraphMigrationRecord AND b.migrationId=$id) OR
+      (a:UnlinkedGraphMigration AND a.id=$id) OR (b:UnlinkedGraphMigration AND b.id=$id)
+      WITH a,r,b WHERE NOT coalesce((type(r)='UNLINKED_IMPORTED_RECORD' AND labels(a)=['UnlinkedGraphMigrationRecord']
+        AND a.migrationId=$id AND size(labels(b))=1 AND labels(b)[0] IN $labels),false)
+      RETURN count(r) AS count`, { id, labels: LABELS })
+    if (!edges.records[0].get('count').equals(neo4j.int(0))) throw new Error('unexpected_target_relationships')
+    const rows = await session.run('MATCH (m:UnlinkedGraphMigrationRecord {migrationId:$id})-[:UNLINKED_IMPORTED_RECORD]->(n) RETURN m.sourceId AS sourceId, labels(m) AS ledgerLabels,m.hash AS hash,labels(n) AS labels,properties(n) AS properties ORDER BY m.sourceId', { id })
+    const expected = new Map(snapshot.nodes.map(row => [row.sourceId, row]))
+    for (const record of rows.records) {
+      const row = expected.get(record.get('sourceId'))
+      if (!row || record.get('hash') !== digest(row) || JSON.stringify(record.get('ledgerLabels')) !== JSON.stringify(['UnlinkedGraphMigrationRecord'])) throw new Error('migration_ledger_invalid')
+    }
+    const ledgerCount = await session.run('MATCH (m:UnlinkedGraphMigrationRecord {migrationId:$id}) RETURN count(m) AS count', { id })
+    if (!ledgerCount.records[0].get('count').equals(neo4j.int(snapshot.nodes.length))) throw new Error('migration_ledger_invalid')
     const actual = rows.records.map(r => ({ sourceId: r.get('sourceId'), label: r.get('labels').length === 1 ? r.get('labels')[0] : null, properties: encode(r.get('properties'), neo4j) }))
     if (digest(actual) !== digest(snapshot.nodes)) throw new Error('target_parity_failed')
     const count = await session.run('MATCH (n) WHERE any(label IN labels(n) WHERE label IN $labels) RETURN count(n) AS count', { labels: LABELS })
