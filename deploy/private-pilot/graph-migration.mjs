@@ -138,6 +138,11 @@ async function checkSchema(session, expected, requireAll = false) {
   const c = await session.run('SHOW CONSTRAINTS YIELD name,type,entityType,labelsOrTypes,properties RETURN name,type,entityType,labelsOrTypes,properties')
   const i = await session.run("SHOW INDEXES YIELD name,type,entityType,labelsOrTypes,properties,owningConstraint WHERE owningConstraint IS NULL AND type <> 'LOOKUP' RETURN name,type,entityType,labelsOrTypes,properties")
   const current = new Map([...c.records, ...i.records].map(r => [r.get('name'), r.toObject()]))
+  const approved = new Map(expected.map(entry => [entry.name, entry]))
+  for (const entry of current.values()) {
+    if (entry.labelsOrTypes.some(label => LABELS.includes(label)) &&
+        JSON.stringify(entry) !== JSON.stringify(approved.get(entry.name))) throw new Error('target_schema_conflict')
+  }
   for (const entry of expected) {
     const prior = current.get(entry.name)
     if ((!prior && requireAll) || (prior && JSON.stringify(prior) !== JSON.stringify(entry))) throw new Error('target_schema_conflict')
@@ -213,7 +218,12 @@ export async function rollbackGraph(driver, neo4j, snapshot, id) {
         const row = expected.get(r.get('sourceId'))
         if (!row || digest(encode(r.get('properties'), neo4j)) !== digest(row.properties) || JSON.stringify(r.get('labels')) !== JSON.stringify([row.label])) throw new Error('rollback_later_edit')
       }
-      const edges = await tx.run('MATCH (:UnlinkedGraphMigrationRecord {migrationId:$id})-[:UNLINKED_IMPORTED_RECORD]->(n)-[r]-() WHERE type(r) <> $type RETURN count(r) AS count', { id, type: 'UNLINKED_IMPORTED_RECORD' })
+      const edges = await tx.run(`MATCH (m:UnlinkedGraphMigrationRecord {migrationId:$id})-[:UNLINKED_IMPORTED_RECORD]->(n)
+        UNWIND [n,m] AS touched MATCH (touched)-[r]-()
+        WITH startNode(r) AS a,r,endNode(r) AS b,n WHERE NOT coalesce((type(r)='UNLINKED_IMPORTED_RECORD'
+          AND labels(a)=['UnlinkedGraphMigrationRecord'] AND a.migrationId=$id
+          AND b=n AND size(labels(b))=1 AND labels(b)[0] IN $labels),false)
+        RETURN count(r) AS count`, { id, labels: LABELS })
       if (!edges.records[0].get('count').equals(neo4j.int(0))) throw new Error('rollback_later_relationship')
       await tx.run('MATCH (m:UnlinkedGraphMigrationRecord {migrationId:$id})-[:UNLINKED_IMPORTED_RECORD]->(n) DETACH DELETE n,m', { id })
       await tx.run("MATCH (m:UnlinkedGraphMigration {id:$id}) SET m.status='rolled-back'", { id })

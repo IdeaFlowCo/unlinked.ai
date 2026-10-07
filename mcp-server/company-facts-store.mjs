@@ -123,7 +123,7 @@ export function createNeo4jCompanyFactsStore(driver, database = 'neo4j') {
         await session.executeWrite(async tx => {
           await locked(tx, dataset, revision)
           await tx.run(`MATCH (r:UnlinkedCompanyRevision {dataset: $dataset, revision: $revision}) SET r.state = 'deleted'
-            WITH r OPTIONAL MATCH (p:UnlinkedCompanyDataset {id: $dataset}) WHERE p.revision = $revision DELETE p`, { dataset, revision })
+            WITH r OPTIONAL MATCH (p:UnlinkedCompanyDataset {id: $dataset}) WHERE p.revision = $revision DETACH DELETE p`, { dataset, revision })
         })
       } finally { await session.close() }
     },

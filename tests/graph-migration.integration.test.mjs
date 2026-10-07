@@ -7,6 +7,8 @@ import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPrivatePilotDependencies } from '../mcp-server/private-composition.mjs'
+import { createNeo4jCompanyFactsStore } from '../mcp-server/company-facts-store.mjs'
+import { COMPANY_DATASET } from '../mcp-server/company-metadata.mjs'
 import { encode, decode, digest, exportGraph, exportSharedGraph, importGraph, restoreIsolatedGraph, verifyGraph, rollbackGraph, validateSnapshot } from '../deploy/private-pilot/graph-migration.mjs'
 
 const enabled = process.env.UNLINKED_MIGRATION_TEST === 'isolated-fixture'
@@ -131,6 +133,72 @@ check('later relationships block rollback; missing schema fails verification', a
   await assert.rejects(rollbackGraph(target, neo4j, snapshot, 'fixture-schema'), /rollback_later_relationship/)
   await query(target, 'DROP INDEX fixture_resource_owner')
   await assert.rejects(verifyGraph(target, neo4j, snapshot, 'fixture-schema'), /target_schema_conflict/)
+})
+
+check('target schema rejects unexpected domain indexes during import and verification but permits unrelated schema', async () => {
+  const snapshot = await exportGraph(source, neo4j)
+  await query(target, 'CREATE TEXT INDEX unrelated_text FOR (n:Node) ON (n.content)')
+  for (const type of ['TEXT', 'RANGE']) {
+    await query(target, `CREATE ${type} INDEX extra_domain FOR (n:OperationalResource) ON (n.text)`)
+    await assert.rejects(importGraph(target, neo4j, snapshot, 'fixture-extra-schema'), /target_schema_conflict/)
+    assert.equal((await query(target, 'MATCH (n:OperationalResource) RETURN count(n) AS count')).records[0].get('count').toNumber(), 0)
+    await query(target, 'DROP INDEX extra_domain')
+  }
+  await importGraph(target, neo4j, snapshot, 'fixture-extra-schema')
+  await query(target, 'CREATE TEXT INDEX extra_domain FOR (n:OperationalResource) ON (n.text)')
+  await assert.rejects(verifyGraph(target, neo4j, snapshot, 'fixture-extra-schema'), /target_schema_conflict/)
+  await query(target, 'DROP INDEX extra_domain')
+  assert.equal((await verifyGraph(target, neo4j, snapshot, 'fixture-extra-schema')).parity, true)
+  assert.deepEqual((await exportSharedGraph(target, neo4j, 'fixture-extra-schema')).schema, snapshot.schema)
+})
+
+check('rollback rejects malformed ledger edges and preserves their endpoints', async () => {
+  const snapshot = await exportGraph(source, neo4j)
+  await importGraph(target, neo4j, snapshot, 'fixture-ledger-edges')
+  for (const edge of [
+    'MATCH (n:OperationalResource),(other:Node) CREATE (n)-[:UNLINKED_IMPORTED_RECORD {later:true}]->(other)',
+    'MATCH (n:OperationalResource),(other:Node) CREATE (other)-[:UNLINKED_IMPORTED_RECORD {later:true}]->(n)',
+    'MATCH (n:OperationalResource) CREATE (:UnlinkedGraphMigrationRecord)-[:UNLINKED_IMPORTED_RECORD {later:true}]->(n)',
+    "MATCH (n:OperationalResource) CREATE (:UnlinkedGraphMigrationRecord {migrationId:'foreign'})-[:UNLINKED_IMPORTED_RECORD {later:true}]->(n)",
+    "MATCH (n:OperationalResource) CREATE (:Node {migrationId:'fixture-ledger-edges'})-[:UNLINKED_IMPORTED_RECORD {later:true}]->(n)",
+    'MATCH (n:OperationalResource) CREATE (n)-[:UNLINKED_IMPORTED_RECORD {later:true}]->(n)',
+    "MATCH (m:UnlinkedGraphMigrationRecord {migrationId:'fixture-ledger-edges'}),(other:Node {id:'existing-main-record'}) CREATE (m)-[:LATER_REFERENCE {later:true}]->(other)",
+  ]) {
+    await query(target, edge)
+    await assert.rejects(rollbackGraph(target, neo4j, snapshot, 'fixture-ledger-edges'), /rollback_later_relationship/)
+    assert.equal((await query(target, 'MATCH ()-[r {later:true}]->() RETURN count(r) AS count')).records[0].get('count').toNumber(), 1)
+    assert.equal((await query(target, 'MATCH (n:OperationalResource) RETURN count(n) AS count')).records[0].get('count').toNumber(), 1)
+    assert.equal((await query(target, "MATCH (n:Node {id:'existing-main-record'}) RETURN n.content AS content")).records[0].get('content'), 'Preserve me')
+    await query(target, 'MATCH ()-[r {later:true}]->() DELETE r')
+  }
+  await query(target, "MATCH (m:UnlinkedGraphMigrationRecord {migrationId:'fixture-ledger-edges'})-[:UNLINKED_IMPORTED_RECORD]->() SET m:Node")
+  await assert.rejects(rollbackGraph(target, neo4j, snapshot, 'fixture-ledger-edges'), /rollback_later_relationship/)
+  await query(target, "MATCH (m:UnlinkedGraphMigrationRecord {migrationId:'fixture-ledger-edges'}) REMOVE m:Node")
+  assert.equal((await rollbackGraph(target, neo4j, snapshot, 'fixture-ledger-edges')).status, 'rolled-back')
+})
+
+check('company revocation removes migrated live pointers in shared and restored isolated graphs', async () => {
+  const originalStore = createNeo4jCompanyFactsStore(source)
+  await originalStore.initialize()
+  const companies = [{ name: 'Synthetic Fixture Company', description: 'Operator-published fixture' }]
+  const { revision } = await originalStore.publish(COMPANY_DATASET, companies, 'a'.repeat(64))
+  const snapshot = await exportGraph(source, neo4j)
+  await importGraph(target, neo4j, snapshot, 'fixture-company')
+  const reverse = await exportSharedGraph(target, neo4j, 'fixture-company')
+  await query(source, 'MATCH (n) DETACH DELETE n')
+  await restoreIsolatedGraph(source, neo4j, reverse, 'fixture-company-restored')
+  for (const driver of [target, source]) {
+    const store = createNeo4jCompanyFactsStore(driver)
+    await store.initialize()
+    assert.deepEqual((await store.read()).companies, companies)
+    await store.revoke(COMPANY_DATASET, revision)
+    assert.equal(await store.read(), null)
+    assert.equal((await query(driver, 'MATCH (p:UnlinkedCompanyDataset) RETURN count(p) AS count')).records[0].get('count').toNumber(), 0)
+    assert.equal((await query(driver, 'MATCH (r:UnlinkedCompanyRevision) RETURN r.state AS state')).records[0].get('state'), 'deleted')
+    assert.equal((await query(driver, 'MATCH (c:UnlinkedCompanyChunk) RETURN count(c) AS count')).records[0].get('count').toNumber(), 1)
+  }
+  const revoked = await exportSharedGraph(target, neo4j, 'fixture-company')
+  assert.equal(revoked.nodes.some(node => node.label === 'UnlinkedCompanyDataset'), false)
 })
 
 check('shared reverse backup preserves later edits, additions and deletions while excluding unrelated Noos data', async () => {
