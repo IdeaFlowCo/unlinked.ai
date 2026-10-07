@@ -130,7 +130,7 @@ test('public/llms.txt conforms to specification', () => {
   const content = fs.readFileSync(path.join(ROOT_DIR, 'public/llms.txt'), 'utf8');
 
   assert.ok(content.startsWith('# Unlinked'), 'Must start with # Unlinked');
-  assert.ok(content.includes('> Import a LinkedIn export, search your own network and connect your agent.'), 'Must contain current blockquote');
+  assert.ok(content.includes('> Search public people, connect your agent, and add your contacts when needed.'), 'Public llms.txt summary must describe public search first and optional contacts');
   assert.ok(content.includes('(/agents)'), 'Must link to /agents');
   assert.ok(content.includes('(/AGENTS.md)'), 'Must link to /AGENTS.md');
   assert.ok(content.includes('(/.well-known/unlinked.json)'), 'Must link to unlinked.json');
