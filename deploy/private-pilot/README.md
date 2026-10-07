@@ -141,3 +141,44 @@ The target must be canonical, absent and without symlinks; parent ownership/mode
 The application writer must verify graph queries, source/owner/principal readback, receipts, blob references, counts and tombstones on that separately approved rehearsal before accepting recovery.
 Rollback stops only labeled owned services and preserves all state, invitation bundles, source receipts and backups.
 It invalidates ephemeral browser sessions and MCP signing keys through runtime stop; durable invitation/grant or provider-client revocation is a separate owner operation using the retained recovery bundle.
+
+## Verified shared Noos graph cutover
+
+`shared-noos.yaml` is an explicit opt-in override (Docker Compose >=2.24.4), applied after lossless graph migration and verification. The runtime alone joins the existing external `noos_default` network and uses exactly `bolt://noos_neo4j:7687`; ingress keeps its frontend network, ports and private host rules. Base loopback/isolated-container modes are unchanged.
+
+Set `PILOT_SHARED_GRAPH_MIGRATION_ID` and `PILOT_SHARED_GRAPH_MANIFEST_SHA256` to the reviewed migration receipt. Before initializing any source store/schema, composition requires exactly one `UnlinkedGraphMigration` node with matching `id`, `manifestHash`, and `status: verified`. Missing, mismatched or unverified receipts fail startup and close the graph driver. The verified checkpoint is locked and its first `activatedAt` is durably recorded before any initialization; pre-activation destructive rollback then refuses this receipt, including on subsequent restarts. The runtime's protected `NOOS_PRIVATE_PASSWORD` must authenticate the shared target; no credentials are sent to browsers.
+
+```sh
+docker compose -f compose.yaml -f shared-noos.yaml config
+docker compose -f compose.yaml -f shared-noos.yaml up -d runtime ingress
+```
+
+Pause Unlinked writes and its background workers before the stable export; keep the source graph as retained read-only rollback data. The override makes `graph` profile-only (`rollback-graph`) rather than automatically launching it. It does not stop an already running source graph. Do not run old and shared application writers simultaneously. Do not use `--remove-orphans` or delete the old graph/data during this cutover.
+
+Verify owner/identity/resource/asset parity and negative generic Noos exposure before reopening writes; resume background dispatch once. A rollback after target-side writes requires reconciling those writes before switching back. A verified migration receipt proves import integrity, not blanket authorization to expose private profiles through generic Noos routes.
+
+The operator-only `graph-migration-cli.mjs` supports a bounded source export, import, verification, pre-activation rollback, and post-activation reverse recovery. Its allowlist covers the 24 populated domains from the reviewed census plus four currently empty schema domains: `UnlinkedEmailInviteLock`, `UnlinkedEmailSend`, `UnlinkedEmailSuppression`, and `UnlinkedMemberInvitation`. Only single-label records and NODE UNIQUENESS/RANGE schema are supported. Unknown labels, schema or application relationships abort; this tool does not flatten relationships or silently drop empty-domain constraints.
+
+Supply `MIGRATION_NEO4J_MODULE_ROOT` pointing to an existing reviewed dependency checkout, and `MIGRATION_NEO4J_URI`, `MIGRATION_NEO4J_USER`, and `MIGRATION_NEO4J_PASSWORD` through the protected operator environment. The CLI never accepts or prints credentials in arguments. Export creates a new mode-600 file exclusively; snapshots contain private data and must stay outside git and release logs. Review the count/hash-only output and retain the original source and assets.
+
+```sh
+node deploy/private-pilot/graph-migration-cli.mjs export /private/original-source.json
+# Change the protected connection environment to the shared target.
+node deploy/private-pilot/graph-migration-cli.mjs import /private/original-source.json reviewed-cutover-id
+node deploy/private-pilot/graph-migration-cli.mjs verify /private/original-source.json reviewed-cutover-id
+# Only before runtime activation:
+node deploy/private-pilot/graph-migration-cli.mjs rollback /private/original-source.json reviewed-cutover-id
+```
+
+For recovery after activation, stop Unlinked application writers and workers first. Keep them stopped throughout the shared export, restore, verification and connection switch. Use `export-shared` against the shared graph, with the original verified receipt ID. It exports every current approved domain record, including later additions, edits, tombstones and the effect of deletions. It excludes unrelated Noos nodes/schema and migration metadata. It ignores only valid `UNLINKED_IMPORTED_RECORD` edges from a single-label migration record belonging to that receipt into an approved single-label record; all other relationships touching the domain fail closed.
+
+```sh
+node deploy/private-pilot/graph-migration-cli.mjs export-shared /private/postactivation-recovery.json reviewed-cutover-id
+# Change the protected connection environment to a NEW isolated graph.
+node deploy/private-pilot/graph-migration-cli.mjs restore-isolated /private/postactivation-recovery.json reviewed-recovery-id
+node deploy/private-pilot/graph-migration-cli.mjs verify /private/postactivation-recovery.json reviewed-recovery-id
+```
+
+`restore-isolated` refuses unrelated graph records or relationships, and allows a retry only for that recovery run's ledger/domain. Recovery receipts are protected from destructive rollback before any copy writes, including partial retries, because the normal isolated launcher does not activate shared checkpoints. It does not overwrite the retained original source. Keep the existing asset roots unchanged, verify owner/session/identity/resource and asset parity, then switch the single application writer to the fresh isolated graph. Never replay the old pre-cutover snapshot over a graph containing later writes. Neither reverse export nor restore deletes or mutates the shared source; retain both graphs until independent recovery verification is complete.
+
+The `graph-migration` GitHub Actions job runs the actual Neo4j 5.26→5.15 fixture, including activation and reverse recovery, on disposable hosted services. The regular source test command skips those destructive fixtures unless `UNLINKED_MIGRATION_TEST=isolated-fixture` and the explicit driver checkout are supplied. The fixture verifies both server versions before resetting data; never point the fixture ports at real stores.

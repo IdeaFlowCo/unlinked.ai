@@ -59,6 +59,7 @@ function loadNoos(root) {
 // capability, provider token, graph credential or operations bearer reaches a
 // browser/agent. The caller supplies an isolated root and reviewed private env.
 export async function createPrivatePilotDependencies({ root, baseUrl, host, operationalPort, boltUrl, dataMode, networkMode = 'loopback',
+  sharedGraphMigrationId = process.env.PILOT_SHARED_GRAPH_MIGRATION_ID, sharedGraphManifestSha256 = process.env.PILOT_SHARED_GRAPH_MANIFEST_SHA256,
   config = { issuer: process.env.IDEAFLOW_ISSUER, clientId: process.env.IDEAFLOW_CLIENT_ID,
     clientSecret: process.env.IDEAFLOW_CLIENT_SECRET, graphPassword: process.env.NOOS_PRIVATE_PASSWORD,
     apiKey: process.env.OPENAI_API_KEY }, modules, loginFactory = createIdeaflowLogin,
@@ -71,7 +72,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // Automatic sign-in kill switch: UNLINKED_AUTO_SIGNIN=off.
   autoSignInEnv = process.env }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
-  const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : networkMode === 'isolated-container' && bolt.hostname === 'graph' && bolt.port === '7687'
+  const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : ((networkMode === 'isolated-container' && bolt.hostname === 'graph') || (networkMode === 'shared-noos' && bolt.hostname === 'noos_neo4j')) && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
       bolt.protocol !== 'bolt:' || !privateBolt || !bolt.port || bolt.pathname || bolt.search || bolt.hash || bolt.username || bolt.password ||
       !Number.isSafeInteger(operationalPort) || operationalPort < 7000 || operationalPort > 9999 || !['synthetic', 'private_live'].includes(dataMode) ||
@@ -79,7 +80,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       !Number.isSafeInteger(graphReadyRetryMs) || graphReadyRetryMs < 1 || graphReadyRetryMs > graphReadyDeadlineMs ||
       ['issuer', 'clientId', 'clientSecret', 'graphPassword', 'apiKey'].some(key => typeof config[key] !== 'string' || !config[key])) throw new Error('private_composition_configuration_required')
   if (dataMode === 'private_live' && (root !== '/srv/unlinked-private-guest-pilot-20261001' || !['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) ||
-      config.issuer !== 'https://id.ideaflow.app/api/auth' || bolt.port !== (networkMode === 'isolated-container' ? '7687' : '9289') || operationalPort !== 9022)) throw new Error('private_composition_target_required')
+      config.issuer !== 'https://id.ideaflow.app/api/auth' || bolt.port !== (networkMode === 'loopback' ? '9289' : '7687') || operationalPort !== 9022)) throw new Error('private_composition_target_required')
+  if (networkMode === 'shared-noos' && (typeof sharedGraphMigrationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(sharedGraphMigrationId) || typeof sharedGraphManifestSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sharedGraphManifestSha256))) throw new Error('shared_graph_verified_migration_required')
   const stat = await lstat(root)
   if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_composition_root_required')
   const dependencies = modules ?? loadNoos(root)
@@ -105,6 +107,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         if (Date.now() + graphReadyRetryMs > deadline) throw new Error('private_graph_not_ready')
         await wait(graphReadyRetryMs)
       }
+    }
+    if (networkMode === 'shared-noos') {
+      const session = driver.session({ database: 'neo4j', defaultAccessMode: 'WRITE' })
+      try {
+        // Fence rollback before the first application write, including schema initialization.
+        // A duplicate receipt must not activate either checkpoint.
+        const result = await session.run('MATCH (candidate:UnlinkedGraphMigration {id:$id,manifestHash:$manifestHash}) WITH collect(candidate) AS receipts WHERE size(receipts)=1 WITH receipts[0] AS m SET m._lock=true REMOVE m._lock WITH m WHERE m.status="verified" SET m.activatedAt=coalesce(m.activatedAt,timestamp()) RETURN m.id AS id,m.manifestHash AS manifestHash,m.status AS status', { id: sharedGraphMigrationId, manifestHash: sharedGraphManifestSha256 })
+        if (result.records.length !== 1 || result.records[0].get('id') !== sharedGraphMigrationId || result.records[0].get('manifestHash') !== sharedGraphManifestSha256 || result.records[0].get('status') !== 'verified') throw new Error('shared_graph_verified_migration_required')
+      } finally { await session.close() }
     }
     const store = new dependencies.OperationalStore(driver, 'neo4j')
     const provisioner = new dependencies.InvitedOwnerProvisioner(driver, 'neo4j', {

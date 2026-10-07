@@ -7,16 +7,16 @@ import { lstat } from 'node:fs/promises'
 const root = '/srv/unlinked-private-guest-pilot-20261001'
 let dependencies, pilot
 const networkMode = process.env.PILOT_NETWORK_MODE ?? 'loopback'
-const browserHost = networkMode === 'isolated-container' ? '0.0.0.0' : '127.0.0.1'
-const boltUrl = networkMode === 'isolated-container' ? 'bolt://graph:7687' : 'bolt://127.0.0.1:9289'
+const browserHost = ['isolated-container', 'shared-noos'].includes(networkMode) ? '0.0.0.0' : '127.0.0.1'
+const boltUrl = networkMode === 'shared-noos' ? 'bolt://noos_neo4j:7687' : networkMode === 'isolated-container' ? 'bolt://graph:7687' : 'bolt://127.0.0.1:9289'
 try {
-  if (!['loopback', 'isolated-container'].includes(networkMode) || process.env.PILOT_ROOT !== root || !['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(process.env.PILOT_ORIGIN) || process.env.PILOT_DATA_MODE !== 'private_live' || process.env.PILOT_HOST !== browserHost || process.env.PILOT_PORT !== '9367' || process.env.PILOT_OPERATIONS_URL !== 'http://127.0.0.1:9022' || process.env.PILOT_BOLT_URL !== boltUrl) throw new Error()
+  if (!['loopback', 'isolated-container', 'shared-noos'].includes(networkMode) || process.env.PILOT_ROOT !== root || !['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(process.env.PILOT_ORIGIN) || process.env.PILOT_DATA_MODE !== 'private_live' || process.env.PILOT_HOST !== browserHost || process.env.PILOT_PORT !== '9367' || process.env.PILOT_OPERATIONS_URL !== 'http://127.0.0.1:9022' || process.env.PILOT_BOLT_URL !== boltUrl) throw new Error()
   const wiring = root + '/runtime/wiring.mjs'
   const info = await lstat(wiring)
   if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600) throw new Error()
   const { createPrivatePilotDependencies } = await import(pathToFileURL(wiring).href)
   if (typeof createPrivatePilotDependencies !== 'function') throw new Error()
-  dependencies = await createPrivatePilotDependencies({ root, baseUrl: process.env.PILOT_ORIGIN, host: '127.0.0.1', operationalPort: 9022, boltUrl, networkMode, dataMode: 'private_live' })
+  dependencies = await createPrivatePilotDependencies({ root, baseUrl: process.env.PILOT_ORIGIN, host: '127.0.0.1', operationalPort: 9022, boltUrl, networkMode, dataMode: 'private_live', sharedGraphMigrationId: process.env.PILOT_SHARED_GRAPH_MIGRATION_ID, sharedGraphManifestSha256: process.env.PILOT_SHARED_GRAPH_MANIFEST_SHA256 })
   for (const key of ['login', 'resolveOwner', 'signup', 'getBackend', 'complete', 'close']) {
     if (typeof dependencies[key] !== (key === 'login' ? 'object' : 'function') || dependencies[key] === null) throw new Error()
   }

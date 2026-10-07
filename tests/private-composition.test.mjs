@@ -61,6 +61,10 @@ async function fixture(t) {
           state.readinessChecks = (state.readinessChecks ?? 0) + 1
           if (state.readyFailures-- > 0) throw new Error('graph_starting')
         },
+        session(options) {
+          state.receiptSessionOptions = options
+          return { async run(query, params) { state.receiptQuery = { query, params }; return { records: (state.receipts ?? []).map(values => ({ get: key => values[key] })) } }, async close() { state.receiptSessionClosed = true } }
+        },
         close: async () => { state.closes++ },
       }
     } }, OperationalStore, InvitedOwnerProvisioner,
@@ -267,4 +271,44 @@ test('composed reminders ignore manual people and deleted receipts, and stop for
     if (process.env.PRIVATE_BROWSER_EVIDENCE_DIR) await writeFile(join(process.env.PRIVATE_BROWSER_EVIDENCE_DIR, `composed-reminder-${uploaded}.json`), JSON.stringify({ boundary: 'Real runtime composition and owner-fenced recovery reader; injected graph/store/transport contracts, synthetic account.', durableUpload: uploaded, atSignupHours: 48, result, deliveredSubjects: sent.map(message => message.subject), persistedStage: store.recipients.get(accountKey(member)).importReminderStage }, null, 2))
     await runtime.close()
   }
+})
+
+const migrationId = 'synthetic-migration-1'
+const manifestHash = 'a'.repeat(64)
+const sharedOptions = options => ({ ...options, networkMode: 'shared-noos', boltUrl: 'bolt://noos_neo4j:7687', sharedGraphMigrationId: migrationId, sharedGraphManifestSha256: manifestHash })
+
+test('shared Noos refuses invalid configuration without initializing stores', async t => {
+  const { options, state } = await fixture(t)
+  for (const change of [{ boltUrl: 'bolt://graph:7687' }, { boltUrl: 'bolt://noos_neo4j:9289' }, { boltUrl: 'bolt://noos_neo4j.evil:7687' }, { sharedGraphMigrationId: undefined }, { sharedGraphManifestSha256: 'bad' }, { sharedGraphMigrationId: 'unsafe/id' }]) {
+    await assert.rejects(createPrivatePilotDependencies({ ...sharedOptions(options), ...change }), /private_composition_configuration_required|shared_graph_verified_migration_required/)
+  }
+  assert.equal(state.initialized, undefined)
+  assert.equal(state.storeInitialized, undefined)
+})
+
+test('shared Noos checks exact verified receipt before any schema provisioning', async t => {
+  const { options, state } = await fixture(t)
+  for (const receipts of [[], [{ id: migrationId, manifestHash, status: 'imported' }], [{ id: 'other', manifestHash, status: 'verified' }], [{ id: migrationId, manifestHash: 'b'.repeat(64), status: 'verified' }], [{ id: migrationId, manifestHash, status: 'verified' }, { id: migrationId, manifestHash, status: 'verified' }]]) {
+    state.receipts = receipts
+    await assert.rejects(createPrivatePilotDependencies(sharedOptions(options)), /shared_graph_verified_migration_required/)
+    assert.equal(state.initialized, undefined)
+    assert.equal(state.storeInitialized, undefined)
+    assert.equal(state.receiptSessionClosed, true)
+  }
+  assert.equal(state.closes, 5)
+})
+
+test('shared Noos initializes only after exact verified migration and retains private target rules', async t => {
+  const { options, state } = await fixture(t)
+  state.receipts = [{ id: migrationId, manifestHash, status: 'verified' }]
+  const dependencies = await createPrivatePilotDependencies(sharedOptions(options))
+  t.after(dependencies.close)
+  assert.equal(state.driver.url, 'bolt://noos_neo4j:7687')
+  assert.deepEqual(state.receiptSessionOptions, { database: 'neo4j', defaultAccessMode: 'WRITE' })
+  assert.deepEqual(state.receiptQuery.params, { id: migrationId, manifestHash })
+  assert.match(state.receiptQuery.query, /UnlinkedGraphMigration/)
+  assert.match(state.receiptQuery.query, /WHERE size\(receipts\)=1/)
+  assert.match(state.receiptQuery.query, /SET m\.activatedAt=coalesce\(m\.activatedAt,timestamp\(\)\)/)
+  assert.equal(state.storeInitialized, true)
+  await assert.rejects(createPrivatePilotDependencies({ ...sharedOptions(options), dataMode: 'private_live' }), /private_composition_target_required/)
 })
