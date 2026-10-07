@@ -147,3 +147,7 @@ Public setup links to the shared OpenChat + Unlinked agent hub at
 `https://chat.globalbr.ai/agents`. Identity/inbox are shared; agent credentials
 remain separate. OpenChat `oc_` keys cover messages and Context; Unlinked grants
 retain their existing scopes. Never send an Unlinked grant to OpenChat.
+
+## Shared Ideaflow connector
+
+Connect an agent at https://id.ideaflow.app/agents using one account connection for Unlinked, OpenChat and Thoughtstream Vision. The shared MCP URL is https://id.ideaflow.app/mcp. Each app has separate consented read/write scopes; adding another app never silently expands an existing grant. Direct Unlinked MCP/API credentials remain supported. The internal request-bound adapter at `/api/connector/mcp` resolves only existing issuer/subject account bindings and accepts no ordinary user bearer tokens. Deployment requires a dedicated `IDEAFLOW_CONNECTOR_SECRET` shared only with the gateway.

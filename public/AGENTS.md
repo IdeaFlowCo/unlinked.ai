@@ -55,3 +55,7 @@ OpenChat machine-readable docs: https://chat.globalbr.ai/AGENTS.md and
 https://chat.globalbr.ai/api/openapi.json. The maintained OpenChat MCP adapter
 is in https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server (local
 stdio, same API key); OpenChat has no live hosted /mcp endpoint.
+
+## Shared Ideaflow connector
+
+Connect an agent at https://id.ideaflow.app/agents using one account connection for Unlinked, OpenChat and Thoughtstream Vision. The shared MCP URL is https://id.ideaflow.app/mcp. Each app has separate consented read/write scopes; adding another app never silently expands an existing grant. Direct Unlinked MCP/API credentials remain supported. The internal request-bound adapter at `/api/connector/mcp` resolves only existing issuer/subject account bindings and accepts no ordinary user bearer tokens. Deployment requires a dedicated `IDEAFLOW_CONNECTOR_SECRET` shared only with the gateway.

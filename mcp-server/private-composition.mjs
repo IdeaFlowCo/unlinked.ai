@@ -489,6 +489,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         if (!state.isDirectory() || state.isSymbolicLink()) throw new Error('private_asset_root_required')
         await rm(target, { recursive: true, force: true })
       },
+      ideaflowConnectorSecret: process.env.IDEAFLOW_CONNECTOR_SECRET,
       resolveOwner: identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null,
       claimInvitation: provisioner.claim.bind(provisioner),
       signup: provisioner.signup.bind(provisioner),

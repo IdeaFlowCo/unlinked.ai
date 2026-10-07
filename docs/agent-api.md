@@ -493,3 +493,7 @@ MCP annotations mark these as writes. Messaging and posting are never available.
 Settings and `whoami.grant.update` suggest regeneration/reconnection only when
 the grant lacks tools its own scope now provides. A v3 read grant has no nudge
 solely because v4 adds an opt-in scope. Missing grant records render safely.
+
+## Shared connector delegation
+
+The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` on that host). The gateway forwards authorized calls to `POST /api/connector/mcp` with a dedicated `IDEAFLOW_CONNECTOR_SECRET` HS256 assertion, never a personal API key. Assertions bind the exact UTF-8 JSON body hash, `https://www.unlinked.ai/mcp` audience, Ideaflow issuer/subject, consented `unlinked:read` and optional `unlinked:write`, unique jti, and at most 60 seconds. Invalid/replayed assertions fail before account lookup. No account or linking is created by a call. The existing account tool service and live owner authorization are reused; write permission exposes only existing connection actions, never messaging or raw archives. Gateway disconnect revokes future assertions; in-flight authorized operations can finish. Deploy the per-service secret in the runtime env with the release; absence keeps the internal endpoint disabled.
