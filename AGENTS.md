@@ -143,11 +143,7 @@ Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/ses
 
 The standalone browser's progressive filtering, URL state, ordering and private date provenance are described in `docs/network-controls.md`. Browser ordering is not an agent API contract change; preserve existing agent defaults and keep owner relationship dates out of public profile projections.
 
-Public setup defaults to the shared Ideaflow hub, with Unlinked context at
-`https://id.ideaflow.app/agents?app=unlinked`. Client-specific guidance and verification
-status are owned by `/agents/guide` and `/agents/clients.json` on that hub.
-Keep direct app-key fallbacks service-specific; imports are not connection prerequisites.
-See [agent onboarding](docs/agent-onboarding.md) for the decision and acceptance matrix.
+Public setup and its release/acceptance gates are owned by [agent onboarding](docs/agent-onboarding.md); client-specific instructions remain on the central identity gateway.
 
 ## Shared Ideaflow connector
 

@@ -6,9 +6,11 @@ Default entry: https://id.ideaflow.app/agents?app=unlinked. The shared MCP endpo
 
 An import is not a connection prerequisite. Public `/search-public` and `/api/people` require no account; actual web-reader compatibility remains separately unverified. Existing direct grants, tool catalogs, HTTP routes and OAuth permissions are unchanged. The Muse custom-API route is documented but untested in the real host. A direct Unlinked grant never authorizes OpenChat or Vision.
 
-Before claiming connection, the agent checks identity and completes a read-only query. Shared MCP uses `get_profile`, `get_connection_status`, then an advertised `unlinked__`-prefixed tool. Direct clients use `/api/agent/v1/whoami` or `unlinked_whoami`. Imports, recovered records, permissions and graph anchoring have separate meanings: import count zero does not prove an empty network, and no query matches do not imply an import is required. Existing typed API errors remain authoritative; do not invent a data-readiness field.
+The [public agent brief](../public/AGENTS.md#connect-or-search-now) owns connection progress, read verification and data-readiness reporting guidance. Direct identity reads use `/api/agent/v1/whoami` or `unlinked_whoami`; existing typed errors are owned by the [agent API contract](agent-api.md). Do not invent a data-readiness field.
 
 ## Verification and limits
+
+Deploy these cross-links only after the companion `ideaflow-auth` branch `feat/agent-onboarding-muse-dots` lands and its central guide routes are deployed. Directory publication and real dot/Muse host acceptance remain external gates; documented setup does not establish either.
 
 - Serve the discovery JSON and setup pages anonymously; private `/mcp` and `/api/agent/v1/` keep their authentication.
 - Check JSON URLs and import requirements as contracts, and exercise the actual runtime discovery handler and setup renderer.

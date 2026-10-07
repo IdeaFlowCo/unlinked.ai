@@ -27,7 +27,7 @@ request another export. See [LinkedIn’s export guidance](https://www.linkedin.
 New members without an upload can receive reminder emails; see
 [reminder timing, eligibility and preferences](docs/email.md#linkedin-export-reminders).
 `/import-linkedin` explains how to request and keep the export, then links to sign-in and upload.
-`/login` starts Ideaflow ID sign-in in the standalone runtime, and `/agents` points to Settings for Agent setup.
+`/login` starts Ideaflow ID sign-in in the standalone runtime, and `/agents` offers agent connection guidance (see [Agent & MCP Surface](#agent--mcp-surface)).
 The fictional homepage answer illustrates title/company matching, not a live search result or inferred biography.
 Public People browsing, private upload, owner-network AI search, recovered-profile confirmation, Everyone AI search and agent setup live in the canonical beta; legacy Supabase APIs remain historical and are not the login path.
 
@@ -48,13 +48,13 @@ for controls, confirmed removal and preservation of imported observations. For l
 
 ## Agent & MCP Surface
 
-unlinked.ai exposes a canonical account-scoped MCP endpoint from the standalone runtime. The legacy REST schema and stdio package remain historical reference:
+Start at the [shared Ideaflow setup hub](https://id.ideaflow.app/agents?app=unlinked) to connect Unlinked, OpenChat and Thoughtstream Vision with separate app permissions. No LinkedIn export is required to connect. See [agent onboarding](docs/agent-onboarding.md) for client guides, connection verification and release gates. The direct Unlinked endpoint remains supported; the legacy REST schema and stdio package remain historical reference:
 
-- **Setup status:** [`/agents`](https://www.unlinked.ai/agents) describes current setup; signed-in users create/revoke grants in Settings.
+- **Setup status:** [`/agents`](https://www.unlinked.ai/agents) offers shared setup and public search; Settings manages optional direct Unlinked grants.
 - **Machine discovery:** [`/llms.txt`](https://www.unlinked.ai/llms.txt), [`/.well-known/unlinked.json`](https://www.unlinked.ai/.well-known/unlinked.json), [`/.well-known/mcp/server-card.json`](https://www.unlinked.ai/.well-known/mcp/server-card.json), and [`/openapi.json`](https://www.unlinked.ai/openapi.json)
 - **Developer & contributor notes:** [`AGENTS.md`](AGENTS.md) (repo-internal) and [`public/AGENTS.md`](public/AGENTS.md) (HTTP agent brief)
-- **Agent permissions:** See [Settings key management](docs/agent-key-settings.md) for manual API keys and [the agent contract](docs/agent-api.md#catalog-v4-optional-connection-actions) for optional connection-request permissions and OAuth consent.
-- **Current MCP:** Streamable HTTP at `https://www.unlinked.ai/mcp`, versioned tools documented in the [agent contract](docs/agent-api.md), authorized by a revocable account-scoped bearer grant. `degree: 1|2` or "my second-degree connections" reads recorded public paths from the explicitly confirmed recovered profile; no confirmed legacy link means no graph anchor is inferred. Sanitized recovered Connections observations can participate in owner-network search for the same confirmed owner. Older single-tool grants remain owner-network only.
+- **Direct Unlinked permissions:** See [Settings key management](docs/agent-key-settings.md) for manual API keys and [the agent contract](docs/agent-api.md#catalog-v4-optional-connection-actions) for optional connection-request permissions and OAuth consent.
+- **Direct Unlinked MCP:** Streamable HTTP at `https://www.unlinked.ai/mcp`, versioned tools documented in the [agent contract](docs/agent-api.md), authorized by a revocable account-scoped bearer grant. `degree: 1|2` or "my second-degree connections" reads recorded public paths from the explicitly confirmed recovered profile; no confirmed legacy link means no graph anchor is inferred. Sanitized recovered Connections observations can participate in owner-network search for the same confirmed owner. Older single-tool grants remain owner-network only.
 - **Signed connection API:** Browser sessions can call `GET /api/my-connections?degree=1|2&q=&cursor=` for bounded recorded first- or second-degree public paths with source revision and deterministic pagination.
 - **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — historical stdio server implementation supporting the legacy REST API when that backend is available.
 - **Agent Keys:** Historical REST keys start with `ul_`; current Agent setup uses the standalone runtime's account grant.

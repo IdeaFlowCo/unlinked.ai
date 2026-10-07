@@ -2,22 +2,11 @@
 
 ## Connect or search now
 
-The default is one **Ideaflow connection** for Unlinked, OpenChat and Thoughtstream Vision, with separate app permissions. Start at https://id.ideaflow.app/agents?app=unlinked and read https://id.ideaflow.app/agents/guide. Shared MCP: https://id.ideaflow.app/mcp. Client routes and evidence status: https://id.ideaflow.app/agents/clients.json.
-
-- **Public people search:** https://www.unlinked.ai/search-public or GET https://www.unlinked.ai/api/people?q=QUERY. No login, agent credential or LinkedIn export required. Verify the actual response before claiming the host can read it; reader compatibility is not established for every agent.
-- **Private network:** reuse an existing connection; otherwise use the host's supported installation and authorization flow. Check identity and available data before suggesting an import. No export is required to establish a connection.
-- **ChatGPT / dots:** install and enable the shared OAuth MCP plugin through the host's supported plugin flow. Reading a URL or pasting an API key into chat does not install a plugin. If the agent has no installation tool, identify the exact host setup step. See the shared guide; directory publication and actual dot acceptance are not established.
-- **Meta Muse:** ask it to create a custom API connector from https://www.unlinked.ai/openapi.json. For private access use your Unlinked grant through its supported credential setup, with Authorization: Bearer on this origin only. First GET /api/agent/v1/whoami, then a read-only query. This is a documented integration approach, not a verified Muse installation. Native Muse MCP support is not assumed.
-- **Claude, Claude Code, Codex, Gemini CLI, Cursor, Hermes and other agents:** use the exact host guide above. Prefer shared OAuth where compatible; scoped per-app API credentials remain alternatives. A model/brand name alone does not identify the host's tools or permissions.
-
-Connection progress is: guide read → integration available in host → account authorized → read query verified. Report the actual stopping point; do not claim connected after copying configuration. In shared MCP, call get_profile and get_connection_status, then a consented app read. For Unlinked tools the shared prefix is unlinked__ (for example unlinked__unlinked_whoami); use tools/list for exact names. Direct Unlinked MCP tool names below have no shared prefix.
-
-Keep missing authorization, permission denial, a missing app account, pending import, empty data, and zero query matches distinct. An import count of zero does not rule out recovered connections. If readiness is unknown, say so; never infer an empty network from one unsuccessful query. Honor cancellation and revocation. Never send messages or modify shared notes as a setup test. Supply credentials through the host's supported credential flow, not a copied setup prompt.
-
+Start at https://id.ideaflow.app/agents?app=unlinked for shared setup. The [Unlinked agent brief](https://www.unlinked.ai/AGENTS.md#connect-or-search-now) owns connection verification and data-readiness guidance; client-specific setup and evidence status are owned by https://id.ideaflow.app/agents/guide and https://id.ideaflow.app/agents/clients.json.
 
 For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository. An experimental alternate public transport is https://unlinked-ideaflowco.vercel.app/search-public?q=gaming%20investors. Ordinary ChatGPT reader access is not established; see the alternate transport section of that contract.
 
-> Import a LinkedIn export, search your own network and connect your agent.
+> Search public people, connect your agent, and add your contacts when needed.
 
 Canonical app: https://www.unlinked.ai. Sign in with Ideaflow ID at /login; no invitation required.
 If signed Ideaflow email evidence matches a recovered legacy account, the browser may ask once whether to continue with the old Unlinked profile.
@@ -58,7 +47,7 @@ Known graph paths: unlinked_search_network(query, degree=1|2, cursor?) or query 
 
 Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
 
-Grant catalog v4 adds optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing grants and default issuance remain read-only. Unlinked grants cannot send messages or post; connect OpenChat separately for messaging and Context. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
+Grant catalog v4 adds optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing grants and default issuance remain read-only. For messaging permissions, see [shared setup](https://id.ideaflow.app/agents?app=unlinked). The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
 
 ## Connection browsing and page depth
 
