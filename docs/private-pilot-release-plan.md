@@ -26,7 +26,7 @@ The separate real guest packet fixes its root at `/srv/unlinked-private-guest-pi
 Inside the runtime container, that root parent is an ephemeral mode-700 tmpfs owned by the explicit operator UID/GID; only the `runtime/`, `assets/` and `audit/` child mounts are bound into the app, preserving their read-only/write boundaries and preventing a Docker-created root-owned 755 parent from bypassing the privacy guard.
 Its helper runs as the private file-owning release operator and uses only the existing noninteractive `sudo -n docker` route for Docker operations, preserving only the manifest-derived origin, UID/GID and three image variables needed by Compose.
 The graph service keeps the pinned Neo4j image startup path and `tini`, but sets `umask 077` before launch so newly created graph directories/files satisfy the private 700/600 recovery policy.
-The operational service must use the dedicated driver/database and must never mount the legacy generic query API.
+The operational service must use the reviewed configured graph driver and must never mount the legacy generic query API. The [release packet](../deploy/private-pilot/README.md#verified-shared-noos-graph-cutover) owns the opt-in shared graph migration and recovery contract.
 Private archive/source/oversized-observation bytes use `assets/`, with owner-hashed paths, immutable SHA-256 names and modes 700/600.
 Paired quiesced backups use `backups/` and include graph resources, owner/identity bindings, every referenced blob, integrity manifest and tombstones; restore rehearsals must use a new canonical `backups/rehearsal-*` target under that operator-owned mode-700 backup root.
 Existing storage backends remain replaceable; binary ZIP bytes are not graph properties.
@@ -49,7 +49,7 @@ The paused legacy Supabase route is not such proof.
 `getBackend` rechecks the immutable owner UUID/Noos user binding and returns an owner-specific private operational adapter; arbitrary browser fields cannot select it.
 MCP uses independent tool audiences and durable Noos grant records. Invited setup is scoped to exactly one import and short-lived; open-account setup is scoped to the owner network, same-owner sanitized recovered Connections observations and, for new shared People grants, the published professional index. It persists until revoked or signing-secret replacement, excludes recovered original files, and exposes `unlinked_search_network` plus `unlinked_search_everyone`; older single-tool grants remain owner-network only.
 Noos operational tokens and provider tokens never enter the download.
-Revocation/deletion is checked live, and ephemeral stage signing keys revoke all delegated grants on runtime restart.
+Revocation/deletion is checked live; account grant signing-secret lifetimes are owned by [the account launch contract](../deploy/private-pilot/ACCOUNT-LAUNCH.md), and invited grant restart behavior by [the staging contract](private-noos-staging.md#scoped-search-and-browser).
 
 ## Acceptance sequence and rollback
 
@@ -61,12 +61,12 @@ Revocation/deletion is checked live, and ephemeral stage signing keys revoke all
 6. Only a separately reviewed real-data pilot may accept the guest's archive, with the guest's combined upload consent to private retention and bounded OpenAI processing. Do not switch the synthetic fixture into a real-data cohort implicitly.
 
 Rollback stops the owned browser/operational services, removes only their Tailscale Serve port for the synthetic rehearsal, preserves private data/receipts/backups, and invalidates ephemeral grants.
-The real guest packet rollback stops only its three labeled containers and preserves state, source receipts, invitation bundles and backups; provider client/grant revocation remains a separate owner operation.
+The real guest packet's base isolated-container rollback stops only its three labeled containers and preserves state, source receipts, invitation bundles and backups; provider client/grant revocation remains a separate owner operation. Shared-graph recovery follows the [release packet](../deploy/private-pilot/README.md#verified-shared-noos-graph-cutover).
 Publication rollback is an irreversible tombstone for that publication; it retains private originals and denies tools.
 A quiesced paired restore must restore journal rows before final publication fences and preserve owner mappings, source IDs, immutable receipt history and grant/publication tombstones.
 The synthetic harness rehearses this pair; power-loss/directory-fsync durability, operational backup ownership/retention and historical live-writer fencing remain separate release evidence.
 
-The private container recipe uses a frontend bridge for nginx/runtime and a separate internal runtime/graph bridge.
+The base private container recipe uses a frontend bridge for nginx/runtime and a separate internal runtime/graph bridge.
 Only non-root nginx publishes 443 to container 8443; neither app nor graph has a published port, and operations remains container loopback.
 The runtime's private parent tmpfs is part of that recipe; graph, backups and invitation trees are not broadly mounted into the app.
 The process default remains host loopback; exact isolated-container mode and private service addresses must be explicitly selected.

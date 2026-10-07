@@ -23,7 +23,7 @@ await startPrivatePilot({
 ```
 
 `login` is `createIdeaflowLogin` configured with the exact issuer, client and `/auth/callback/ideaflow` URL; invited browser flows require its explicit HTTPS `authorizationOrigin` so the landing page can allow only that provider in `form-action`.
-`networkMode` defaults to host loopback; the deployment launcher is the only path that selects the exact `isolated-container` topology.
+`networkMode` defaults to host loopback; deployment topologies and the opt-in shared graph checkpoint are owned by the [release packet](../deploy/private-pilot/README.md#verified-shared-noos-graph-cutover).
 `provisioner` is Noos `InvitedOwnerProvisioner` with role `callback` and that same issuer/client; the operator capability is kept out of the browser runtime.
 `getBackend` revalidates the active immutable owner/principal binding on each private operation.
 These are private process capabilities, not HTTP endpoints accepting claimed identity fields.
@@ -34,7 +34,7 @@ Private ingress and the browser handler use `Referrer-Policy: strict-origin`: na
 Expired/replayed browser intent, invalid state/nonce/signature/client, unknown ordinary sign-in, rejected/revoked invitation and owner-readback conflict issue no session.
 Reopening the original invitation starts a new authentication and can recover a lost claim response through Noos's exact-subject idempotent replay.
 The graph's permanent revocation fence controls claims and subsequent resource/tool access.
-Browser memory loss requires sign-in again; the owner mapping and archive receipts remain durable in Noos.
+Browser restart persistence is owned by [Durable Sessions](durable-sessions.md); the owner mapping and archive receipts remain durable in Noos.
 
 After sign-in, upload, consent, publication, AI search and scoped MCP setup follow the [staging contract](private-noos-staging.md#scoped-search-and-browser).
 The invitation action adds no second AI consent.
@@ -43,5 +43,5 @@ Focused source proof runs `node --test --test-concurrency=1 tests/private-browse
 It performs signed synthetic OIDC over the real browser HTTP controller, while its claim store is synthetic.
 Real Noos invitation transaction/race proof and final complete-network model/MCP/restore proof are separate required receipts, not inferred from this browser test.
 
-Live delivery requires the stable HTTPS private origin, exact production Ideaflow client/callback, a dedicated persistent graph/assets target with paired backup/restore, private runtime secrets and operator-issued invitation.
+Live delivery requires the stable HTTPS private origin, exact production Ideaflow client/callback, a reviewed persistent graph/assets target with verified recovery, private runtime secrets and operator-issued invitation.
 Provider production changes remain an explicit Ideaflow production gate; no personal archive belongs in a synthetic runtime.

@@ -54,3 +54,42 @@ jobs:
         run: |
           python3 deploy/private-pilot/checks.py
           python3 deploy/private-pilot/topology-check.py
+  graph-migration:
+    # Public PRs use disposable hosted databases and synthetic credentials only.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      source-graph:
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/unlinked-s21-fixture
+        ports: ['8967:7687']
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p unlinked-s21-fixture 'RETURN 1'"
+          --health-interval 10s --health-timeout 10s --health-retries 20
+      target-graph:
+        image: neo4j:5.15-community
+        env:
+          NEO4J_AUTH: neo4j/unlinked-s21-fixture
+        ports: ['8968:7687']
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p unlinked-s21-fixture 'RETURN 1'"
+          --health-interval 10s --health-timeout 10s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install locked application test dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm --prefix mcp-server ci --ignore-scripts --no-audit --no-fund
+      - name: Install existing compatible driver into disposable test harness
+        run: npm install --prefix "$RUNNER_TEMP/unlinked-migration-driver" --ignore-scripts --no-audit --no-fund --save-exact neo4j-driver@5.28.3
+      - name: Exercise cross-version migration, activation fence and reverse recovery
+        env:
+          UNLINKED_MIGRATION_TEST: isolated-fixture
+          MIGRATION_NEO4J_MODULE_ROOT: ${{ runner.temp }}/unlinked-migration-driver
+        run: node --test tests/graph-migration.integration.test.mjs
