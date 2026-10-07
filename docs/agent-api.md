@@ -365,9 +365,8 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
   `/srv/unlinked-private-guest-pilot-20261001/runtime/runtime.env`, and is set
   by the Unlinked host operator, not by the consumer. The runtime reads it
   only at startup, so adding, rotating or removing a client requires a
-  runtime restart, and every restart signs all browser users out. Batch
-  allow-list changes with a release rollout rather than restarting on their
-  own.
+  runtime restart. Browser session persistence is owned by
+  [Durable Sessions](durable-sessions.md).
 - **Issuer and subject:** the issuer must exactly equal the issuer the
   Unlinked runtime is configured with (production:
   `https://id.ideaflow.app/api/auth`). Any other issuer, including a

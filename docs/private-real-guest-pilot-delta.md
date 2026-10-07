@@ -70,12 +70,12 @@ Actual real-user delegation must receive its own reviewed approval; synthetic st
 6. Verify the guest's actual production sign-in/intended account and approved NEW ownership/principal proof; read back both sides, snapshot ACLs and backups.
 7. Enable only this owner, obtain the guest's upload action disclosure, upload the real archive, verify prompt `/profile` return, background continuation after navigation/close, profile-first display, Settings receipts, accepted/indexed counts/replay, owner-wide search and account MCP parity.
 
-Rollback stops only the three labeled new ingress/runtime/graph containers, preserves private originals/owner UUID/backups, and leaves durable grant/client revocation to the separately approved identity-owner operation.
+Base isolated-container rollback stops only the three labeled new ingress/runtime/graph containers, preserves private originals/owner UUID/backups, and leaves durable grant/client revocation to the separately approved identity-owner operation. Shared-graph recovery follows the [release packet](../deploy/private-pilot/README.md#verified-shared-noos-graph-cutover).
 Do not blindly delete or rebind live identity/owner data.
 Restore is a quiesced paired graph/blob operation with integrity manifest, bindings, journal rows before final publication fences, and preserved tombstones; rehearsal targets are new canonical `backups/rehearsal-*` directories and are never pilot or legacy storage.
 Synthetic paired restore has been proven; operational backup scheduling/ownership, durable directory fsync, real identity/principal proof,443 route and actual browser acceptance remain unproven release gates.
 
 Private container activation publishes only non-root ingress 443:8443.
-The browser wildcard listener is confined to the dedicated frontend bridge with no published app port, and the graph is confined to a separate internal backend bridge with no published Bolt port.
+In the base isolated-container topology, the browser wildcard listener is confined to the dedicated frontend bridge with no published app port, and the graph is confined to a separate internal backend bridge with no published Bolt port.
 `root-mount-check.py` is the bounded Docker proof for the runtime parent tmpfs; it uses generated fixtures only and does not start the graph, expose ports or read provider credentials.
 Operational/raw asset services remain runtime loopback; the owner and delegated tool checks continue to apply before every read/write.
