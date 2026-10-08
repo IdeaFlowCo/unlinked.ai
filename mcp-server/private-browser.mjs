@@ -1089,7 +1089,7 @@ export function createPrivateBrowserHandler({ profileAsks, createMessagingSessio
       }
       const askAction = url.pathname.match(/^\/profile\/asks\/(publish|edit|close|remove)$/)
       if (signup && profileAsks && request.method === 'POST' && askAction) {
-        const input = new URLSearchParams((await body(request, 16384)).toString('utf8'))
+        const input = new URLSearchParams((await body(request, 128 * 1024)).toString('utf8'))
         const operation = askAction[1], allowed = operation === 'publish' || operation === 'edit'
           ? ['csrf','id','expectedRevision','text','visibility','expiresAt','userIds','conversationIds'] : ['csrf','id','expectedRevision']
         if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || [...input.keys()].some(k => !allowed.includes(k)) || allowed.filter(k => !['userIds','conversationIds'].includes(k)).some(k => input.getAll(k).length > 1)) { response.writeHead(403).end(); return }

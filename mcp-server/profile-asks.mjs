@@ -37,9 +37,11 @@ export function createProfileAsks({ secret, identityForOwner, resolveRecipient, 
       // Same exact live claimed-owner binding as addressed OpenChat messages.
       const recipient = await resolveRecipient(profileId)
       if (recipient.status !== 'member' || !validIdentity(recipient.identity)) return []
-      const result = await exchange({ operation: 'list', owner: recipient.identity, viewer: viewerOwner ? await identity(viewerOwner) : null })
-      if (!Array.isArray(result.asks) || result.asks.length > 50) throw new ProfileAskError(503, 'Asks are temporarily unavailable.')
-      return result.asks.filter(ask => Number.isFinite(Date.parse(ask.expiresAt)) && Date.parse(ask.expiresAt) > Date.now() && (!ask.status || ask.status === 'active')).map(ask => dto(ask))
+      const viewer = viewerOwner ? await identity(viewerOwner) : null
+      const isOwner = viewer?.issuer === recipient.identity.issuer && viewer?.subject === recipient.identity.subject
+      const result = await exchange({ operation: 'list', owner: recipient.identity, viewer })
+      if (!Array.isArray(result.asks) || result.asks.length > (isOwner ? 100 : 50)) throw new ProfileAskError(503, 'Asks are temporarily unavailable.')
+      return result.asks.filter(ask => Number.isFinite(Date.parse(ask.expiresAt)) && Date.parse(ask.expiresAt) > Date.now() && (!ask.status || ask.status === 'active')).slice(0, 50).map(ask => dto(ask))
     },
     async mine(owner) {
       const binding = await identity(owner)
