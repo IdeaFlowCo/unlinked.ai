@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
+import { randomInt } from 'node:crypto'
+import { startPrivatePilot } from '../mcp-server/private-pilot.mjs'
 import { createProfileAsks, profileAskMessagePath } from '../mcp-server/profile-asks.mjs'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { renderOwnerAsks, renderProfileAsks } from '../mcp-server/profile-asks-views.mjs'
@@ -34,21 +36,35 @@ test('rendered controls are labelled, private by default and escaped; message li
  assert.ok(renderProfileAsks([ask],'seed-person').includes('Message about this'));assert.equal(renderProfileAsks([],'seed-person'),'')
  assert.equal(profileAskMessagePath('seed-person','bad/ask'),null)
 })
-test('browser owner publish/edit/close/remove requires same-origin CSRF; viewer cards enforce canonical bridge without polluting public People JSON',async t=>{
- let handler, mutations=[], live={...ask}, visible=true, reads=[]
+for (const entry of ['browser', 'pilot']) test(`${entry} owner publish/edit/close/remove requires same-origin CSRF; viewer cards enforce canonical bridge without polluting public People JSON`,async t=>{
+ let mutations=[], live={...ask}, visible=true, reads=[]
  const service={
   async mine(actor){assert.deepEqual(actor,owner);return {asks:live?[live]:[],audience:{people:[{id:'selected-person',name:'Fixture Person'}],groups:[]}}},
   async forProfile(id,viewer){reads.push({id,viewer});return live && visible && live.status==='active'?[live]:[]},
   async mutate(actor,operation,id,input){mutations.push({actor,operation,id,input});if(operation==='publish')live={...ask,...input};if(operation==='edit')live={...live,...input,revision:2};if(operation==='close')live={...live,status:'withdrawn'};if(operation==='remove')live=null},
  }
  const snapshot={state:'published',complete:true,revision:'synthetic-asks-v1',profiles:[{id:'seed-person',name:'Same Name',presence:'member',positions:[],education:[],skills:[]}],connections:[]}
- const server=createServer((req,res)=>handler(req,res));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)))
- const endpoint=`http://127.0.0.1:${server.address().port}`,origin=endpoint.replace('http:','https:')
- handler=createPrivateBrowserHandler({baseUrl:origin,dataMode:'synthetic',profileAsks:service,
+ const options={dataMode:'synthetic',profileAsks:service,
   login:{begin:async()=>({location:'https://id.example.invalid/authorize',transaction:{state:'synthetic-state'}}),finish:async()=>identity},
   resolveOwner:async()=>owner,signup:async()=>owner,issueAccountGrant:async()=>({accessToken:'synthetic-fixture'}),revokeAccountGrant:async()=>{},ownProfileId:async()=> 'seed-person',
   getBackend:async()=>({adapter:{},readLegacyProfile:async()=>({profileId:'seed-person',profile:{name:'Owner A'}}),listImportIds:async()=>[],listImportJobIds:async()=>[],readResource:async()=>null}),readPublishedSnapshot:async()=>snapshot,
- })
+ }
+ let endpoint,origin,runtime
+ for(let attempt=0;attempt<10;attempt++){
+  const port=randomInt(7000,10000)
+  endpoint=`http://127.0.0.1:${port}`;origin=endpoint.replace('http:','https:')
+  try{
+   if(entry==='pilot') runtime=await startPrivatePilot({...options,baseUrl:origin,port,complete:async()=>({}),accountGrantKey:new Uint8Array(32).fill(7)})
+   else{
+    const handler=createPrivateBrowserHandler({...options,baseUrl:origin})
+    const server=createServer((req,res)=>handler(req,res))
+    await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve)})
+    runtime={stop:()=>new Promise(resolve=>server.close(resolve))}
+   }
+   break
+  }catch(error){if(error.code!=='EADDRINUSE'||attempt===9)throw error}
+ }
+ t.after(()=>runtime.stop())
  const get=(path,cookie)=>fetch(endpoint+path,{redirect:'manual',headers:cookie?{Cookie:cookie}:{}})
  const anonymous=await get('/people/seed-person'),html=await anonymous.text();assert.match(html,/Message about this/);assert.equal(anonymous.headers.get('Cache-Control'),'no-store');assert.equal(reads[0].viewer,undefined)
  const publicJson=await(await get('/api/people/seed-person')).json();assert.ok(!JSON.stringify(publicJson).includes('fixture-ask'))
