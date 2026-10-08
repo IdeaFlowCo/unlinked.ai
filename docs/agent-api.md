@@ -457,20 +457,19 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
   doubt; treat `grant_revoked` as the user's explicit choice — surface "re-enable
   in Unlinked Settings", do not retry automatically.
 
-## Future consumers (design-level notes, nothing here is built)
+## Person context and profile asks
 
-Beyond the Ideaflow MCP connector, two planned consumers are expected to use
-this same HTTP JSON API: an Unlinked people-context overlay (since built
-differently: it reads the Noos people overlay directly, see
-[private-context.md](private-context.md)) and a
-cross-product "OpenChat asks on profiles" feature (both centered on person
-read, `whoami`/linkage verification and the typed error vocabulary). A
+The Unlinked people-context overlay reads the Noos people overlay directly; see
+[private-context.md](private-context.md). The browser profile asks source
+implementation uses an OpenChat-owned confidential adapter instead; it adds no
+agent-grant scope or tool. See [profile-asks.md](profile-asks.md) for publication,
+audience enforcement and the held coordinated rollout. A
 Superconnector→Neo4j projection is also under design consideration. For
 cross-product person-identity resolution the contract therefore keeps stable
 identifiers first-class:
 
 **Reserved namespace:** `ask` / `asks` (tool names, endpoint segments and
-result `kind`s) is reserved for that future person-"asks" resource
+result `kind`s) is reserved for person-"asks" resources
 (user-authored intent posts on profiles). That is why the AI search tool is
 named `unlinked_ai_search` and lives at `/api/agent/v1/ai-search` — do not
 add AI-search aliases under an `ask` name.

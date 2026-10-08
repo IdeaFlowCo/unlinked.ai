@@ -163,3 +163,5 @@ retain their existing scopes. Never send an Unlinked grant to OpenChat.
 Connect an agent at https://id.ideaflow.app/agents using one account connection for Unlinked, OpenChat and Thoughtstream Vision. The shared MCP URL is https://id.ideaflow.app/mcp. Each app has separate consented read/write scopes; adding another app never silently expands an existing grant. Direct Unlinked MCP/API credentials remain supported. The internal request-bound adapter at `/api/connector/mcp` resolves only existing issuer/subject account bindings and accepts no ordinary user bearer tokens. Deployment requires a dedicated `IDEAFLOW_CONNECTOR_SECRET` shared only with the gateway.
 
 Settings manual-key setup, lifecycle, compatibility and release/rollback constraints are owned by `docs/agent-key-settings.md`.
+
+Owner-authored profile asks reuse OpenChat Story/intent records and live audiences through a confidential adapter; no Unlinked ask store or agent-grant expansion. Source contract and coordinated release holds: [docs/profile-asks.md](docs/profile-asks.md).
