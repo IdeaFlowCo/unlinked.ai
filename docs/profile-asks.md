@@ -79,4 +79,11 @@ change. A separate native launch remains held.
 
 Owner inventory accepts all fifty active asks plus fifty recent historical asks from the canonical receiver; viewer reads remain capped at fifty active asks.
 
-Failed publish/edit submissions preserve unsaved text, visibility, expiry and submitted audience IDs even when inventory is unavailable. Failed edit forms retain the submitted revision, so retrying cannot silently overwrite a newer version.
+Failed publish/edit submissions preserve unsaved text, visibility, expiry and
+submitted audience IDs in the error page, even when inventory is unavailable.
+When inventory is available, failed edits show the stored current text for
+comparison and retain the submitted revision, so retrying cannot silently
+overwrite a newer version. Audience controls use only currently available people
+and groups; submitted IDs remain readable separately for failed edits. During an
+inventory outage, recovery is read-only: no publish or edit form is offered.
+Copy unsaved changes before reloading the profile; they are not durably saved.

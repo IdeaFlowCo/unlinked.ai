@@ -108,11 +108,13 @@ for (const entry of ['browser', 'pilot']) test(`${entry} owner publish/edit/clos
   const failed=await post('edit',unsaved),page=await failed.text()
   assert.equal(failed.status,status);assert.match(page,/Unsaved changes &lt;keep&gt;/);assert.match(page,/Current stored version/)
   assert.match(page,/name="expectedRevision" value="3"/);assert.match(page,/value="selected-person" checked/)
+  await evidence(`${entry}-edit-recovery-${status}.html`, page)
  }
  failInventory=true
  const outageEdit=await post('edit',unsaved),outageEditHtml=await outageEdit.text()
  assert.equal(outageEdit.status,503);assert.match(outageEditHtml,/Your unsaved text/);assert.match(outageEditHtml,/Unsaved changes &lt;keep&gt;/);assert.match(outageEditHtml,/selected-person/)
  assert.ok(!outageEditHtml.includes('action="/profile/asks/edit"'))
+ await evidence(`${entry}-edit-inventory-outage.html`, outageEditHtml)
  const outagePublish=await post('publish',{...draft,text:'Unsaved publication'})
  assert.equal(outagePublish.status,503);assert.match(await outagePublish.text(),/Unsaved publication/)
  assert.equal(mutations.length,4)
