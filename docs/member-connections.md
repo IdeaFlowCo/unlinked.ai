@@ -137,7 +137,5 @@ refresh on page navigation. Notification emails already use the Resend mailer
 and preferences described in [email.md](email.md); the feed reflects whether
 that runtime has email enabled.
 
-Accepted requests also reconcile into the shared OpenChat inbox as an empty,
-deduplicated direct chat. This adds no external message or OpenChat friendship
-permission. Delivery, durable retry and removal semantics are documented in
-[Accepted connections in OpenChat](openchat-accepted-connections.md).
+For OpenChat synchronization, rollout requirements, durable retry and removal
+semantics, see [Accepted connections in OpenChat](openchat-accepted-connections.md).
