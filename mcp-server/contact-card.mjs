@@ -19,7 +19,6 @@ import { randomInt } from 'node:crypto'
 // the two card shapes can converge. See docs/contact-card.md.
 export const CONTACT_CARD_TOKEN = /^[0-9A-Za-z]{24}$/
 export const CONTACT_CARD_FIELDS = Object.freeze(['phone', 'whatsapp', 'email', 'link'])
-const SHOW = Object.freeze({ phone: 'showPhone', whatsapp: 'showWhatsapp', email: 'showEmail', link: 'showLink' })
 const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 const LINK_MAX = 200
 const PROFILE_PATH = /^\/people\/[A-Za-z0-9._~%-]{1,480}$/

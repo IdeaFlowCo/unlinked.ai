@@ -333,6 +333,7 @@ test('LinkedIn Share my profile links reach lookup with or without tracking and 
     const result = await f.post('/find-me', { csrf: f.csrf, linkedinUrl: address })
     assert.equal(result.status, 200)
     const page = await result.text()
+    await evidence(suffix ? 'lookup-tracked-no-result.html' : 'lookup-clean-no-result.html', page)
     assert.deepEqual(slugs, ['felipe-contreras-a353a3189'])
     assert.match(page, /No profile was returned for that LinkedIn address/)
     assert.ok(page.includes('value="' + address.replaceAll('&', '&amp;') + '"'))
@@ -344,6 +345,7 @@ test('LinkedIn Share my profile links reach lookup with or without tracking and 
 test('disabled lookup and invalid share links have explicit feedback instead of a silent miss', async t => {
   const f = await start(t, { displayName: 'Fictional New Member' })
   const disabled = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://www.linkedin.com/in/felipe-contreras-a353a3189/' })).text()
+  await evidence('lookup-disabled.html', disabled)
   assert.match(disabled, /LinkedIn profile lookup is not available right now/)
   assert.match(disabled, /could not fetch LinkedIn/)
   const invalid = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://lnkd.in/unresolved-short-link' })).text()

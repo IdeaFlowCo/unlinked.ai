@@ -24,7 +24,8 @@ additive and idempotent; no existing data is touched.
 | `createdAt`, `respondedAt`, `withdrawnAt`, `removedAt` | Epoch milliseconds |
 | `removedBy` | `sender` or `recipient` for a removed request |
 
-Rules:
+Public-profile request rules (the separate card invitation capability is owned by
+[Contact card](contact-card.md#sharing-and-joining-from-a-card)):
 
 - **Who can be asked:** only a profile with `presence: member`. The account
   behind it is resolved server-side (`accountForProfile`), following the

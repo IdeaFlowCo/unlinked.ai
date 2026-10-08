@@ -76,4 +76,4 @@ Manual-key controls and connector choice: docs/agent-key-settings.md. Historical
 
 For compatible hosts needing several apps or messages, use https://id.ideaflow.app/agents and its separate OpenChat permissions. Existing direct Claude/ChatGPT sign-in remains supported. Muse’s observed manual form uses the direct Unlinked key; Muse OAuth is unverified. Connection requests do not record private “X knows Y” relationships; those are saved with the connector’s OpenChat private-people tools and shown only to their owner on Unlinked person and contact pages (“Your private context”).
 
-Browser card sharing: `/card` opens the full owner card; `/card?share=public` is the public-only version. Contact-card `/c/<token>` holders may explicitly choose Sign up & add; browser-only same-origin POST `/c/<token>/add` carries the intent through verified login and connects the accounts. Scanning alone never adds anyone. Contact details and tokens remain excluded from agent grants. See `docs/contact-card.md`.
+Browser-only card joining is not an agent capability. The repository guide `docs/contact-card.md` owns card sharing, signup and privacy boundaries.

@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -5,6 +7,13 @@ import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createContactCards, createMemoryContactCardStore } from '../mcp-server/contact-card.mjs'
 import { createConnectionRequests, createMemoryConnectionStore } from '../mcp-server/member-connections.mjs'
 import { renderCard } from '../mcp-server/private-onboarding-views.mjs'
+
+async function evidence(name, content) {
+  const directory = process.env.UNLINKED_TEST_EVIDENCE_DIR
+  if (!directory) return
+  await mkdir(directory, { recursive: true })
+  await writeFile(join(directory, name), content)
+}
 
 const sharer = { ownerId: 'card-owner', userId: 'card-user' }
 const visitor = { ownerId: 'visitor-owner', userId: 'visitor-user' }
@@ -15,7 +24,7 @@ async function site(t, { existing = false, self = false } = {}) {
   const saved = await cards.save(sharer, { email: 'ada@example.test', showEmail: true }, { name: 'Ada Example' })
   let registered = existing, signups = 0, fail = false
   const current = self ? sharer : visitor
-  const backend = { adapter: {}, readResource: async () => null, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => [] }
+  const backend = { readLegacyProfile: async () => self ? { profileId: 'ada-example', profile: { name: 'Ada Example', about: 'Builds analytical engines', positions: [{ title: 'Engineer', company: 'Engine Works' }], education: [{ institution: 'Example University' }], skills: ['Mathematics'] } } : null, adapter: {}, readResource: async () => null, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => [] }
   let handler
   const server = createServer((req, res) => void handler(req, res))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -46,7 +55,9 @@ test('scanned card signs up a new visitor and connects both accounts without a p
   const s = await site(t)
   const page = await s.request(s.path)
   assert.equal(page.status, 200)
-  assert.match(await page.text(), /Sign up &amp; add Ada/)
+  const guestHtml = await page.text()
+  assert.match(guestHtml, /Sign up &amp; add Ada/)
+  await evidence('card-guest.html', guestHtml)
   assert.equal(s.connectionStore.records.size, 0, 'Viewing a card never connects anyone')
   const start = await s.start()
   assert.equal(start.status, 303)
@@ -59,6 +70,8 @@ test('scanned card signs up a new visitor and connects both accounts without a p
   assert.equal((await s.connections.connections(sharer)).length, 1)
   const body = await (await s.request(s.path, { headers: { Cookie: cookie } })).text()
   assert.match(body, /Added to your connections/)
+  await evidence('card-connected.html', body)
+  await evidence('card-connection-state.json', JSON.stringify({ signupCount: s.signups(), visitorConnections: await s.connections.connections(visitor), sharerConnections: await s.connections.connections(sharer) }, null, 2))
   assert.doesNotMatch(body, /card-owner|card-user|visitor-owner|visitor-user/)
   const csrf = body.match(/name="csrf" value="([^"]+)"/)[1]
   assert.equal((await s.post(s.path + '/add', { csrf }, cookie)).status, 303)
@@ -115,6 +128,7 @@ test('failed add keeps the signed-in session and offers a working retry', async 
   s.fail(false)
   const body = await (await s.request(callback.headers.get('location'), { headers: { Cookie: cookie } })).text()
   assert.match(body, /We couldn’t add this person/)
+  await evidence('card-retry.html', body)
   assert.match(body, /Add Ada to my connections/)
   const csrf = body.match(/name="csrf" value="([^"]+)"/)[1]
   await s.post(s.path + '/add', { csrf }, cookie)
@@ -127,4 +141,21 @@ test('My card is one tap from the main navigation, defaults to details, and incl
   assert.match(header.split('<details class="me">')[0], /class="my-card-link" href="\/card"/)
   assert.match(view.content, /aria-current="page">With contact details/)
   for (const text of ['Builds analytical engines', 'Engine Works', 'Example University', 'Mathematics', 'name="phone"']) assert.ok(view.content.includes(text), text)
+})
+
+
+test('owner HTTP card defaults to contact details and retains the public-only switch', async t => {
+  const s = await site(t, { existing: true, self: true })
+  const { cookie } = await s.finish(await s.start())
+  const full = await s.request('/card', { headers: { Cookie: cookie } })
+  assert.equal(full.status, 200)
+  const content = await full.text()
+  assert.match(content, /aria-current="page">With contact details/)
+  assert.match(content, /name="email"/)
+  assert.match(content, /ada@example.test/)
+  for (const detail of ['Builds analytical engines', 'Engine Works', 'Example University', 'Mathematics']) assert.ok(content.includes(detail), detail)
+  await evidence('card-owner.html', content)
+  const publicOnly = await (await s.request('/card?share=public', { headers: { Cookie: cookie } })).text()
+  assert.match(publicOnly, /aria-current="page">Public</)
+  assert.doesNotMatch(publicOnly, /ada@example.test/)
 })

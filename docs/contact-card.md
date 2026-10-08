@@ -5,7 +5,7 @@ A member's card comes in two versions, both at `/card`, directly accessible as *
 - **Public** (`/card?share=public`) — name, headline, location and a QR code that opens the member's public profile (`/people/<id>`). Unchanged: no contact details.
 - **With contact details** (default) — the business-card version. It carries the phone number, WhatsApp, email address and link the member switches on, and has its own QR code and link.
 
-Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard), routes in `mcp-server/private-browser.mjs`, pages in `mcp-server/private-onboarding-views.mjs` (`renderCard`, `renderContactCard`). Tests: `tests/contact-card.test.mjs`.
+Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard), routes in `mcp-server/private-browser.mjs`, pages in `mcp-server/private-onboarding-views.mjs` (`renderCard`, `renderContactCard`). Tests: `tests/contact-card.test.mjs` and `tests/card-signup.test.mjs`.
 
 ## Who can see what
 
@@ -15,7 +15,7 @@ Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard),
 | Model context, MCP tools, `/api/agent/v1` | Never |
 | `/card?share=public` (Public version), `/scan`, `/profile`, Settings | Never |
 | `/c/<token>` and `/c/<token>/contact.vcf` | Only the fields switched on |
-| The member's own `/card?share=contact` and `/export` | Everything they entered |
+| The member's own `/card` (also `/card?share=contact`) and `/export` | Everything they entered |
 
 The contact card is reached only through `/c/<token>`. The token is 24 random alphanumerics (about 143 bits), unrelated to any account or profile id, so it cannot be derived from a public page. The page is sent with `noindex`, `no-store` and `Referrer-Policy: no-referrer`, and requests are bounded for the whole site.
 
