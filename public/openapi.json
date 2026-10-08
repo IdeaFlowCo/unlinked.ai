@@ -1460,6 +1460,37 @@
           }
         }
       }
+    },
+    "/c/{token}/add": {
+      "post": {
+        "summary": "Browser-only: join and add the owner of a shared contact card",
+        "description": "Requires a same-origin form POST and session CSRF when signed in. Guests complete verified Ideaflow login before connecting. Card visibility and owner activity are rechecked. No bearer/agent access. Viewing alone never connects.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-Za-z]{24}$"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Provider signup/sign-in or contact card result"
+          },
+          "400": {
+            "description": "Invalid intent or CSRF"
+          },
+          "403": {
+            "description": "Wrong origin"
+          },
+          "404": {
+            "description": "Card unavailable"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -211,7 +211,7 @@ test('lookup failure yields friendly name-only fallback without a confirmation c
   const f = await start(t, { displayName: 'New Member', signupLookup: service })
   const page = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://linkedin.com/in/new-member' })).text()
   await evidence('lookup-failure-fallback.html', page)
-  assert.ok(page.includes('continue with your name')); assert.ok(!page.includes('name="candidate"')); assert.ok(!page.includes('raw secret'))
+  assert.ok(page.includes('LinkedIn profile lookup is temporarily unavailable')); assert.ok(!page.includes('name="candidate"')); assert.ok(!page.includes('raw secret'))
   const profile = await f.signed('/profile')
   assert.equal(profile.status, 200); assert.ok((await profile.text()).includes('New Member'))
 })
@@ -322,4 +322,32 @@ test('two authenticated sessions can upgrade a signup stand-in to legacy; a stal
   const retained = await service.readForExport({ ownerId: 'owner-a', userId: 'user-a' })
   assert.equal(retained.retired, true); assert.equal(retained.retiredByProfileId, 'p-jl'); assert.equal(retained.profile.headline, 'Day one profile')
   await assert.rejects(service.confirm({ owner: { ownerId: 'owner-a', userId: 'user-a' }, slug: 'new-member' }), /self_claim_conflict/)
+})
+
+test('LinkedIn Share my profile links reach lookup with or without tracking and retain the typed link on failure', async t => {
+  for (const suffix of ['', '?utm_source=share&utm_medium=ios_app#profile']) {
+    const slugs = []
+    const service = signupService(async slug => { slugs.push(slug); return null })
+    const f = await start(t, { displayName: 'Fictional New Member', signupLookup: service })
+    const address = 'https://www.linkedin.com/in/felipe-contreras-a353a3189/' + suffix
+    const result = await f.post('/find-me', { csrf: f.csrf, linkedinUrl: address })
+    assert.equal(result.status, 200)
+    const page = await result.text()
+    assert.deepEqual(slugs, ['felipe-contreras-a353a3189'])
+    assert.match(page, /No profile was returned for that LinkedIn address/)
+    assert.ok(page.includes('value="' + address.replaceAll('&', '&amp;') + '"'))
+    assert.doesNotMatch(page, /name="candidate"/)
+    assert.equal(f.calls.claims.length, 0)
+  }
+})
+
+test('disabled lookup and invalid share links have explicit feedback instead of a silent miss', async t => {
+  const f = await start(t, { displayName: 'Fictional New Member' })
+  const disabled = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://www.linkedin.com/in/felipe-contreras-a353a3189/' })).text()
+  assert.match(disabled, /LinkedIn profile lookup is not available right now/)
+  assert.match(disabled, /could not fetch LinkedIn/)
+  const invalid = await (await f.post('/find-me', { csrf: f.csrf, linkedinUrl: 'https://lnkd.in/unresolved-short-link' })).text()
+  assert.match(invalid, /Paste a LinkedIn profile address/)
+  assert.match(invalid, /value="https:\/\/lnkd.in\/unresolved-short-link"/)
+  assert.doesNotMatch(invalid, /name="candidate"/)
 })

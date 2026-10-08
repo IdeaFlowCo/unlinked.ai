@@ -1,9 +1,9 @@
 # Contact card
 
-A member's card comes in two versions, both at `/card`:
+A member's card comes in two versions, both at `/card`, directly accessible as **My card** in the main navigation:
 
-- **Public** — name, headline, location and a QR code that opens the member's public profile (`/people/<id>`). Unchanged: no contact details.
-- **With contact details** — the business-card version. It carries the phone number, WhatsApp, email address and link the member switches on, and has its own QR code and link.
+- **Public** (`/card?share=public`) — name, headline, location and a QR code that opens the member's public profile (`/people/<id>`). Unchanged: no contact details.
+- **With contact details** (default) — the business-card version. It carries the phone number, WhatsApp, email address and link the member switches on, and has its own QR code and link.
 
 Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard), routes in `mcp-server/private-browser.mjs`, pages in `mcp-server/private-onboarding-views.mjs` (`renderCard`, `renderContactCard`). Tests: `tests/contact-card.test.mjs`.
 
@@ -13,7 +13,7 @@ Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard),
 |---|---|
 | Public profile, People index, company pages, search | Never |
 | Model context, MCP tools, `/api/agent/v1` | Never |
-| `/card` (Public version), `/scan`, `/profile`, Settings | Never |
+| `/card?share=public` (Public version), `/scan`, `/profile`, Settings | Never |
 | `/c/<token>` and `/c/<token>/contact.vcf` | Only the fields switched on |
 | The member's own `/card?share=contact` and `/export` | Everything they entered |
 
@@ -55,3 +55,11 @@ Differences today: OpenChat's card carries `headline`, `linkedIn`, `x`, `link`, 
 Direction: one card per person, not one per app. The private overlay on people is planned to live in Noos, with Unlinked and OpenChat as two views of it. The contact card belongs there too: the member's own details and `show…` switches stored once, keyed by their Ideaflow sign-in, and each app rendering its own `/c/<token>` from the same projection. Until then the field names above are the contract; OpenChat adding `phone`/`whatsapp`/`email` should use exactly these names and rules (tracked in OpenChat's tracker).
 
 Finding a person by phone number across apps is a separate question (`unlinked-aaz`). Nothing here makes a number searchable.
+
+## Sharing and joining from a card
+
+The owner sees their full professional details alongside the card. Contact details remain behind the separate, revocable `/c/<token>` link.
+
+A contact card offers **Sign up & add [name]** to guests and **Add [name] to my connections** to members. Viewing or scanning alone never writes. A same-origin POST records the token in the existing one-use OIDC login transaction; after verified signup/sign-in, the callback rechecks card visibility, token validity and active owners, connects the two accounts, and returns to that card. No archive or published profile is required. A shared contact-card token is an invitation capability, so its holder can connect without a separate owner approval. Owners see this disclosure beside their QR. Ordinary public-profile URLs remain read-only and retain the normal connection-request flow.
+
+Existing connections and own-card scans are harmless; pending requests settle through the existing connection service. Hidden, reset or deleted cards cannot be used. Failed additions preserve the login and offer retry. Contact-card tokens and owner identifiers never go into provider URLs, public projections or agent grants. Browser-only endpoint: `POST /c/<token>/add`, same-origin required and session CSRF required when signed in.

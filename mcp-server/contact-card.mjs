@@ -143,6 +143,13 @@ export function createContactCards({ store, now = Date.now } = {}) {
       if (typeof token !== 'string' || !CONTACT_CARD_TOKEN.test(token)) return null
       return projectContactCard(await store.getByToken(token))
     },
+    // Server-only bearer capability. Never included in the card projection.
+    // Recheck visibility and token rotation at the time of connecting.
+    async ownerForToken(token) {
+      if (typeof token !== 'string' || !CONTACT_CARD_TOKEN.test(token)) return null
+      const record = await store.getByToken(token)
+      return projectContactCard(record) ? { ownerId: record.ownerId, userId: record.userId } : null
+    },
     // The member's own copy for their data export: details and switches, no link.
     async exportOwner(member) {
       const record = await store.get(owner(member))

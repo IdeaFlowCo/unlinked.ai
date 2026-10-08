@@ -206,3 +206,5 @@ unique constraint works on its own, apart from normal transaction locking. It
 also checks that a second confirmation is rejected, that deletion and legacy
 upgrade release the slug, initialization backfill, and constraint enforcement
 against direct duplicate writes.
+
+LinkedIn **Share my profile** URLs may include tracking parameters or fragments; signup normalization drops these after validating the exact HTTPS LinkedIn origin, before legacy and provider lookup. Invalid/shortened links get an explicit validation message rather than being fetched or treated as a failed person search. Lookup failures retain the entered URL and distinguish disabled service, no result, timeout, provider refusal and temporary errors. A missing result never claims a profile or proves the person is absent from LinkedIn.
