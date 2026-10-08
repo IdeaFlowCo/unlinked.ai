@@ -117,3 +117,5 @@ MCP package has its own release version; keep its package/lockfile metadata and
 legacy stdio server version aligned when releasing that package.
 
 Person profiles offer **Message with OpenChat**; see [recipient selection and profile privacy](docs/openchat-message.md).
+For the source-only **Add an ask** and **Message about this** flows, see
+[Asks on profiles](docs/profile-asks.md), including the coordinated release holds.

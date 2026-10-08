@@ -27,7 +27,7 @@ to no profile publication; their ordinary authorized feeds remain available.
 Only `showOnProfile:true` Stories are read for Unlinked profiles. Public access
 requires explicit `profileVisibility:'public'`; selected asks use the existing
 selected-user or live shared-conversation audience. Group access ends when
- either member leaves. Blocking works in either direction. An empty DM or public
+either member leaves. Blocking works in either direction. An empty DM or public
 profile never establishes friendship or ask permission. Choosing a specific
 person explicitly grants that Story's audience permission; removing a friendship
 alone does not revoke that separate explicit selection. Edit the audience or

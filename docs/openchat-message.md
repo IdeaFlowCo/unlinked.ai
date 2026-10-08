@@ -6,7 +6,10 @@ OpenChat client and uses the same conversations, history and read state.
 Member profiles open a named composer inside Unlinked; unclaimed profiles show
 **Not on Unlinked** and an invitation.
 
-The public action passes only the canonical public profile URL. OpenChat resolves
+The ordinary **Message with OpenChat** action passes only the canonical public
+profile URL. For **Message about this**, see the
+[profile-ask message contract](profile-asks.md#message-about-this).
+OpenChat resolves
 its recipient server-to-server through `POST /api/messaging/v1/recipient`, sending
 `{profileId}` with the dedicated `UNLINKED_MESSAGING_SECRET` bearer credential.
 `mcp-server/messaging.mjs` checks the current published snapshot, resolves the
