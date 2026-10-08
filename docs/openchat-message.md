@@ -51,3 +51,6 @@ LinkedIn messaging remains plan-only; the coordinated OpenChat repository owns
 `docs/linkedin-messaging-plan.md` (Unipile, Beeper, and existing bridge options).
 
 People results (public search, your contacts, AI picks and connected people) offer **Message** for verified members, linking to their addressed draft. Imported nonmembers offer **Invite to Unlinked**. Unclassified private contacts never imply a recipient. The embedded and standalone fallback URLs both retain the selected profile.
+
+Accepted member connection requests create or reuse one empty shared direct chat;
+see [acceptance delivery and reconciliation](openchat-accepted-connections.md).
