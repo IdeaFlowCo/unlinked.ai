@@ -1105,6 +1105,7 @@ export function createPrivateBrowserHandler({ profileAsks, createMessagingSessio
           const state = await bounded(() => profileAsks.mine(session.owner), { unavailable: true })
           state.error = failure instanceof ProfileAskError ? failure.message : 'Asks are temporarily unavailable. Try again.'
           if (operation === 'publish') state.draft = values
+          if (operation === 'edit') state.failedEdit = { id: input.get('id'), values }
           const jobs = await jobResources(), props = jobProps(jobs)
           const { profile, publicProfileUrl } = await readOwnCard(jobs)
           journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, profileAsks: state }), props.importJob, '', failure instanceof ProfileAskError ? failure.status : 503); return

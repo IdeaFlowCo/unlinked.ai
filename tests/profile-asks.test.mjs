@@ -5,7 +5,7 @@ import { randomInt } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { startPrivatePilot } from '../mcp-server/private-pilot.mjs'
-import { createProfileAsks, profileAskMessagePath } from '../mcp-server/profile-asks.mjs'
+import { createProfileAsks, profileAskMessagePath, ProfileAskError } from '../mcp-server/profile-asks.mjs'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { renderOwnerAsks, renderProfileAsks } from '../mcp-server/profile-asks-views.mjs'
 
@@ -46,11 +46,11 @@ test('rendered controls are labelled, private by default and escaped; message li
  assert.equal(profileAskMessagePath('seed-person','bad/ask'),null)
 })
 for (const entry of ['browser', 'pilot']) test(`${entry} owner publish/edit/close/remove requires same-origin CSRF; viewer cards enforce canonical bridge without polluting public People JSON`,async t=>{
- let mutations=[], live={...ask}, visible=true, reads=[]
+ let mutations=[], live={...ask}, visible=true, reads=[], failMutation=null, failInventory=false
  const service={
-  async mine(actor){assert.deepEqual(actor,owner);return {asks:live?[live]:[],audience:{people:[{id:'selected-person',name:'Fixture Person'}],groups:[]}}},
+  async mine(actor){if(failInventory)throw new ProfileAskError(503,'Synthetic inventory outage');assert.deepEqual(actor,owner);return {asks:live?[live]:[],audience:{people:[{id:'selected-person',name:'Fixture Person'}],groups:[]}}},
   async forProfile(id,viewer){reads.push({id,viewer});return live && visible && live.status==='active'?[live]:[]},
-  async mutate(actor,operation,id,input){mutations.push({actor,operation,id,input});if(operation==='publish')live={...ask,...input};if(operation==='edit')live={...live,...input,revision:2};if(operation==='close')live={...live,status:'withdrawn'};if(operation==='remove')live=null},
+  async mutate(actor,operation,id,input){if(failMutation)throw failMutation;mutations.push({actor,operation,id,input});if(operation==='publish')live={...ask,...input};if(operation==='edit')live={...live,...input,revision:2};if(operation==='close')live={...live,status:'withdrawn'};if(operation==='remove')live=null},
  }
  const snapshot={state:'published',complete:true,revision:'synthetic-asks-v1',profiles:[{id:'seed-person',name:'Same Name',presence:'member',positions:[],education:[],skills:[]}],connections:[]}
  const options={dataMode:'synthetic',profileAsks:service,
@@ -101,6 +101,22 @@ for (const entry of ['browser', 'pilot']) test(`${entry} owner publish/edit/clos
  const signedOut=await get(profileAskMessagePath('seed-person',ask.id));assert.match(await signedOut.text(),/askId%3Dfixture-ask/)
  assert.equal((await post('close',{id:ask.id,expectedRevision:'2'})).status,303);assert.equal((await post('remove',{id:ask.id,expectedRevision:'2'})).status,303)
  assert.equal(mutations.length,4)
+ live={...ask,revision:9,text:'Current stored version'}
+ const unsaved={text:'Unsaved changes <keep>',visibility:'selected',userIds:'selected-person',expiresAt:draft.expiresAt,id:ask.id,expectedRevision:'3'}
+ for(const status of [400,409,503]) {
+  failMutation=new ProfileAskError(status,'Synthetic failed edit')
+  const failed=await post('edit',unsaved),page=await failed.text()
+  assert.equal(failed.status,status);assert.match(page,/Unsaved changes &lt;keep&gt;/);assert.match(page,/Current stored version/)
+  assert.match(page,/name="expectedRevision" value="3"/);assert.match(page,/value="selected-person" checked/)
+ }
+ failInventory=true
+ const outageEdit=await post('edit',unsaved),outageEditHtml=await outageEdit.text()
+ assert.equal(outageEdit.status,503);assert.match(outageEditHtml,/Your unsaved text/);assert.match(outageEditHtml,/Unsaved changes &lt;keep&gt;/);assert.match(outageEditHtml,/selected-person/)
+ assert.ok(!outageEditHtml.includes('action="/profile/asks/edit"'))
+ const outagePublish=await post('publish',{...draft,text:'Unsaved publication'})
+ assert.equal(outagePublish.status,503);assert.match(await outagePublish.text(),/Unsaved publication/)
+ assert.equal(mutations.length,4)
+
 })
 
  test('bridge filters expired and closed asks and fails closed on malformed responses and revision conflicts',async()=>{

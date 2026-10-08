@@ -78,3 +78,5 @@ writes while OpenChat retains canonical history. No iOS build is part of this
 change. A separate native launch remains held.
 
 Owner inventory accepts all fifty active asks plus fifty recent historical asks from the canonical receiver; viewer reads remain capped at fifty active asks.
+
+Failed publish/edit submissions preserve unsaved text, visibility, expiry and submitted audience IDs even when inventory is unavailable. Failed edit forms retain the submitted revision, so retrying cannot silently overwrite a newer version.
