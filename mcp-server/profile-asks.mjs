@@ -15,7 +15,7 @@ export function createProfileAsks({ secret, identityForOwner, resolveRecipient, 
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` }, body: JSON.stringify(value),
     })
     const text = await response.text()
-    if (text.length > 1200000) throw new ProfileAskError(503, 'Asks are temporarily unavailable.')
+    if (text.length > 2000000) throw new ProfileAskError(503, 'Asks are temporarily unavailable.')
     let result
     try { result = JSON.parse(text) } catch { throw new ProfileAskError(503, 'Asks are temporarily unavailable.') }
     if (!response.ok) throw new ProfileAskError([400,403,404,409,429].includes(response.status) ? response.status : 503, response.status === 409 ? 'This ask changed. Reload your profile before saving.' : response.status < 500 ? 'Could not save this ask. Check its text, audience and expiry, then try again.' : 'Asks are temporarily unavailable.')
@@ -46,7 +46,7 @@ export function createProfileAsks({ secret, identityForOwner, resolveRecipient, 
       const [result, audience] = await Promise.all([
         exchange({ operation: 'list', owner: binding, viewer: binding }), exchange({ operation: 'audience', owner: binding, viewer: binding }),
       ])
-      if (!Array.isArray(result.asks) || result.asks.length > 50 || !Array.isArray(audience.people) || !Array.isArray(audience.groups)) throw new ProfileAskError(503, 'Asks are temporarily unavailable.')
+      if (!Array.isArray(result.asks) || result.asks.length > 100 || !Array.isArray(audience.people) || !Array.isArray(audience.groups)) throw new ProfileAskError(503, 'Asks are temporarily unavailable.')
       return { asks: result.asks.map(ask => dto(ask, true)), audience }
     },
     async mutate(owner, operation, askId, input) {

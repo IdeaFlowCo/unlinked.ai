@@ -76,3 +76,5 @@ PR115/116 and OpenChat PR154/155. Removing the service secret disables this brid
 and existing messaging; reverting Unlinked UI independently stops new profile
 writes while OpenChat retains canonical history. No iOS build is part of this
 change. A separate native launch remains held.
+
+Owner inventory accepts all fifty active asks plus fifty recent historical asks from the canonical receiver; viewer reads remain capped at fifty active asks.

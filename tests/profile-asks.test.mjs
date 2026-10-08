@@ -108,3 +108,15 @@ for (const entry of ['browser', 'pilot']) test(`${entry} owner publish/edit/clos
   const disabled=bridge({secret:'',fetchImpl:async()=>{calls++;throw Error('must not fetch')}})
   await assert.rejects(disabled.mine(owner),{status:503});assert.equal(calls,0)
  })
+
+ test('owner adapter accepts the canonical active plus bounded history inventory without widening viewer reads',async()=>{
+  const asks=Array.from({length:100},(_,i)=>({...ask,id:`history-${i}`,status:i<50?'active':'withdrawn'}))
+  const service=bridge({fetchImpl:async(_url,options)=>new Response(JSON.stringify(JSON.parse(options.body).operation==='audience'?{people:[],groups:[]}:{asks}))})
+  const state=await service.mine(owner)
+  assert.equal(state.asks.length,100)
+  assert.equal(state.asks.filter(a=>a.status==='active').length,50)
+  assert.match(renderOwnerAsks(state,'synthetic-csrf'),/history-0/)
+  await assert.rejects(service.forProfile('seed-person'),{status:503})
+  const oversized=bridge({fetchImpl:async(_url,options)=>new Response(JSON.stringify(JSON.parse(options.body).operation==='audience'?{people:[],groups:[]}:{asks:[...asks,{...ask,id:'over-bound'}]}))})
+  await assert.rejects(oversized.mine(owner),{status:503})
+ })
