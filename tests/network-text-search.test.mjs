@@ -79,3 +79,11 @@ test('the deadline covers the network read too, not just AI ranking', async () =
     assert.ok(Date.now() - started < 300)
   } finally { clearInterval(keepAlive) }
 })
+
+test('the deadline holds even when a backend read ignores the abort signal', async () => {
+  const stuck = createAccountNetwork({ owner, complete: async () => ({ matches: [] }),
+    getBackend: async () => ({ listImportIds: async () => [], readLegacyObservations: async () => { await new Promise(resolve => setTimeout(resolve, 1000)); return { assertions: people } } }) })
+  const started = Date.now()
+  await assert.rejects(stuck.searchNetwork({ query: 'someone to advise on hiring', aiBudgetMs: 100 }), error => error.name === 'TimeoutError')
+  assert.ok(Date.now() - started < 500)
+})

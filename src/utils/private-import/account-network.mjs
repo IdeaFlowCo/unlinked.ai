@@ -79,9 +79,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
   } : null
   // Text first: every literal name/company/title match, no model call. A query
   // with no literal match falls back to AI ranking, all inside one deadline.
-  const searchNetwork = async ({ query, signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
-    if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
-    const deadline = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(aiBudgetMs)])
+  const searchWithin = async ({ query, deadline }) => {
     const network = await readNetwork(networkId, { signal: deadline })
     const text = matchNetworkText(network.assertions, query)
     const considered = network.assertions.filter(row => row.category === 'connections').length
@@ -94,6 +92,20 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
     let first = network
     const readFirst = async (id, options) => { if (first) { const value = first; first = null; return value } return readNetwork(id, options) }
     return search({ query, signal: deadline, readFirst })
+  }
+  // The deadline is a strongly held timer (an AbortSignal.timeout inside
+  // AbortSignal.any can be collected before it fires), and the call is raced
+  // against it, so awaits that ignore the signal cannot outlive it either.
+  const searchNetwork = async ({ query, signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
+    if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
+    const timer = new AbortController()
+    const handle = setTimeout(() => timer.abort(new DOMException('search_network deadline elapsed', 'TimeoutError')), aiBudgetMs)
+    const deadline = signal ? AbortSignal.any([signal, timer.signal]) : timer.signal
+    const expired = new Promise((_, reject) => deadline.addEventListener('abort', () => reject(deadline.reason), { once: true }))
+    const work = searchWithin({ query, deadline })
+    work.catch(() => {}); expired.catch(() => {})
+    try { return await Promise.race([work, expired]) }
+    finally { clearTimeout(handle) }
   }
   return { readNetwork, search, searchNetwork }
 }
