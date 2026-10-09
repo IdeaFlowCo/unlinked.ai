@@ -1,11 +1,20 @@
 # unlinked.ai — Repository Agent Memory
 
-Next.js 15 (App Router) + React 19 + Radix UI Themes + Supabase + Pinecone + OpenAI.
-The canonical beta at **https://www.unlinked.ai** runs the standalone Noos-backed runtime; Next.js retains historical/public source routes.
+The canonical beta at **https://www.unlinked.ai** runs the standalone Noos-backed runtime (`mcp-server/private-composition.mjs`). Next.js 15 / React 19 / Radix UI retains historical/public source routes; its Supabase authentication and legacy agent keys below are not canonical onboarding.
 
 This file is the repo-internal guide for autonomous agents and contributors working *in* this codebase. For agents arriving at unlinked.ai over HTTP, see the public brief at `public/AGENTS.md` (served at `/AGENTS.md`).
 
-## Architecture & Core Invariants
+## Canonical agent setup and grant invariants
+
+Settings presents API keys before client instructions: named independent keys, repeatable Show/Copy API key, retained Copy agent setup, and compact per-key permission switches (connection actions; private people notes & relations). Reveal/copy never issue or rotate credentials. Shared Ideaflow OAuth is recommended for compatible multi-app hosts; direct Unlinked OAuth and manual keys remain supported. Muse manual setup is documented; Muse OAuth is unverified. The authoritative UI/lifecycle contract is [docs/agent-key-settings.md](docs/agent-key-settings.md); authentication, tool normalization and provisioning are in [docs/agent-api.md](docs/agent-api.md).
+
+- Historical `ACCOUNT_GRANT_TOOL_VERSIONS` lists are immutable validation records. Valid old grants resolve **current tools within their original enabled scope**; new tools do not require token rotation. Auth, discovery, whoami, Settings and execution must agree on effective capabilities.
+- Manual permission edits preserve jti, issuedAt and generation (identical token bytes). Owner-only grants may enable connection actions without gaining public reads. OAuth additions require consent; connection actions do not grant messaging or private relationship assertions.
+- Catalog v7 (unlinked-9kk.5) adds the separate **Private people notes & relations** permission (scope suffix `_and_private_notes`, OAuth scope `private_notes`): owner-only notes/relations in the Noos people overlay via `mcp-server/private-notes-tools.mjs`, which calls `/api/overlay` and never re-implements its rules. It is default-on for API keys (pre-v7 keys resolve to it with the same token; Jacob, unlinked-lf4) and never implies connection writes; pre-v7 OAuth connections need reconsent. Writes carry `author: agent:<key/app name>`, `source: direct-key`. Messaging stays off Unlinked keys (OpenChat via the shared connector). Contract: `docs/agent-api.md` ("Private people notes & relations").
+- Owner/session/CSRF checks and compare-and-set protect lifecycle edits. Replacement changes only the selected key's generation; revocation tombstones and generation checks prevent resurrection or reuse of replaced secrets. Revalidate the live identity/generation and requested tool, not entire tool-array equality. Retain generation/v5 validation on rollback.
+- Read-only provisioning never returns a write-enabled Default key. If no eligible read-only grant exists and the deterministic Default is write-enabled, use the bounded independent read-only fallback while preserving the original read boundary and tombstones. Reauthentication at the end must check effective read-only scope as well as owner; a concurrent permission change must not return a write token.
+
+## Legacy Next.js architecture (historical, not canonical runtime)
 
 - **Legacy Authentication & Agent Keys:**
   - Browser sessions authenticate via Supabase cookies.
@@ -38,7 +47,7 @@ The trusted invited-owner browser callback and direct Noos claim/readback wiring
 The open-account private runtime adds issuer/subject signup, durable profile-first archive processing, recovered legacy-account confirmation, owner-wide network search and persistent account-scoped MCP grants; see `docs/durable-archive-import.md`, `docs/private-pilot-release-plan.md` and `deploy/private-pilot/ACCOUNT-LAUNCH.md`.
 The exact canonical-host callback/runtime transition is documented in `deploy/private-pilot/CANONICAL-HOST.md`.
 The standalone private runtime composition and guarded deployment/recovery commands are in `mcp-server/private-composition.mjs` and `deploy/private-pilot/README.md`; the canonical beta uses that runtime at `https://www.unlinked.ai` while the public Next.js application retains historical/source routes.
-Account grant provisioning, Settings regeneration and OAuth isolation are owned by `docs/agent-api.md` ("Grant provisioning" and "OAuth connector"). Bearer tokens are re-derived from durable grant records and must never enter logs, audit events or error messages.
+Account grant provisioning and OAuth isolation are owned by `docs/agent-api.md` ("Grant provisioning" and "OAuth connector"). Bearer tokens are re-derived from durable grant records and must never enter logs, audit events or error messages.
 Members show a QR business card at `/card` (inline SVG from the dependency-free encoder `src/utils/qr-code.mjs`, round-trip tested with jsQR); its target is only a snapshot-verified public profile URL. The card's second version carries opt-in contact details (phone, WhatsApp, email, link) behind a random resettable link `/c/<token>`; those details must never reach public profiles, search, model context or agent tools (`docs/contact-card.md`). `/meet` classifies Unlinked profile and OpenChat QR codes through `src/utils/meet-scan.js` and always requires an explicit confirm before opening. The header search field's QR button opens `/scan` (`renderScan`): a Scan tab reusing the `/meet` scanner (`MEET_SCRIPT`, same element ids) and a My card tab; signed-in members get one `<details>` "Me" menu (`meMenu`) whose headline is filled per request via `fillMeHeadline`, enhanced by `TOP_BAR_SCRIPT` on every page's nonce. The PWA surface (`public/manifest.webmanifest`, `public/sw.js`, icons via `scripts/generate-pwa-icons.mjs`) precaches only fixed public shell assets — never member content; keep it that way when changing caching.
 
 See `docs/private-archive-import.md` for the bounded parser/job adapter contract, `docs/durable-archive-import.md` for the default-off background worker/status/profile behavior, the test adapter boundary and links to live activation gates; see `README.md` for the public archive entry.
@@ -105,6 +114,8 @@ The provenance-backed one/two-hop reader, signed HTTP API and account MCP degree
 
 Shared public People/API/AI and backward-compatible account grant behavior are documented in `docs/shared-people-beta.md`; no raw private import or identity data is projected publicly.
 
+Owner-only “Your private context” on `/people/:id` and `/network/contacts/:connectionId` reads the Ideaflow people overlay in Noos (never written, cached, published or given to models here); identity bridge, endpoints, export/delete decision and config are in `docs/private-context.md`.
+
 Company page facts (`/companies/<name>`) are the static list in `mcp-server/company-metadata.mjs` overlaid by the operator-published graph dataset `curated-companies-v1` (own labels, revoke-based rollback, static fallback on read errors); schema, publisher and rollback are in `docs/company-facts.md`.
 
 Member-to-member connection requests (Connect, `/invitations`) and the per-account notification feed (`/notifications`, header bell and My Network badges filled per request via `fillNavAlerts`) are documented in `docs/member-connections.md`; graph labels `UnlinkedConnectionRequest` and `UnlinkedNotification`.
@@ -113,7 +124,7 @@ The versioned agent tool contract — hosted MCP tools plus the grant-authentica
 
 Sign-in is one "Sign in with Ideaflow" control with silent SSO; only an explicit sign-out, Switch account or an invitation binding asks Ideaflow ID for `prompt=select_account` (`docs/ideaflow-sign-in.md`). Do not add other sign-in options or `prompt=login`. Signed-out page views make one silent `prompt=none` hop per browser session (automatic sign-in; kill switch `UNLINKED_AUTO_SIGNIN=off`); a silent attempt creates only the private app record, never a public profile or confirmation step (same doc).
 
-MCP clients connect with OAuth ("paste the URL and sign in"): `mcp-server/oauth-server.mjs` is the authorization server for `/mcp` (RFC 9728/8414 metadata, CIMD for three exact published client ids (Claude, Claude Code, ChatGPT) plus stateless HMAC-signed DCR client ids, redirect URIs limited to the Claude/ChatGPT callbacks and loopback, PKCE S256, consent at `/oauth/authorize` in `private-browser.mjs`). Its access token is an ordinary account grant carrying `payload.connection`; connection grants are never reused as the copyable Settings credential, survive Regenerate, and revoking one never tombstones the automatic grant. Contract: `docs/agent-api.md` ("OAuth connector").
+MCP clients connect with OAuth ("paste the URL and sign in"): `mcp-server/oauth-server.mjs` is the authorization server for `/mcp` (RFC 9728/8414 metadata, CIMD for three exact published client ids (Claude, Claude Code, ChatGPT) plus stateless HMAC-signed DCR client ids, redirect URIs limited to the Claude/ChatGPT callbacks and loopback, PKCE S256, consent at `/oauth/authorize` in `private-browser.mjs`). Its access token is an ordinary account grant carrying `payload.connection`; isolation from manual keys is owned by the contract: `docs/agent-api.md` ("OAuth connector").
 
 The immutable private legacy Storage recovery, owner confirmation/download boundary and offline operator are documented in `docs/legacy-storage-recovery.md`; originals are excluded from agent grants and public projections.
 
@@ -140,3 +151,22 @@ Unlinked is the network and OpenChat its messenger. The confidential `/api/messa
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
 Professional profile links and the in-memory enrichment of immutable published rows are documented in `docs/profile-details.md`; never copy raw assertion or contact-card fields into public profiles.
+
+## People directory controls
+
+The standalone browser's progressive filtering, URL state, ordering and private date provenance are described in `docs/network-controls.md`. Browser ordering is not an agent API contract change; preserve existing agent defaults and keep owner relationship dates out of public profile projections.
+
+Public setup links to the shared OpenChat + Unlinked agent hub at
+`https://chat.globalbr.ai/agents`. Identity/inbox are shared; **direct service credentials**
+remain separate (the shared Ideaflow connector below uses one consented account connection). OpenChat `oc_` keys cover messages and Context; Unlinked grants
+retain their existing scopes. Never send an Unlinked grant to OpenChat.
+
+## Shared Ideaflow connector
+
+Connect an agent at https://id.ideaflow.app/agents using one account connection for Unlinked, OpenChat and Thoughtstream Vision. The shared MCP URL is https://id.ideaflow.app/mcp. Each app has separate consented read/write scopes; adding another app never silently expands an existing grant. Direct Unlinked MCP/API credentials remain supported. The internal request-bound adapter at `/api/connector/mcp` resolves only existing issuer/subject account bindings and accepts no ordinary user bearer tokens. Deployment requires a dedicated `IDEAFLOW_CONNECTOR_SECRET` shared only with the gateway.
+
+Settings manual-key setup, lifecycle, compatibility and release/rollback constraints are owned by `docs/agent-key-settings.md`.
+
+## Request diagnostics
+
+Default-off standalone REST/MCP diagnostics, trust/redaction boundaries, private retention and the operator reader are documented in [docs/request-diagnostics.md](docs/request-diagnostics.md). Never enable broad access logging or log request bodies/credentials to diagnose an agent. Enabling collection requires the normal scoped runtime release gate.

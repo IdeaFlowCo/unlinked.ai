@@ -99,7 +99,7 @@ for updates on already-open pages.
 
 ## Agents
 
-The [agent API contract](agent-api.md#catalog-v4-optional-connection-actions)
+The [agent API contract](agent-api.md#optional-connection-actions)
 owns the read tools, explicit opt-in write scope and grant compatibility.
 
 ## Not yet
@@ -108,7 +108,7 @@ owns the read tools, explicit opt-in write scope and grant compatibility.
 
 ## Connection controls and removal
 
-People rows and profiles share Connect, Accept + Ignore, Connected, or Invite controls; outgoing requests use the pending control described in [Browser feedback and badge refresh](#browser-feedback-and-badge-refresh). `/network?connected=1&presence=member` (also via signed-in `/people`) lists only your connected real members, with member/shadow/all counts and both graph directions.
+People rows and profiles share Connect, Accept + Ignore, Connected, or Invite controls; outgoing requests use the pending control described in [Browser feedback and badge refresh](#browser-feedback-and-badge-refresh). Connection browsing includes both graph directions; scope, membership filters, counts and ordering are owned by [People filtering and ordering](network-controls.md).
 
 Either participant can remove an accepted member request through `POST /connections/remove`, after the profile/row confirmation. The request becomes `removed`, releases its pair key and removes the agreed edge from both accounts; no notification is sent. A fresh request can reconnect them when no independent imported edge still connects their profiles. Accepted off-platform invite connections also offer removal (their link is revoked). Removal captures the pair’s active request and accepted invitation IDs, then claims the exact selected accepted agreement with a store compare-and-set before settling only those captured agreements. The claim atomically stores those IDs on the selected agreement; either participant can resume an incomplete removal after a store failure, using only its original IDs. Completion closes that retry authorization. A stale duplicate cannot touch a fresh reconnection. Settlement retracts obsolete request notifications and imposes no withdrawal cooldown. Pair reads include every active request and the latest withdrawal per sender regardless of removed history. Reconnecting requires a fresh request and acceptance. Imported observations and claimed profiles remain independent provenance and are preserved. A profile connected by an imported observation can therefore still show Connected and remain in the connections filter after removal; that observation does not offer Remove.
 

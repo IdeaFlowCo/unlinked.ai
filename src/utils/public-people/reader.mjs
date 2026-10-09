@@ -1,5 +1,7 @@
 import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { createHash } from 'node:crypto'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
+import { PUBLIC_NETWORK_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 
@@ -64,8 +66,8 @@ const deepFreeze = value => {
 
 // `photoFor(id)` optionally names a same-origin profile photo URL
 // (mcp-server/profile-photos.mjs); summaries and details then carry `photo`.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
   // once, and building it is slow. With the default `reuse: false`, each new
@@ -202,19 +204,19 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   }
   return {
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence } = requestValue(request)
-      if (!SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
+      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false } = requestValue(request)
+      if (!PUBLIC_NETWORK_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
       // The presence filter is part of the cursor scope, so a page never mixes filters.
-      const filter = presence ? `${presence}:` : ''
+      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}`
       const scope = matcher ? `list:${filter}${mode}:${normalizedQuery}` : `list:${filter}`
       const decodedCursor = cursorValue(cursor, scope), data = await snapshot(signal)
       // A snapshot that does not name its members has no presence, so it matches no filter.
       const people = presence ? data.ordered.filter(person => person.presence === presence) : data.ordered
-      if (!matcher) return { ...page(people, decodedCursor, scope, data.revision), ...(presence ? { total: people.length } : {}) }
+      if (!matcher) return { ...page(orderNetwork(people, sort), decodedCursor, scope, data.revision), ...(presence || includeTotal ? { total: people.length } : {}) }
       // `match` says whether the rows have every word ('all') or only some of them.
       const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id))
-      return { ...page(ranked.rows, decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
+      return { ...page(orderNetwork(ranked.rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
     },
     async profile(request = {}) {
       const { id, cursor, signal, query = '', sort = 'name' } = requestValue(request)

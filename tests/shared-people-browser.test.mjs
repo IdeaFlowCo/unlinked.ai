@@ -6,7 +6,7 @@ import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs
 
 const profile = (id, name) => ({ id, name, headline: 'Engineer', positions: [{ title: 'Engineer', company: 'Test Company' }], education: [], skills: [] })
 test('anonymous People reads only public professional snapshot; no-import member searches Everyone with CSRF and exact owner', async t => {
-  let handler, backendReads = 0, models = 0
+  let handler, backendReads = 0, models = 0, down = false
   const owner = { ownerId: 'test-owner', userId: 'test-user' }
   const data = { state: 'published', complete: true, revision: 'public-test-v1', profiles: [profile('first', 'A First'), profile('last', 'Z Last')], connections: [{ fromId: 'first', toId: 'last' }] }
   const server = createServer((req,res) => void handler(req,res))
@@ -18,7 +18,7 @@ test('anonymous People reads only public professional snapshot; no-import member
   }, resolveOwner: async identity => identity.subject === 'verified-subject' ? owner : null,
   signup: async () => owner, issueAccountGrant: async () => ({ accessToken: 'test-grant' }), revokeAccountGrant: async () => {},
   getBackend: async value => { assert.deepEqual(value, owner); backendReads++; return { adapter: {}, listImportIds: async () => [], listImportJobIds: async () => [], readResource: async () => null } },
-  readPublishedSnapshot: async () => data,
+  readPublishedSnapshot: async () => { if (down) throw Error('index down'); return data },
   complete: async ({ candidateIds, input }) => { models++; assert.ok(!input.includes('test@example')); return { matches: [{ id: candidateIds[0], reason: 'Name matches' }] } },
   })
   const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
@@ -44,6 +44,14 @@ test('anonymous People reads only public professional snapshot; no-import member
   assert.equal((await submit('query=Last&scope=everyone&csrf=wrong')).status,400)
   const searched = await submit(new URLSearchParams({query:'Last',scope:'everyone',csrf})); assert.equal(searched.status,200); assert.match(await searched.text(),/2 public profiles considered/); assert.equal(models,1)
   const toggled=await submit(new URLSearchParams([['query','Last'],['scope','everyone'],['scope','own'],['csrf',csrf]])); assert.equal(toggled.status,200); assert.equal(models,1)
+  // An unreadable index is an AI-search notice on the People page, never the upload error page.
+  down = true
+  const failed = await submit(new URLSearchParams({query:'Last',scope:'everyone',csrf})); assert.equal(failed.status,503)
+  const failedHTML = await failed.text(); assert.match(failedHTML,/AI search could not finish/); assert.match(failedHTML,/Results for “Last”/); assert.doesNotMatch(failedHTML,/We could not finish that|return to your files/); assert.equal(models,1)
+  const unavailablePage = await request('/people/last',{headers:{Cookie:session}}); assert.equal(unavailablePage.status,503)
+  const unavailableHTML = await unavailablePage.text(); assert.match(unavailableHTML,/People are unavailable right now/); assert.match(unavailableHTML,/Back to your people/)
+  assert.deepEqual(await (await request('/api/people/last')).json(),{error:'public_people_unavailable'})
+  down = false
 })
 
 test('anonymous unavailable projection returns503, never empty or owner-private fallback', async t => {
@@ -52,6 +60,8 @@ test('anonymous unavailable projection returns503, never empty or owner-private 
   const endpoint=`http://127.0.0.1:${server.address().port}`
   handler=createPrivateBrowserHandler({baseUrl:endpoint.replace('http:','https:'), login:{begin:async()=>{},finish:async()=>{}},resolveOwner:async()=>null,getBackend:async()=>{throw Error('private read forbidden')}})
   const response=await fetch(endpoint+'/api/people');assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'public_people_unavailable'})
+  // Browsers get a page that says what happened; only the API answers in JSON.
+  for (const path of ['/people','/people/someone','/network?q=peter']) { const page=await fetch(endpoint+path);assert.equal(page.status,503);assert.match(page.headers.get('content-type'),/text\/html/);const text=await page.text();assert.match(text,/People are unavailable right now/);assert.doesNotMatch(text,/public_people_unavailable/) }
 })
 
 test('signed-in network without public provider defaults search to own network', async t => {

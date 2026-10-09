@@ -106,3 +106,9 @@ test('canonical isolated-runtime origin passes target validation but never bypas
     await assert.rejects(startPrivatePilot({ ...options, ...change }), /explicit_isolated_pilot_configuration_required/)
   }
 })
+
+test('shared-Noos runtime keeps canonical private ingress restrictions', async () => {
+  const options = { baseUrl: 'https://www.unlinked.ai', networkMode: 'shared-noos', host: '0.0.0.0', port: 9367, complete: async () => ({}), signup: 'invalid' }
+  await assert.rejects(startPrivatePilot(options), /account_signup_configuration_required/)
+  for (const change of [{ host: '127.0.0.1' }, { baseUrl: 'https://foreign.invalid' }, { baseUrl: 'https://www.unlinked.ai.evil.invalid' }, { port: 9368 }]) await assert.rejects(startPrivatePilot({ ...options, ...change }), /explicit_isolated_pilot_configuration_required/)
+})

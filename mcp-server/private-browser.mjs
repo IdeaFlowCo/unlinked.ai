@@ -1,5 +1,7 @@
 import { messagesScript } from './messages-view.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
+import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
+import { NETWORK_FILTER_SCRIPT } from './network-filter-script.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
@@ -24,10 +26,11 @@ import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
 import { CONNECTION_FEEDBACK_SCRIPT } from './connection-feedback.mjs'
 import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
-import { ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from './account-grants.mjs'
+import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
+import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
@@ -145,11 +148,14 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
     return slug ? usable(await Promise.resolve(lookupSlug(slug)).catch(() => null)) : null
   }
   const candidates = await Promise.all(rows.map(async row => [usable(publicTarget(row)), await bySlug(row)]))
-  const found = await lookup([...new Set(candidates.flat().filter(Boolean))].slice(0, 1000))
+  const targets = [...new Set(candidates.flat().filter(Boolean))], found = new Map()
+  for (let start = 0; start < targets.length; start += 1000) {
+    for (const [id, summary] of await lookup(targets.slice(start, start + 1000))) found.set(id, summary)
+  }
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -173,7 +179,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     const authorization = new URL(authorizationOrigin)
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
-  const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map()
+  const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map()
   let invitationWindow = 0, invitationRequests = 0, contactWindow = 0, contactRequests = 0, unsubscribeWindow = 0, unsubscribeRequests = 0
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
@@ -190,7 +196,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
-  const contactRow = row => ({ name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
+  const contactRow = row => ({ ...(typeof row.id === 'string' ? { sourceRowId: row.id, contactHref: `/network/contacts/${encodeURIComponent(row.id)}` } : {}), ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
   const publicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite', 'unlinked-connection'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
   const usableTarget = id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
   async function contactRows(rows, reader = publicReader) {
@@ -203,7 +209,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const match = matches[index]
         return match ? { ...value, id: match.id, ...(match.photo ? { photo: match.photo } : {}), ...(match.presence ? { presence: match.presence, connectionCount: match.connectionCount } : {}) } : value
       })
-    } catch { return plainRows }
+    } catch {
+      // Without the index, a row whose source names its profile still links there.
+      return plainRows.map((value, index) => {
+        const id = rows[index].provenance?.toId !== undefined ? usableTarget(publicTarget(rows[index])) : null
+        return id ? { ...value, id } : value
+      })
+    }
   }
   // One reader per page view: every read of the index on that page shares one build.
   const pageReader = () => createPublicPeopleReader({ readPublishedSnapshot, reuse: true, photoFor })
@@ -212,14 +224,27 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // accepted invites and connection requests) plus everyone the public graph
   // connects to its own profile. Its own profile is never listed.
   async function connectedProfiles(owner, network, reader) {
-    const targets = [...new Set(network.assertions.filter(row => row.category === 'connections').map(publicTarget).map(usableTarget).filter(Boolean))]
+    const assertions = network.assertions.filter(row => row.category === 'connections')
+    const matches = await publishedPeopleFor(assertions, { publicTarget, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : null, lookup: ids => reader.lookup({ ids }) })
     const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner).catch(() => null) : null
     const found = new Map()
-    for (let start = 0; start < targets.length; start += 1000) for (const summary of (await reader.lookup({ ids: targets.slice(start, start + 1000) })).values()) found.set(summary.id, summary)
+    for (const summary of matches) if (summary) found.set(summary.id, summary)
     if (mine) {
       for (const summary of await reader.neighbors({ id: mine })) found.set(summary.id, summary)
       const self = (await reader.lookup({ ids: [mine] })).get(mine)
       found.delete(mine); if (self) found.delete(self.id)
+    }
+    // Deduplication retains the earliest known date, so reimporting a contact
+    // does not make an old connection look newly imported or newly connected.
+    for (const [index, row] of assertions.entries()) {
+      const id = matches[index]?.id, profile = found.get(id)
+      if (!profile) continue
+      const dates = {}
+      for (const key of ['connectedAt', 'importedAt']) {
+        const at = validTimestamp(row[key])
+        if (at) dates[key] = Math.min(at, validTimestamp(profile[key]) ?? at)
+      }
+      found.set(id, { ...profile, ...dates })
     }
     return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
@@ -227,7 +252,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // Overlapping requests share the public reader's snapshot build. Let a small
   // browser/crawler burst share it while retaining the site-wide minute bound.
   const PUBLIC_IN_FLIGHT = 8
-  const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
+  const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || (pathname !== '/people/add' && /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname)) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
   let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
   const PHOTO_PER_MINUTE = 6000, PHOTO_IN_FLIGHT = 32
@@ -283,7 +308,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'${view.messaging ? '; frame-src https://chat.ideaflow.app' : ''}`)
     if (view.messaging) response.setHeader('Permissions-Policy', 'camera=(self \"https://chat.ideaflow.app\"), microphone=(self \"https://chat.ideaflow.app\")')
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
-    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${script}`
+    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -369,7 +394,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
   // A People listing a Connect/answer/withdraw/remove form may return to: the
   // /network path with only its own filter parameters (a stale notice is dropped).
-  const NETWORK_RETURN_KEYS = ['q', 'mode', 'presence', 'connected', 'scope', 'cursor', 'page']
+  const NETWORK_RETURN_KEYS = ['q', 'mode', 'presence', 'connected', 'scope', 'cursor', 'page', 'sort']
   const networkReturn = value => {
     if (typeof value !== 'string' || value.length > 1200 || !/^\/network(?:\?[\x21-\x7e]*)?$/.test(value) || value.includes('#')) return null
     const url = new URL(value, base)
@@ -405,14 +430,16 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // request and shows consent (signing in first when needed); POST carries the
   // same parameters plus the session CSRF token and re-validates everything.
   async function authorizeConnector(request, response, url, session, chrome) {
-    let params = url.searchParams, decision = null, access = 'read'
+    let params = url.searchParams, decision = null, access = 'read', privateNotes = false
     if (request.method === 'POST') {
       const input = new URLSearchParams((await body(request, 16384)).toString('utf8'))
-      if (!session || input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('decision').length !== 1 || input.getAll('access').length > 1) throw new Error('private_browser_csrf')
+      if (!session || input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('decision').length !== 1 || input.getAll('access').length > 1 || input.getAll('private_notes').length > 1) throw new Error('private_browser_csrf')
       decision = input.get('decision')
       access = input.get('access') ?? 'read'
-      if (!['allow', 'deny'].includes(decision) || !['read', 'connections'].includes(access)) throw new Error('private_browser_csrf')
-      params = new URLSearchParams([...input].filter(([key]) => !['csrf', 'decision', 'access'].includes(key)))
+      // An unticked checkbox sends nothing: private notes off for this app.
+      privateNotes = input.get('private_notes') === 'on'
+      if (!['allow', 'deny'].includes(decision) || !['read', 'connections'].includes(access) || ![null, 'on'].includes(input.get('private_notes'))) throw new Error('private_browser_csrf')
+      params = new URLSearchParams([...input].filter(([key]) => !['csrf', 'decision', 'access', 'private_notes'].includes(key)))
     } else if (request.method !== 'GET') { response.writeHead(405).end(); return }
     const result = await oauth.readAuthorization(params)
     if (!result.ok) {
@@ -430,8 +457,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     if (access === 'connections' && !offerConnections) throw new Error('private_browser_csrf')
     const ownerHash = createHash('sha256').update(session.owner.ownerId).digest('hex')
     if (decision === 'deny') { await recordAudit({ event: 'oauth_connection_denied', app: result.request.app, ownerHash }); redirect(response, oauth.deny(result.request)); return }
-    const location = oauth.approve(result.request, session.owner, { connections: access === 'connections' })
-    await recordAudit({ event: 'oauth_connection_approved', app: result.request.app, ownerHash, access })
+    const location = oauth.approve(result.request, session.owner, { connections: access === 'connections', privateNotes })
+    await recordAudit({ event: 'oauth_connection_approved', app: result.request.app, ownerHash, access, privateNotes })
     response.setHeader('Referrer-Policy', 'no-referrer')
     redirect(response, location)
   }
@@ -439,9 +466,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // both the People index and connection requests, and only by explicit opt-in.
   const connectionActionsAvailable = Boolean(memberConnections) && typeof readPublishedSnapshot === 'function'
   // What the copyable setup can do, and which current tools it lacks.
-  const setupAccess = grant => ({ scope: grant.scope, missingTools: missingAccountGrantTools(grant) })
+  const setupAccess = grant => ({ scope: grant.scope })
   // Connected apps carry whether they predate tools their scope now has.
-  const settingsGrants = grants => grants.map(grant => grant.connection ? { ...grant, outdated: missingAccountGrantTools(grant).length > 0 } : grant)
+  const settingsGrants = grants => grants.map(grant => ({ ...grant, ...(effectiveAccountGrant(grant) ?? {}) }))
   // Settings grant listing: labels for OAuth-connected apps when available.
   const grantList = async (owner, backend) => typeof listAccountGrants === 'function' ? await listAccountGrants(owner) : (await backend.listAccountGrantIds()).map(id => ({ id }))
   const connector = oauth && mcpEndpoint ? { url: mcpEndpoint } : undefined
@@ -548,6 +575,35 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         response.writeHead(viewer ? 200 : 401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
         response.end(JSON.stringify(viewer ? await readAlerts(viewer.owner, null) ?? {} : { error: 'Sign in to see notifications.' })); return
       }
+      // The signed-in owner's own private context from the Ideaflow people
+      // overlay (docs/private-context.md). Owner-only JSON, never cached, never
+      // part of a public page, the public index or model context; another
+      // account or a signed-out visitor gets nothing.
+      if (url.pathname === '/api/private-context' || url.pathname.startsWith('/api/private-context/')) {
+        const send = (status, value) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store, private', Vary: 'Cookie', 'X-Robots-Tag': 'noindex, nofollow, noarchive', 'Cross-Origin-Resource-Policy': 'same-origin' }); response.end(JSON.stringify(value)) }
+        const match = url.pathname.match(/^\/api\/private-context\/(people|contacts|entities)\/([^/]{1,480})(\/neighbourhood)?$/)
+        if (request.method !== 'GET') { send(405, { error: 'method_not_allowed' }); return }
+        if (!viewer) { send(401, { error: 'sign_in_required' }); return }
+        if (request.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(request.headers['sec-fetch-site'])) { send(403, { error: 'same_origin_required' }); return }
+        if (!match || (match[1] === 'entities') !== Boolean(match[3])) { send(404, { error: 'not_found' }); return }
+        if (!privateContext) { send(503, { state: 'unavailable' }); return }
+        const depthValues = url.searchParams.getAll('depth')
+        if ([...url.searchParams.keys()].some(key => key !== 'depth') || depthValues.length > 1 || (depthValues.length && !['1', '2'].includes(depthValues[0]))) { send(400, { error: 'invalid_input' }); return }
+        const now = Date.now(), budget = contextBudgets.get(viewer.owner.ownerId) ?? { window: now, count: 0 }
+        if (now - budget.window >= 60000) { budget.window = now; budget.count = 0 }
+        if (++budget.count > 60) { send(429, { error: 'rate_limited' }); return }
+        if (contextBudgets.size > 5000) contextBudgets.clear()
+        contextBudgets.set(viewer.owner.ownerId, budget)
+        let id
+        try { id = decodeURIComponent(match[2]) } catch { send(400, { error: 'invalid_input' }); return }
+        try {
+          const value = match[1] === 'people' ? await privateContext.forProfile(viewer.owner, id)
+            : match[1] === 'contacts' ? await privateContext.forContact(viewer.owner, id)
+            : await privateContext.neighbourhood(viewer.owner, id, depthValues[0] === '2' ? 2 : 1)
+          if (value) send(200, value); else send(404, { error: 'not_found' })
+        } catch { send(503, { state: 'unavailable' }) }
+        return
+      }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline, ...(responseAlerts.has(response) ? { alerts: responseAlerts.get(response) } : {}) } : {}
       if (await servePublicDiscovery(request, response, url.pathname, chrome, { signInOrigin: authorizationOrigin })) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
@@ -596,7 +652,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         journey(response, renderContactCard({ ...chrome, card, token: contactLink[1] }), null, '', card ? 200 : 404); return
       }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
-      const publicProfile = url.pathname.match(/^\/people\/([^/]+)(\/connections)?$/)
+      // /people/add is the signed-in Add a person page, never a profile id.
+      const publicProfile = url.pathname === '/people/add' ? null : url.pathname.match(/^\/people\/([^/]+)(\/connections)?$/)
       const publicCompanyApi = url.pathname.match(/^\/api\/companies\/([^/]+)$/)
       const publicCompany = url.pathname.match(/^\/companies\/([^/]+)$/)
       if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/people' && viewer) { redirect(response, `/network${url.search}`); return }
@@ -636,20 +693,26 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             const notice = url.searchParams.get('connect')
             const companies = new Map(await Promise.all([...new Set(result.profile.positions.map(position => position.company).filter(Boolean))].map(async name => [name, companyDetailLevel(await lookupCompanyFacts(name))])))
             const profile = { ...result.profile, positions: result.profile.positions.map(position => ({ ...position, companyDetailLevel: companies.get(position.company) })) }
-            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined })); return
+            // The owner's private context mounts only for a signed-in viewer and is
+            // fetched separately; the page itself never carries it.
+            const withContext = Boolean(viewer && privateContext && !publicProfile?.[2])
+            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, withContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
-          const result = await publicReader.list({ query, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined })
+          const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
+          const result = await publicReader.list({ query, mode, presence, sort, includeTotal: url.pathname !== '/api/people', cursor: url.searchParams.get('cursor') ?? undefined })
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
           if (url.pathname === '/search-public') {
             const content = publicSearchDocument(result, { query, mode, presence })
             response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(content) })
             response.end(request.method === 'HEAD' ? undefined : content); return
           }
-          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, presence, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
+          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, presence, sort, total: result.total, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
+          // People and company pages answer people with a page; the APIs keep JSON.
+          if (status === 503 && !url.pathname.startsWith('/api/') && url.pathname !== '/search-public') { journey(response, renderPeopleUnavailable(chrome), null, '', 503); return }
           response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' })); return
         } finally { publicBusy-- }
       }
@@ -1200,6 +1263,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const connectedValues = url.searchParams.getAll('connected')
         if (connectedValues.length > 1 || (connectedValues.length && connectedValues[0] !== '1')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
         const connectedOnly = connectedValues[0] === '1'
+        const sort = url.searchParams.get('sort') ?? 'best'
+        if (url.searchParams.getAll('sort').length > 1 || !(connectedOnly ? NETWORK_SORTS : PUBLIC_NETWORK_SORTS).includes(sort)) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
         // The same matching as the public list: every word in any form, else the closest people.
         const matcher = typed ? createQueryMatcher(typed, mode) : null
         const index = Number(url.searchParams.get('page') ?? '0')
@@ -1218,47 +1283,87 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (connectedOnly) {
           const kept = (mine ?? []).filter(value => !presence || value.presence === presence)
           const ranked = matcher ? rankMatches(kept, matcher, value => ({ name: words(value.name), text: words([value.name, value.headline, value.location].filter(Boolean).join(' ')) })) : { rows: kept, match: 'none' }
-          const rows = await withConnect(session.owner, ranked.rows.slice(index * 100, (index + 1) * 100), reader)
-          const view = renderPeople({ ...props, query: typed, mode, presence, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
+          const ordered = orderNetwork(ranked.rows, sort)
+          const rows = await withConnect(session.owner, ordered.slice(index * 100, (index + 1) * 100), reader)
+          const view = renderPeople({ ...props, query: typed, mode, presence, sort, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
             connectedView: { rows, total: ranked.rows.length, ...(ranked.rows.length > (index + 1) * 100 ? { nextPage: index + 1 } : {}) } })
           journey(response, view, props.importJob); return
         }
-        const ownMatches = matcher ? rankMatches(connections, matcher, row => ({ name: words([row.fields['first name'], row.fields['last name']].filter(Boolean).join(' ')), text: words([row.fields['first name'], row.fields['last name'], row.fields.company, row.fields.position].filter(Boolean).join(' ')) })) : { rows: connections, match: 'none' }
-        const rows = ownMatches.rows
-        const linking = contactRows(rows.slice(index * 100, (index + 1) * 100), reader)
-        let everyone, nextCursor, state = 'ready', match = ownMatches.match
+        const linking = contactRows(connections, reader)
+        let everyone, nextCursor, total, state = 'ready', match = 'none'
         if (publicProfessionalSearch) {
           everyone = []
-          try { const result = await reader.list({ query: filter, mode, presence, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
+          try { const result = await reader.list({ query: filter, mode, presence, sort, includeTotal: true, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; total = result.total; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
           catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
         // The contact lookup ran alongside the public list and shares its snapshot read.
-        const contacts = await withConnect(session.owner, await linking, reader)
+        const eligibleContacts = (await linking).filter(value => !presence || value.presence === presence)
+        const ownMatches = matcher ? rankMatches(eligibleContacts, matcher, row => ({ name: words(row.name), text: words([row.name, row.company, row.headline].filter(Boolean).join(' ')) })) : { rows: eligibleContacts, match: 'none' }
+        if (ownMatches.match === 'all' || (ownMatches.match === 'some' && match !== 'all')) match = ownMatches.match
+        const matchingContacts = orderNetwork(ownMatches.rows, sort)
+        const contacts = await withConnect(session.owner, matchingContacts.slice(index * 100, (index + 1) * 100), reader)
         everyone = await withConnect(session.owner, everyone, reader)
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
-        if (rows.length > (index + 1) * 100) extend(view, `<p class="dir"><a href="/network?page=${index + 1}&q=${encodeURIComponent(filter)}${mode === 'exact' ? '&mode=exact' : ''}">Next contacts</a></p>`)
+        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
         journey(response, view, props.importJob)
         return
+      }
+      // One of the owner's own imported contacts, with their private context.
+      const contactDetail = url.pathname.match(/^\/network\/contacts\/([^/]{1,480})$/)
+      if (signup && request.method === 'GET' && contactDetail) {
+        let id
+        try { id = decodeURIComponent(contactDetail[1]) } catch { response.writeHead(404).end(); return }
+        const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
+        const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
+        if (!row) { response.writeHead(404).end(); return }
+        const [contact] = await contactRows([row], pageReader())
+        const props = jobProps(await jobResources())
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        journey(response, renderContactDetail({ ...props, contact, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // The agent setup is prepared automatically: reuse the owner's live
         // grant or mint the one idempotent automatic grant. A revoked automatic
-        // setup stays revoked (ensure returns null) until the owner regenerates.
-        const ensured = typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner) : null
+        // setup stays revoked (ensure returns null); explicit selection reads only.
+        const selectedId = url.searchParams.get('key')
+        const ensured = selectedId && accountKeys ? await accountKeys.readKey(session.owner, selectedId) : typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner) : null
         const configuration = ensured ? scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const setups = ensured ? agentClientSetups({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const grants = await grantList(session.owner, backend)
         const jobs = await jobResources(), props = jobProps(jobs)
         // Email choices appear only while email is on; a slow read costs the section, never the page.
         const email = memberEmail?.sending ? await bounded(() => memberEmail.settings(session.owner), null) : null
-        const view=renderSettings({ ...props, grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+        const view=renderSettings({ ...props, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
           ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
         return
+      }
+      if (signup && accountKeys && request.method === 'POST' && url.pathname === '/settings/api-keys') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        const action = input.get('action'), id = input.get('grantId')
+        const allowed = action === 'create' ? ['csrf', 'action', 'name', 'access', 'private_notes'] : action === 'rename' ? ['csrf', 'action', 'grantId', 'name'] : action === 'permissions' ? ['csrf', 'action', 'grantId', 'access', 'private_notes'] : ['csrf', 'action', 'grantId']
+        if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || [...input.keys()].some(key => !allowed.includes(key) || input.getAll(key).length !== 1)) throw new Error('private_browser_csrf')
+        let selected = id
+        if (action === 'create') {
+          const access = input.get('access'), notes = input.get('private_notes')
+          if (access !== null && (access !== 'connections' || !connectionActionsAvailable)) throw new Error('private_browser_csrf')
+          if (notes !== null && notes !== 'on') throw new Error('private_browser_csrf')
+          selected = (await issueAccountGrant(session.owner, undefined, { name: input.get('name'),
+            ...(access ? { scope: composeAccountScope({ public: true, write: true }) } : {}), privateNotes: notes === 'on' })).grantId
+        } else if (action === 'permissions') {
+          const access = input.get('access'), notes = input.get('private_notes')
+          if (access !== null && (access !== 'connections' || !connectionActionsAvailable)) throw new Error('private_browser_csrf')
+          if (notes !== null && notes !== 'on') throw new Error('private_browser_csrf')
+          // One CAS write for both switches; the key's token, jti and generation are unchanged.
+          await accountKeys.setPermissions(session.owner, id, { connections: access === 'connections', privateNotes: notes === 'on' })
+        } else if (action === 'rename') await accountKeys.renameKey(session.owner, id, input.get('name'))
+        else if (action === 'replace') await accountKeys.replaceKey(session.owner, id)
+        else if (action === 'revoke') { await accountKeys.readKey(session.owner, id); await revokeAccountGrant(session.owner, id); selected = null }
+        else throw new Error('private_browser_csrf')
+        redirect(response, selected ? `/settings?key=${encodeURIComponent(selected)}#api-keys` : '/settings#api-keys'); return
       }
       if (signup && memberEmail && request.method === 'POST' && url.pathname === '/settings/email') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
@@ -1275,6 +1380,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // The contact card's details belong to the export; its link does not.
         if (contactCards) data.contactCard = await contactCards.exportOwner(session.owner).catch(() => null)
         if (memberEmail) data.email = await memberEmail.exportOwner(session.owner).catch(() => null)
+        // Private notes and relations live in the owner's Ideaflow people overlay
+        // (shared with OpenChat); the export includes the owner's copy.
+        if (privateContext) {
+          try { const overlay = await privateContext.exportOwner(session.owner); data.ideaflowPrivateContext = overlay ? { storedIn: 'Ideaflow people overlay (Noos), shared by OpenChat and Unlinked', deletedWithUnlinkedAccount: false, ...overlay } : null }
+          catch { data.ideaflowPrivateContext = { error: 'private_context_unavailable' } }
+        }
         await recordAudit({ event: 'account_data_exported', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="unlinked-export-${new Date().toISOString().slice(0, 10)}.json"` })
         response.end(JSON.stringify(data, null, 2)); return
@@ -1326,13 +1437,24 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const scope = publicProfessionalSearch ? input.getAll('scope').at(-1) ?? 'everyone' : 'own'
           if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
           if (scope === 'everyone') {
-            const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
+            let result = null
+            try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) }) }
+            catch { /* The page still shows the people this account knows, with a notice. */ }
             const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
             const reader = pageReader()
-            const own = network.imports.length || network.legacyProfileId ? await withConnect(session.owner, await contactRows(network.assertions.filter(row => row.category === 'connections').slice(0, 100), reader), reader) : undefined
-            const aiMatches = await withConnect(session.owner, result.matches, reader)
-            const view = renderPeople({ ...props, scope, aiMatches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.`, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
-            journey(response, view, props.importJob); return
+            const connections = network.assertions.filter(row => row.category === 'connections')
+            // On failure, the account's own people for the same words stand in for the AI picks.
+            const ownRows = async () => {
+              const rows = await contactRows(result ? connections.slice(0, 100) : connections, reader)
+              const typed = input.get('query').trim()
+              return result || !typed ? rows.slice(0, 100) : rankMatches(rows, createQueryMatcher(typed, 'best'), row => ({ name: words(row.name), text: words([row.name, row.company, row.headline].filter(Boolean).join(' ')) })).rows.slice(0, 100)
+            }
+            const own = network.imports.length || network.legacyProfileId ? await withConnect(session.owner, await ownRows(), reader) : undefined
+            const ai = result
+              ? { aiMatches: await withConnect(session.owner, result.matches, reader), aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }
+              : { aiError: own === undefined ? 'AI search could not finish. Try again in a minute.' : 'AI search could not finish. Try again in a minute; your own matching people are below.' }
+            const view = renderPeople({ ...props, scope, ...ai, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
+            journey(response, view, props.importJob, '', result ? 200 : 503); return
           }
           const account = createAccountNetwork({ owner: session.owner, getBackend, complete })
           const result = await account.search({ query: input.get('query'), signal: controller.signal })
@@ -1346,23 +1468,17 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return
         }
-        // Regenerate: mint the replacement first — a failure leaves the
-        // existing setup intact — then revoke every other live grant so old
-        // bearer credentials die as soon as the new one exists.
-        // OAuth-connected apps are separate connections and stay connected.
-        // `access=connections` is the explicit opt-in to connection-request
-        // write tools; absent access or `access=read` issues the read-only setup.
-        // Unknown fields and unsupported access values are rejected.
+        // Compatibility endpoint: create an additional setup, never invalidate
+        // another client. Replacement now targets a key explicitly in Settings.
         const access = input.getAll('access')
         if (access.length > 1 || (access.length && !['read', 'connections'].includes(access[0])) || (access[0] === 'connections' && !connectionActionsAvailable) || [...input.keys()].some(key => !['csrf', 'access'].includes(key))) throw new Error('private_browser_csrf')
-        const issued = await issueAccountGrant(session.owner, undefined, access[0] === 'connections' ? { scope: ACCOUNT_WRITE_SCOPE } : {})
+        const issued = await issueAccountGrant(session.owner, undefined, access[0] === 'connections' ? { scope: composeAccountScope({ public: true, write: true, privateNotes: true }) } : {})
         const { accessToken, grantId: replacement } = issued
-        for (const grant of await grantList(session.owner, backend)) if (grant.id !== replacement && !grant.connection) await revokeAccountGrant(session.owner, grant.id)
         const configuration = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
         const setups = agentClientSetups({ endpoint: mcpEndpoint, accessToken })
         const jobs = await jobResources(), props = jobProps(jobs)
-        journey(response, renderSettings({ ...props, imports: summaries(jobs), grants: settingsGrants(await grantList(session.owner, backend)), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector,
-          agentAccess: { scope: issued.scope ?? (access[0] === 'connections' ? ACCOUNT_WRITE_SCOPE : undefined), missingTools: [], regenerated: true }, connectionActionsAvailable }), props.importJob, agentSetupCopyScript()); return
+        journey(response, renderSettings({ ...props, selectedKeyId: replacement, keyManagement: Boolean(accountKeys), imports: summaries(jobs), grants: settingsGrants(await grantList(session.owner, backend)), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector,
+          agentAccess: { scope: issued.scope, missingTools: [], regenerated: true }, connectionActionsAvailable }), props.importJob, agentSetupCopyScript()); return
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         if (uploadBusy) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }

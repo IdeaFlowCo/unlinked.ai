@@ -1,0 +1,17 @@
+# Opt-in cutover after a verified lossless migration. Compose >= 2.24.4.
+# Keep the source graph available only with --profile rollback-graph;
+# never resume its writers alongside the shared runtime.
+services:
+  graph:
+    profiles: [rollback-graph]
+  runtime:
+    networks: !override [frontend, noos]
+    environment:
+      PILOT_NETWORK_MODE: shared-noos
+      PILOT_BOLT_URL: bolt://noos_neo4j:7687
+      PILOT_SHARED_GRAPH_MIGRATION_ID: ${PILOT_SHARED_GRAPH_MIGRATION_ID:?verified migration id required}
+      PILOT_SHARED_GRAPH_MANIFEST_SHA256: ${PILOT_SHARED_GRAPH_MANIFEST_SHA256:?verified manifest hash required}
+networks:
+  noos:
+    external: true
+    name: noos_default

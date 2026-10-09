@@ -66,8 +66,8 @@ test('agent setup is prepared automatically, idempotently, stays revoked after r
   assert.equal(first.status, 200)
   const configA = configFrom(first.html)
   assert.ok(configA, 'configuration shown automatically')
-  assert.match(first.html, /ready — nothing to create/)
-  assert.match(first.html, /Regenerate agent setup/)
+  assert.match(first.html, /Copy API key/)
+  assert.match(first.html, /Copy agent setup/)
   assert.equal(f.activeGrants().length, 1)
   const tokenA = configA.mcpServers['unlinked-private'].headers.Authorization.slice(7)
   assert.ok(await grants.authenticateGrant({ headers: { authorization: `Bearer ${tokenA}` } }))
@@ -77,12 +77,12 @@ test('agent setup is prepared automatically, idempotently, stays revoked after r
   assert.equal(f.activeGrants().length, 1)
   assert.deepEqual(configFrom(second.html), configA)
 
-  // A migrated/expanded tool list on the live grant is tolerated: still reused, never duplicated.
+  // A corrupt catalog is not displayed as a usable credential or duplicated.
   const grantRecord = f.activeGrants()[0]
   grantRecord.payload.tools = [...grantRecord.payload.tools, 'unlinked_future_tool']
   const migrated = await settings()
   assert.equal(f.activeGrants().length, 1)
-  assert.deepEqual(configFrom(migrated.html), configA)
+  assert.equal(configFrom(migrated.html), null)
   grantRecord.payload.tools = grantRecord.payload.tools.slice(0, -1)
 
   // Revoking the only grant sticks: Settings shows no credential and mints nothing.
@@ -91,8 +91,8 @@ test('agent setup is prepared automatically, idempotently, stays revoked after r
   const afterRevoke = await settings()
   assert.equal(f.activeGrants().length, 0, 'revocation is not undone by a page view')
   assert.equal(configFrom(afterRevoke.html), null)
-  assert.match(afterRevoke.html, /Agent access is revoked/)
-  assert.match(afterRevoke.html, /Create agent setup/)
+  assert.match(afterRevoke.html, /No API key is prepared/)
+  assert.match(afterRevoke.html, /Create API key/)
   assert.equal((await grants.authenticateGrant({ headers: { authorization: `Bearer ${tokenA}` } })), null)
 
   // Explicit regenerate mints exactly one new grant with a working credential.
@@ -104,18 +104,18 @@ test('agent setup is prepared automatically, idempotently, stays revoked after r
   assert.equal(f.activeGrants().length, 1)
   assert.ok(await grants.authenticateGrant({ headers: { authorization: `Bearer ${tokenB}` } }))
 
-  // Regenerating again revokes the previous credential before showing the new one.
+  // Compatibility creation adds a key without invalidating an existing client.
   const again = await post('/setup-account', {})
   const configC = configFrom(await again.text())
   const tokenC = configC.mcpServers['unlinked-private'].headers.Authorization.slice(7)
-  assert.equal(f.activeGrants().length, 1)
-  assert.equal(await grants.authenticateGrant({ headers: { authorization: `Bearer ${tokenB}` } }), null)
+  assert.equal(f.activeGrants().length, 2)
+  assert.ok(await grants.authenticateGrant({ headers: { authorization: `Bearer ${tokenB}` } }))
   assert.ok(await grants.authenticateGrant({ headers: { authorization: `Bearer ${tokenC}` } }))
 
   // Settings keeps showing the regenerated credential and still never duplicates it.
   const final = await settings()
-  assert.deepEqual(configFrom(final.html), configC)
-  assert.equal(f.activeGrants().length, 1)
+  assert.ok([tokenB, tokenC].includes(configFrom(final.html).mcpServers['unlinked-private'].headers.Authorization.slice(7)))
+  assert.equal(f.activeGrants().length, 2)
 
   // Bearer secrets never reach the audit stream or durable grant records.
   const auditText = JSON.stringify(auditEvents)
@@ -125,7 +125,7 @@ test('agent setup is prepared automatically, idempotently, stays revoked after r
   }
 })
 
-test('ensureGrant reuses a manually created grant instead of minting an automatic duplicate', async t => {
+test('ensureGrant reuses a manually created grant instead of minting an automatic duplicate', async () => {
   const owner = { ownerId: 'synthetic-manual-owner', userId: 'synthetic-manual-user' }
   const f = fixture(owner)
   const grants = createAccountGrantService({ issuer: 'https://synthetic-private.invalid', signingKey: randomBytes(32), getBackend: f.getBackend })

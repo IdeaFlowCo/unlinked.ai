@@ -1,0 +1,18 @@
+# People filtering and ordering
+
+The standalone People directory uses one visible, labelled native GET search field in the toolbar above the list; other page types keep the header search. The filter form always submits to `/network`, including from AI POST results at `/ask` or `/search-account`. Signed-in members have **Everyone** and **My connections** (`connected=1`) scope links. Membership stays visible as **All**, **On Unlinked** (`presence=member`), and **Not yet on Unlinked** (`presence=shadow`). Query, directory scope, membership, matching mode, and sort survive searches, links, pagination, and return URLs from connection actions. Everyone supports only name and default/relevance ordering, so switching to Everyone drops a private date sort.
+
+Typing filters on the server after a 300 ms pause. It searches the full eligible dataset, not only the rows in the browser, and orders results before pagination. Membership eligibility is applied before deciding whether all-word matches exist or partial matches should be shown. Older requests are cancelled and cannot replace newer results. Rapid control changes retain the pending query, membership and sort; pagination restarts when those controls differ from the displayed results. Controls remain native GET forms and links without JavaScript; failures keep the previous results, show an error, and restore Apply with the pending query, sort and hidden filter state, including newly selected private date sorts. Back/Forward restore list state and the search field. A refresh preserves the control focused when the response arrives if it survives in the new results, including the search selection; focus outside the directory stays untouched. Duplicate person actions retain focus within their original result section and source row, and surviving open removal disclosures remain open. AI ranking remains an explicit action. The result summary shows the current public or connected page size and full matching total; My connections also shows the unfiltered connection count. Clear filters resets query, membership, matching mode and sort while keeping the directory scope. Clear search removes only the query and matching mode.
+
+Browser `sort` values:
+
+- `best`: existing default order, or relevance during a query.
+- `name` / `name-desc`: name ascending / descending, with deterministic ID ties.
+- `connected`: My connections only, newest original LinkedIn connection or accepted Unlinked connection first.
+- `imported`: My connections only, descending date of first known import into the owner's network.
+
+Date order never substitutes a batch import date for a connection date. Dates come from the original Connections `connected on` field, the live owner's import creation time, or accepted invitation/request `respondedAt`. Unknown dates stay last; duplicate public identities retain their earliest known date, so reimporting does not make an existing contact look new. Rows display the date used, and the sort explains its meaning.
+
+Dates are owner-only listing metadata and are not projected onto public profiles. The browser requests full result counts explicitly; reader ordering, cursor isolation and API compatibility are owned by the [public People reader contract](public-people-reader.md).
+
+Regression coverage: `tests/network-controls.test.mjs` covers server-wide filtering and ordering across pages, cursor isolation, native form state, date semantics, authenticated date ordering, and public date isolation. `tests/network-filter-script.test.mjs` covers pending query/sort/membership state, pagination after edits, Back/Forward, focus during fetches and native fallback after failures.

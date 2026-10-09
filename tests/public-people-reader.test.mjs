@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPublicPeopleReader, PublicPeopleReaderError } from '../src/utils/public-people/reader.mjs'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from '../src/utils/public-people/limits.mjs'
+import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 
 const person = (id, name, company = 'Example') => ({ id, name, company, headline: 'Research', about: 'Published biography', positions: [{ title: '', company, email: 'private@example.test' }], education: [{ institution: 'College', phone: 'private-phone' }], skills: ['Research'], email: 'private@example.test', phone: 'private-phone', notes: 'private-notes', rawImport: 'private-archive' })
 const published = () => ({ state: 'published', complete: true, revision: 'immutable-fence-1', profiles: [{ ...person('z', 'Zoë'), headline: 'Graph systems researcher' }, person('b', 'alice', 'Climate'), person('a', 'Alice', 'Energy')], connections: [{ fromId: 'z', toId: 'a' }, { fromId: 'z', toId: 'b' }] })
@@ -96,7 +98,7 @@ test('viewer authority comes only from immutable factory config, never query inp
   const reader = createPublicPeopleReader({ viewer, readPublishedSnapshot: async input => { seen = input;return published() } })
   await reader.list({ viewer: { memberId: 'attacker' }, email: 'attacker@example.test' })
   assert.equal(seen.viewer, viewer)
-  assert.equal(seen.maxProfiles, 20000);assert.equal(seen.maxConnections, 100000);assert.ok(seen.signal instanceof AbortSignal)
+  assert.equal(seen.maxProfiles, PUBLIC_INDEX_MAX_PROFILES);assert.equal(seen.maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS);assert.ok(seen.signal instanceof AbortSignal)
   assert.throws(() => createPublicPeopleReader({ viewer: { memberId: 'mutable' } }), /configuration_invalid/)
   const nested = { memberId: 'A' }
   assert.throws(() => createPublicPeopleReader({ viewer: Object.freeze({ identity: nested }) }), /configuration_invalid/)
@@ -144,4 +146,19 @@ test('a connection listed by both people appears once on each profile', async ()
   const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => ({ ...published(), connections: [{ fromId: 'z', toId: 'a' }, { fromId: 'a', toId: 'z' }, { fromId: 'b', toId: 'a' }] }) })
   assert.deepEqual((await reader.profile({ id: 'a' })).profile.connections.map(p => p.id), ['b', 'z'])
   assert.deepEqual((await reader.profile({ id: 'z' })).profile.connections.map(p => p.id), ['a'])
+})
+
+// Production reached about 25,000 public profiles on 2026-10-09 (16,296 legacy
+// plus member uploads); the old 20,000 bound made the whole directory unavailable.
+test('an index past the old 20,000-profile bound stays readable and searchable', async () => {
+  const profiles = Array.from({ length: 25000 }, (_, index) => ({ id: `p${index}`, name: `Person ${index}`, headline: index === 24999 ? 'Rare zymurgist' : 'Engineer', positions: [], education: [], skills: [] }))
+  const connections = profiles.slice(1).map(profile => ({ fromId: 'p0', toId: profile.id }))
+  const snapshot = { state: 'published', complete: true, revision: 'scale-v1', profiles, connections }
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => snapshot })
+  const listed = await reader.list({ includeTotal: true })
+  assert.equal(listed.total, 25000)
+  assert.deepEqual((await reader.list({ query: 'zymurgist' })).profiles.map(profile => profile.id), ['p24999'])
+  const search = createSharedPeopleSearch({ readPublishedSnapshot: async () => snapshot, complete: async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Fits' }] }) })
+  assert.equal((await search({ query: 'zymurgist' })).matches[0].id, 'p24999')
+  await assert.rejects(createPublicPeopleReader({ readPublishedSnapshot: async () => ({ ...snapshot, profiles: Array.from({ length: PUBLIC_INDEX_MAX_PROFILES + 1 }, (_, index) => ({ id: `q${index}`, name: 'Q', positions: [], education: [], skills: [] })), connections: [] }) }).list(), error => error instanceof PublicPeopleReaderError && error.status === 503)
 })

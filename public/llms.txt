@@ -11,7 +11,7 @@ Import processing continues server-side after navigation. Profile and People sho
 Everyone People browsing reads only the published professional index and does not require sign-in or an import.
 Own-network AI search reads only the signed-in owner's published imports plus same-owner sanitized recovered Connections observations; Everyone AI ranks bounded matching candidates from the public index.
 Owner-network AI search requires supplied title/position evidence for a requested role, omits domain-only matches, and gives short conversational reasons grounded in supplied fields, stating when sector focus is unknown; response shapes and grant versions are unchanged.
-Your agent setup is prepared automatically; Settings shows the revocable, regenerable account-scoped MCP grant. Keep its bearer credential private.
+Manual keys: open [Settings → API keys](https://www.unlinked.ai/settings#api-keys) for **Copy API key** or **Copy agent setup**. See [key management](https://www.unlinked.ai/agents) for setup and Muse field formats; the lifecycle and release contract is `docs/agent-key-settings.md` in the repository.
 Contact emails, phone numbers and original archive bytes are excluded from agent search.
 Connect Claude or ChatGPT with OAuth (primary): add a custom connector with the URL https://www.unlinked.ai/mcp, choose Connect, sign in to Unlinked and Allow — no token to copy. Claude: Settings → Connectors → Add custom connector. ChatGPT: developer-mode connector with OAuth. Claude Code: `claude mcp add --transport http unlinked https://www.unlinked.ai/mcp`, then `/mcp` to sign in. Discovery: /mcp answers 401 with `WWW-Authenticate: Bearer resource_metadata="https://www.unlinked.ai/.well-known/oauth-protected-resource/mcp"`; authorization server metadata at /.well-known/oauth-authorization-server (PKCE S256, public clients, Client ID Metadata Documents for Claude's, Claude Code's and ChatGPT's published client ids, or dynamic registration at /oauth/register; redirect URIs limited to the Claude/ChatGPT connector callbacks and http://localhost / 127.0.0.1 loopback). Scopes: `network`, `people`, and optional `connections` (unchecked by default on consent). Each connection is a revocable account grant listed under Settings → Connected apps; tokens do not expire and are revoked there or at /oauth/revoke.
 Header alternative for clients that cannot sign in: Streamable HTTP with header `Authorization: Bearer <grant>`. Claude Desktop/claude.ai: custom connector (Customize → Connectors, Authentication "No sign in", request header Authorization). claude_desktop_config.json accepts only local stdio servers, so use `{"command":"npx","args":["-y","mcp-remote@0.1.38","https://www.unlinked.ai/mcp","--header","Authorization:${UNLINKED_AUTH_HEADER}"],"env":{"UNLINKED_AUTH_HEADER":"Bearer <grant>"}}` there, never a url/headers entry. Claude Code: `claude mcp add --transport http unlinked https://www.unlinked.ai/mcp --header "Authorization: Bearer <grant>"`.
@@ -33,7 +33,7 @@ Signed-in members have a shareable business card with a QR of their public profi
 
 ## Current authenticated MCP
 Streamable HTTP endpoint: https://www.unlinked.ai/mcp.
-Tools: unlinked_search_network(query, degree?=1|2, cursor?) and unlinked_search_everyone(query), plus for current grants unlinked_whoami(), unlinked_list_people(q?, mode?, cursor?, limit?), unlinked_list_connections(degree?=1|2, q?, cursor?, limit?), unlinked_get_profile(id, connectionsCursor?) and unlinked_ai_search(query, scope?=everyone|mine, timeoutMs?); grants from catalog version 3 add the read-only unlinked_list_connection_requests(direction?=received|sent) and unlinked_list_notifications(limit?) (connection actions require the explicit opt-in described below). Old grants retain exactly their original tool list and scope. Its durable account grant covers current/future owner imports, same-owner sanitized recovered Connections observations and the published professional index until revoked in Settings.
+Tools: unlinked_search_network(query, degree?=1|2, cursor?) and unlinked_search_everyone(query), plus for current grants unlinked_whoami(), unlinked_list_people(q?, mode?, cursor?, limit?), unlinked_list_connections(degree?=1|2, q?, cursor?, limit?), unlinked_get_profile(id, connectionsCursor?) and unlinked_ai_search(query, scope?=everyone|mine, timeoutMs?); read-only tools include unlinked_list_connection_requests(direction?=received|sent) and unlinked_list_notifications(limit?) and unlinked_lookup_contact(connectionId | linkedinUrl | profileId | refHashes) (connection actions require the explicit opt-in described below). Grant catalog v7 adds owner-only private people notes & relations — unlinked_get_person_private, unlinked_get_private_thing, unlinked_list_private_things, unlinked_search_private, unlinked_get_neighbourhood, unlinked_save_private_thing, unlinked_add_private_note, unlinked_delete_private_note, unlinked_add_private_link, unlinked_update_private_link, unlinked_delete_private_link, unlinked_delete_private_thing — under a separate permission that is on by default for API keys (Settings switch “Private people notes & relations”; OAuth scope private_notes, ticked on the consent page; apps connected earlier reconnect). They never notify anyone and are not connection requests or messaging; refresh tools/list, do not replace the key. Valid old grants receive current tools within their original permissions and data scope, with unchanged token bytes. Its durable account grant covers current/future owner imports, same-owner sanitized recovered Connections observations and the published professional index until revoked in Settings.
 The same tools are a grant-authenticated HTTP JSON API under /api/agent/v1/ with typed error codes, opaque cursors and max 50 rows per page; the versioned contract is docs/agent-api.md in the repository.
 Server-to-server grant provisioning (contract v1.1): POST /api/agent/v1/provision-grant lets an operator-allow-listed confidential client ensure a read-only grant for a verified OIDC issuer+subject binding — never email; disabled (404) unless configured; revoked access stays revoked.
 Grant tokens are distinct from Ideaflow tokens and Noos operational credentials.
@@ -43,7 +43,7 @@ Known graph paths: unlinked_search_network(query, degree=1|2, cursor?) or query 
 
 Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
 
-Grant catalog v4 adds optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing grants and default issuance remain read-only. Agents can never send messages or post. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
+Grant catalog v5 supports optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing read-only grants and default issuance stay read-only. Owner-only grants can enable actions without gaining public reads. Unlinked grants cannot send messages or post; connect OpenChat separately for messaging and Context. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
 
 ## Connection browsing and page depth
 
@@ -54,3 +54,30 @@ OpenChat messaging uses the same Ideaflow account. Profile recipients resolve on
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
 Professional profile details, outbound links and their privacy boundaries are documented in `docs/profile-details.md` in source.
+
+## OpenChat + Unlinked agent setup
+
+Start at https://chat.globalbr.ai/agents for the shared setup hub: API keys,
+MCP configurations, REST examples, conversation Context and troubleshooting.
+OpenChat and Unlinked share an Ideaflow identity and inbox; agent credentials
+are currently separate. An Unlinked grant does not send messages. Use an
+OpenChat `oc_` key for both messages and Context with read/write scopes and
+conversation membership. In OpenChat: Settings → Agent keys → New API key.
+Existing keys can be revealed and copied repeatedly; Copy setup with this key
+reuses the selected key. Settings → Copy agent setup creates a fresh key.
+OpenChat machine-readable docs: https://chat.globalbr.ai/AGENTS.md and
+https://chat.globalbr.ai/api/openapi.json. The maintained OpenChat MCP adapter
+is in https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server (local
+stdio, same API key); OpenChat has no live hosted /mcp endpoint.
+
+## Shared Ideaflow connector
+
+Connect an agent at https://id.ideaflow.app/agents using one account connection for Unlinked, OpenChat and Thoughtstream Vision. The shared MCP URL is https://id.ideaflow.app/mcp. Each app has separate consented read/write scopes; adding another app never silently expands an existing grant. Direct Unlinked MCP/API credentials remain supported. The internal request-bound adapter at `/api/connector/mcp` resolves only existing issuer/subject account bindings and accepts no ordinary user bearer tokens. Deployment requires a dedicated `IDEAFLOW_CONNECTOR_SECRET` shared only with the gateway.
+
+Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository).
+
+For compatible hosts needing several apps or messages, use https://id.ideaflow.app/agents and its separate OpenChat permissions. Existing direct Claude/ChatGPT sign-in remains supported. Muse’s observed manual form uses the direct Unlinked key; Muse OAuth is unverified. Connection requests do not record private “X knows Y” relationships; those are saved with the direct key’s private notes & relations tools or the connector’s OpenChat private-people tools (one shared store) and shown only to their owner on Unlinked person and contact pages (“Your private context”) and in OpenChat. Messaging is OpenChat through the shared connector, never an Unlinked key.
+
+## Troubleshooting request failures
+
+When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures.

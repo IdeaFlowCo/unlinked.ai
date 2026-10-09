@@ -1,7 +1,15 @@
+import { validTimestamp, connectionDate } from '../network-order.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from './consent.mjs'
 import { createPrivateSearch } from './ai-search.mjs'
+import { matchNetworkText } from './network-text-search.mjs'
+
+// unlinked_search_network answers literal queries from text alone; only a
+// query with no literal match pays for AI ranking, within this budget. It stays
+// under the shared Ideaflow connector's 25 s downstream timeout so callers get
+// this typed failure, not the gateway's generic abort.
+export const NETWORK_AI_BUDGET_MS = 20000
 
 // One authenticated account, all its currently published imports. Source
 // assertions keep their original IDs and provenance; no email/URL ownership.
@@ -22,7 +30,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit' })
       const publication = await readImport(id, { signal })
       requireCombinedUploadConsent(publication.consent)
-      for (const row of publication.assertions) assertions.push(row)
+      for (const row of publication.assertions) assertions.push({ ...row, ...(publication.importedAt ? { importedAt: publication.importedAt } : {}), ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })
       indexed += publication.indexed ?? 0
       imports.push(id)
     }
@@ -47,7 +55,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       for (const value of await backend.readInviteConnections()) {
         if (assertions.length >= observationLimit) throw Error('account_observation_limit')
         assertions.push({ id: privateId(owner.ownerId, 'invite-connection', value.invitationId), ownerId: owner.ownerId, importId: networkId, sourceId: 'unlinked-invites', rowId: `invite:${value.invitationId}`, category: 'connections',
-          fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-invite', invitationId: value.invitationId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
+          ...(validTimestamp(value.connectedAt) ? { connectedAt: value.connectedAt } : {}), fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-invite', invitationId: value.invitationId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
       }
     }
     // Accepted connection requests ("Connect") connect two accounts the same way.
@@ -55,17 +63,36 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       for (const value of await backend.readMemberConnections()) {
         if (assertions.length >= observationLimit) throw Error('account_observation_limit')
         assertions.push({ id: privateId(owner.ownerId, 'member-connection', value.requestId), ownerId: owner.ownerId, importId: networkId, sourceId: 'unlinked-connections', rowId: `connection:${value.requestId}`, category: 'connections',
-          fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-connection', requestId: value.requestId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
+          ...(validTimestamp(value.connectedAt) ? { connectedAt: value.connectedAt } : {}), fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-connection', requestId: value.requestId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
       }
     }
     if(typeof backend.readLegacyObservations==='function'){
       const recovered=await backend.readLegacyObservations({signal,limit:observationLimit-assertions.length})
-      if(recovered){assertions.push(...recovered.assertions);indexed+=recovered.assertions.length}
+      if(recovered){assertions.push(...recovered.assertions.map(row => ({ ...row, ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })));indexed+=recovered.assertions.length}
     }
     return { legacyProfileId: legacy?.profileId, id: networkId, ownerId: owner.ownerId, imports, indexed, assertions, consent: COMBINED_UPLOAD_CONSENT }
   }
-  return { readNetwork, search: typeof complete === 'function' ? async ({ query, signal }) => {
-    const result = await createPrivateSearch({ readImport: readNetwork, complete })({ importId: networkId, query, signal })
+  const search = typeof complete === 'function' ? async ({ query, signal, readFirst = readNetwork }) => {
+    const result = await createPrivateSearch({ readImport: readFirst, complete })({ importId: networkId, query, signal })
     return { ...result, scope: 'owner_network' }
-  } : null }
+  } : null
+  // Text first: every literal name/company/title match, no model call. A query
+  // with no literal match falls back to AI ranking under one overall budget.
+  const searchNetwork = async ({ query, signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
+    if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
+    const network = await readNetwork(networkId, { signal })
+    const text = matchNetworkText(network.assertions, query)
+    const considered = network.assertions.filter(row => row.category === 'connections').length
+    if (text?.total) return { importId: networkId, mode: 'text_match', indexed: network.indexed, considered, total: text.total, truncated: text.truncated,
+      matches: text.matches.map(({ row, matchedIn }) => ({ assertionId: row.id, sourceId: row.sourceId, rowId: row.rowId, subject: row.subject,
+        fields: Object.fromEntries(['first name', 'last name', 'company', 'position', 'connected on'].filter(key => typeof row.fields?.[key] === 'string').map(key => [key, row.fields[key].slice(0, 256)])),
+        reason: `Text match in ${matchedIn.join(' and ')}` })), scope: 'owner_network' }
+    if (!search) throw new Error('private_search_configuration_required')
+    // The already-read network seeds the ranking; its final consistency re-read stays live.
+    let first = network
+    const readFirst = async (id, options) => { if (first) { const value = first; first = null; return value } return readNetwork(id, options) }
+    const budget = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(aiBudgetMs)])
+    return search({ query, signal: budget, readFirst })
+  }
+  return { readNetwork, search, searchNetwork }
 }
