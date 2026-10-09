@@ -25,6 +25,7 @@ const TOOL_FAILURES = {
   account_tool_result_limit: ['result_too_large', 'The result exceeded 1 MiB; narrow the query.'],
 }
 export function typedToolFailure(error) {
+  if (error instanceof AccountToolError) return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: error.code, message: error.message } }) }] }
   const message = String(error?.message ?? '')
   const known = TOOL_FAILURES[message]
   const [code, text] = known ?? ['upstream_unavailable', 'The search could not finish upstream. The grant is still valid; retry, or narrow the query.']
@@ -48,13 +49,18 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     // Unauthenticated requests get the OAuth challenge (RFC 9728) whatever the
     // method, so connectors can discover sign-in from their first request.
     const grant = await authenticateGrant(request)
-    // Every issued grant stores the exact tool list of its catalog version;
-    // old grants keep exposing only the tools they were created with.
+    // Authentication resolves valid historical records to current permitted tools.
     const catalog = grant ? accountGrantTools(grant.version ?? 1, grant.scope) : null
     if (!grant || !catalog || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(catalog)) {
       response.writeHead(401, typeof challenge === 'function' ? { 'WWW-Authenticate': challenge({ invalidToken: typeof request.headers.authorization === 'string' }) } : {}).end(); return
     }
     if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
+    const revalidate = async name => {
+      const current = await authenticateGrant(request)
+      if (!current || current.grantId !== grant.grantId || current.ownerId !== grant.ownerId || current.userId !== grant.userId) throw new AccountToolError('grant_revoked', 'The grant was revoked or replaced.')
+      if (!current.tools.includes(name)) throw new AccountToolError('scope_not_granted', 'This key no longer permits the requested tool.')
+      return current
+    }
     const server = new McpServer({ name: 'unlinked-account-network', version: '1.0.0' })
     server.registerTool('unlinked_search_network', {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -65,13 +71,11 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
       try {
-        const before = await authenticateGrant(request)
-        if (!before || before.grantId !== grant.grantId || before.ownerId !== grant.ownerId || before.userId !== grant.userId) throw new Error('account_grant_revoked')
+        await revalidate('unlinked_search_network')
         const connectionQuery = knownConnectionQuery(query, degree)
         if (cursor !== undefined && !connectionQuery.degree) throw new Error('account_cursor_requires_connection_mode')
         const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).search({ query, signal })
-        const after = await authenticateGrant(request)
-        if (!after || after.grantId !== grant.grantId || after.ownerId !== grant.ownerId || after.userId !== grant.userId) throw new Error('account_grant_revoked')
+        await revalidate('unlinked_search_network')
         const text = JSON.stringify(result)
         if (Buffer.byteLength(text) > 1024 * 1024) throw new Error('account_tool_result_limit')
         return { content: [{ type: 'text', text }] }
@@ -85,17 +89,13 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       const controller = new AbortController(), signal = AbortSignal.any([controller.signal, AbortSignal.timeout(40000)])
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
       try {
-        const valid = async () => { const current = await authenticateGrant(request); if (!current || current.grantId !== grant.grantId || current.ownerId !== grant.ownerId || current.userId !== grant.userId || !current.tools.includes('unlinked_search_everyone')) throw new Error('account_grant_revoked') }
+        const valid = () => revalidate('unlinked_search_everyone')
         await valid()
         const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal })
         await valid()
         return { content: [{ type: 'text', text: JSON.stringify(result) }] }
       } catch (error) { return typedToolFailure(error) }
     })
-    const revalidate = async () => {
-      const current = await authenticateGrant(request)
-      if (!current || current.grantId !== grant.grantId || current.ownerId !== grant.ownerId || current.userId !== grant.userId || JSON.stringify(current.tools) !== JSON.stringify(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant was revoked; sign in and create a new agent grant.')
-    }
     for (const name of SERVICE_TOOLS) {
       if (!grant.tools.includes(name)) continue
       // Clients that ask before acting see which tools change something.
@@ -105,7 +105,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
         response.once('close', () => { if (!response.writableFinished) controller.abort() })
         try {
-          const { text } = await toolService.call({ grant, name, input, signal, revalidate })
+          const { text } = await toolService.call({ grant, name, input, signal, revalidate: () => revalidate(name) })
           return { content: [{ type: 'text', text }] }
         } catch (error) {
           const typed = error instanceof AccountToolError ? error : new AccountToolError('upstream_unavailable', 'The tool could not finish; retry.')
@@ -113,6 +113,9 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
         }
       })
     }
+    // This POST-only, stateless transport cannot deliver list-change pushes.
+    // Clients explicitly refresh tools/list after a permission change.
+    server.server.registerCapabilities({ tools: { listChanged: false } })
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     response.once('close', () => { void transport.close(); void server.close() })
     await server.connect(transport)

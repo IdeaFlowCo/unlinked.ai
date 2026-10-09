@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { ACCOUNT_GRANT_TOOL_VERSIONS as MAIN_ACCOUNT_GRANT_TOOL_VERSIONS } from './fixtures/account-grant-catalog-v1-v3.mjs'
 import { createRequire } from 'node:module'
-import { createAccountGrantService, ACCOUNT_GRANT_TOOL_VERSIONS, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from '../mcp-server/account-grants.mjs'
+import { createAccountGrantService, ACCOUNT_GRANT_TOOL_VERSIONS, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE } from '../mcp-server/account-grants.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
 import { createConnectionRequests, createMemoryConnectionStore } from '../mcp-server/member-connections.mjs'
 import { createMemberInvitations, createMemoryInvitationStore } from '../mcp-server/member-invitations.mjs'
@@ -52,12 +52,10 @@ async function site(t, limits) {
 
 test('catalog 1–3 retains main semantics; v4 is a sibling and defaults are read-only', async t => {
   for (const version of [1,2,3]) assert.deepEqual(ACCOUNT_GRANT_TOOL_VERSIONS[version], MAIN_ACCOUNT_GRANT_TOOL_VERSIONS[version])
-  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION,4)
+  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION,5)
   assert.ok(ACCOUNT_GRANT_TOOL_VERSIONS[4][ACCOUNT_WRITE_SCOPE])
   const p=await site(t), issued=await p.grants.issueGrant(a)
   assert.ok(!issued.tools.some(x=>/unlinked_(send|accept|ignore|withdraw)_/.test(x)))
-  assert.deepEqual(missingAccountGrantTools(null),[])
-  assert.deepEqual(missingAccountGrantTools({version:3,scope:issued.scope,tools:issued.tools}),[])
 })
 
 test('HTTP and MCP write access requires opt-in; state machine, authorization, daily and separate minute budgets', async t => {
@@ -113,17 +111,17 @@ test('browser rows and member-only filter count both graph directions; removal i
   assert.equal((await p.connections.between(a,b)).state,'none')
 })
 
-test('Settings explicit choice is server validated, current grants get no nudge, missing records do not throw, and old grants do', async t => {
+test('Settings explicit choice is validated and historical grants receive current reads without key replacement', async t => {
   const p=await site(t), s=await p.signIn('a')
   assert.match(s.text,/<input type="checkbox" name="access" value="connections">/);assert.doesNotMatch(s.text,/missing newer tools/)
   assert.equal((await p.post(s,'/setup-account',{access:'surprise'})).status,400)
   assert.equal((await p.post(s,'/setup-account',{write_scope:'yes'})).status,400)
-  const enabled=await p.post(s,'/setup-account',{access:'connections'});assert.equal(enabled.status,200);assert.match(await enabled.text(),/connection actions enabled/)
+  const enabled=await p.post(s,'/setup-account',{access:'connections'});assert.equal(enabled.status,200);assert.match(await enabled.text(),/id="key-connection-actions"[^>]* checked/)
   const write=(await p.grants.listGrants(a)).find(g=>g.scope===ACCOUNT_WRITE_SCOPE);assert.ok(write)
   await p.post(s,'/setup-account',{});assert.ok((await p.grants.listGrants(a)).some(g=>g.scope==='owner_network_and_public'));assert.ok(await p.grants.readKey(a,write.id))
   const read=(await p.grants.listGrants(a)).find(g=>g.scope==='owner_network_and_public'), current=await p.grants.readKey(a,read.id), record=p.resources.get(current.grantId);record.payload.version=2;record.payload.tools=[...ACCOUNT_GRANT_TOOL_VERSIONS[2].owner_network_and_public]
-  const outdated=await(await p.go('/settings?key='+current.grantId,{headers:{Cookie:s.cookie}})).text();assert.match(outdated,/earlier tool set/)
-  const who=await(await p.agent(current.accessToken,'whoami')).json();assert.equal(who.grant.update.currentVersion,4);assert.ok(who.grant.update.missingTools.includes('unlinked_list_notifications'))
+  const outdated=await(await p.go('/settings?key='+current.grantId,{headers:{Cookie:s.cookie}})).text();assert.doesNotMatch(outdated,/earlier tool set/);assert.match(outdated,/New tools within enabled permissions use this same key/)
+  const who=await(await p.agent(current.accessToken,'whoami')).json();assert.equal(who.grant.version,CURRENT_ACCOUNT_GRANT_VERSION);assert.ok(who.grant.tools.includes('unlinked_list_notifications'));assert.equal(who.grant.update,undefined)
   assert.doesNotThrow(()=>renderSettings({agentAccess:undefined,grants:[]}))
   assert.doesNotMatch(renderPeople({everyone:profiles}).content,/ style=/)
 })

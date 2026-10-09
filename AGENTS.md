@@ -1,11 +1,19 @@
 # unlinked.ai — Repository Agent Memory
 
-Next.js 15 (App Router) + React 19 + Radix UI Themes + Supabase + Pinecone + OpenAI.
-The canonical beta at **https://www.unlinked.ai** runs the standalone Noos-backed runtime; Next.js retains historical/public source routes.
+The canonical beta at **https://www.unlinked.ai** runs the standalone Noos-backed runtime (`mcp-server/private-composition.mjs`). Next.js 15 / React 19 / Radix UI retains historical/public source routes; its Supabase authentication and legacy agent keys below are not canonical onboarding.
 
 This file is the repo-internal guide for autonomous agents and contributors working *in* this codebase. For agents arriving at unlinked.ai over HTTP, see the public brief at `public/AGENTS.md` (served at `/AGENTS.md`).
 
-## Architecture & Core Invariants
+## Canonical agent setup and grant invariants
+
+Settings presents API keys before client instructions: named independent keys, repeatable Show/Copy API key, retained Copy agent setup, and a compact per-key connection-action permission switch. Reveal/copy never issue or rotate credentials. Shared Ideaflow OAuth is recommended for compatible multi-app hosts; direct Unlinked OAuth and manual keys remain supported. Muse manual setup is documented; Muse OAuth is unverified. The authoritative UI/lifecycle contract is [docs/agent-key-settings.md](docs/agent-key-settings.md); authentication, tool normalization and provisioning are in [docs/agent-api.md](docs/agent-api.md).
+
+- Historical `ACCOUNT_GRANT_TOOL_VERSIONS` lists are immutable validation records. Valid old grants resolve **current tools within their original enabled scope**; new tools do not require token rotation. Auth, discovery, whoami, Settings and execution must agree on effective capabilities.
+- Manual permission edits preserve jti, issuedAt and generation (identical token bytes). Owner-only grants may enable connection actions without gaining public reads. OAuth additions require consent; connection actions do not grant messaging or private relationship assertions.
+- Owner/session/CSRF checks and compare-and-set protect lifecycle edits. Replacement changes only the selected key's generation; revocation tombstones and generation checks prevent resurrection or reuse of replaced secrets. Revalidate the live identity/generation and requested tool, not entire tool-array equality. Retain generation/v5 validation on rollback.
+- Read-only provisioning never returns a write-enabled Default key. If no eligible read-only grant exists and the deterministic Default is write-enabled, use the bounded independent read-only fallback while preserving the original read boundary and tombstones. Reauthentication at the end must check effective read-only scope as well as owner; a concurrent permission change must not return a write token.
+
+## Legacy Next.js architecture (historical, not canonical runtime)
 
 - **Legacy Authentication & Agent Keys:**
   - Browser sessions authenticate via Supabase cookies.
@@ -144,8 +152,8 @@ Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/ses
 The standalone browser's progressive filtering, URL state, ordering and private date provenance are described in `docs/network-controls.md`. Browser ordering is not an agent API contract change; preserve existing agent defaults and keep owner relationship dates out of public profile projections.
 
 Public setup links to the shared OpenChat + Unlinked agent hub at
-`https://chat.globalbr.ai/agents`. Identity/inbox are shared; agent credentials
-remain separate. OpenChat `oc_` keys cover messages and Context; Unlinked grants
+`https://chat.globalbr.ai/agents`. Identity/inbox are shared; **direct service credentials**
+remain separate (the shared Ideaflow connector below uses one consented account connection). OpenChat `oc_` keys cover messages and Context; Unlinked grants
 retain their existing scopes. Never send an Unlinked grant to OpenChat.
 
 ## Shared Ideaflow connector

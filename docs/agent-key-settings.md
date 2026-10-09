@@ -35,15 +35,42 @@ compatible clients). **Setup instructions and advanced formats** retains Claude
 Desktop's valid stdio `mcp-remote` configuration, Claude Code and header examples.
 Muse custom OAuth/redirect compatibility is unverified; no callbacks were added.
 
+## Permissions and connector choice
+
+API key selection, **Show/Hide**, **Copy API key** and **Copy agent setup** appear
+above client-specific sign-in/config instructions. Under the selected key,
+**Send and manage connection requests** is an accessible switch; select its state
+and **Save permissions**. Turn it on/off anytime without replacing or reconnecting
+that key. It covers send, accept, ignore and withdraw only. Other manual keys and
+OAuth apps are unaffected. Existing owner-only keys retain owner-only reads.
+
+Use the shared [Ideaflow connector setup](https://id.ideaflow.app/agents) for
+compatible hosts wanting several apps or messages; consent to each app's read/write
+permissions there. Messages require **OpenChat** write access, separate from
+Unlinked connection requests. Existing direct Claude/ChatGPT Unlinked OAuth
+connections keep working; there is no forced migration. New OAuth permissions
+require consent/reconsent, not this manual-key switch. Muse's observed manual form
+uses the direct Unlinked key/OpenAPI instructions above; Muse OAuth remains untested.
+
+“X knows Y” private relationship assertions are not connection requests. Existing
+OpenChat private-link capability is a separately reviewed adapter/surface follow-up
+(`unlinked-47t` design gate); this release creates no relationship backend or toggle.
+Legacy Thoughtstream/Ideaflow and NoteStream destinations remain distinct.
+
 ## Independent lifecycle
 
 Select a named row, then **Manage [name]** to **Save name**, **Replace this key** or
 **Revoke this key**. Replacement stops clients using only that key, preserves its
-name and exact permission/catalog scope, and leaves other keys and OAuth intact.
-Create a new key for newer tools or different permissions. Names are display-only,
+name and enabled permissions, and leaves other keys and OAuth intact.
+New tools within enabled permissions work with the same key. Refresh the agent’s
+cached tool list instead of replacing a key. Names are display-only,
 1–80 trimmed characters, without controls. Existing unnamed keys remain valid and
 appear as Default key or Existing key with a date and short identifier. Revoked
 automatic grants stay revoked; visiting Settings does not undo that choice.
+
+Server-to-server read-only fallback issuance and reuse are owned by the
+[grant provisioning contract](agent-api.md#grant-provisioning-v11--post-apiagentv1provision-grant). The fallback appears
+as an independent **Read-only provisioning key** in Settings.
 
 The grant service stores optional name and generation metadata in existing owner
 resources. Tokens remain deterministically re-derived, not stored in plaintext.
@@ -65,7 +92,10 @@ REST/MCP validators and provisioning must run the generation-aware grant service
 Do not roll back authentication to a pre-generation validator after any key is
 replaced: old code would ignore generation and accept a replaced token. Rollback
 must retain the generation comparison and generation-aware re-derivation (a
-forward corrective release is preferred). Revoke tombstones remain compatible.
+forward corrective release is preferred). V5 permission edits also require a
+v5-capable validator; older runtimes reject those records. Preserve v5 catalogs
+and normalization when rolling back UI, or use a forward corrective release.
+Revoke tombstones remain compatible.
 
 PR114 and identity34 own shared discovery/host guides and their coordinated
 release. This change does not merge or replace those PRs or claim Muse support.
