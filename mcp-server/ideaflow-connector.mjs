@@ -1,3 +1,4 @@
+import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE } from './account-grants.mjs'
 import { createAccountHostedHandler } from './account-hosted.mjs'
@@ -51,11 +52,12 @@ export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBacken
     for await (const chunk of request) { length += chunk.length; if (length > 1024*1024) return fail(413, 'Request too large'); chunks.push(chunk) }
     const bytes = Buffer.concat(chunks)
     const identity = verify(request.headers.authorization?.replace(/^Bearer /, '') ?? '', bytes)
-    if (!identity) return fail(401, 'Invalid connector assertion')
+    if (!identity) { requestDiagnostic().denied('not_linked'); return fail(401, 'Invalid connector assertion') }
+    requestDiagnostic().gateway(identity)
     let body
     try { body = JSON.parse(bytes.toString('utf8')) } catch { return fail(400, 'Invalid JSON') }
     const owner = await resolveOwner({ issuer: identity.identity_issuer, subject: identity.sub })
-    if (!owner) return fail(409, 'account_link_required')
+    if (!owner) { requestDiagnostic().denied('account_link_required'); return fail(409, 'account_link_required') }
     const publicEnabled = typeof readPublishedSnapshot === 'function'
     const write = identity.scope.split(' ').includes('unlinked:write')
     if (write && !publicEnabled) return fail(403, 'Connection actions unavailable')

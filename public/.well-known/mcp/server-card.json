@@ -378,5 +378,12 @@
       "unlinked:read",
       "unlinked:write"
     ]
+  },
+  "requestDiagnostics": {
+    "enabledByDefault": false,
+    "responseHeader": "X-Request-ID",
+    "idTrust": "server-generated; incoming trace IDs ignored",
+    "privacy": "No credentials, queries, result bodies or sensitive URL parameters. Opaque account correlation only after successful authentication.",
+    "gatewayLimitation": "Shared gateway does not currently forward the downstream Unlinked request ID."
   }
 }

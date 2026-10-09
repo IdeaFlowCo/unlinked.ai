@@ -1,3 +1,4 @@
+import { requestDiagnostic, instrumentMcpTransport } from './request-diagnostics.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -48,12 +49,16 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     if (request.headers.host !== base.host || request.headers.origin && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
     // Unauthenticated requests get the OAuth challenge (RFC 9728) whatever the
     // method, so connectors can discover sign-in from their first request.
-    const grant = await authenticateGrant(request)
+    let grant
+    try { grant = await authenticateGrant(request) }
+    catch (error) { requestDiagnostic().denied('upstream_unavailable'); throw error }
     // Authentication resolves valid historical records to current permitted tools.
     const catalog = grant ? accountGrantTools(grant.version ?? 1, grant.scope) : null
     if (!grant || !catalog || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(catalog)) {
+      requestDiagnostic().denied('not_linked')
       response.writeHead(401, typeof challenge === 'function' ? { 'WWW-Authenticate': challenge({ invalidToken: typeof request.headers.authorization === 'string' }) } : {}).end(); return
     }
+    requestDiagnostic().authenticated(grant.ownerId)
     if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
     const revalidate = async name => {
       const current = await authenticateGrant(request)
@@ -76,10 +81,11 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
         if (cursor !== undefined && !connectionQuery.degree) throw new Error('account_cursor_requires_connection_mode')
         const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).search({ query, signal })
         await revalidate('unlinked_search_network')
+        requestDiagnostic().result(result)
         const text = JSON.stringify(result)
         if (Buffer.byteLength(text) > 1024 * 1024) throw new Error('account_tool_result_limit')
         return { content: [{ type: 'text', text }] }
-      } catch (error) { return typedToolFailure(error) }
+      } catch (error) { requestDiagnostic().failure(error, signal); return typedToolFailure(error) }
     })
     if (grant.tools.includes('unlinked_search_everyone') && typeof readPublishedSnapshot === 'function') server.registerTool('unlinked_search_everyone', {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -93,8 +99,9 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
         await valid()
         const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal })
         await valid()
+        requestDiagnostic().result(result)
         return { content: [{ type: 'text', text: JSON.stringify(result) }] }
-      } catch (error) { return typedToolFailure(error) }
+      } catch (error) { requestDiagnostic().failure(error, signal); return typedToolFailure(error) }
     })
     for (const name of SERVICE_TOOLS) {
       if (!grant.tools.includes(name)) continue
@@ -105,9 +112,11 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
         response.once('close', () => { if (!response.writableFinished) controller.abort() })
         try {
-          const { text } = await toolService.call({ grant, name, input, signal, revalidate: () => revalidate(name) })
+          const { text, result } = await toolService.call({ grant, name, input, signal, revalidate: () => revalidate(name) })
+          requestDiagnostic().result(result)
           return { content: [{ type: 'text', text }] }
         } catch (error) {
+          requestDiagnostic().failure(error, signal)
           const typed = error instanceof AccountToolError ? error : new AccountToolError('upstream_unavailable', 'The tool could not finish; retry.')
           return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: typed.code, message: typed.message } }) }] }
         }
@@ -119,6 +128,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     response.once('close', () => { void transport.close(); void server.close() })
     await server.connect(transport)
+    instrumentMcpTransport(transport)
     await transport.handleRequest(request, response, parsedBody)
   }
 }

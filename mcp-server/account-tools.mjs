@@ -1,3 +1,4 @@
+import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
@@ -341,6 +342,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   }
 
   const askFailure = (error, signal) => {
+    requestDiagnostic().failure(error, signal)
     if (error instanceof AccountToolError) return error
     if (signal?.aborted || error?.name === 'TimeoutError' || error?.name === 'AbortError') return new AccountToolError('upstream_unavailable', 'AI ranking did not finish within the time budget; retry, raise timeoutMs, or use the deterministic listing tools.')
     if (/query_invalid|query_limit/.test(String(error?.message))) return new AccountToolError('invalid_input', 'The query was empty or too long.')

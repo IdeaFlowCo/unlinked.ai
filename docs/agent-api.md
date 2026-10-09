@@ -520,3 +520,7 @@ The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` 
 
 See [Settings key management](agent-key-settings.md) for manual setup, Muse field
 formats, independent key lifecycle, compatibility and generation-aware rollback.
+
+## Request diagnostics
+
+When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures. See [the private diagnostics contract](request-diagnostics.md) for field semantics, retention, trusted gateway correlation limits and operator lookup. The JSON response schemas, permissions and status mappings are unchanged.
