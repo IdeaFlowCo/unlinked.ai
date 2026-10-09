@@ -20,6 +20,15 @@
         "connections"
       ],
       "note": "Paste https://www.unlinked.ai/mcp into a Claude or ChatGPT custom connector and sign in; each connection is a revocable account grant."
+    },
+    "manualKeys": {
+      "settings": "https://www.unlinked.ai/settings#api-keys",
+      "copyKeyLabel": "Copy API key",
+      "copySetupLabel": "Copy agent setup",
+      "repeatableReveal": true,
+      "namedIndependentKeys": true,
+      "expiry": "until revoked",
+      "instructions": "Manual key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository."
     }
   },
   "data": {

@@ -3,6 +3,14 @@
 export const ONBOARDING_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap'
 export const ONBOARDING_STYLE = `
 html{-webkit-text-size-adjust:100%}
+.unlinked-onboarding #api-keys{border-top:1px solid var(--line);margin-top:24px;padding-top:20px;scroll-margin-top:24px}
+.unlinked-onboarding .key-list{display:flex;flex-direction:column;gap:6px;margin:16px 0}
+.unlinked-onboarding .key-row{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;text-decoration:none;overflow-wrap:anywhere}
+.unlinked-onboarding .key-row[aria-current]{border-color:var(--brand);background:var(--tint)}
+.unlinked-onboarding .key-value{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.unlinked-onboarding .key-value input{min-width:0;flex:1;padding:12px 14px;border:1px solid var(--line2);border-radius:var(--r);font:14px monospace}
+.unlinked-onboarding .selected-key h4{margin:16px 0 8px;font-size:16px}
+@media(max-width:520px){.unlinked-onboarding .key-row{flex-direction:column;gap:4px}}
 .membership-member{display:inline-flex;font-size:12px;font-weight:600;color:#27634a;background:#e8f4ed;border-radius:99px;padding:2px 8px;margin-left:8px;vertical-align:middle}
 .unlinked-onboarding .messages-page{padding:24px 0 0}
 .unlinked-onboarding .messages-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}

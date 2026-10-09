@@ -5,7 +5,7 @@ import { renderSettings, renderAgents } from '../mcp-server/private-onboarding-v
 
 const endpoint = 'https://www.unlinked.ai/mcp', accessToken = 'synthetic.grant-token_value~1'
 const decode = value => value.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-const field = (content, id) => { const match = content.match(new RegExp(`<textarea id="${id}"[^>]*>([\\s\\S]*?)</textarea>`)); return match ? decode(match[1]) : null }
+const field = (content, id) => { const match = content.match(new RegExp(`<textarea id="${id}"[^>]*>([\\s\\S]*?)</textarea>`)); return match ? decode(match[1]) : decode(content.match(new RegExp(`<input id="${id}"[^>]*value="([^"]*)"`))?.[1] ?? '') }
 
 // Claude Desktop rejects remote entries in claude_desktop_config.json
 // ("not valid MCP server configurations and were skipped"): every entry must
@@ -86,7 +86,7 @@ test('with the OAuth connector, Settings leads with "paste the URL and sign in" 
   const setups = agentClientSetups({ endpoint, accessToken })
   const grants = [{ id: 'conn1', issuedAt: 1790000000, scope: 'owner_network_and_public', connection: { app: 'Claude', clientName: 'Claude', redirectHost: 'claude.ai' } }, { id: 'manual1', issuedAt: 1780000000 }]
   const { content } = renderSettings({ accountLabel: 'a@example.invalid', displayName: 'A', csrf: 'c', agentConfiguration: setups.generic, agentSetups: setups, agentSetupAutomatic: true, grants, connector: { url: endpoint } })
-  const connectorPart = content.slice(0, content.indexOf('Use a private credential instead'))
+  const connectorPart = content.slice(0, content.indexOf('<section id="api-keys">'))
   assert.match(connectorPart, /paste this address, then sign in/)
   assert.equal(field(content, 'agent-connector-url'), endpoint)
   assert.equal(field(content, 'agent-connector-claude-code'), `claude mcp add --transport http unlinked ${endpoint}`)
@@ -97,9 +97,9 @@ test('with the OAuth connector, Settings leads with "paste the URL and sign in" 
   assert.match(connectorPart, /name="grantId" value="conn1"/)
   assert.equal(connectorPart.includes('value="manual1"'), false)
   // The header-based routes remain, below, as the alternative.
-  const manualPart = content.slice(content.indexOf('Use a private credential instead'))
+  const manualPart = content.slice(content.indexOf('<section id="api-keys">'))
   assert.match(manualPart, /custom connector with a request header instead of signing in/)
   assert.equal(field(content, 'agent-setup-claude-header'), `Bearer ${accessToken}`)
-  assert.match(manualPart, /name="grantId" value="manual1"/)
-  assert.match(manualPart, /Connected apps stay connected/)
+  assert.match(manualPart, /key=manual1/)
+  assert.match(manualPart, /Copy API key/)
 })

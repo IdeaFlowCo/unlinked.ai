@@ -154,7 +154,7 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -1262,20 +1262,37 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // The agent setup is prepared automatically: reuse the owner's live
         // grant or mint the one idempotent automatic grant. A revoked automatic
-        // setup stays revoked (ensure returns null) until the owner regenerates.
-        const ensured = typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner) : null
+        // setup stays revoked (ensure returns null); explicit selection reads only.
+        const selectedId = url.searchParams.get('key')
+        const ensured = selectedId && accountKeys ? await accountKeys.readKey(session.owner, selectedId) : typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner) : null
         const configuration = ensured ? scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const setups = ensured ? agentClientSetups({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const grants = await grantList(session.owner, backend)
         const jobs = await jobResources(), props = jobProps(jobs)
         // Email choices appear only while email is on; a slow read costs the section, never the page.
         const email = memberEmail?.sending ? await bounded(() => memberEmail.settings(session.owner), null) : null
-        const view=renderSettings({ ...props, grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+        const view=renderSettings({ ...props, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
           ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
         return
+      }
+      if (signup && accountKeys && request.method === 'POST' && url.pathname === '/settings/api-keys') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        const action = input.get('action'), id = input.get('grantId')
+        const allowed = action === 'create' ? ['csrf', 'action', 'name', 'access'] : action === 'rename' ? ['csrf', 'action', 'grantId', 'name'] : ['csrf', 'action', 'grantId']
+        if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || [...input.keys()].some(key => !allowed.includes(key) || input.getAll(key).length !== 1)) throw new Error('private_browser_csrf')
+        let selected = id
+        if (action === 'create') {
+          const access = input.get('access')
+          if (access !== null && (access !== 'connections' || !connectionActionsAvailable)) throw new Error('private_browser_csrf')
+          selected = (await issueAccountGrant(session.owner, undefined, { name: input.get('name'), ...(access ? { scope: ACCOUNT_WRITE_SCOPE } : {}) })).grantId
+        } else if (action === 'rename') await accountKeys.renameKey(session.owner, id, input.get('name'))
+        else if (action === 'replace') await accountKeys.replaceKey(session.owner, id)
+        else if (action === 'revoke') { await accountKeys.readKey(session.owner, id); await revokeAccountGrant(session.owner, id); selected = null }
+        else throw new Error('private_browser_csrf')
+        redirect(response, selected ? `/settings?key=${encodeURIComponent(selected)}#api-keys` : '/settings#api-keys'); return
       }
       if (signup && memberEmail && request.method === 'POST' && url.pathname === '/settings/email') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
@@ -1363,22 +1380,16 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return
         }
-        // Regenerate: mint the replacement first — a failure leaves the
-        // existing setup intact — then revoke every other live grant so old
-        // bearer credentials die as soon as the new one exists.
-        // OAuth-connected apps are separate connections and stay connected.
-        // `access=connections` is the explicit opt-in to connection-request
-        // write tools; absent access or `access=read` issues the read-only setup.
-        // Unknown fields and unsupported access values are rejected.
+        // Compatibility endpoint: create an additional setup, never invalidate
+        // another client. Replacement now targets a key explicitly in Settings.
         const access = input.getAll('access')
         if (access.length > 1 || (access.length && !['read', 'connections'].includes(access[0])) || (access[0] === 'connections' && !connectionActionsAvailable) || [...input.keys()].some(key => !['csrf', 'access'].includes(key))) throw new Error('private_browser_csrf')
         const issued = await issueAccountGrant(session.owner, undefined, access[0] === 'connections' ? { scope: ACCOUNT_WRITE_SCOPE } : {})
         const { accessToken, grantId: replacement } = issued
-        for (const grant of await grantList(session.owner, backend)) if (grant.id !== replacement && !grant.connection) await revokeAccountGrant(session.owner, grant.id)
         const configuration = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
         const setups = agentClientSetups({ endpoint: mcpEndpoint, accessToken })
         const jobs = await jobResources(), props = jobProps(jobs)
-        journey(response, renderSettings({ ...props, imports: summaries(jobs), grants: settingsGrants(await grantList(session.owner, backend)), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector,
+        journey(response, renderSettings({ ...props, selectedKeyId: replacement, keyManagement: Boolean(accountKeys), imports: summaries(jobs), grants: settingsGrants(await grantList(session.owner, backend)), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector,
           agentAccess: { scope: issued.scope ?? (access[0] === 'connections' ? ACCOUNT_WRITE_SCOPE : undefined), missingTools: [], regenerated: true }, connectionActionsAvailable }), props.importJob, agentSetupCopyScript()); return
       }
       if (request.method === 'POST' && url.pathname === '/upload') {

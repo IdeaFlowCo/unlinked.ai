@@ -2,7 +2,9 @@
 
 For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository. An experimental alternate public transport is https://unlinked-ideaflowco.vercel.app/search-public?q=gaming%20investors. Ordinary ChatGPT reader access is not established; see the alternate transport section of that contract.
 
-Use https://www.unlinked.ai/login for Ideaflow ID sign-in; /settings holds your automatically prepared agent setup (view/copy, revoke or regenerate it there). No setup click is needed, repeated visits never mint duplicate grants, and a revoked automatic setup stays revoked until the owner regenerates.
+Use https://www.unlinked.ai/login for Ideaflow ID sign-in. Settings preserves your automatically prepared credential; revoked automatic access stays revoked until you explicitly create a key. No archive is needed to connect.
+
+Manual keys: open [Settings → API keys](https://www.unlinked.ai/settings#api-keys) for **Copy API key** or **Copy agent setup**. See [key management](https://www.unlinked.ai/agents) for setup and Muse field formats; the lifecycle and release contract is `docs/agent-key-settings.md` in the repository.
 On a signed recovered-account match, the browser may ask once whether to continue with the old Unlinked profile.
 Import a full LinkedIn ZIP or Connections-only ZIP/CSV, maximum 64 MiB.
 The server processes imports durably; /profile and /network show progress.

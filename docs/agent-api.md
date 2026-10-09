@@ -28,7 +28,7 @@ grant is only valid on the origin that issued it.
 ## Authentication and linkage (fail closed)
 
 Every call requires `Authorization: Bearer <account grant token>` — the
-per-user, revocable grant (read-only by default) issued in **Settings → Connect my agent**
+per-user, revocable grant (read-only by default) issued in **Settings → API keys → Create API key**
 on the runtime, or through the OAuth connector flow below. There is no anonymous access to any `/api/agent/v1/` route and
 no email-based linkage anywhere: the grant token *is* the account linkage, and
 `unlinked_whoami` returns the stable Unlinked `ownerId` so a consumer can
@@ -126,7 +126,7 @@ Security decisions:
   refresh token is issued (`grant_types_supported: ["authorization_code"]`);
   disconnecting in **Settings → Connected apps** or `POST /oauth/revoke` (by
   the same client) stops it on the next call. Connection grants are never
-  reused as the copyable Settings credential, survive **Regenerate**, and
+  reused as the copyable Settings credential, survive manual key creation, replacement and revocation, and
   disconnecting one never turns off the copyable credential. Tokens never
   enter audit events (`oauth_connection_approved` / `_denied` / `_granted`
   record only app, owner hash, grant id and scope).
@@ -385,9 +385,9 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
 - **Settings auto-setup (`ensureGrant(owner)`):** reuses the newest live,
   non-OAuth credential at its issued scope and version, including an opted-in
   write credential. With none, it prepares the deterministic default read
-  grant unless that automatic grant was revoked. Regenerate issues a new
-  credential first, then revokes all other non-OAuth grants; connected apps
-  stay connected.
+  grant unless that automatic grant was revoked. Explicit key selection reads
+  only that existing key. Manual creation and selected-key lifecycle are owned
+  by [Settings key management](agent-key-settings.md#independent-lifecycle).
 - **Provisioning semantics (`ensureGrant(owner, { readOnly: true })`):**
   reuses the newest live, non-OAuth **read-only** grant of any catalog version for that owner.
   It never returns an opted-in write credential. Tokens are deterministically
@@ -465,11 +465,11 @@ revision, which is tombstone-safe by construction).
 ## Catalog v4: optional connection actions
 
 Versions 1–3 are immutable. Version 4 retains the v3 read lists and adds
-`owner_network_and_public_and_write`, never a default. Settings regeneration
+`owner_network_and_public_and_write`, never a default. Creating a key in Settings
 and OAuth consent offer an unchecked optional choice; the server validates
 `access=connections`, availability and duplicate/unknown fields. Requesting
 OAuth `connections` alone does not grant it. Defaults and existing grants keep
-read access only; opting out at regeneration restores a read-only credential.
+read access only; creating another key without that opt-in gives it read-only access.
 
 | MCP tool | HTTP POST route | JSON fields |
 |---|---|---|
@@ -489,10 +489,16 @@ profileId, id?, visibility: "owner_private" }`; the other actions return
 with status `accepted`, `ignored` or `withdrawn`. Removal remains browser-only.
 MCP annotations mark these as writes. Messaging and posting are never available.
 
-Settings and `whoami.grant.update` suggest regeneration/reconnection only when
+Settings and `whoami.grant.update` identify missing newer tools only when
 the grant lacks tools its own scope now provides. A v3 read grant has no nudge
 solely because v4 adds an opt-in scope. Missing grant records render safely.
 
 ## Shared connector delegation
 
 The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` on that host). The gateway forwards authorized calls to `POST /api/connector/mcp` with a dedicated `IDEAFLOW_CONNECTOR_SECRET` HS256 assertion, never a personal API key. Assertions bind the exact UTF-8 JSON body hash, `https://www.unlinked.ai/mcp` audience, Ideaflow issuer/subject, consented `unlinked:read` and optional `unlinked:write`, unique jti, and at most 60 seconds. Invalid/replayed assertions fail before account lookup. No account or linking is created by a call. The existing account tool service and live owner authorization are reused; write permission exposes only existing connection actions, never messaging or raw archives. Gateway disconnect revokes future assertions; in-flight authorized operations can finish. Deploy the per-service secret in the runtime env with the release; absence keeps the internal endpoint disabled.
+
+
+### Named manual keys
+
+See [Settings key management](agent-key-settings.md) for manual setup, Muse field
+formats, independent key lifecycle, compatibility and generation-aware rollback.

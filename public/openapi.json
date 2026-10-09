@@ -3,7 +3,7 @@
   "info": {
     "title": "Unlinked canonical beta",
     "version": "1.0.0",
-    "description": "Browser sessions and scoped MCP grants; the account grant is prepared automatically in Settings (revocable/regenerable). Legacy REST schemas are historical."
+    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository."
   },
   "servers": [
     {

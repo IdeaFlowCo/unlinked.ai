@@ -42,7 +42,7 @@ async function site(t, limits) {
   handler = createPrivateBrowserHandler({ baseUrl: origin, dataMode: 'private_live', signup: async () => accounts[subject], resolveOwner: async () => accounts[subject],
     login: { begin: async () => ({ location: 'https://idp.invalid/', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://idp.invalid', subject, displayName: `Person ${subject}` }) },
     getBackend, readPublishedSnapshot, memberConnections: connections, memberInvitations: invitations, accountForProfile, ownProfileId,
-    ensureAccountGrant: grants.ensureGrant, issueAccountGrant: grants.issueGrant, listAccountGrants: grants.listGrants, revokeAccountGrant: grants.revoke, mcpEndpoint: origin + '/mcp' })
+    ensureAccountGrant: grants.ensureGrant, issueAccountGrant: grants.issueGrant, listAccountGrants: grants.listGrants, accountKeys: grants, revokeAccountGrant: grants.revoke, mcpEndpoint: origin + '/mcp' })
   const go = (path, opts = {}) => fetch(endpoint+path,{ redirect:'manual',...opts })
   const signIn = async id => { subject=id; const login = await go('/login'); const cb = await go('/auth/callback/ideaflow?state=state&code=x',{headers:{Cookie:login.headers.getSetCookie()[0].split(';')[0]}}); const cookie=cb.headers.getSetCookie().find(x=>x.startsWith('__Host-ul-session=')).split(';')[0]; const text=await (await go('/settings',{headers:{Cookie:cookie}})).text(); return {cookie,csrf:csrf(text),text} }
   const post = (session,path,fields) => go(path,{method:'POST',headers:{Cookie:session.cookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:session.csrf,...fields})})
@@ -119,10 +119,10 @@ test('Settings explicit choice is server validated, current grants get no nudge,
   assert.equal((await p.post(s,'/setup-account',{access:'surprise'})).status,400)
   assert.equal((await p.post(s,'/setup-account',{write_scope:'yes'})).status,400)
   const enabled=await p.post(s,'/setup-account',{access:'connections'});assert.equal(enabled.status,200);assert.match(await enabled.text(),/connection actions enabled/)
-  const issued=await p.grants.ensureGrant(a);assert.equal(issued.scope,ACCOUNT_WRITE_SCOPE)
-  await p.post(s,'/setup-account',{});assert.equal((await p.grants.ensureGrant(a)).scope,'owner_network_and_public')
-  const current=await p.grants.ensureGrant(a), record=p.resources.get(current.grantId);record.payload.version=2;record.payload.tools=[...ACCOUNT_GRANT_TOOL_VERSIONS[2].owner_network_and_public]
-  const outdated=await(await p.go('/settings',{headers:{Cookie:s.cookie}})).text();assert.match(outdated,/missing newer tools/)
+  const write=(await p.grants.listGrants(a)).find(g=>g.scope===ACCOUNT_WRITE_SCOPE);assert.ok(write)
+  await p.post(s,'/setup-account',{});assert.ok((await p.grants.listGrants(a)).some(g=>g.scope==='owner_network_and_public'));assert.ok(await p.grants.readKey(a,write.id))
+  const read=(await p.grants.listGrants(a)).find(g=>g.scope==='owner_network_and_public'), current=await p.grants.readKey(a,read.id), record=p.resources.get(current.grantId);record.payload.version=2;record.payload.tools=[...ACCOUNT_GRANT_TOOL_VERSIONS[2].owner_network_and_public]
+  const outdated=await(await p.go('/settings?key='+current.grantId,{headers:{Cookie:s.cookie}})).text();assert.match(outdated,/earlier tool set/)
   const who=await(await p.agent(current.accessToken,'whoami')).json();assert.equal(who.grant.update.currentVersion,4);assert.ok(who.grant.update.missingTools.includes('unlinked_list_notifications'))
   assert.doesNotThrow(()=>renderSettings({agentAccess:undefined,grants:[]}))
   assert.doesNotMatch(renderPeople({everyone:profiles}).content,/ style=/)
