@@ -7,7 +7,7 @@ export async function manualKeyFixture({ connectorPreview = false } = {}) {
   const owner = { ownerId: 'synthetic-key-owner', userId: 'synthetic-key-user' }
   const foreign = { ownerId: 'synthetic-other-owner', userId: 'synthetic-other-user' }
   const resources = new Map(), audits = []
-  let failWrite = false, beforeWrite = null
+  let failWrite = false, beforeWrite = null, beforeGrantList = null
   const getBackend = async caller => ({
     readResource: async (_type, id) => { const row = resources.get(id); return row?.sourceOwnerId === caller.ownerId ? structuredClone(row) : null },
     writeResource: async row => {
@@ -31,7 +31,10 @@ export async function manualKeyFixture({ connectorPreview = false } = {}) {
     login: { begin: async () => ({ location: 'https://synthetic-idp.invalid/authorize', transaction: { state: 'synthetic-state' } }), finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'synthetic-key-subject' }) },
     resolveOwner: async () => owner, signup: async () => owner, getBackend,
     issueAccountGrant: grants.issueGrant, ensureAccountGrant: grants.ensureGrant, revokeAccountGrant: grants.revoke,
-    listAccountGrants: grants.listGrants, accountKeys: grants, mcpEndpoint: `${baseUrl}/mcp`,
+    listAccountGrants: async owner => {
+      if (beforeGrantList) { const fn = beforeGrantList; beforeGrantList = null; await fn() }
+      return grants.listGrants(owner)
+    }, accountKeys: grants, mcpEndpoint: `${baseUrl}/mcp`,
     readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'synthetic-keys', profiles: [], connections: [] }),
     audit: async row => audits.push(row),
   })
@@ -45,5 +48,6 @@ export async function manualKeyFixture({ connectorPreview = false } = {}) {
   const post = (session, input, extra = {}) => fetch(`${endpoint}/settings/api-keys`, { method: 'POST', redirect: 'manual', headers: { Cookie: session.cookie, Origin: baseUrl, ...extra }, body: new URLSearchParams({ csrf: session.csrf, ...input }) })
   const page = async (session, id) => fetch(`${endpoint}/settings${id ? `?key=${id}` : ''}`, { headers: { Cookie: session.cookie } })
   return { owner, foreign, resources, audits, grants, options, endpoint, baseUrl, signIn, post, page, close: () => new Promise(resolve => server.close(resolve)),
+    beforeGrantList: fn => { beforeGrantList = fn },
     failWrites: value => { failWrite = value }, beforeWrite: fn => { beforeWrite = fn } }
 }
