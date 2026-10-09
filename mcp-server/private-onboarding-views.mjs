@@ -582,6 +582,11 @@ export function renderDataDeleted() {
   return base('Your data is deleted', `<section class="narrow"><h1 class="hq">Your data is deleted</h1><p class="lead">Your imports, profile, connections and agent access have been erased, and you no longer appear in the public People index.</p><p>If you ever want to come back, sign in again and bring a fresh LinkedIn export.</p><p><a class="button" href="/">Back to the home page</a></p></section>`)
 }
 
+// The public People index could not be read: say so in a page, never raw JSON.
+export function renderPeopleUnavailable({ accountLabel, displayName, csrf, importJob } = {}) {
+  return base('People are unavailable', `<section class="narrow"><h1 class="hq">People are unavailable right now</h1><p class="lead">We could not load profiles on Unlinked this time. Nothing about your account or files has changed.</p><p><a class="button" href="">Try again</a> <a class="button sec" href="${csrf ? '/network' : '/'}">${csrf ? 'Back to your people' : 'Back to the home page'}</a></p></section>`, { accountLabel, displayName, csrf, importJob })
+}
+
 // Public guides, readable with or without a session.
 export function renderAgents({ accountLabel, displayName, csrf, importJob } = {}) {
   const setupLink = csrf

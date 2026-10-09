@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { PUBLIC_UPLOAD_CONSENT } from '../private-import/consent.mjs'
 import { createScopedImportReader } from '../private-import/noos-adapter.mjs'
 import { applyProfileDecisions } from './profile-decisions.mjs'
@@ -109,7 +110,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         if (!signupId) ownerImports.set(owner, [...(ownerImports.get(owner) ?? []), { id: 'member-import-' + item.id, key: [resource.payload.createdAt ?? 0, item.id] }])
       }
       revisions.push(snapshot.revision)
-      if (profiles.length > 20000 || connections.length > 100000) throw Error('shared_public_capacity_limit')
+      if (profiles.length > PUBLIC_INDEX_MAX_PROFILES || connections.length > PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('shared_public_capacity_limit')
     }
     if (identity(await discover()) !== identity(items)) throw Error('public_member_source_changed')
     // Without a legacy or signup identity, the newest import stands for the
@@ -137,7 +138,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     if (typeof readMembers !== 'function') return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections})
     // Claimed profiles are members; everyone else in the index is a shadow.
     const claimed = await readMembers()
-    if (!Array.isArray(claimed) || claimed.length > 20000) throw Error('public_member_presence_invalid')
+    if (!Array.isArray(claimed) || claimed.length > PUBLIC_INDEX_MAX_PROFILES) throw Error('public_member_presence_invalid')
     const known = new Set(profiles.map(value => value.id))
     for (const id of claimed) if (known.has(id)) members.add(id)
     const memberIds = [...members].sort()

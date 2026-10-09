@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { PUBLIC_NETWORK_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
@@ -64,8 +65,8 @@ const deepFreeze = value => {
 
 // `photoFor(id)` optionally names a same-origin profile photo URL
 // (mcp-server/profile-photos.mjs); summaries and details then carry `photo`.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = 20000, maxConnections = 100000, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, 20000) || !bounded(maxConnections, 100000) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
   // once, and building it is slow. With the default `reuse: false`, each new
