@@ -51,7 +51,7 @@ Header alternative for clients that cannot sign in: Streamable HTTP with header 
 Owner-network AI search requires supplied title/position evidence for a requested role, omits domain-only matches, and gives short conversational reasons grounded in supplied fields, stating when sector focus is unknown; response shapes and grant versions are unchanged.
 
 Anonymous discovery, professional People browsing and Meet are public. Owner data, uploads, settings, status and MCP require their specific authentication.
-/meet scans Unlinked profile cards and OpenChat cards and always stops at an explicit confirm step; scanning never adds a contact or grants access. Signed-in members show their QR business card at /card; its target is their already-public profile URL. The web app is installable (manifest at /manifest.webmanifest); the service worker precaches only fixed public shell assets and never caches member content.
+/meet scans Unlinked profile cards and OpenChat cards and always stops at an explicit confirm step; scanning never adds a contact or grants access. Signed-in members show their QR business card at /card; its contact version opens a revocable contact link, while the public-only version opens their published profile. The web app is installable (manifest at /manifest.webmanifest); the service worker precaches only fixed public shell assets and never caches member content.
 Legacy Supabase APIs and legacy stdio tools remain historical code, not current onboarding instructions.
 
 Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
@@ -88,6 +88,8 @@ Connect an agent at https://id.ideaflow.app/agents using one account connection 
 Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository).
 
 For compatible hosts needing several apps or messages, use https://id.ideaflow.app/agents and its separate OpenChat permissions. Existing direct Claude/ChatGPT sign-in remains supported. Muse’s observed manual form uses the direct Unlinked key; Muse OAuth is unverified. Connection requests do not record private “X knows Y” relationships; those are saved with the direct key’s private notes & relations tools (above) or the connector’s OpenChat private-people tools — one shared store — and shown only to their owner on Unlinked person and contact pages (“Your private context”) and in OpenChat.
+
+Browser-only card joining is not an agent capability. The repository guide `docs/contact-card.md` owns card sharing, signup and privacy boundaries.
 
 ## Troubleshooting request failures
 

@@ -55,6 +55,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .header-search .scan:hover{background:var(--tint)}
 .unlinked-onboarding nav{display:flex;gap:18px;align-items:center;font-size:15px}
 .unlinked-onboarding nav a{color:var(--fg);text-decoration:none;white-space:nowrap}
+.unlinked-onboarding nav .my-card-link{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(--brand-d);font-weight:600}
 .unlinked-onboarding nav a:hover{text-decoration:underline}
 .unlinked-onboarding nav .chip{display:inline-block;border:1px solid var(--line2);border-radius:99px;padding:6px 13px;background:#fff;max-width:200px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .unlinked-onboarding nav a.button{color:#fff}

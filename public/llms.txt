@@ -29,7 +29,7 @@ Header alternative for clients that cannot sign in: Streamable HTTP with header 
 - [Meet: scan an Unlinked profile card or an OpenChat card, confirm before opening](/meet)
 - [Install the app (PWA manifest)](/manifest.webmanifest)
 
-Signed-in members have a shareable business card with a QR of their public profile URL at /card; scanning it only opens that public page.
+Signed-in members open their full card at /card; the public-only version is /card?share=public.
 
 ## Current authenticated MCP
 Streamable HTTP endpoint: https://www.unlinked.ai/mcp.
@@ -75,6 +75,8 @@ Connect an agent at https://id.ideaflow.app/agents using one account connection 
 Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository).
 
 For compatible hosts needing several apps or messages, use https://id.ideaflow.app/agents and its separate OpenChat permissions. Existing direct Claude/ChatGPT sign-in remains supported. Muse’s observed manual form uses the direct Unlinked key; Muse OAuth is unverified. Connection requests do not record private “X knows Y” relationships; those are saved with the direct key’s private notes & relations tools or the connector’s OpenChat private-people tools (one shared store) and shown only to their owner on Unlinked person and contact pages (“Your private context”) and in OpenChat. Messaging is OpenChat through the shared connector, never an Unlinked key.
+
+Browser-only card joining is not an agent capability. The repository guide `docs/contact-card.md` owns card sharing, signup and privacy boundaries.
 
 ## Troubleshooting request failures
 
