@@ -119,8 +119,9 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   const whoami = await who.json()
   assert.equal(whoami.ownerId, app.owner.ownerId)
   assert.equal(whoami.grant.version, CURRENT_ACCOUNT_GRANT_VERSION)
-  assert.deepEqual(whoami.grant.tools, [...ACCOUNT_GRANT_TOOL_VERSIONS[3].owner_network_and_public])
+  assert.deepEqual(whoami.grant.tools, [...ACCOUNT_GRANT_TOOL_VERSIONS[6].owner_network_and_public])
   assert.equal(whoami.importCount, 1)
+  assert.deepEqual(whoami.imports, { uploaded: 1, recoveredArchive: false })
   assert.equal(whoami.publicIndexAvailable, true)
 
   // Degree-1 connections include owner-imported contacts without any legacy
@@ -146,6 +147,19 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   assert.equal((await crossed.json()).error.code, 'cursor_invalid')
   const filtered = await (await call(app.endpoint, accessToken, 'connections?q=navy')).json()
   assert.deepEqual(filtered.connections.map(x => x.name), ['Grace Hopper'])
+  // One contact without paging, by address or by the listed id (unlinked-9kk.3).
+  const byUrl = await call(app.endpoint, accessToken, 'contacts/lookup', { method: 'POST', body: JSON.stringify({ linkedinUrl: 'linkedin.com/in/Synthetic-Grace/' }) })
+  assert.equal(byUrl.status, 200)
+  const graceContact = (await byUrl.json()).contact
+  assert.equal(graceContact.name, 'Grace Hopper')
+  assert.equal(graceContact.connectionId, filtered.connections[0].id)
+  assert.match(graceContact.linkedinRefHash, /^[a-f0-9]{64}$/)
+  assert.ok(!JSON.stringify(graceContact).includes('private.invalid'))
+  const byId = await (await call(app.endpoint, accessToken, 'contacts/lookup', { method: 'POST', body: JSON.stringify({ connectionId: graceContact.connectionId }) })).json()
+  assert.equal(byId.contact.linkedinRefHash, graceContact.linkedinRefHash)
+  const neither = await call(app.endpoint, accessToken, 'contacts/lookup', { method: 'POST', body: JSON.stringify({}) })
+  assert.equal(neither.status, 400)
+  assert.equal((await neither.json()).error.code, 'invalid_input')
 
   // Second degree without a confirmed anchor is typed degree_unproven, never inferred.
   const unproven = await call(app.endpoint, accessToken, 'connections?degree=2')
@@ -311,7 +325,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const mcpTransport = new StreamableHTTPClientTransport(new URL(`${narrowApp.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${narrow.accessToken}` } } })
   try {
     await mcpClient.connect(mcpTransport)
-    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact'])
     const who = await mcpClient.callTool({ name: 'unlinked_whoami', arguments: {} })
     assert.ok(!who.isError)
     assert.equal(JSON.parse(who.content[0].text).ownerId, narrowApp.owner.ownerId)

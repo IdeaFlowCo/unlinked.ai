@@ -61,7 +61,8 @@
       "unlinked_get_profile",
       "unlinked_ai_search",
       "unlinked_list_connection_requests",
-      "unlinked_list_notifications"
+      "unlinked_list_notifications",
+      "unlinked_lookup_contact"
     ],
     "grantVersioning": "Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository).",
     "optionalWriteScope": {

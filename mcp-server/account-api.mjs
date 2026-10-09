@@ -35,6 +35,7 @@ const ROUTES = Object.freeze({
   'POST /api/agent/v1/connection-requests/accept': { tool: 'unlinked_accept_connection_request', body: ['id'] },
   'POST /api/agent/v1/connection-requests/ignore': { tool: 'unlinked_ignore_connection_request', body: ['id'] },
   'POST /api/agent/v1/connection-requests/withdraw': { tool: 'unlinked_withdraw_connection_request', body: ['id'] },
+  'POST /api/agent/v1/contacts/lookup': { tool: 'unlinked_lookup_contact', body: ['connectionId', 'linkedinUrl', 'profileId', 'refHashes'] },
   'POST /api/agent/v1/ai-search': { tool: 'unlinked_ai_search', body: ['query', 'scope', 'timeoutMs'] },
   'POST /api/agent/v1/search-network': { tool: 'unlinked_search_network', body: ['query', 'degree', 'cursor'] },
   'POST /api/agent/v1/search-everyone': { tool: 'unlinked_search_everyone', body: ['query'] },

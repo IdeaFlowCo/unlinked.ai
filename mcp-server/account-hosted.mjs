@@ -35,7 +35,7 @@ export function typedToolFailure(error) {
 
 // Tools beyond the two launch tools are registered from the shared service so
 // the MCP surface and the HTTP agent API (docs/agent-api.md) stay one contract.
-const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
+const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact',
   // Registered only for grants whose opt-in scope includes them.
   'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']
 

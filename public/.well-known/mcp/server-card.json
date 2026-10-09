@@ -237,6 +237,40 @@
       }
     },
     {
+      "name": "unlinked_lookup_contact",
+      "description": "Read-only, owner-scoped: resolve one of the owner's own contacts by connectionId, linkedinUrl or published profileId (or up to 100 linkedinRefHash values) without paging. Returns name, headline, company, connectionId, linkedinRefHash (SHA-256 of the canonical LinkedIn slug) and publishedProfileId when the person has a published profile.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "connectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "linkedinUrl": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "profileId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "refHashes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "minItems": 1,
+            "maxItems": 100
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "unlinked_send_connection_request",
       "description": "Send a connection request. Only with explicit opt-in; off by default. Same browser authorization and limits.",
       "annotations": {
