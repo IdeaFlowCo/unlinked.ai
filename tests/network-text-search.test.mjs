@@ -58,8 +58,12 @@ test('a query with no literal match is AI-ranked; the AI fallback stops at its t
   assert.equal(ranked.mode, 'query_time_ai')
   assert.equal(calls, 1)
   const hanging = ({ signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
-  const started = Date.now()
-  await assert.rejects(network(people, hanging).searchNetwork({ query: 'someone to advise on hiring', aiBudgetMs: 50 }), error => error.name === 'TimeoutError')
-  assert.ok(Date.now() - started < 5000)
+  // AbortSignal.timeout timers do not hold the event loop open (a live server does).
+  const keepAlive = setInterval(() => {}, 1000)
+  try {
+    const started = Date.now()
+    await assert.rejects(network(people, hanging).searchNetwork({ query: 'someone to advise on hiring', aiBudgetMs: 50 }), error => error.name === 'TimeoutError')
+    assert.ok(Date.now() - started < 5000)
+  } finally { clearInterval(keepAlive) }
   await assert.rejects(network(people).searchNetwork({ query: 'someone to advise on hiring' }), /private_search_configuration_required/)
 })
