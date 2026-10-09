@@ -311,6 +311,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .note-open:hover .note-text{text-decoration:underline}
 .unlinked-onboarding .note-text{font-size:15px}
 .unlinked-onboarding .note-time{display:block}
+.unlinked-onboarding .note-state{color:var(--brand-d);font-weight:600}
 .unlinked-onboarding .note .row-actions{margin-left:58px}
 .unlinked-onboarding .note-summary{display:flex;gap:14px;align-items:center;padding:14px 18px;margin:8px 0 0;background:#fff;border:1px solid var(--line);border-radius:var(--r);color:var(--fg);text-decoration:none}
 .unlinked-onboarding .note-summary span span{display:block}
