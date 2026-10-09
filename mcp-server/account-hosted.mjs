@@ -72,7 +72,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     const server = new McpServer({ name: 'unlinked-account-network', version: '1.0.0' })
     server.registerTool('unlinked_search_network', {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-      description: 'Search all currently published LinkedIn observations owned by your authenticated Unlinked account. A name, company or title query returns every literal match instantly (mode text_match, sorted by name, up to 500 with total/truncated); only a query with no literal match is AI-ranked, within 25 s. Every result retains archive provenance. With degree1/2 (or a second-degree query), read recorded public connection paths from your explicitly linked legacy profile. Unknown identity/relationship matches are not invented; no other owner/private fields are accessed.',
+      description: 'Search all currently published LinkedIn observations owned by your authenticated Unlinked account. A name, company or title query returns every literal match instantly (mode text_match, sorted by name, up to 500 with total/truncated); only a query with no literal match is AI-ranked, within 20 s. Every result retains archive provenance. With degree1/2 (or a second-degree query), read recorded public connection paths from your explicitly linked legacy profile. Unknown identity/relationship matches are not invented; no other owner/private fields are accessed.',
       inputSchema: { query: z.string().min(1).max(1024), degree: z.union([z.literal(1), z.literal(2)]).optional(), cursor: z.string().max(2048).optional() },
     }, async ({ query, degree, cursor }) => {
       const controller = new AbortController()

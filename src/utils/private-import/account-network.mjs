@@ -6,8 +6,10 @@ import { createPrivateSearch } from './ai-search.mjs'
 import { matchNetworkText } from './network-text-search.mjs'
 
 // unlinked_search_network answers literal queries from text alone; only a
-// query with no literal match pays for AI ranking, within this budget.
-export const NETWORK_AI_BUDGET_MS = 25000
+// query with no literal match pays for AI ranking, within this budget. It stays
+// under the shared Ideaflow connector's 25 s downstream timeout so callers get
+// this typed failure, not the gateway's generic abort.
+export const NETWORK_AI_BUDGET_MS = 20000
 
 // One authenticated account, all its currently published imports. Source
 // assertions keep their original IDs and provenance; no email/URL ownership.

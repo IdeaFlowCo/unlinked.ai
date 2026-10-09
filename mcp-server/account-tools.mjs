@@ -34,7 +34,7 @@ export function networkSearchFailure(error, signal) {
   if (error instanceof AccountToolError) return error
   if (error?.message === 'private_search_configuration_required') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking is not configured.')
   if (error?.message === 'private_search_query_limit') return new AccountToolError('invalid_input', 'The query was empty or too long.')
-  if (!signal?.aborted && error?.name === 'TimeoutError') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking did not finish within 25 s; search a name, company or title word, or page through unlinked_list_connections.')
+  if (!signal?.aborted && error?.name === 'TimeoutError') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking did not finish within 20 s; search a name, company or title word, or page through unlinked_list_connections.')
   return error
 }
 
