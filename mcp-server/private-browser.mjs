@@ -1,3 +1,4 @@
+import { PROFILE_ASK_ID, ProfileAskError } from './profile-asks.mjs'
 import { messagesScript } from './messages-view.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
@@ -155,7 +156,7 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null }) {
+export function createPrivateBrowserHandler({ profileAsks, createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -186,7 +187,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // Pages a sign-in may return to. Everything else lands on the home route.
   // An OAuth connector authorization request returns to its own validated
   // consent page (the query is re-validated there, never trusted).
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}(?:&askId=[A-Za-z0-9_-]{1,80})?$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -691,10 +692,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             const notice = url.searchParams.get('connect')
             const companies = new Map(await Promise.all([...new Set(result.profile.positions.map(position => position.company).filter(Boolean))].map(async name => [name, companyDetailLevel(await lookupCompanyFacts(name))])))
             const profile = { ...result.profile, positions: result.profile.positions.map(position => ({ ...position, companyDetailLevel: companies.get(position.company) })) }
+            const asks = profileAsks && !publicProfile?.[2] ? await bounded(() => profileAsks.forProfile(profile.id, viewer?.owner), []) : undefined
             // The owner's private context mounts only for a signed-in viewer and is
             // fetched separately; the page itself never carries it.
             const withContext = Boolean(viewer && privateContext && !publicProfile?.[2])
-            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, withContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
+            journey(response, renderPerson({ ...chrome, profile, profileAsks: asks, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, withContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
@@ -839,8 +841,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         return
       }
       if (request.method === 'GET' && url.pathname === '/messages') {
+        if ([...url.searchParams.keys()].some(key => !['profile','askId'].includes(key)) || [...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length !== 1) || (url.searchParams.has('askId') && (!PROFILE_ASK_ID.test(url.searchParams.get('askId')) || !parseUnlinkedProfileContext(url.searchParams.get('profile'))))) { response.writeHead(400).end(); return }
         const profile = parseUnlinkedProfileContext(url.searchParams.get('profile'))
-        journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, profile }), null, messagesScript(session.csrf)); return
+        journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, profile, askId: profile && PROFILE_ASK_ID.test(url.searchParams.get('askId') ?? '') ? url.searchParams.get('askId') : undefined }), null, messagesScript(session.csrf)); return
       }
       if (request.method === 'POST' && url.pathname === '/messages/session') {
         const input = new URLSearchParams((await body(request, 2048)).toString())
@@ -1082,7 +1085,31 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const photo = mine ? profilePhotos.urlFor(mine) : null
           if (photo) profile.photo = photo
         }
-        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
+        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, profileAsks: profileAsks ? await bounded(() => profileAsks.mine(session.owner), { unavailable: true }) : undefined, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
+      }
+      const askAction = url.pathname.match(/^\/profile\/asks\/(publish|edit|close|remove)$/)
+      if (signup && profileAsks && request.method === 'POST' && askAction) {
+        const input = new URLSearchParams((await body(request, 128 * 1024)).toString('utf8'))
+        const operation = askAction[1], allowed = operation === 'publish' || operation === 'edit'
+          ? ['csrf','id','expectedRevision','text','visibility','expiresAt','userIds','conversationIds'] : ['csrf','id','expectedRevision']
+        if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || [...input.keys()].some(k => !allowed.includes(k)) || allowed.filter(k => !['userIds','conversationIds'].includes(k)).some(k => input.getAll(k).length > 1)) { response.writeHead(403).end(); return }
+        const visibility = input.get('visibility'), selected = visibility === 'selected'
+        const values = { text: input.get('text') ?? '', visibility, expiresAt: `${input.get('expiresAt') ?? ''}:00Z`,
+          userIds: selected ? input.getAll('userIds') : [], conversationIds: selected ? input.getAll('conversationIds') : [],
+          ...(operation === 'publish' ? {} : { expectedRevision: Number(input.get('expectedRevision')) }) }
+        try {
+          if (operation !== 'publish' && (!input.has('expectedRevision') || !/^\d+$/.test(input.get('expectedRevision')))) throw new ProfileAskError(400, 'Reload your profile before changing this ask.')
+          await profileAsks.mutate(session.owner, operation, input.get('id'), operation === 'close' || operation === 'remove' ? { expectedRevision: values.expectedRevision } : values)
+          redirect(response, '/profile#asks'); return
+        } catch (failure) {
+          const state = await bounded(() => profileAsks.mine(session.owner), { unavailable: true })
+          state.error = failure instanceof ProfileAskError ? failure.message : 'Asks are temporarily unavailable. Try again.'
+          if (operation === 'publish') state.draft = values
+          if (operation === 'edit') state.failedEdit = { id: input.get('id'), values }
+          const jobs = await jobResources(), props = jobProps(jobs)
+          const { profile, publicProfileUrl } = await readOwnCard(jobs)
+          journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, profileAsks: state }), props.importJob, '', failure instanceof ProfileAskError ? failure.status : 503); return
+        }
       }
       // The contact version of the card, for its owner: the details, their show
       // switches, and the link and QR once something is shown.

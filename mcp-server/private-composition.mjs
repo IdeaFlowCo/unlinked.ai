@@ -1,3 +1,4 @@
+import { createProfileAsks } from './profile-asks.mjs'
 import { validTimestamp } from '../src/utils/network-order.mjs'
 import { createMessagingResolver, createMessagingSession } from './messaging.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
@@ -471,6 +472,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // NOOS_OVERLAY_APP_UNLINKED_SECRET (the value Noos holds for app
       // "unlinked"); the shared-noos network reaches noos_api directly.
       ...privateOverlay({ secret: overlayEnv.NOOS_OVERLAY_APP_UNLINKED_SECRET, url: overlayEnv.NOOS_OVERLAY_URL, networkMode, issuer: config.issuer, identityForOwner }),
+      profileAsks: createProfileAsks({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner, resolveRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }) }),
       // Operator-published photos (publish-profile-photos.mjs), read-only here.
       // No member hide-photo choice exists yet; when it does, pass it as
       // `hidden` so it outranks the operator set (docs/profile-photos.md).
