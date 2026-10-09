@@ -7,7 +7,7 @@ import { createSharedPeopleSearch } from '../src/utils/public-people/shared-sear
 import { SEARCH_MODES } from '../src/utils/public-people/text-match.mjs'
 import { ConnectionError } from './member-connections.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
-import { ACCOUNT_WRITE_SCOPE, CURRENT_ACCOUNT_GRANT_VERSION, missingAccountGrantTools, scopeCoversPublic } from './account-grants.mjs'
+import { scopeAllowsConnectionActions, scopeCoversPublic } from './account-grants.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const LINKEDIN_PROFILE = /^https:\/\/www\.linkedin\.com\/in\/[\w%-]+$/
@@ -191,10 +191,10 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     return { kind: 'unlinked_connection_request_update', id, status, visibility: 'owner_private' }
   }
   const tools = {
-    async unlinked_send_connection_request(grant, { profileId, note }) {
+    async unlinked_send_connection_request(grant, { profileId, note }, signal, revalidate) {
       requireConnections()
       let outcome
-      try { outcome = await connectionActions.send(owner(grant), { profileId, note }) }
+      try { outcome = await connectionActions.send(owner(grant), { profileId, note, beforeWrite: revalidate }) }
       catch (failure) {
         if (failure instanceof ConnectionError) throw connectionFailure(failure.code)
         if (failure instanceof PublicPeopleReaderError) throw failure.status === 400 ? new AccountToolError('invalid_input', 'The profile id is not valid.') : new AccountToolError('upstream_unavailable', 'The published People index is unavailable right now.')
@@ -223,11 +223,9 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       const importIds = typeof backend.listImportIds === 'function' ? await backend.listImportIds() : []
       let legacy = null
       if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
-      // Only a grant missing tools its scope now has is told to update.
-      const missing = missingAccountGrantTools(grant)
       return { kind: 'unlinked_whoami', ownerId: grant.ownerId,
         grant: { scope: grant.scope, version: grant.version ?? 1, tools: [...grant.tools],
-          ...(missing.length ? { update: { currentVersion: CURRENT_ACCOUNT_GRANT_VERSION, missingTools: missing, how: 'This grant predates tools its scope now includes. The owner can regenerate the agent setup in Unlinked Settings, or disconnect and reconnect this app, to get them.' } } : {}) },
+          toolRefresh: 'New tools within enabled permissions use this same key. Refresh tools/list if your client caches tools. Enable connection requests for this API key in Settings; OAuth apps need consent for additional permissions.' },
         importCount: Array.isArray(importIds) ? importIds.length : 0,
         legacyProfile: legacy ? { profileId: legacy.profileId, name: legacy.profile?.name ?? null, revision: legacy.revision } : null,
         publicIndexAvailable: typeof readPublishedSnapshot === 'function' }
@@ -351,22 +349,26 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   }
 
   // revalidate (when supplied) must re-authenticate the live grant and throw
-  // AccountToolError('grant_revoked') on any mismatch; it runs before and after
-  // the tool body so a mid-call revocation never returns data.
+  // on revoked/replaced identity or removal of the requested permission. Unrelated
+  // permission edits are allowed. Reads recheck after work; writes recheck before
+  // execution (send also after target lookup), never misreport a committed write.
   async function call({ grant, name, input = {}, signal, revalidate }) {
     if (!grant || typeof grant.ownerId !== 'string' || typeof grant.userId !== 'string' || !Array.isArray(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant is no longer valid.')
     if (!Object.hasOwn(tools, name)) throw new AccountToolError('not_found', 'Unknown tool.')
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
-    if (WRITE_TOOLS.has(name) && grant.scope !== ACCOUNT_WRITE_SCOPE) throw new AccountToolError('scope_not_granted', 'Connection actions require an explicit opt-in grant.')
+    if (WRITE_TOOLS.has(name) && !scopeAllowsConnectionActions(grant.scope)) throw new AccountToolError('scope_not_granted', 'Connection actions require an explicit opt-in grant.')
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
     const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
     try {
-      if (typeof revalidate === 'function') await revalidate()
-      const result = await tools[name](grant, parsed.data, signal)
+      if (typeof revalidate === 'function') grant = await revalidate() ?? grant
+      const result = await tools[name](grant, parsed.data, signal, revalidate)
       // A write has already happened by now; only reads are withheld when the
       // grant was revoked mid-call, so a landed write is never reported as failed.
-      if (typeof revalidate === 'function' && !WRITE_TOOLS.has(name)) await revalidate()
+      if (typeof revalidate === 'function' && !WRITE_TOOLS.has(name)) {
+        const current = await revalidate()
+        if (name === 'unlinked_whoami' && current) result.grant = { ...result.grant, scope: current.scope, version: current.version, tools: [...current.tools] }
+      }
       const text = JSON.stringify(result)
       if (Buffer.byteLength(text) > 1024 * 1024) throw new AccountToolError('result_too_large', 'The result exceeded 1 MiB; narrow the query or lower the page size.')
       return { result, text }

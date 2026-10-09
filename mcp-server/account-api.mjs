@@ -110,6 +110,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     if (verified.error === 'grant_revoked') throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
     if (!verified.grant || verified.grant.ownerId !== owner.ownerId) throw new AccountToolError('upstream_unavailable', 'The provisioned grant could not be verified right now; retry.')
     const grant = verified.grant
+    if (!['owner_network', 'owner_network_and_public'].includes(grant.scope)) throw new AccountToolError('grant_revoked', 'The provisioned key no longer permits read-only provisioning.')
     // Audit the event — never the token. The contract promises an audit row
     // for every issuance/reuse, so an unauditable provisioning fails closed:
     // the token is simply not returned (the grant record itself is unchanged).
@@ -192,13 +193,11 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       const controller = new AbortController()
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)])
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
-      // The pre-call check already happened just above; revalidate only after
-      // the tool body, so a mid-call revocation still never returns data.
-      let checked = false
       const revalidate = async () => {
-        if (!checked) { checked = true; return }
         const current = await authenticateGrant(request)
-        if (!current || current.grantId !== grant.grantId || current.ownerId !== grant.ownerId || current.userId !== grant.userId || JSON.stringify(current.tools) !== JSON.stringify(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant was revoked; sign in and create a new agent grant.')
+        if (!current || current.grantId !== grant.grantId || current.ownerId !== grant.ownerId || current.userId !== grant.userId) throw new AccountToolError('grant_revoked', 'The grant was revoked or replaced.')
+        if (!current.tools.includes(route.tool)) throw new AccountToolError('scope_not_granted', 'This key no longer permits the requested tool.')
+        return current
       }
       const { text } = await service.call({ grant, name: route.tool, input, signal, revalidate })
       if (response.headersSent) { response.end(); return }

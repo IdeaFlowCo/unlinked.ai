@@ -3,7 +3,7 @@
   "info": {
     "title": "Unlinked canonical beta",
     "version": "1.0.0",
-    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository."
+    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository. Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository)."
   },
   "servers": [
     {
@@ -586,7 +586,7 @@
             "description": "not_linked or grant_revoked (typed error body)"
           },
           "403": {
-            "description": "scope_not_granted for grants issued before catalog version 3"
+            "description": "scope_not_granted when the effective grant does not permit this tool (see docs/agent-api.md)"
           }
         }
       }
@@ -619,7 +619,7 @@
             "description": "not_linked or grant_revoked (typed error body)"
           },
           "403": {
-            "description": "scope_not_granted for grants issued before catalog version 3"
+            "description": "scope_not_granted when the effective grant does not permit this tool (see docs/agent-api.md)"
           }
         }
       }
@@ -815,7 +815,7 @@
         },
         "responses": {
           "200": {
-            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } \u2014 token only in this response body, never logged"
+            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } — token only in this response body, never logged"
           },
           "400": {
             "description": "invalid_input"
@@ -833,7 +833,7 @@
             "description": "rate_limited (per-client budget; Retry-After)"
           },
           "503": {
-            "description": "upstream_unavailable (including an unavailable audit sink \u2014 provisioning fails closed rather than going unaudited)"
+            "description": "upstream_unavailable (including an unavailable audit sink — provisioning fails closed rather than going unaudited)"
           }
         }
       }
@@ -1486,7 +1486,7 @@
             "authorizationUrl": "https://www.unlinked.ai/oauth/authorize",
             "tokenUrl": "https://www.unlinked.ai/oauth/token",
             "scopes": {
-              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile\u2019s recorded paths, and (where available) your connection requests and notifications.",
+              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile’s recorded paths, and (where available) your connection requests and notifications.",
               "people": "Search and read the published People index on Unlinked (public professional profiles only).",
               "connections": "Send connection requests to members, and accept, ignore or withdraw your connection requests, under the same rules and daily limits as the site."
             }

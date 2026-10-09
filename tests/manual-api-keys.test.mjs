@@ -47,7 +47,7 @@ test('key management requires browser session, exact CSRF and owner; validates n
   const foreign = await f.grants.issueGrant(f.foreign, undefined, { name: 'Foreign' })
   const oauth = await f.grants.issueGrant(f.owner, undefined, { connection: { kind: 'oauth', app: 'ChatGPT', clientName: null, redirectHost: 'chatgpt.com', clientKey: 'b'.repeat(64), resource: null } })
   for (const grantId of [foreign.grantId, oauth.grantId]) {
-    for (const action of ['rename', 'replace', 'revoke']) assert.equal((await f.post(session, { action, grantId, ...(action === 'rename' ? { name: 'No' } : {}) })).status, 400)
+    for (const action of ['rename', 'replace', 'revoke', 'permissions']) assert.equal((await f.post(session, { action, grantId, ...(action === 'rename' ? { name: 'No' } : {}) })).status, 400)
     assert.equal((await f.page(session, grantId)).status, 400)
   }
   for (const name of ['', ' ', 'x'.repeat(81), 'bad\nname']) assert.equal((await f.post(session, { action: 'create', name })).status, 400)
@@ -69,7 +69,7 @@ test('replacement is atomic, keeps legacy catalog, and loses safely to concurren
   await assert.rejects(f.grants.replaceKey(f.owner, key.grantId), /synthetic_write_failure/)
   f.failWrites(false); assert.ok(await auth(f.grants, prior.accessToken))
   const next = await f.grants.replaceKey(f.owner, key.grantId)
-  assert.equal(next.version, 1); assert.deepEqual(next.tools, ['unlinked_search_network'])
+  assert.ok(next.tools.includes('unlinked_list_notifications')); assert.ok(!next.tools.includes('unlinked_search_everyone')); assert.equal(f.resources.get(key.grantId).payload.version, 1)
   assert.equal(await auth(f.grants, prior.accessToken), null)
   f.beforeWrite(() => f.grants.revoke(f.owner, key.grantId))
   await assert.rejects(f.grants.replaceKey(f.owner, key.grantId), /cas_conflict/)

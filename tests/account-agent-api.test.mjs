@@ -100,7 +100,7 @@ const call = (endpoint, token, path, options = {}) => fetch(`${endpoint}/api/age
 
 test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, privacy fences and revocation', async t => {
   const f = fixture()
-  const complete = async ({ input, candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
+  const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   const app = await launch(t, { f, readPublishedSnapshot: async () => publishedSnapshot(), complete })
   const signed = await app.signIn()
   await app.upload(signed)
@@ -205,7 +205,7 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   assert.equal((await revoked.json()).error.code, 'grant_revoked')
 })
 
-test('old v1 grant records keep working unchanged: narrow MCP tool list, stateless JSON-RPC tools/call, no new tools over HTTP', async t => {
+test('old v1 token keeps exact bytes and gains current permitted reads across REST and stateless MCP', async t => {
   const f = fixture()
   const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   const app = await launch(t, { f, readPublishedSnapshot: async () => publishedSnapshot(), complete })
@@ -220,15 +220,18 @@ test('old v1 grant records keep working unchanged: narrow MCP tool list, statele
   record.payload.tools = [...accountGrantTools(1, record.payload.scope)]
   assert.deepEqual(record.payload.tools, ['unlinked_search_network', 'unlinked_search_everyone'])
   const grant = await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${accessToken}` } })
-  assert.equal(grant.version, 1)
-  assert.deepEqual(grant.tools, ['unlinked_search_network', 'unlinked_search_everyone'])
+  assert.equal(grant.version, CURRENT_ACCOUNT_GRANT_VERSION)
+  assert.deepEqual(grant.tools, [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, record.payload.scope)])
+  assert.equal((await app.grants.readKey(app.owner, grantId)).accessToken, accessToken)
+  assert.equal(record.payload.version, 1)
 
-  // MCP listTools shows exactly the tools the grant was issued with.
+  // MCP exposes current tools within the existing read permission.
   const client = new Client({ name: 'synthetic-v1-compat', version: '1.0' })
   const transport = new StreamableHTTPClientTransport(new URL(`${app.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${accessToken}` } } })
   try {
     await client.connect(transport)
-    assert.deepEqual((await client.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_search_everyone'])
+    assert.deepEqual((await client.listTools()).tools.map(x => x.name), grant.tools)
+    assert.equal(client.getServerCapabilities().tools.listChanged, false)
     const result = await client.callTool({ name: 'unlinked_search_network', arguments: { query: 'Engineer' } })
     assert.ok(!result.isError)
     assert.equal(JSON.parse(result.content[0].text).scope, 'owner_network')
@@ -244,14 +247,14 @@ test('old v1 grant records keep working unchanged: narrow MCP tool list, statele
   assert.ok(!payload.result.isError)
   assert.equal(JSON.parse(payload.result.content[0].text).scope, 'everyone')
 
-  // v1 grants do not gain the new tools on any surface.
+  // Current read tools work without copying or replacing the existing key.
   const who = await call(app.endpoint, accessToken, 'whoami')
-  assert.equal(who.status, 403)
-  assert.equal((await who.json()).error.code, 'scope_not_granted')
+  assert.equal(who.status, 200)
+  assert.deepEqual((await who.json()).grant.tools, grant.tools)
+  assert.ok(!grant.tools.some(name => /unlinked_(send|accept|ignore|withdraw)_/.test(name)))
 })
 
 test('owner_network scope cannot reach public tools; anchored owners get proven second-degree paths; MCP typed errors and shared rate budgets', async t => {
-  const f = fixture()
   const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   // The private-scope app issues owner_network grants (no public search).
   const narrowApp = await launch(t, { f: fixture(), readPublishedSnapshot: undefined, complete })
@@ -290,7 +293,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const withAnchor = async owner => ({ ...await base(owner),
     readLegacyProfile: async () => ({ ...anchor, profile: publishedSnapshot().profiles[0], profiles: publishedSnapshot().profiles, connections: publishedSnapshot().connections.filter(e => e.fromId === 'anchor-a') }) })
   const anchoredApp = await launch(t, { f: { ...anchored, getBackend: withAnchor }, readPublishedSnapshot: async () => publishedSnapshot(), complete })
-  const anchoredSigned = await anchoredApp.signIn()
+  await anchoredApp.signIn()
   const anchoredGrant = await anchoredApp.grants.issueGrant(anchoredApp.owner)
   const degree1 = await (await call(anchoredApp.endpoint, anchoredGrant.accessToken, 'connections')).json()
   assert.equal(degree1.total, 1)
@@ -335,7 +338,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   assert.equal((await limited.call({ grant: otherGrant, name: 'unlinked_whoami' })).result.ownerId, otherOwner.ownerId)
 })
 
-test('republished index invalidates cursors as typed cursor_invalid; transient backend failure is upstream_unavailable, not revocation', async t => {
+test('republished index invalidates cursors as typed cursor_invalid; transient backend failure is upstream_unavailable, not revocation', async () => {
   const f = fixture()
   const owner = { ownerId: 'synthetic-cursor-owner', userId: 'synthetic-cursor-user' }
   f.register(owner)
