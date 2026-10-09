@@ -100,7 +100,7 @@ const call = (endpoint, token, path, options = {}) => fetch(`${endpoint}/api/age
 
 test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, privacy fences and revocation', async t => {
   const f = fixture()
-  const complete = async ({ input, candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
+  const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   const app = await launch(t, { f, readPublishedSnapshot: async () => publishedSnapshot(), complete })
   const signed = await app.signIn()
   await app.upload(signed)
@@ -255,7 +255,6 @@ test('old v1 token keeps exact bytes and gains current permitted reads across RE
 })
 
 test('owner_network scope cannot reach public tools; anchored owners get proven second-degree paths; MCP typed errors and shared rate budgets', async t => {
-  const f = fixture()
   const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   // The private-scope app issues owner_network grants (no public search).
   const narrowApp = await launch(t, { f: fixture(), readPublishedSnapshot: undefined, complete })
@@ -294,7 +293,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const withAnchor = async owner => ({ ...await base(owner),
     readLegacyProfile: async () => ({ ...anchor, profile: publishedSnapshot().profiles[0], profiles: publishedSnapshot().profiles, connections: publishedSnapshot().connections.filter(e => e.fromId === 'anchor-a') }) })
   const anchoredApp = await launch(t, { f: { ...anchored, getBackend: withAnchor }, readPublishedSnapshot: async () => publishedSnapshot(), complete })
-  const anchoredSigned = await anchoredApp.signIn()
+  await anchoredApp.signIn()
   const anchoredGrant = await anchoredApp.grants.issueGrant(anchoredApp.owner)
   const degree1 = await (await call(anchoredApp.endpoint, anchoredGrant.accessToken, 'connections')).json()
   assert.equal(degree1.total, 1)
@@ -339,7 +338,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   assert.equal((await limited.call({ grant: otherGrant, name: 'unlinked_whoami' })).result.ownerId, otherOwner.ownerId)
 })
 
-test('republished index invalidates cursors as typed cursor_invalid; transient backend failure is upstream_unavailable, not revocation', async t => {
+test('republished index invalidates cursors as typed cursor_invalid; transient backend failure is upstream_unavailable, not revocation', async () => {
   const f = fixture()
   const owner = { ownerId: 'synthetic-cursor-owner', userId: 'synthetic-cursor-user' }
   f.register(owner)
