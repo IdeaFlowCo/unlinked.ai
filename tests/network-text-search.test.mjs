@@ -67,3 +67,15 @@ test('a query with no literal match is AI-ranked; the AI fallback stops at its t
   } finally { clearInterval(keepAlive) }
   await assert.rejects(network(people).searchNetwork({ query: 'someone to advise on hiring' }), /private_search_configuration_required/)
 })
+
+test('the deadline covers the network read too, not just AI ranking', async () => {
+  const slowRead = createAccountNetwork({ owner, complete: ({ signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })),
+    getBackend: async () => ({ listImportIds: async () => [], readLegacyObservations: async () => { await new Promise(resolve => setTimeout(resolve, 150)); return { assertions: people } } }) })
+  const keepAlive = setInterval(() => {}, 1000)
+  try {
+    const started = Date.now()
+    await assert.rejects(slowRead.searchNetwork({ query: 'someone to advise on hiring', aiBudgetMs: 200 }), error => error.name === 'TimeoutError')
+    // A ranking-only budget would end at read (150 ms) + budget (200 ms).
+    assert.ok(Date.now() - started < 300)
+  } finally { clearInterval(keepAlive) }
+})
