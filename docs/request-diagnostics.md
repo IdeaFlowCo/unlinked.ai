@@ -14,12 +14,13 @@ stops collection on the next approved runtime restart; it does not erase files.
 
 ## Record contract
 
-`schema: 1`, `event: agent_request`, one row when an HTTP response finishes or
-closes. `at` and `completed_at` are server UTC timestamps; `duration_ms` uses a
-monotonic clock. The server generates a fresh UUIDv4 and returns it in
+`schema: 1`, `event: agent_request`, at most one retained row when an instrumented
+HTTP response finishes or closes, subject to the storage and volume bounds below.
+`at` and `completed_at` are server UTC timestamps; `duration_ms` uses a monotonic
+clock. When diagnostics is enabled, the server generates a fresh UUIDv4 and returns it in
 `X-Request-ID`, including on authentication failures. Caller `X-Request-ID`,
 `traceparent`, JSON-RPC IDs, proxy IPs and user agents are never trusted or stored.
-A client can correlate a direct response header with exactly one retained row.
+A client can correlate a direct response header with its row if retained.
 
 Fields describe transport, HTTP method, a fixed route template (never a raw URL),
 an allowlisted RPC method/tool, auth type/outcome, actual HTTP status (null if no
@@ -32,8 +33,10 @@ bearer token. Direct OAuth and copyable account grants both use
 `auth_type: account_bearer`; the shared adapter uses `gateway_assertion`; the old
 invited-import path uses `private_bearer`. Provisioning uses
 `provisioning_client`; its account pseudonym is attached only after the returned
-grant has been verified. Auth infrastructure failures are `unavailable`, not
-credential rejection.
+grant has been verified. Explicitly classified auth infrastructure failures use
+`unavailable`; failures outside those classification points may leave
+`auth_outcome: not_evaluated` with an HTTP/typed error. Neither proves credential
+rejection.
 
 Available scalar details include query character count (not text), page limit,
 cursor presence (not value), requested timeout, result count, next-page presence,
@@ -52,7 +55,7 @@ HTTP request. Batch rows retain authentication, correlation, HTTP status,
 bytes, timing and response-level cancellation. RPC method, tool, input/result
 counts, pagination, typed error, provider cause, timeout and rate-limit fields
 are omitted because concurrent calls cannot be attributed to one tool. A batch
-HTTP200 does not establish that all calls succeeded; inspect the client response
+HTTP 200 does not establish that all calls succeeded; inspect the client response
 or reproduce the failing call individually. Empty, rejected-before-dispatch and
 single-message arrays cannot be identified as batches at this boundary; no
 cross-call attribution occurs for those requests.
@@ -88,34 +91,40 @@ Unlinked IDs. This PR does not change the gateway or its other app destinations.
 
 ## Storage, bounds and access
 
-The runtime operator alone owns `<pilot-root>/audit/requests` (mode700).
-`requests-YYYY-MM-DD.jsonl` files are mode600; symlinks, hard links, wrong owners
-and non-private modes are refused. Startup fails if an explicitly enabled store
-cannot initialize securely. Runtime sink failures drop metadata and never alter
-authentication, tool results or HTTP status.
+The runtime operator alone owns `<pilot-root>/audit/requests` (mode 700).
+`requests-YYYY-MM-DD.jsonl` files are mode 600; symlinks, hard links, wrong owners
+and non-private modes are refused when the relevant directory or file is checked.
+Startup validates the audit/request directories and prunes expired files; active
+files are checked when opened for writing, not preflighted at startup. Failed
+initialization stops startup when diagnostics is explicitly enabled. Runtime sink
+failures drop metadata and never alter authentication, tool results or HTTP status.
 
-- At most600 completed request rows per minute, per runtime instance.
-- At most128 queued writes and4096 bytes per row.
-- At most8MiB per UTC day. Once full, remaining rows for that day are dropped.
-- Seven UTC calendar dates, at most56MiB under the single-writer deployment.
+- At most 600 completed request rows per minute, per runtime instance.
+- At most 128 queued writes and 4096 bytes per row.
+- At most 8 MiB per UTC day. Once full, remaining rows for that day are dropped.
+- Seven UTC calendar dates, at most 56 MiB under the single-writer deployment.
   Expired owned files are pruned on startup, date rollover and an hourly timer.
   The timer runs only while diagnostics is enabled. When disabling/shutting down,
   the operator must remove expired diagnostics through the approved cleanup
   procedure; no deletion occurs while the process is stopped.
 
-`dropped_since_last_emit` and `sink_dropped_since_last_write` count omissions
-since the next successful stage. A full disk or sustained failures may prevent
-these counters being persisted. Logging is best-effort, not a complete audit of
+`dropped_since_last_emit` counts rate-cap omissions since the previous emission
+attempt; `sink_dropped_since_last_write` counts store omissions since the previous
+successful write. The emission counter resets before sink acceptance, so a dropped
+row can also lose its reported rate-cap count. A full disk or sustained failures
+may prevent these counters being persisted. Logging is best-effort, not a complete audit of
 all requests or a security ledger. No new public log-reading endpoint exists.
 The operator reader requires an exact request/account filter, re-projects rows,
-rejects unsafe files, and returns at most500 rows with a `truncated` indicator.
+rejects unsafe files, and returns at most 500 rows with a `truncated` indicator.
 Only the approved single runtime writes this directory; concurrent writers are
 not supported. Do not include request logs in public release/CI artifacts or
 long-lived backups that defeat this retention policy.
 
 ## On-demand correlation after approved deployment and activation
 
-1. Ask the client to repeat **one** small successful operation and **one** failing
+1. Ask which client/app and connection destination were used (direct Unlinked
+   REST/MCP or the shared Ideaflow gateway), without collecting URL parameters.
+   Ask the client to repeat **one** small successful operation and **one** failing
    operation using its existing connection. Record server response
    `X-Request-ID` for each, approximate local time with timezone, endpoint/tool,
    HTTP status/typed error, elapsed time and query length. Do not ask for a key,
@@ -144,9 +153,9 @@ long-lived backups that defeat this retention policy.
    Authentication failures deliberately have no account ID and require a
    response request ID. Never attach them to an owner based on a claimed header.
 4. Compare `transport`, `auth_outcome`, `tool`, `http_status`, `error_class`,
-   timeout/cancellation flags and sizes/counts. Distinguish400 input limits,
-   401 grant rejection/revocation,429 budgets,413 result size and503 upstream
-   failures. For MCP, inspect the error class even when HTTP is200. A cancelled
+   timeout/cancellation flags and sizes/counts. Distinguish 400 input limits,
+   401 grant rejection/revocation, 429 budgets, 413 result size and 503 upstream
+   failures. For MCP, inspect the error class even when HTTP is 200. A cancelled
    response does not establish whether the host, network or user caused it.
 5. Save only the selected sanitized rows in the private incident directory.
    Missing rows can mean diagnostics was off, retention/volume limits, sink

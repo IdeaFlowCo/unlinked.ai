@@ -43,6 +43,55 @@ async function fixture(t, { complete, service, emit, enabled = true, maxPerMinut
 }
 const call = (name, args = {}) => ({ jsonrpc: '2.0', id: SECRET, method: 'tools/call', params: { name, arguments: args } })
 
+test('operator CLI correlates real REST/MCP response IDs with private persisted metadata', async t => {
+  const { mkdtemp, mkdir, rm, readFile, readdir, writeFile, stat } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { execFileSync } = await import('node:child_process')
+  const { fileURLToPath } = await import('node:url')
+  const { createDiagnosticsStore } = await import('../mcp-server/request-diagnostics-store.mjs')
+  const evidence = process.env.UNLINKED_DIAGNOSTICS_TEST_EVIDENCE
+  if (evidence) await mkdir(evidence, { recursive: true })
+  const directory = await mkdtemp(join(evidence ?? tmpdir(), 'operator-correlation-'))
+  if (!evidence) t.after(() => rm(directory, { recursive: true, force: true }))
+  const sink = await createDiagnosticsStore({ directory })
+  t.after(() => sink.close())
+  const f = await fixture(t, { emit: row => sink.emit(row) })
+  const transcript = []
+  for (const [scenario, send, status] of [
+    ['REST successful search', () => f.rest('ai-search', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Request-ID': randomUUID() }, body: JSON.stringify({ query: 'engineer ' + SECRET }) }), 200],
+    ['REST rejected credential', () => f.rest('whoami?token=' + SECRET, { headers: { Authorization: 'Bearer invalid-' + SECRET } }), 401],
+    ['MCP successful search', () => f.rpc(call('unlinked_ai_search', { query: 'engineer ' + SECRET })), 200],
+    ['MCP invalid tool', () => f.rpc(call(SECRET)), 200],
+  ]) {
+    const response = await send(), body = await response.text(), requestId = response.headers.get('x-request-id')
+    assert.equal(response.status, status)
+    assert.match(requestId, UUID)
+    await sink.flush()
+    const command = [fileURLToPath(new URL('../scripts/read-request-diagnostics.mjs', import.meta.url)), '--directory', directory, '--request-id', requestId]
+    const output = execFileSync(process.execPath, command, { encoding: 'utf8' })
+    const selected = JSON.parse(output)
+    assert.equal(selected.records.length, 1)
+    const row = selected.records[0]
+    assert.equal(row.request_id, requestId)
+    assert.equal(row.http_status, status)
+    assert.equal(row.response_bytes, Buffer.byteLength(body))
+    assert.equal(row.account_id, status === 401 ? undefined : diagnosticAccountId(owner.ownerId))
+    if (scenario.includes('successful')) assert.equal(row.result_count, 1)
+    if (scenario === 'MCP invalid tool') assert.equal(row.error_class, 'protocol_error')
+    if (status === 401) assert.equal(row.auth_outcome, 'rejected')
+    transcript.push({ scenario, response: { status, 'X-Request-ID': requestId }, command: [process.execPath, ...command], operatorOutput: selected })
+  }
+  for (const filename of await readdir(directory)) {
+    const path = join(directory, filename)
+    assert.equal((await stat(path)).mode & 0o777, 0o600)
+    const persisted = await readFile(path, 'utf8')
+    for (const secret of [SECRET, owner.ownerId, owner.userId, 'private-profile-id', 'private-result-person']) assert.ok(!persisted.includes(secret))
+  }
+  assert.equal((await stat(directory)).mode & 0o777, 0o700)
+  if (evidence) await writeFile(join(evidence, 'operator-correlation.json'), JSON.stringify({ synthetic: true, backend: 'fixture doubles; real HTTP handlers, diagnostics store and CLI', transcript }, null, 2) + '\n')
+})
+
 test('REST captures only trusted metadata and server-generated IDs, never caller secrets or query/result contents', async t => {
   const f = await fixture(t)
   const forged = randomUUID(), query = 'engineer ' + SECRET
