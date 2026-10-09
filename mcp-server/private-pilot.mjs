@@ -1,3 +1,4 @@
+import { diagnosticTransport, requestDiagnostic } from './request-diagnostics.mjs'
 import { createIdeaflowConnectorHandler } from './ideaflow-connector.mjs'
 import { createMessagingHandler, MESSAGING_PATH } from './messaging.mjs'
 import { createServer } from 'node:http'
@@ -17,7 +18,7 @@ import { warmPublicPeopleIndex } from './public-people-warmup.mjs'
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
 // invocation; no operational credential or provider token is sent to clients.
-export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagingSession, messagingSecret, resolveMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos, autoSignIn = false, overlay, overlayIdentity }) {
+export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagingSession, messagingSecret, resolveMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, requestDiagnostics, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos, autoSignIn = false, overlay, overlayIdentity }) {
   const base = new URL(baseUrl)
   const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : ['isolated-container', 'shared-noos'].includes(networkMode) && host === '0.0.0.0' && ['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) && port === 9367
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !Number.isSafeInteger(port) || port < 7000 || port > 9999 || !privateHost || typeof complete !== 'function') throw new Error('explicit_isolated_pilot_configuration_required')
@@ -33,7 +34,9 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagi
     issueGrant: accountGrants.issueGrant, revokeConnectionToken: accountGrants.revokeConnectionToken, audit }) : null
   // One tool service instance backs both agent surfaces, so the MCP tools and
   // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
-  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined }) : null
+  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined,
+    // Private people notes & relations (catalog v7) call the same Noos overlay as the private-context panel.
+    ...(overlay && typeof overlayIdentity === 'function' ? { overlay, identityFor: overlayIdentity } : {}) }) : null
   // Owner-only private context from the Ideaflow people overlay
   // (docs/private-context.md). The owner's contact lookup is the same
   // owner-scoped unlinked_lookup_contact the agent tools use, run for the
@@ -61,10 +64,14 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagi
   const server = createServer((request, response) => {
     let pathname
     try { pathname = new URL(request.url, base).pathname } catch { response.writeHead(400).end(); return }
-    void (pathname === '/api/connector/mcp' && connector ? connector(request, response) : pathname === MESSAGING_PATH ? messaging(request, response) : pathname === '/mcp' ? mcp(request, response) : oauth?.isEndpoint(pathname) ? oauth.handle(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(() => {
+    const handle = () => (pathname === '/api/connector/mcp' && connector ? connector(request, response) : pathname === MESSAGING_PATH ? messaging(request, response) : pathname === '/mcp' ? mcp(request, response) : oauth?.isEndpoint(pathname) ? oauth.handle(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(error => {
+      requestDiagnostic().failure(error)
       if (!response.headersSent) response.writeHead(503).end()
       else response.end()
     })
+    const transport = diagnosticTransport(pathname)
+    if (requestDiagnostics && transport) void requestDiagnostics.run(request, response, transport, handle)
+    else void handle()
   })
   server.requestTimeout = 120000
   server.headersTimeout = 15000

@@ -1,3 +1,4 @@
+import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
@@ -7,7 +8,8 @@ import { createSharedPeopleSearch } from '../src/utils/public-people/shared-sear
 import { SEARCH_MODES } from '../src/utils/public-people/text-match.mjs'
 import { ConnectionError } from './member-connections.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
-import { scopeAllowsConnectionActions, scopeCoversPublic } from './account-grants.mjs'
+import { PRIVATE_NOTES_TOOLS, scopeAllowsConnectionActions, scopeAllowsPrivateNotes, scopeCoversPublic } from './account-grants.mjs'
+import { PRIVATE_NOTES_DESCRIPTIONS, PRIVATE_NOTES_MUTATING, PRIVATE_NOTES_SCHEMAS, createPrivateNotesTools } from './private-notes-tools.mjs'
 import { linkedinRefHash, linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
 import { linkedinUrl as canonicalLinkedinUrl } from '../src/utils/private-import/archive.mjs'
 
@@ -22,15 +24,29 @@ export const ACCOUNT_TOOL_ERROR_STATUS = Object.freeze({
   result_too_large: 413, rate_limited: 429, upstream_unavailable: 503,
   // Connection-request write tools (grant catalog version 4, opt-in scope).
   not_a_member: 409, already_connected: 409, request_pending: 409, request_unavailable: 409, cooldown_active: 429,
+  // Private people notes & relations (grant catalog version 7, separate permission).
+  ambiguous_name: 409, identity_unavailable: 409,
 })
 
+// unlinked_search_network's text-first path: name the AI fallback's own
+// failures (missing provider, spent time budget) instead of a generic outage.
+export function networkSearchFailure(error, signal) {
+  if (error instanceof AccountToolError) return error
+  if (error?.message === 'private_search_configuration_required') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking is not configured.')
+  if (error?.message === 'private_search_query_limit') return new AccountToolError('invalid_input', 'The query was empty or too long.')
+  if (!signal?.aborted && error?.name === 'TimeoutError') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking did not finish within 20 s; search a name, company or title word, or page through unlinked_list_connections.')
+  return error
+}
+
 export class AccountToolError extends Error {
-  constructor(code, message) {
+  // details: extra owner-only fields for the error body (ambiguous_name candidates).
+  constructor(code, message, details) {
     if (!Object.hasOwn(ACCOUNT_TOOL_ERROR_STATUS, code)) throw new Error('account_tool_error_code_invalid')
     super(message ?? code)
     this.name = 'AccountToolError'
     this.code = code
     this.status = ACCOUNT_TOOL_ERROR_STATUS[code]
+    if (details) this.details = details
   }
 }
 
@@ -64,6 +80,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
     connectionId: z.string().min(1).max(128).optional(), linkedinUrl: z.string().min(1).max(512).optional(),
     profileId: z.string().min(1).max(160).optional(), refHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(100).optional(),
   },
+  ...PRIVATE_NOTES_SCHEMAS,
 })
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
@@ -79,10 +96,14 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_withdraw_connection_request: 'Opt-in write tool. Withdraw a still-open connection request the owner sent (id from unlinked_list_connection_requests direction sent). The recipient’s notification is removed; asking the same person again waits 21 days.',
   unlinked_lookup_contact: 'Read-only, owner-scoped: resolve one of the owner’s own contacts without paging. Give exactly one of connectionId (an id from unlinked_list_connections), linkedinUrl (a linkedin.com/in/ address), profileId (a published profile id) or refHashes (up to 100 linkedinRefHash values). Returns name, headline, company, the owner connectionId when the owner imported the person, linkedinRefHash (SHA-256 of the canonical LinkedIn slug, the private-graph key `linkedin:in:<hash>`) and publishedProfileId when the same person has a published Unlinked profile. Never returns another owner’s imports; typed not_found when nothing matches.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and give short conversational reasons stating unknown sector focus. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
+  ...PRIVATE_NOTES_DESCRIPTIONS,
 })
 
-const DETERMINISTIC_TOOLS = new Set(['unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+const DETERMINISTIC_TOOLS = new Set([...PRIVATE_NOTES_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
 export const WRITE_TOOLS = new Set(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
+// Every tool that changes something: connection writes plus private-notes writes.
+export const MUTATING_TOOLS = new Set([...WRITE_TOOLS, ...PRIVATE_NOTES_MUTATING])
+const PRIVATE_NOTES_TOOL_SET = new Set(PRIVATE_NOTES_TOOLS)
 // Request-model refusals, mapped onto the typed agent vocabulary.
 const CONNECTION_FAILURES = Object.freeze({
   connection_not_member: ['not_a_member', 'That profile is not an Unlinked member yet (an imported profile), so it cannot be asked to connect.'],
@@ -125,7 +146,9 @@ const cursorOffset = (cursor, binding, length) => {
 // One service instance backs both the hosted MCP tools and the HTTP agent API,
 // so rate budgets are shared. Every tool result is grant-scoped, public-or-own
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, limits = {} }) {
+// `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
+// people overlay client (private-context.mjs) and the owner identity bridge.
+export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, overlay, identityFor, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // Write tools use the same rules as the site's Connect button.
@@ -249,7 +272,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
       return { kind: 'unlinked_whoami', ownerId: grant.ownerId,
         grant: { scope: grant.scope, version: grant.version ?? 1, tools: [...grant.tools],
-          toolRefresh: 'New tools within enabled permissions use this same key. Refresh tools/list if your client caches tools. Enable connection requests for this API key in Settings; OAuth apps need consent for additional permissions.' },
+          toolRefresh: 'New tools within enabled permissions use this same key: refresh tools/list if your client caches tools; never replace the key for this. Switch “Send and manage connection requests” and “Private people notes & relations” for this API key in Settings; OAuth apps reconnect to consent to additional permissions. Messaging is not part of Unlinked keys: use the shared Ideaflow connector (https://id.ideaflow.app/mcp) with OpenChat permission.' },
         importCount: (Array.isArray(importIds) ? importIds.length : 0) + Number(recoveredArchive),
         imports: { uploaded: Array.isArray(importIds) ? importIds.length : 0, recoveredArchive },
         legacyProfile: legacy ? { profileId: legacy.profileId, name: legacy.profile?.name ?? null, revision: legacy.revision } : null,
@@ -422,10 +445,11 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
           // with the hosted MCP launch tool's historical 100-row pages.
           return await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal, pageSize: 50 })
         }
-        if (typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'AI ranking is not configured.')
-        return await createAccountNetwork({ owner, getBackend, complete }).search({ query, signal })
+        return await createAccountNetwork({ owner, getBackend, complete }).searchNetwork({ query, signal })
       } catch (error) {
         if (error instanceof AccountToolError) throw error
+        const typed = networkSearchFailure(error, signal)
+        if (typed instanceof AccountToolError) throw typed
         if (error.message === 'known_connections_anchor_unavailable') throw new AccountToolError('degree_unproven', 'Recorded public paths require a confirmed legacy profile anchor; none is linked.')
         if (error.message === 'known_connections_cursor_invalid') throw new AccountToolError('cursor_invalid', 'The cursor does not match the current listing; restart from the first page.')
         if (error.message === 'known_connections_input_invalid') throw new AccountToolError('invalid_input', 'The search request was invalid (query, degree or cursor).')
@@ -440,7 +464,11 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     },
   }
 
+  Object.assign(tools, createPrivateNotesTools({ overlay, identityFor, createError: (code, message, details) => new AccountToolError(code, message, details),
+    lookupContact: (grant, input, signal) => tools.unlinked_lookup_contact(grant, input, signal) }))
+
   const askFailure = (error, signal) => {
+    requestDiagnostic().failure(error, signal)
     if (error instanceof AccountToolError) return error
     if (signal?.aborted || error?.name === 'TimeoutError' || error?.name === 'AbortError') return new AccountToolError('upstream_unavailable', 'AI ranking did not finish within the time budget; retry, raise timeoutMs, or use the deterministic listing tools.')
     if (/query_invalid|query_limit/.test(String(error?.message))) return new AccountToolError('invalid_input', 'The query was empty or too long.')
@@ -457,6 +485,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     if (!Object.hasOwn(tools, name)) throw new AccountToolError('not_found', 'Unknown tool.')
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
     if (WRITE_TOOLS.has(name) && !scopeAllowsConnectionActions(grant.scope)) throw new AccountToolError('scope_not_granted', 'Connection actions require an explicit opt-in grant.')
+    if (PRIVATE_NOTES_TOOL_SET.has(name) && !scopeAllowsPrivateNotes(grant.scope)) throw new AccountToolError('scope_not_granted', 'Private people notes & relations are switched off for this key (Settings) or not consented for this app.')
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
     const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
@@ -465,7 +494,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       const result = await tools[name](grant, parsed.data, signal, revalidate)
       // A write has already happened by now; only reads are withheld when the
       // grant was revoked mid-call, so a landed write is never reported as failed.
-      if (typeof revalidate === 'function' && !WRITE_TOOLS.has(name)) {
+      if (typeof revalidate === 'function' && !MUTATING_TOOLS.has(name)) {
         const current = await revalidate()
         if (name === 'unlinked_whoami' && current) result.grant = { ...result.grant, scope: current.scope, version: current.version, tools: [...current.tools] }
       }

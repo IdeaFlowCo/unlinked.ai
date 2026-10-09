@@ -35,7 +35,7 @@ const lookup = async (input, who = owner) => (await service.call({ grant: grantF
 const refused = async (input, code, who = owner) => assert.rejects(service.call({ grant: grantFor(who), name: 'unlinked_lookup_contact', input }), error => error.code === code)
 
 test('catalog v6 adds the read-only lookup to every scope', () => {
-  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION, 6)
+  assert.ok(CURRENT_ACCOUNT_GRANT_VERSION >= 6)
   for (const scope of ['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write']) {
     const v5 = accountGrantTools(5, scope), v6 = accountGrantTools(6, scope)
     assert.deepEqual(v6.filter(name => name !== 'unlinked_lookup_contact'), [...v5])

@@ -1,3 +1,5 @@
+import { createRequestDiagnostics } from './request-diagnostics.mjs'
+import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
 import { validTimestamp } from '../src/utils/network-order.mjs'
 import { createMessagingResolver, createMessagingSession } from './messaging.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
@@ -94,7 +96,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // Optional signup profile lookup (docs/signup-profile-lookup.md): UNLINKED_PROFILE_LOOKUP_*.
   profileLookupEnv = process.env, profileLookupLoader = loadProfileLookupAdapter,
   // Automatic sign-in kill switch: UNLINKED_AUTO_SIGNIN=off.
-  autoSignInEnv = process.env,
+  autoSignInEnv = process.env, diagnosticsEnv = process.env,
   // Private context from the Ideaflow people overlay: NOOS_OVERLAY_APP_UNLINKED_SECRET, NOOS_OVERLAY_URL.
   overlayEnv = process.env }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
@@ -113,10 +115,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, closed = false
+  let server, worker, memberEmail, diagnosticsStore, closed = false
   const close = async () => {
     if (closed) return
     closed = true
+    await diagnosticsStore?.close()
     await worker?.stop()
     await memberEmail?.stop()
     if (server?.listening) {
@@ -336,6 +339,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         listAccountGrantIds: () => store.listAccountGrantIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
       }
     }
+    let requestDiagnostics
+    if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {
+      const auditDirectory = join(root, 'audit')
+      await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
+      const auditStat = await lstat(auditDirectory)
+      if (!auditStat.isDirectory() || auditStat.isSymbolicLink() || (auditStat.mode & 0o777) !== 0o700 || auditStat.uid !== process.getuid()) throw new Error('diagnostics_audit_directory_not_private')
+      diagnosticsStore = await createDiagnosticsStore({ directory: join(auditDirectory, 'requests') })
+      requestDiagnostics = createRequestDiagnostics({ emit: diagnosticsStore.emit })
+    }
     const audit = async event => {
       const directory = join(root, 'audit')
       await mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
@@ -457,7 +469,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           return result.records.length === 1 ? { issuer:result.records[0].get('issuer'), subject:result.records[0].get('subject') } : null
         } finally { await session.close() }
     }
-    return { login, getBackend, close, audit, backgroundImports: true,
+    return { login, getBackend, close, audit, requestDiagnostics, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),

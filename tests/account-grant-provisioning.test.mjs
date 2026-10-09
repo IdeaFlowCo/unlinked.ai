@@ -75,7 +75,8 @@ test('provisioning maps verified issuer+subject to a reusable read-only grant; n
   assert.equal(created.ownerId, owner.ownerId)
   assert.equal(created.created, true)
   assert.equal(created.version, CURRENT_ACCOUNT_GRANT_VERSION)
-  assert.equal(created.scope, 'owner_network_and_public')
+  // API keys default to the private-notes permission (catalog v7); never connection actions.
+  assert.equal(created.scope, 'owner_network_and_public_and_private_notes')
   assert.ok(created.tools.includes('unlinked_whoami'))
   // The returned token authenticates and drives a real tool call.
   const who = await fetch(`${app.endpoint}/api/agent/v1/whoami`, { headers: { Authorization: `Bearer ${created.accessToken}` } })
@@ -179,15 +180,15 @@ test('provisioning stays read-only after Settings opts into writes and respects 
   const app = await launch(t)
   const owner = { ownerId: 'scope-owner', userId: 'scope-user' }
   app.f.register({ issuer: ISSUER, subject: 'scope-subject' }, owner)
-  const write = await app.grants.issueGrant(owner, undefined, { scope: ACCOUNT_WRITE_SCOPE })
-  assert.equal((await app.grants.ensureGrant(owner)).scope, ACCOUNT_WRITE_SCOPE)
+  const write = await app.grants.issueGrant(owner, undefined, { scope: `${ACCOUNT_WRITE_SCOPE}_and_private_notes` })
+  assert.equal((await app.grants.ensureGrant(owner)).scope, `${ACCOUNT_WRITE_SCOPE}_and_private_notes`)
   const response = await app.provision({ issuer: ISSUER, subject: 'scope-subject' })
   assert.equal(response.status, 200)
   const read = await response.json()
-  assert.equal(read.scope, 'owner_network_and_public')
+  assert.equal(read.scope, 'owner_network_and_public_and_private_notes')
   assert.notEqual(read.grantId, write.grantId)
   const verified = await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${read.accessToken}` } })
-  assert.equal(verified.scope, 'owner_network_and_public')
+  assert.equal(verified.scope, 'owner_network_and_public_and_private_notes')
   assert.ok(!verified.tools.includes('unlinked_send_connection_request'))
   const denied = await fetch(`${app.endpoint}/api/agent/v1/connection-requests/send`, {
     method: 'POST', headers: { Authorization: `Bearer ${read.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: 'someone' }) })
@@ -265,7 +266,7 @@ for (const competitor of ['revoke', 'replaceKey', 'setConnectionActions']) test(
   } else assert.equal(result, null)
   assert.equal(app.f.resources.size, 2)
   assert.equal((await app.grants.readKey(owner, selected.grantId)).accessToken, selected.accessToken)
-  assert.equal((await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${selected.accessToken}` } })).scope, ACCOUNT_WRITE_SCOPE)
+  assert.equal((await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${selected.accessToken}` } })).scope, `${ACCOUNT_WRITE_SCOPE}_and_private_notes`)
 })
 
 test('automatic tombstone prevents fallback issuance and explicit new keys remain usable', async t => {

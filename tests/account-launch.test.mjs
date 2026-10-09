@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import JSZip from 'jszip'
 import { createRequire } from 'node:module'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
-import { createAccountGrantService } from '../mcp-server/account-grants.mjs'
+import { createAccountGrantService, PRIVATE_NOTES_TOOLS } from '../mcp-server/account-grants.mjs'
 import { createAccountHostedHandler } from '../mcp-server/account-hosted.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { parseArchive, LIMITS, digest } from '../src/utils/private-import/archive.mjs'
@@ -134,7 +134,7 @@ test('open browser signup →1001 ConnectionsZIP→whole-owner search→durable 
   const transport=new StreamableHTTPClientTransport(new URL(`${endpoint}/mcp`),{requestInit:{headers:{Authorization:authorization}}})
   try {
     await client.connect(transport)
-    assert.deepEqual((await client.listTools()).tools.map(x=>x.name),['unlinked_search_network','unlinked_whoami','unlinked_list_connections','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact'])
+    assert.deepEqual((await client.listTools()).tools.map(x=>x.name),['unlinked_search_network','unlinked_whoami','unlinked_list_connections','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact',...PRIVATE_NOTES_TOOLS])
     const result=await client.callTool({name:'unlinked_search_network',arguments:{query:'Zephyr'}})
     assert.ok(!result.isError);const data=JSON.parse(result.content[0].text);assert.equal(data.indexed,1002);assert.equal(data.considered,1002);assert.equal(data.scope,'owner_network')
     const foreign={ownerId:'other-owner',userId:'other-user'};f.register(foreign)
@@ -180,8 +180,8 @@ test('real MCP client without imports reads Everyone with explicit durable grant
   const old=createAccountGrantService({issuer,signingKey:key,getBackend:f.getBackend})
   const grants=createAccountGrantService({issuer,signingKey:key,getBackend:f.getBackend,publicSearchEnabled:true})
   const oldIssued=await old.issueGrant(owner),issued=await grants.issueGrant(owner)
-  assert.deepEqual((await grants.authenticateGrant({headers:{authorization:'Bearer '+oldIssued.accessToken}})).tools,['unlinked_search_network','unlinked_whoami','unlinked_list_connections','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact'])
-  assert.deepEqual((await grants.authenticateGrant({headers:{authorization:'Bearer '+issued.accessToken}})).tools,['unlinked_search_network','unlinked_search_everyone','unlinked_whoami','unlinked_list_people','unlinked_list_connections','unlinked_get_profile','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact'])
+  assert.deepEqual((await grants.authenticateGrant({headers:{authorization:'Bearer '+oldIssued.accessToken}})).tools,['unlinked_search_network','unlinked_whoami','unlinked_list_connections','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact',...PRIVATE_NOTES_TOOLS])
+  assert.deepEqual((await grants.authenticateGrant({headers:{authorization:'Bearer '+issued.accessToken}})).tools,['unlinked_search_network','unlinked_search_everyone','unlinked_whoami','unlinked_list_people','unlinked_list_connections','unlinked_get_profile','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact',...PRIVATE_NOTES_TOOLS])
   let handler,revokeDuringModel=false
   const server=createServer((req,res)=>void handler(req,res));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)))
   const endpoint=`http://127.0.0.1:${server.address().port}`,origin=`https://127.0.0.1:${server.address().port}`
@@ -189,7 +189,7 @@ test('real MCP client without imports reads Everyone with explicit durable grant
     readPublishedSnapshot:async()=>({state:'published',complete:true,revision:'public-fixture-v1',profiles:[{id:'legacy-person',name:'Public graph engineer',positions:[],education:[],skills:[]}],connections:[]}),
     complete:async({candidateIds})=>{if(revokeDuringModel)await grants.revoke(owner,issued.grantId);return{matches:[{id:candidateIds[0],reason:'Recorded graph role'}]}}})
   const client=new Client({name:'no-upload-global-proof',version:'1.0'}),transport=new StreamableHTTPClientTransport(new URL(endpoint+'/mcp'),{requestInit:{headers:{Authorization:'Bearer '+issued.accessToken}}})
-  try{await client.connect(transport);assert.deepEqual((await client.listTools()).tools.map(x=>x.name),['unlinked_search_network','unlinked_search_everyone','unlinked_whoami','unlinked_list_people','unlinked_list_connections','unlinked_get_profile','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact'])
+  try{await client.connect(transport);assert.deepEqual((await client.listTools()).tools.map(x=>x.name),['unlinked_search_network','unlinked_search_everyone','unlinked_whoami','unlinked_list_people','unlinked_list_connections','unlinked_get_profile','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact',...PRIVATE_NOTES_TOOLS])
     const result=await client.callTool({name:'unlinked_search_everyone',arguments:{query:'graph engineer'}});assert.ok(!result.isError);const data=JSON.parse(result.content[0].text);assert.equal(data.considered,1);assert.equal(data.matches[0].id,'legacy-person');assert.equal(data.scope,'everyone')
     assert.equal((await f.getBackend(owner)).listImportIds? (await (await f.getBackend(owner)).listImportIds()).length:-1,0)
     revokeDuringModel=true;const denied=await client.callTool({name:'unlinked_search_everyone',arguments:{query:'graph'}});assert.equal(denied.isError,true)

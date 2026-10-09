@@ -479,11 +479,11 @@
           "200": {
             "description": "Public profile detail, with presence and connectionCount when known, and its connections as summaries."
           },
-          "404": {
-            "description": "not_found"
-          },
           "401": {
             "description": "not_linked or grant_revoked"
+          },
+          "404": {
+            "description": "not_found"
           }
         }
       }
@@ -1491,6 +1491,931 @@
           }
         }
       }
+    },
+    "/api/agent/v1/contacts/lookup": {
+      "post": {
+        "summary": "Read-only, owner-scoped: resolve one of the owner's own contacts without paging",
+        "operationId": "unlinked_lookup_contact",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "linkedinUrl": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "profileId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "refHashes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner contact or public profile"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/person": {
+      "get": {
+        "summary": "unlinked_get_person_private: Read the owner’s private card about an Unlinked person: profileId may be a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address.",
+        "description": "Read the owner’s private card about an Unlinked person: profileId may be a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. Returns the notes and relations recorded about that person (with note and link ids for corrections), plus profileId, connectionId and linkedinRefHash when they apply. entities is empty when nothing is recorded yet. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_get_person_private",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profileId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/thing": {
+      "get": {
+        "summary": "unlinked_get_private_thing: Read one of the owner’s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations.",
+        "description": "Read one of the owner’s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_get_private_thing",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "thingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/things": {
+      "get": {
+        "summary": "unlinked_list_private_things: List the owner’s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind.",
+        "description": "List the owner’s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind. Use an id with unlinked_get_private_thing. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_list_private_things",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "person",
+                "company",
+                "idea",
+                "project"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      },
+      "post": {
+        "summary": "unlinked_save_private_thing: Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”).",
+        "description": "Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”). Returns its id for notes and links. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one. Set createNew true with a clientRequestId only to save a different one with an existing name; retries return the same entity. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_save_private_thing",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "person",
+                      "company",
+                      "idea",
+                      "project"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "createNew": {
+                    "type": "boolean"
+                  },
+                  "clientRequestId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/search": {
+      "get": {
+        "summary": "unlinked_search_private: Search the owner’s private people knowledge in one call: entities matched by name or private note text, and relations matched by relation text, either end’s name, or relationType (knows, family, works_at, worked_with, works_on, attended, interested_in, other).",
+        "description": "Search the owner’s private people knowledge in one call: entities matched by name or private note text, and relations matched by relation text, either end’s name, or relationType (knows, family, works_at, worked_with, works_on, attended, interested_in, other). Give at least one of query, relationType or kind. At most 50 of each; truncated says more matched. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_search_private",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "relationType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "knows",
+                "family",
+                "works_at",
+                "worked_with",
+                "works_on",
+                "attended",
+                "interested_in",
+                "other"
+              ]
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "person",
+                "company",
+                "idea",
+                "project"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/neighbourhood": {
+      "get": {
+        "summary": "unlinked_get_neighbourhood: Read one person or thing and what surrounds it in the owner’s private graph: everything one (default) or two private relations away, and those relations (fromId/toId).",
+        "description": "Read one person or thing and what surrounds it in the owner’s private graph: everything one (default) or two private relations away, and those relations (fromId/toId). subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Never creates anything; empty when nothing is recorded. Bounded; truncated says it was cut. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_get_neighbourhood",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "subjectKind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unlinked",
+                "thing",
+                "user"
+              ]
+            }
+          },
+          {
+            "name": "subjectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "enum": [
+                    1
+                  ]
+                },
+                {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/things/delete": {
+      "post": {
+        "summary": "unlinked_delete_private_thing: Delete (undo) one of the owner’s private entities by id: removes it with its private notes and every private relation to or from it.",
+        "description": "Delete (undo) one of the owner’s private entities by id: removes it with its private notes and every private relation to or from it. Cannot be reversed. Deleting an entity about an Unlinked person forgets only the owner’s private notes; the profile and contact are untouched. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_delete_private_thing",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "thingId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "thingId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/notes": {
+      "post": {
+        "summary": "unlinked_add_private_note: Add a private note about a person or thing.",
+        "description": "Add a private note about a person or thing. subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Adding the same text again returns the existing note. Recorded as written by this agent (author agent:<key or app name>, source direct-key). Set assertion “inferred” when you concluded it yourself. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_add_private_note",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subjectKind": {
+                    "type": "string",
+                    "enum": [
+                      "unlinked",
+                      "thing",
+                      "user"
+                    ]
+                  },
+                  "subjectId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "assertion": {
+                    "type": "string",
+                    "enum": [
+                      "stated",
+                      "inferred"
+                    ]
+                  }
+                },
+                "required": [
+                  "subjectKind",
+                  "subjectId",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/notes/delete": {
+      "post": {
+        "summary": "unlinked_delete_private_note: Delete (undo) one of the owner’s private notes by note id.",
+        "description": "Delete (undo) one of the owner’s private notes by note id. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_delete_private_note",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "noteId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "noteId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/links": {
+      "post": {
+        "summary": "unlinked_add_private_link: Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another.",
+        "description": "Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another. Subject: subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Target: toKind “unlinked” + toId (published profile id, connection id or linkedin.com/in/ address), toKind “user” + toId (OpenChat user id already in the owner’s private notes), or toKind person/company/idea/project with toId (saved thing id) or toName. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one, then pass its id. Set createNew true with a clientRequestId only to save a different one with an existing name. The same subject, relation and target is one link, so retries never duplicate. Recorded as written by this agent (author agent:<key or app name>, source direct-key). relationType is derived from the words. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_add_private_link",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subjectKind": {
+                    "type": "string",
+                    "enum": [
+                      "unlinked",
+                      "thing",
+                      "user"
+                    ]
+                  },
+                  "subjectId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "relation": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "toKind": {
+                    "type": "string",
+                    "enum": [
+                      "unlinked",
+                      "user",
+                      "person",
+                      "company",
+                      "idea",
+                      "project"
+                    ]
+                  },
+                  "toId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "toName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "createNew": {
+                    "type": "boolean"
+                  },
+                  "clientRequestId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "assertion": {
+                    "type": "string",
+                    "enum": [
+                      "stated",
+                      "inferred"
+                    ]
+                  }
+                },
+                "required": [
+                  "subjectKind",
+                  "subjectId",
+                  "relation",
+                  "toKind"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/links/update": {
+      "post": {
+        "summary": "unlinked_update_private_link: Correct one of the owner’s private relations in place by link id, for example “sister of” to “cousin of”.",
+        "description": "Correct one of the owner’s private relations in place by link id, for example “sister of” to “cousin of”. The relation text, its relationType and the link’s identity change together; if the owner already has that exact relation between the same two ends, the two become one and the existing link is returned with merged true. Recorded as written by this agent (author agent:<key or app name>, source direct-key). Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_update_private_link",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "linkId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "relation": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "assertion": {
+                    "type": "string",
+                    "enum": [
+                      "stated",
+                      "inferred"
+                    ]
+                  }
+                },
+                "required": [
+                  "linkId",
+                  "relation"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/links/delete": {
+      "post": {
+        "summary": "unlinked_delete_private_link: Delete (undo) one of the owner’s private relations by link id.",
+        "description": "Delete (undo) one of the owner’s private relations by link id. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "operationId": "unlinked_delete_private_link",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "linkId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "linkId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-only private result (visibility owner_private)"
+          },
+          "400": {
+            "description": "invalid_input (typed error body; overlayCode for overlay refusals)"
+          },
+          "401": {
+            "description": "not_linked or grant_revoked"
+          },
+          "403": {
+            "description": "scope_not_granted: Private people notes & relations is off for this key, or not consented for this OAuth app"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "409": {
+            "description": "ambiguous_name (with candidates) or identity_unavailable"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1534,5 +2459,12 @@
   "externalDocs": {
     "description": "Shared Ideaflow connector for Unlinked, OpenChat and Thoughtstream Vision",
     "url": "https://id.ideaflow.app/agents"
+  },
+  "x-request-diagnostics": {
+    "enabledByDefault": false,
+    "responseHeader": "X-Request-ID",
+    "idTrust": "server-generated; incoming trace IDs ignored",
+    "privacy": "No credentials, queries, result bodies or sensitive URL parameters. Opaque account correlation only after successful authentication.",
+    "gatewayLimitation": "Shared gateway does not currently forward the downstream Unlinked request ID."
   }
 }

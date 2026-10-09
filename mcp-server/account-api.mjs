@@ -1,5 +1,7 @@
+import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { AccountToolError } from './account-tools.mjs'
+import { parseAccountScope, scopeAllowsConnectionActions } from './account-grants.mjs'
 
 export const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]{4,64}$/
 const sha256 = value => createHash('sha256').update(value).digest()
@@ -36,6 +38,19 @@ const ROUTES = Object.freeze({
   'POST /api/agent/v1/connection-requests/ignore': { tool: 'unlinked_ignore_connection_request', body: ['id'] },
   'POST /api/agent/v1/connection-requests/withdraw': { tool: 'unlinked_withdraw_connection_request', body: ['id'] },
   'POST /api/agent/v1/contacts/lookup': { tool: 'unlinked_lookup_contact', body: ['connectionId', 'linkedinUrl', 'profileId', 'refHashes'] },
+  // Private people notes & relations (catalog v7, separate permission).
+  'GET /api/agent/v1/private/person': { tool: 'unlinked_get_person_private', query: ['profileId'] },
+  'GET /api/agent/v1/private/thing': { tool: 'unlinked_get_private_thing', query: ['thingId'] },
+  'GET /api/agent/v1/private/things': { tool: 'unlinked_list_private_things', query: ['query', 'kind'] },
+  'GET /api/agent/v1/private/search': { tool: 'unlinked_search_private', query: ['query', 'relationType', 'kind', 'limit'], numbers: ['limit'] },
+  'GET /api/agent/v1/private/neighbourhood': { tool: 'unlinked_get_neighbourhood', query: ['subjectKind', 'subjectId', 'depth'], numbers: ['depth'] },
+  'POST /api/agent/v1/private/things': { tool: 'unlinked_save_private_thing', body: ['kind', 'name', 'createNew', 'clientRequestId'] },
+  'POST /api/agent/v1/private/things/delete': { tool: 'unlinked_delete_private_thing', body: ['thingId'] },
+  'POST /api/agent/v1/private/notes': { tool: 'unlinked_add_private_note', body: ['subjectKind', 'subjectId', 'text', 'assertion'], limit: 20480 },
+  'POST /api/agent/v1/private/notes/delete': { tool: 'unlinked_delete_private_note', body: ['noteId'] },
+  'POST /api/agent/v1/private/links': { tool: 'unlinked_add_private_link', body: ['subjectKind', 'subjectId', 'relation', 'toKind', 'toId', 'toName', 'createNew', 'clientRequestId', 'assertion'] },
+  'POST /api/agent/v1/private/links/update': { tool: 'unlinked_update_private_link', body: ['linkId', 'relation', 'assertion'] },
+  'POST /api/agent/v1/private/links/delete': { tool: 'unlinked_delete_private_link', body: ['linkId'] },
   'POST /api/agent/v1/ai-search': { tool: 'unlinked_ai_search', body: ['query', 'scope', 'timeoutMs'] },
   'POST /api/agent/v1/search-network': { tool: 'unlinked_search_network', body: ['query', 'degree', 'cursor'] },
   'POST /api/agent/v1/search-everyone': { tool: 'unlinked_search_everyone', body: ['query'] },
@@ -48,7 +63,7 @@ async function readJsonBody(request, limit = 8192) {
   let size = 0
   for await (const part of request) {
     size += part.length
-    if (size > limit) throw new AccountToolError('invalid_input', 'The request body exceeds 8 KiB.')
+    if (size > limit) throw new AccountToolError('invalid_input', `The request body exceeds ${limit / 1024} KiB.`)
     parts.push(part)
   }
   if (!size) return {}
@@ -87,6 +102,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     // Client authentication comes first and uses its own typed code so a
     // credential problem is never confused with an unlinked person.
     const client = authenticateClient(request, provisioning.clients)
+    if (!client) requestDiagnostic().denied('client_unauthorized')
     if (!client) throw new AccountToolError('client_unauthorized', 'Unknown client or wrong client secret. Supply allow-listed confidential-client credentials via HTTP Basic.')
     admitClient(client.clientId)
     const body = await readJsonBody(request)
@@ -111,7 +127,11 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     if (verified.error === 'grant_revoked') throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
     if (!verified.grant || verified.grant.ownerId !== owner.ownerId) throw new AccountToolError('upstream_unavailable', 'The provisioned grant could not be verified right now; retry.')
     const grant = verified.grant
-    if (!['owner_network', 'owner_network_and_public'].includes(grant.scope)) throw new AccountToolError('grant_revoked', 'The provisioned key no longer permits read-only provisioning.')
+    // Provisioned grants never carry connection actions. They may carry the
+    // owner's default-on private-notes permission (their own overlay data,
+    // which the provisioning app already holds for this owner).
+    if (!parseAccountScope(grant.scope) || scopeAllowsConnectionActions(grant.scope)) throw new AccountToolError('grant_revoked', 'The provisioned key no longer permits read-only provisioning.')
+    requestDiagnostic().authenticated(grant.ownerId, 'provisioning_client')
     // Audit the event — never the token. The contract promises an audit row
     // for every issuance/reuse, so an unauditable provisioning fails closed:
     // the token is simply not returned (the grant record itself is unchanged).
@@ -129,8 +149,9 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     response.end(JSON.stringify(value))
   }
   const failure = (response, error) => {
+    requestDiagnostic().failure(error)
     const typed = error instanceof AccountToolError ? error : new AccountToolError('upstream_unavailable', 'The request could not finish; retry.')
-    send(response, typed.status, { error: { code: typed.code, message: typed.message } }, typed.code === 'rate_limited' ? { 'Retry-After': '60' } : {})
+    send(response, typed.status, { error: { code: typed.code, message: typed.message, ...(typed.details ?? {}) } }, typed.code === 'rate_limited' ? { 'Retry-After': '60' } : {})
   }
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -142,6 +163,8 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
       if (url.pathname === '/api/agent/v1/provision-grant') {
+        requestDiagnostic().route('/api/agent/v1/provision-grant')
+        requestDiagnostic().authType('provisioning_client')
         if (!provisioning) { failure(response, new AccountToolError('not_found', 'Grant provisioning is not enabled on this runtime.')); return }
         if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
         await provisionGrant(request, response); return
@@ -156,6 +179,8 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
         if (!['GET', 'POST'].includes(request.method)) { response.writeHead(405, { Allow: 'GET, POST' }).end(); return }
         failure(response, new AccountToolError('not_found', 'Unknown agent API route. See docs/agent-api.md for the v1 contract.')); return
       }
+      requestDiagnostic().route(profileMatch ? '/api/agent/v1/people/{id}' : `/api/agent/v1/${suffix}`)
+      requestDiagnostic().tool(route.tool)
       const detailed = await authenticateGrantDetailed(request)
       if (!detailed.grant) {
         const messages = {
@@ -164,13 +189,15 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
           not_linked: 'No linked Unlinked account: supply a valid account-grant bearer token issued at /settings. Linkage is never established by email matching.',
         }
         const code = Object.hasOwn(messages, detailed.error) ? detailed.error : 'not_linked'
+        requestDiagnostic().denied(code)
         failure(response, new AccountToolError(code, messages[code]))
         return
       }
       const grant = detailed.grant
+      requestDiagnostic().authenticated(grant.ownerId, 'account_bearer')
       const input = {}
       if (route.body) {
-        const body = await readJsonBody(request)
+        const body = await readJsonBody(request, route.limit)
         const unknown = Object.keys(body).find(key => !route.body.includes(key))
         if (unknown) throw new AccountToolError('invalid_input', `Unknown field: ${unknown}`)
         for (const key of route.body) if (body[key] !== undefined) input[key] = body[key]
@@ -191,6 +218,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
           try { input.id = decodeURIComponent(profileMatch[1]) } catch { throw new AccountToolError('invalid_input', 'The profile id is not valid percent-encoding.') }
         }
       }
+      requestDiagnostic().input(input)
       const controller = new AbortController()
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)])
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
@@ -200,7 +228,8 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
         if (!current.tools.includes(route.tool)) throw new AccountToolError('scope_not_granted', 'This key no longer permits the requested tool.')
         return current
       }
-      const { text } = await service.call({ grant, name: route.tool, input, signal, revalidate })
+      const { text, result } = await service.call({ grant, name: route.tool, input, signal, revalidate })
+      requestDiagnostic().result(result)
       if (response.headersSent) { response.end(); return }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       response.end(text)

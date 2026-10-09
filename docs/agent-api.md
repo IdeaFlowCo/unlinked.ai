@@ -67,7 +67,7 @@ consent decision is the confirmation for the grant.
 | `POST /oauth/revoke` | RFC 7009 revocation |
 
 Any request to `/mcp` without a usable grant answers `401` with
-`WWW-Authenticate: Bearer resource_metadata="https://www.unlinked.ai/.well-known/oauth-protected-resource/mcp", scope="network people"`
+`WWW-Authenticate: Bearer resource_metadata="https://www.unlinked.ai/.well-known/oauth-protected-resource/mcp", scope="network people private_notes"`
 (plus `error="invalid_token"` when a token was presented). Metadata, token,
 registration and revocation endpoints send `Access-Control-Allow-Origin: *`
 (they use no cookies) and accept requests without an `Origin` header.
@@ -117,8 +117,12 @@ Security decisions:
   `offline_access`, `claudeai`, …) are ignored; no recognized read scope means
   all offered read access. Optional `connections` requires the separate
   consent choice described [below](#optional-connection-actions);
-  a scope request alone never enables writes. The token response states the
-  granted `scope`.
+  a scope request alone never enables writes. `private_notes` (private people
+  notes & relations, [below](#private-people-notes--relations-catalog-v7)) is a
+  separate consent-page checkbox that **starts ticked**; unticking it leaves the
+  permission out. The token response states the granted `scope`. Apps connected
+  before catalog v7 do not gain `private_notes`: disconnect and connect again
+  to consent to it.
 - **Tokens are account grants.** The access token is an ordinary account grant
   (same JWT, same per-call revocation check, same tool catalog) whose durable
   record carries `connection: { kind: 'oauth', app, clientName, redirectHost,
@@ -155,10 +159,18 @@ tools for each scope; historical entries are immutable.
   copying a new key is not a tool refresh. This stateless POST-only MCP transport
   does not deliver tool-list-change or notification pushes (`listChanged: false`).
   The notification tool reads the in-app feed on demand.
-- Current issuance is catalog v6 (v5 plus the read-only, owner-scoped
-  `unlinked_lookup_contact` in every scope). New permission categories still need explicit
-  consent. Manual-key connection-request permission can be edited in Settings;
-  OAuth apps require actual consent/reconsent for additional permissions.
+- Catalog v6 added the read-only, owner-scoped `unlinked_lookup_contact` to every
+  scope. Current issuance is **catalog v7**: every v6 scope keeps its exact list
+  and gains a twin with the suffix `_and_private_notes` (scope grammar
+  `owner_network[_and_public][_and_write][_and_private_notes]`) that appends the
+  twelve [private people notes & relations](#private-people-notes--relations-catalog-v7)
+  tools. That is a **separate, default-on permission** (Jacob's decision on
+  unlinked-lf4), so a valid pre-v7 **API key** resolves to its private-notes
+  twin with the same token bytes; it never gains connection-request writes.
+  A pre-v7 **OAuth connection** keeps exactly its consented scope and needs
+  reconnection to consent to `private_notes`. Manual-key permissions
+  (connection requests, private notes) are switched in Settings; OAuth apps
+  require actual consent/reconsent for additional permissions.
 
 OpenChat's production integration — stateless JSON-RPC `tools/call` POSTs to
 `/mcp` invoking `unlinked_search_network` / `unlinked_search_everyone` — is
@@ -195,6 +207,11 @@ an extra sanitized `cause` identifier).
 | `request_pending` | 409 | An open request already exists for the pair. |
 | `request_unavailable` | 409 | The requested state transition is no longer available. |
 | `cooldown_active` | 429 | The withdrawal cooldown has not elapsed. |
+| `ambiguous_name` | 409 | (private notes) Several of the owner's saved things share that name. The body adds `candidates` (`id`, `kind`, `name`, the owner's own); ask the user, then pass an id, or `createNew` with `clientRequestId`. |
+| `identity_unavailable` | 409 | (private notes) The account has no Ideaflow sign-in identity, so it has no people overlay. Sign in to Unlinked with Ideaflow once. |
+
+Private-notes input refusals from the overlay are `invalid_input` with an extra
+`overlayCode` (for example `invalid_relation`).
 
 This vocabulary may be extended, never renamed.
 
@@ -327,8 +344,8 @@ own imports are ever read; nothing matching is typed `not_found`.
 Notes and relations an agent saves about these people through the shared
 Ideaflow connector (OpenChat private-people tools, keyed by the same refs) are
 shown to the owner, and only the owner, on Unlinked person and contact pages;
-see [private-context.md](private-context.md). Unlinked reads them from the
-Noos overlay; this API does not return them.
+see [private-context.md](private-context.md). With the private-notes permission
+this API reads and writes them directly (next section).
 
 ### `POST /api/agent/v1/ai-search` `{ query, scope?, timeoutMs? }` ⇄ `unlinked_ai_search`
 Explicit AI tool. `scope: "mine"` ranks only the owner's imported network
@@ -367,8 +384,14 @@ lexicalMatches, modelCandidates, matches: [{ id, name, headline?, location?,
 company?, reason }], visibility: "public" }`.
 
 ### `POST /api/agent/v1/search-network` `{ query, degree?, cursor? }` ⇄ `unlinked_search_network`
-Launch tool, unchanged semantics: free-text AI search of the owner network, or
-recorded-path reading with `degree`. On HTTP, failures are typed
+Launch tool. Without `degree` it is **text first**: when every query word
+starts a word in a connection's name, company or position, it returns all such
+connections at once with no model call (`mode: "text_match"`, sorted by name,
+at most 500 rows with `total` and `truncated`, `reason` naming the matched
+fields). Only a query with no literal match is AI-ranked (`mode:
+"query_time_ai"`, top ten), within one 20 s budget (below the shared connector's 25 s downstream timeout); a spent budget returns
+`upstream_unavailable` naming the text-query and `list_connections`
+alternatives. With `degree` it reads recorded paths. On HTTP, failures are typed
 (`degree_unproven`, `cursor_invalid`, ...) and recorded-path pages cap at 50
 rows; on MCP it returns the same typed failure shape and keeps 100-row pages
 (offset cursors are interchangeable between the two).
@@ -436,6 +459,11 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
   restore provisioning. See [key lifecycle](agent-key-settings.md).
   **Revoked stays revoked**: after the owner turns agent access off, provisioning answers `grant_revoked` until they
   re-enable it in Settings.
+  "Read-only" here means **no connection actions**. Since catalog v7 the reused or
+  minted key may carry the owner's default-on private-notes permission (the
+  owner's own overlay data, which the provisioning app — OpenChat — already
+  holds for that owner); the fallback keeps the automatic key's private-notes
+  setting.
 - **Response (200):** `{ kind: "unlinked_provision_grant", ownerId, grantId,
   created, version, scope, tools, accessToken }`. The token is verified
   against the live grant record before it is returned, appears **only** in
@@ -546,6 +574,82 @@ lookup). An already-committed write reports success even if permission is change
 afterward. Auth and connection storage are not a cross-resource transaction;
 in-flight operations authorized at their final check may finish.
 
+## Private people notes & relations (catalog v7)
+
+The direct Unlinked key and OAuth connector can record and read the owner's
+**private people knowledge** — notes and relations such as "Alice knows Bob" —
+under a **separate permission, "Private people notes & relations"**, which is
+independent of "Send and manage connection requests".
+
+- **What it is.** Owner-only private knowledge stored in the owner's Ideaflow
+  people overlay (Noos `/api/overlay`, Noos `docs/PEOPLE_OVERLAY.md`), the same
+  store OpenChat and the shared Ideaflow connector use. It is shown only to the
+  owner, in Unlinked (person and contact pages, [private-context.md](private-context.md))
+  and in OpenChat. It **never notifies anyone**, is **not a connection request**
+  and is **not messaging**.
+- **Default on.** New API keys have it on; pre-v7 API keys have it on with the
+  same token (see [versioning](#grant-scope-versioning-how-old-grants-keep-working)).
+  Settings → API keys → *Permissions for this key* has an On/Off switch beside
+  "Send and manage connection requests" (same CAS edit: token, jti, issue time and
+  generation never change). Off hides the tools from `tools/list` and refuses
+  calls with `scope_not_granted`. OAuth apps consent with the `private_notes`
+  checkbox (starts ticked); older connections reconnect to get it.
+- **One semantic layer.** Unlinked never re-implements overlay rules. Names
+  never merging (`ambiguous_name` + `candidates`), idempotent notes and links,
+  `createNew` + `clientRequestId`, provenance, `relationType`, relation edits,
+  search, neighbourhood, deletion and `ensureRefs` are all Noos. Unlinked only
+  names people and states who is writing.
+- **Naming people.** `subjectKind`/`toKind` `unlinked` takes a published profile
+  id, a connection id from `unlinked_list_connections` (an imported LinkedIn
+  contact) or a `linkedin.com/in/` address, resolved with the owner-scoped
+  `unlinked_lookup_contact` (only the caller's own imports). Refs are
+  `unlinked:person:<id>` for published profiles and `linkedin:in:<sha256 of the
+  canonical slug>` for the owner's imports — never a plaintext address; both are
+  joined on one entity with `ensureRefs`. `thing` takes an overlay entity id.
+  `user` (OpenChat user id) works only for OpenChat people the owner already has
+  private notes about; record new OpenChat people through the shared connector.
+  Reads never create entities.
+- **Provenance.** Every write records `author: "agent:<key name>"` (API keys; the
+  default key is "Default key") or `"agent:<connected app>"` (OAuth), `source:
+  "direct-key"` and `assertion` `stated` (default) or `inferred`. Unlinked and
+  OpenChat label each agent-written note and relation with it.
+- **Results** never include raw overlay refs: entity ends carry `profileId`,
+  `linkedinRefHash` (+ `connectionId` when the owner imported them) or
+  `openchatUserId`. Every result is `visibility: "owner_private"`.
+- **Budgets.** Shared with the deterministic budget (120 calls per owner per
+  minute). Writes revalidate the key before running and report a landed write
+  as success.
+
+| MCP tool (`unlinked_*`) | HTTP route (`/api/agent/v1/…`) | Fields | Shared connector equivalent (`openchat__…`) |
+|---|---|---|---|
+| `unlinked_get_person_private` | `GET private/person` | `profileId` (profile id, connection id or LinkedIn address) | `oc_get_unlinked_person_private` |
+| `unlinked_get_private_thing` | `GET private/thing` | `thingId` | `oc_get_private_thing` |
+| `unlinked_list_private_things` | `GET private/things` | `query?`, `kind?` | `oc_list_private_things` |
+| `unlinked_search_private` | `GET private/search` | `query?`, `relationType?`, `kind?`, `limit?` (one of the first three) | `oc_search_private` (also covers `oc_list_private_links` with a query) |
+| `unlinked_get_neighbourhood` | `GET private/neighbourhood` | `subjectKind`, `subjectId`, `depth?` (1–2) | `oc_get_neighbourhood` |
+| `unlinked_save_private_thing` | `POST private/things` | `kind`, `name`, `createNew?`, `clientRequestId?` | `oc_save_private_thing` |
+| `unlinked_add_private_note` | `POST private/notes` | `subjectKind`, `subjectId`, `text` (≤4,000), `assertion?` | `oc_add_private_note` |
+| `unlinked_delete_private_note` | `POST private/notes/delete` | `noteId` | `oc_delete_private_note` |
+| `unlinked_add_private_link` | `POST private/links` | `subjectKind`, `subjectId`, `relation` (≤60), `toKind`, `toId?` / `toName?`, `createNew?`, `clientRequestId?`, `assertion?` | `oc_add_private_link` |
+| `unlinked_update_private_link` | `POST private/links/update` | `linkId`, `relation`, `assertion?` | `oc_update_private_link` |
+| `unlinked_delete_private_link` | `POST private/links/delete` | `linkId` | `oc_delete_private_link` |
+| `unlinked_delete_private_thing` | `POST private/things/delete` | `thingId` | `oc_delete_private_thing` |
+
+Not on the direct key: `oc_get_person_private` / `oc_set_person_private` /
+`oc_list_catch_up` (OpenChat people and their catch-up cadence) — use the shared
+connector. Agents can switch between the two surfaces by dropping the
+`openchat__oc_` prefix for `unlinked_` and using `subjectKind: "unlinked"`.
+
+**Three separate things.** Messaging = OpenChat, through the shared Ideaflow
+connector (`https://id.ideaflow.app/mcp`) with the OpenChat permission; it is not
+available on Unlinked keys. Connection requests = the "Send and manage connection
+requests" switch. Private notes and relations = this permission.
+
+**Tool refresh.** The new tools arrive on the existing key: refresh the
+client's cached `tools/list` (in claude.ai, disconnect and reconnect the
+connector, or start a new conversation). Do not replace or regenerate the key
+for this.
+
 ## Shared connector delegation
 
 The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` on that host). The gateway forwards authorized calls to `POST /api/connector/mcp` with a dedicated `IDEAFLOW_CONNECTOR_SECRET` HS256 assertion, never a personal API key. Assertions bind the exact UTF-8 JSON body hash, `https://www.unlinked.ai/mcp` audience, Ideaflow issuer/subject, consented `unlinked:read` and optional `unlinked:write`, unique jti, and at most 60 seconds. Invalid/replayed assertions fail before account lookup. No account or linking is created by a call. The existing account tool service and live owner authorization are reused; write permission exposes only existing connection actions, never messaging or raw archives. Gateway disconnect revokes future assertions; in-flight authorized operations can finish. Deploy the per-service secret in the runtime env with the release; absence keeps the internal endpoint disabled.
@@ -555,3 +659,7 @@ The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` 
 
 See [Settings key management](agent-key-settings.md) for manual setup, Muse field
 formats, independent key lifecycle, compatibility and generation-aware rollback.
+
+## Request diagnostics
+
+When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures. See [the private diagnostics contract](request-diagnostics.md) for field semantics, retention, trusted gateway correlation limits and operator lookup. The JSON response schemas, permissions and status mappings are unchanged.

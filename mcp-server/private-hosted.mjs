@@ -1,3 +1,4 @@
+import { requestDiagnostic, instrumentMcpTransport } from './request-diagnostics.mjs'
 import { requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -14,13 +15,15 @@ export function createPrivateHostedHandler({ authenticateGrant, readResource, re
   if (typeof authenticateGrant !== 'function' || typeof readResource !== 'function' || !Array.isArray(allowedHosts) || !allowedHosts.length) throw new Error('explicit_private_host_configuration_required')
   const hosts = new Set(allowedHosts), origins = new Set(allowedOrigins)
   return async (req, res) => {
+    requestDiagnostic().authType('private_bearer')
     res.setHeader('Cache-Control', 'no-store')
     if (!hosts.has(req.headers.host) || (req.headers.origin && !origins.has(req.headers.origin))) { res.writeHead(403).end(); return }
     if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }).end(); return }
     let grant
-    try { grant = await authenticateGrant(req) } catch { res.writeHead(503).end(); return }
+    try { grant = await authenticateGrant(req) } catch { requestDiagnostic().denied('upstream_unavailable'); res.writeHead(503).end(); return }
     const availableTools = ['unlinked_read_import', ...(typeof complete === 'function' ? ['unlinked_search_import'] : [])]
-    if (!grant || !Number.isFinite(grant.expiresAt) || grant.expiresAt <= Date.now() || typeof grant.ownerId !== 'string' || !Array.isArray(grant.importIds) || grant.importIds.length > 32 || grant.importIds.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || !Array.isArray(grant.tools) || !grant.tools.length || grant.tools.some(tool => !availableTools.includes(tool))) { res.writeHead(401).end(); return }
+    if (!grant || !Number.isFinite(grant.expiresAt) || grant.expiresAt <= Date.now() || typeof grant.ownerId !== 'string' || !Array.isArray(grant.importIds) || grant.importIds.length > 32 || grant.importIds.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || !Array.isArray(grant.tools) || !grant.tools.length || grant.tools.some(tool => !availableTools.includes(tool))) { requestDiagnostic().denied('not_linked'); res.writeHead(401).end(); return }
+    requestDiagnostic().authenticated(grant.ownerId, 'private_bearer')
     const snapshot = { ownerId: grant.ownerId, importIds: [...grant.importIds] }
     const readImport = createScopedImportReader({ grant: snapshot, readResource: (type, id) => readResource(grant, type, id), ...(readAsset ? { readAsset: sha256 => readAsset(grant, sha256) } : {}) })
     const server = new McpServer({ name: 'unlinked-private-staging', version: '0.1.0' })
@@ -38,10 +41,11 @@ export function createPrivateHostedHandler({ authenticateGrant, readResource, re
         const finalGrant = await authenticateGrant(req)
         if (!finalGrant || finalGrant.expiresAt <= Date.now() || finalGrant.ownerId !== snapshot.ownerId ||
             !finalGrant.importIds.includes(importId) || !finalGrant.tools.includes(tool)) throw new Error('private_import_not_found')
+        requestDiagnostic().result(result)
         const text = JSON.stringify(result)
         if (Buffer.byteLength(text) > 1024 * 1024) throw new Error('private_tool_result_limit')
         return { content: [{ type: 'text', text }] }
-      } catch { return { isError: true, content: [{ type: 'text', text: 'Private import unavailable or access revoked.' }] } }
+      } catch (error) { requestDiagnostic().failure(error, controller.signal); return { isError: true, content: [{ type: 'text', text: 'Private import unavailable or access revoked.' }] } }
     }
     if (grant.tools.includes('unlinked_read_import')) server.registerTool('unlinked_read_import', {
       description: 'Read observed assertions from one explicitly granted private LinkedIn archive.',
@@ -54,6 +58,7 @@ export function createPrivateHostedHandler({ authenticateGrant, readResource, re
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     res.once('close', () => { void transport.close(); void server.close() })
     await server.connect(transport)
+    instrumentMcpTransport(transport)
     await transport.handleRequest(req, res)
   }
 }
@@ -72,7 +77,7 @@ export function createScopedSetupHandler({ authenticateOwner, issueGrant, readRe
     if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }).end(); return }
     try {
       const owner = await authenticateOwner(req)
-      if (!owner || typeof owner.ownerId !== 'string') { res.writeHead(401).end(); return }
+      if (!owner || typeof owner.ownerId !== 'string') { requestDiagnostic().denied('not_linked'); res.writeHead(401).end(); return }
       let size = 0, body = ''
       for await (const bytes of req) {
         size += bytes.length
