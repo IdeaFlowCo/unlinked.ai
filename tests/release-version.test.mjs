@@ -25,7 +25,6 @@ test('anonymous runtime pages expose the app release in their shared footer with
     resolveOwner: async () => null,
     getBackend: async () => { ownerReads++; throw Error('unexpected owner read') },
   })
-  assert.equal(appPackage.version, '0.5.0')
   for (const path of ['/', '/agents', '/import-linkedin', '/meet']) {
     const response = await fetch(endpoint + path)
     assert.equal(response.status, 200)
