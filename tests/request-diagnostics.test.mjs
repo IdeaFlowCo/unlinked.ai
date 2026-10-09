@@ -7,13 +7,13 @@ import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountHostedHandler } from '../mcp-server/account-hosted.mjs'
 import { createIdeaflowConnectorHandler } from '../mcp-server/ideaflow-connector.mjs'
 import { createAccountToolService, AccountToolError } from '../mcp-server/account-tools.mjs'
-import { accountGrantTools } from '../mcp-server/account-grants.mjs'
+import { accountGrantTools, createAccountGrantService } from '../mcp-server/account-grants.mjs'
 
 const owner = { ownerId: randomUUID(), userId: randomUUID() }
 const grant = { ...owner, grantId: 'test-grant', version: 4, scope: 'owner_network_and_public', tools: accountGrantTools(4, 'owner_network_and_public') }
 const SECRET = 'synthetic-sensitive-never-log', gatewaySecret = 'synthetic-gateway-secret-at-least32chars'
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
-async function fixture(t, { complete, service, emit, enabled = true, maxPerMinute = 600, now, authError } = {}) {
+async function fixture(t, { complete, service, emit, enabled = true, maxPerMinute = 600, now, authError, authentication, backend, snapshot } = {}) {
   const rows = [], diagnostics = createRequestDiagnostics({ emit: emit ?? (row => rows.push(row)), maxPerMinute, ...(now ? { now } : {}) })
   let api, mcp, gateway
   const server = createServer((req, res) => {
@@ -28,13 +28,14 @@ async function fixture(t, { complete, service, emit, enabled = true, maxPerMinut
   }
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve) }))
   const host = `127.0.0.1:${server.address().port}`, origin = `https://${host}`, endpoint = `http://${host}`
-  const authenticateGrant = async req => req.headers.authorization === `Bearer ${SECRET}` ? grant : null
-  const getBackend = async () => ({ listImportIds: async () => [], readResource: async () => null })
-  const readPublishedSnapshot = async () => ({ state: 'published', complete: true, revision: 'private-revision', profiles: [{ id: 'private-profile-id', name: 'Engineer private-result-person', headline: 'Engineer', positions: [], education: [], skills: [] }], connections: [] })
+  const authenticateGrant = authentication?.authenticateGrant ?? (async req => req.headers.authorization === `Bearer ${SECRET}` ? grant : null)
+  const authenticateGrantDetailed = authentication?.authenticateGrantDetailed ?? (async req => { if (authError) return { error: authError }; const g = await authenticateGrant(req); return g ? { grant: g } : { error: 'not_linked' } })
+  const getBackend = backend ?? (async () => ({ listImportIds: async () => [], readResource: async () => null }))
+  const readPublishedSnapshot = snapshot ?? (async () => ({ state: 'published', complete: true, revision: 'private-revision', profiles: [{ id: 'private-profile-id', name: 'Engineer private-result-person', headline: 'Engineer', positions: [], education: [], skills: [] }], connections: [] }))
   const completion = complete ?? (async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: SECRET }] }))
   const actualService = service ?? createAccountToolService({ getBackend, readPublishedSnapshot, complete: completion })
-  api = createAccountAgentApiHandler({ origin, authenticateGrant, authenticateGrantDetailed: async req => { if (authError) return { error: authError }; const g = await authenticateGrant(req); return g ? { grant: g } : { error: 'not_linked' } }, service: actualService })
-  mcp = createAccountHostedHandler({ origin, authenticateGrant, getBackend, readPublishedSnapshot, complete: completion, service: actualService })
+  api = createAccountAgentApiHandler({ origin, authenticateGrant, authenticateGrantDetailed, service: actualService })
+  mcp = createAccountHostedHandler({ origin, authenticateGrant, authenticateGrantDetailed, getBackend, readPublishedSnapshot, complete: completion, service: actualService })
   gateway = createIdeaflowConnectorHandler({ origin, secret: gatewaySecret, resolveOwner: async () => owner, getBackend, readPublishedSnapshot, complete: completion, service: actualService })
   const rest = (path, init = {}) => fetch(endpoint + '/api/agent/v1/' + path, { ...init, headers: { Authorization: `Bearer ${SECRET}`, ...init.headers } })
   const rpc = (body, headers = {}, path = '/mcp') => fetch(endpoint + path, { method: 'POST', headers: { Authorization: `Bearer ${SECRET}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...headers }, body: JSON.stringify(body) })
@@ -152,4 +153,92 @@ test('authentication infrastructure failure is unavailable, not a rejected or au
  const f = await fixture(t, { authError: 'upstream_unavailable' })
  assert.equal((await f.rest('whoami')).status, 503)
  assert.equal(f.rows[0].auth_outcome, 'unavailable'); assert.equal(f.rows[0].account_id, undefined)
+})
+
+
+test('MCP preserves legacy 401 while diagnosing durable grant rejection and infrastructure failure', async t => {
+  let record, unavailable = false
+  const authentication = createAccountGrantService({ issuer: 'https://synthetic.invalid', signingKey: new Uint8Array(32).fill(7), getBackend: async () => {
+    if (unavailable) throw new Error(SECRET)
+    return { writeResource: async value => { record = value }, readResource: async () => record }
+  } })
+  const { accessToken } = await authentication.issueGrant(owner)
+  const f = await fixture(t, { authentication })
+  for (const mode of ['accepted', 'upstream_unavailable', 'grant_revoked', 'not_linked']) {
+    unavailable = mode === 'upstream_unavailable'
+    if (mode === 'grant_revoked') record = { ...record, deleted: true, payload: null }
+    const token = mode === 'not_linked' ? SECRET : accessToken
+    const response = await f.rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { Authorization: `Bearer ${token}` })
+    assert.equal(response.status, mode === 'accepted' ? 200 : 401)
+    await response.text()
+    const row = f.rows.at(-1)
+    assert.equal(row.auth_outcome, mode === 'accepted' ? 'accepted' : mode === 'upstream_unavailable' ? 'unavailable' : 'rejected')
+    assert.equal(row.error_class, mode === 'accepted' ? undefined : mode)
+    assert.equal(row.account_id, mode === 'accepted' ? diagnosticAccountId(owner.ownerId) : undefined)
+    if (mode !== 'accepted') assert.equal(await authentication.authenticateGrant({ headers: { authorization: `Bearer ${token}` } }), null)
+  }
+  for (const secret of [SECRET, accessToken, owner.ownerId, owner.userId]) assert.ok(!JSON.stringify(f.rows).includes(secret))
+})
+
+test('REST preserves original timeout and cancellation flags across real service error translation', async t => {
+  let failure
+  const f = await fixture(t, { backend: async () => { throw failure } })
+  for (const name of ['TimeoutError', 'AbortError']) {
+    failure = new DOMException(SECRET, name)
+    for (const [path, body] of [['search-network', { query: SECRET }], ['search-network', { query: 'connections', degree: 2 }], ['connections', null], ['connections?degree=2', null]]) {
+      const response = await f.rest(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
+      assert.equal(response.status, 503)
+      assert.equal((await response.json()).error.code, 'upstream_unavailable')
+      const row = f.rows.at(-1)
+      assert.equal(row.error_class, 'upstream_unavailable')
+      assert.equal(row.timed_out, name === 'TimeoutError')
+      assert.equal(row.cancelled, name === 'AbortError')
+    }
+  }
+  assert.ok(!JSON.stringify(f.rows).includes(SECRET))
+})
+
+test('REST raw backend errors use outward typed class and retain request signal timeout', async t => {
+  const f = await fixture(t, { backend: async () => { throw new Error(SECRET) } })
+  let response = await f.rest('whoami')
+  assert.equal(response.status, 503)
+  assert.equal((await response.json()).error.code, 'upstream_unavailable')
+  assert.equal(f.rows.at(-1).error_class, 'upstream_unavailable')
+  assert.equal(f.rows.at(-1).timed_out, false)
+  const timeout = AbortSignal.timeout.bind(AbortSignal)
+  t.mock.method(AbortSignal, 'timeout', ms => ms === 60000 ? AbortSignal.abort(new DOMException(SECRET, 'TimeoutError')) : timeout(ms))
+  response = await f.rest('whoami')
+  assert.equal(response.status, 503)
+  assert.equal((await response.json()).error.code, 'upstream_unavailable')
+  assert.equal(f.rows.at(-1).error_class, 'upstream_unavailable')
+  assert.equal(f.rows.at(-1).timed_out, true)
+  assert.equal(f.rows.at(-1).cancelled, false)
+  assert.ok(!JSON.stringify(f.rows).includes(SECRET))
+})
+
+test('real People listing and degree-filtered search count profiles on REST and MCP', async t => {
+  const profiles = ['a', 'b', 'c'].map(id => ({ id, name: SECRET + id, positions: [], education: [], skills: [] }))
+  const f = await fixture(t, {
+    backend: async () => ({ readLegacyProfile: async () => ({ profileId: 'a', receiptId: 'receipt', revision: 'legacy' }) }),
+    snapshot: async () => ({ state: 'published', complete: true, revision: 'public', profiles, connections: [{ fromId: 'a', toId: 'b' }, { fromId: 'b', toId: 'c' }] }),
+  })
+  const people = await f.rest('people?limit=2')
+  assert.equal(people.status, 200)
+  const listing = await people.json()
+  assert.equal(listing.profiles.length, 2)
+  assert.equal(f.rows.at(-1).result_count, 2)
+  assert.equal(f.rows.at(-1).has_next_page, true)
+  const search = await f.rest('search-network', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: 'connections', degree: 2 }) })
+  assert.equal(search.status, 200)
+  assert.equal((await search.json()).profiles.length, 1)
+  assert.equal(f.rows.at(-1).result_count, 1)
+  for (const [tool, args, count] of [['unlinked_list_people', { limit: 2 }, 2], ['unlinked_search_network', { query: 'connections', degree: 2 }, 1]]) {
+    const response = await f.rpc(call(tool, args))
+    assert.equal(response.status, 200)
+    const result = await response.json()
+    assert.equal(result.result.isError, undefined)
+    assert.equal(JSON.parse(result.result.content[0].text).profiles.length, count)
+    assert.equal(f.rows.at(-1).result_count, count)
+  }
+  assert.ok(!JSON.stringify(f.rows).includes(SECRET))
 })

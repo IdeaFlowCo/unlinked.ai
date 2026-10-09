@@ -40,7 +40,7 @@ const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list
   // Registered only for grants whose opt-in scope includes them.
   'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']
 
-export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
+export function createAccountHostedHandler({ authenticateGrant, authenticateGrantDetailed, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || ![authenticateGrant, getBackend, complete].every(x => typeof x === 'function')) throw new Error('account_host_configuration_required')
   const toolService = service ?? createAccountToolService({ getBackend, complete, readPublishedSnapshot })
@@ -49,13 +49,19 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     if (request.headers.host !== base.host || request.headers.origin && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
     // Unauthenticated requests get the OAuth challenge (RFC 9728) whatever the
     // method, so connectors can discover sign-in from their first request.
-    let grant
-    try { grant = await authenticateGrant(request) }
+    let grant, authError
+    try {
+      if (typeof authenticateGrantDetailed === 'function') {
+        const detailed = await authenticateGrantDetailed(request)
+        grant = detailed.grant ?? null
+        authError = detailed.error
+      } else grant = await authenticateGrant(request)
+    }
     catch (error) { requestDiagnostic().denied('upstream_unavailable'); throw error }
     // Authentication resolves valid historical records to current permitted tools.
     const catalog = grant ? accountGrantTools(grant.version ?? 1, grant.scope) : null
     if (!grant || !catalog || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(catalog)) {
-      requestDiagnostic().denied('not_linked')
+      requestDiagnostic().denied(authError ?? 'not_linked')
       response.writeHead(401, typeof challenge === 'function' ? { 'WWW-Authenticate': challenge({ invalidToken: typeof request.headers.authorization === 'string' }) } : {}).end(); return
     }
     requestDiagnostic().authenticated(grant.ownerId)

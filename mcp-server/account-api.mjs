@@ -131,9 +131,10 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers })
     response.end(JSON.stringify(value))
   }
-  const failure = (response, error) => {
-    requestDiagnostic().failure(error)
+  const failure = (response, error, signal) => {
+    requestDiagnostic().failure(error, signal)
     const typed = error instanceof AccountToolError ? error : new AccountToolError('upstream_unavailable', 'The request could not finish; retry.')
+    requestDiagnostic().failure(typed)
     send(response, typed.status, { error: { code: typed.code, message: typed.message } }, typed.code === 'rate_limited' ? { 'Retry-After': '60' } : {})
   }
   return async (request, response) => {
@@ -142,6 +143,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     response.setHeader('Referrer-Policy', 'strict-origin')
     response.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
     if (request.headers.host !== base.host || request.headers.origin && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
+    let signal
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
@@ -203,7 +205,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       }
       requestDiagnostic().input(input)
       const controller = new AbortController()
-      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)])
+      signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)])
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
       const revalidate = async () => {
         const current = await authenticateGrant(request)
@@ -216,6 +218,6 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       if (response.headersSent) { response.end(); return }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       response.end(text)
-    } catch (error) { failure(response, error) }
+    } catch (error) { failure(response, error, signal) }
   }
 }

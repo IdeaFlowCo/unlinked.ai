@@ -60,7 +60,7 @@ export function createRequestDiagnostics({ emit, now = () => new Date(), monoton
         },
         result(result) {
           if (!result || typeof result !== 'object') return
-          for (const key of ['matches', 'people', 'connections', 'notifications', 'requests', 'items']) if (Array.isArray(result[key])) { row.result_count = count(result[key].length); break }
+          for (const key of ['matches', 'profiles', 'people', 'connections', 'notifications', 'requests', 'items']) if (Array.isArray(result[key])) { row.result_count = count(result[key].length); break }
           if (Object.hasOwn(result, 'nextCursor')) row.has_next_page = typeof result.nextCursor === 'string' && result.nextCursor.length > 0
           if (typeof result.truncated === 'boolean') row.truncated = result.truncated
           for (const [key, field] of [['considered', 'considered'], ['indexed', 'indexed'], ['lexicalMatches', 'lexical_matches'], ['modelCandidates', 'model_candidates']]) if (count(result[key]) !== undefined) row[field] = count(result[key])

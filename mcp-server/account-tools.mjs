@@ -158,7 +158,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   // With q/mode already schema-validated, a reader 400 under a supplied cursor
   // is a cursor problem; a post-snapshot failure under a supplied cursor is the
   // revision moving between pages. Both mean: restart from the first page.
-  const readerFailure = (error, cursorSupplied, captured) => {
+  const readerFailure = (error, cursorSupplied, captured, signal) => {
+    requestDiagnostic().failure(error, signal)
     if (error instanceof PublicPeopleReaderError && error.status === 400)
       return cursorSupplied
         ? new AccountToolError('cursor_invalid', 'The cursor does not match this listing; restart from the first page.')
@@ -234,7 +235,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     async unlinked_list_people(grant, { q = '', mode = 'best', presence, cursor, limit = 50 }, signal) {
       const { reader, captured } = publicReader(limit)
       let result
-      try { result = await reader.list({ query: q, mode, presence, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
+      try { result = await reader.list({ query: q, mode, presence, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured, signal) }
       return { kind: 'unlinked_list_people', revision: captured.revision, total: result.total ?? captured.total ?? result.profiles.length,
         ...(result.match ? { match: result.match } : {}), profiles: result.profiles,
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), visibility: 'public' }
@@ -246,7 +247,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         result = await reader.profile({ id, cursor: connectionsCursor, signal })
         // A merged profile answers with the profile it was merged into.
         if (result?.moved) result = { ...(await reader.profile({ id: result.moved, signal })), movedFrom: id }
-      } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured) }
+      } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured, signal) }
       if (!result?.profile) throw new AccountToolError('not_found', 'No published public profile has that id.')
       return { kind: 'unlinked_get_profile', revision: captured.revision, profile: result.profile, ...(result.movedFrom ? { movedFrom: result.movedFrom } : {}), visibility: 'public' }
     },
@@ -261,6 +262,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
               provenance: { type: 'recorded_public_path', path: result.paths[index], revision: result.revision }, visibility: 'public' })),
             ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) }
         } catch (error) {
+          requestDiagnostic().failure(error, signal)
           if (error instanceof AccountToolError) throw error
           if (error.message === 'known_connections_anchor_unavailable') throw new AccountToolError('degree_unproven', 'Second-degree requires a confirmed legacy profile anchor with recorded public paths; none is linked. Paths are never inferred.')
           if (error.message === 'known_connections_cursor_invalid') throw new AccountToolError('cursor_invalid', 'The cursor does not match the current listing; restart from the first page.')
@@ -272,7 +274,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       // legacy anchor; anchored recorded public paths join the same listing.
       let network
       try { network = await createAccountNetwork({ owner, getBackend }).readNetwork(undefined, { signal }) }
-      catch { throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
+      catch (error) { requestDiagnostic().failure(error, signal); throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
       const normalized = q.normalize('NFKC').trim().toLowerCase()
       const rows = network.assertions.filter(row => row.category === 'connections').map(connectionEntry)
         .filter(row => !normalized || [row.name, row.headline, row.company].some(value => typeof value === 'string' && value.normalize('NFKC').toLowerCase().includes(normalized)))
@@ -326,6 +328,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         if (typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'AI ranking is not configured.')
         return await createAccountNetwork({ owner, getBackend, complete }).search({ query, signal })
       } catch (error) {
+        requestDiagnostic().failure(error, signal)
         if (error instanceof AccountToolError) throw error
         if (error.message === 'known_connections_anchor_unavailable') throw new AccountToolError('degree_unproven', 'Recorded public paths require a confirmed legacy profile anchor; none is linked.')
         if (error.message === 'known_connections_cursor_invalid') throw new AccountToolError('cursor_invalid', 'The cursor does not match the current listing; restart from the first page.')
