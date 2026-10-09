@@ -6,6 +6,11 @@ const context = new AsyncLocalStorage()
 const TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_search_network', 'unlinked_search_everyone', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request', 'unlinked_read_import', 'unlinked_search_import'])
 const ERRORS = new Set(['not_linked', 'grant_revoked', 'invalid_input', 'cursor_invalid', 'client_unauthorized', 'scope_not_granted', 'not_found', 'degree_unproven', 'result_too_large', 'rate_limited', 'upstream_unavailable', 'not_a_member', 'already_connected', 'request_pending', 'request_unavailable', 'cooldown_active', 'account_link_required', 'protocol_error', 'internal_error'])
 const METHODS = new Set(['initialize', 'notifications/initialized', 'tools/list', 'tools/call', 'ping'])
+const CALL_FIELDS = ['rpc_method', 'tool', 'query_chars', 'cursor_supplied', 'page_limit', 'requested_timeout_ms', 'result_count', 'has_next_page', 'truncated', 'considered', 'indexed', 'lexical_matches', 'model_candidates', 'error_class', 'failure_stage', 'timed_out', 'rate_limited']
+function suppressBatchCallMetadata(row) {
+  if (row.rpc_batch === true) for (const field of CALL_FIELDS) delete row[field]
+  return row
+}
 const count = value => Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000_000) : undefined
 const bytes = (value, encoding) => typeof value === 'string' ? Buffer.byteLength(value, typeof encoding === 'string' ? encoding : undefined) : ArrayBuffer.isView(value) ? value.byteLength : 0
 export const diagnosticAccountId = ownerId => createHash('sha256').update('unlinked-diagnostics-owner-v1\0').update(ownerId).digest('hex')
@@ -34,7 +39,7 @@ export function createRequestDiagnostics({ emit, now = () => new Date(), monoton
       // Caller-supplied X-Request-ID, traceparent and JSON-RPC id never enter
       // diagnostics. The response ID is newly minted even on auth rejection.
       response.setHeader('X-Request-ID', row.request_id)
-      let requestBytes = request.readableLength ?? 0, responseBytes = 0, ended = false
+      let requestBytes = request.readableLength ?? 0, responseBytes = 0, ended = false, dispatched = 0
       const push = request.push
       request.push = function (chunk, encoding) { requestBytes += bytes(chunk, encoding); return push.call(this, chunk, encoding) }
       const write = response.write, end = response.end
@@ -76,6 +81,8 @@ export function createRequestDiagnostics({ emit, now = () => new Date(), monoton
           else if (['private_search_context_limit', 'shared_search_context_limit'].includes(error?.message)) row.failure_stage = 'model_input_limit'
         },
         rpc(message) {
+          dispatched = Math.min(dispatched + 1, 1_000_000_000)
+          if (dispatched > 1) { row.rpc_batch = true; row.rpc_message_count = dispatched }
           row.rpc_method = METHODS.has(message?.method) ? message.method : 'other'
           if (message?.method === 'tools/call') { trace.tool(message.params?.name); trace.input(message.params?.arguments) }
         },
@@ -107,6 +114,8 @@ export function createRequestDiagnostics({ emit, now = () => new Date(), monoton
         row.cancelled ||= !response.writableFinished
         if (!row.error_class && row.http_status >= 400) row.error_class = ({ 400: 'invalid_input', 401: 'not_linked', 403: 'scope_not_granted', 404: 'not_found', 413: 'result_too_large', 429: 'rate_limited', 503: 'upstream_unavailable' })[row.http_status] ?? 'protocol_error'
         row.rate_limited ||= row.http_status === 429
+        if (row.rpc_batch) row.cancelled = !response.writableFinished
+        suppressBatchCallMetadata(row)
         const minute = Math.floor(now().getTime() / 60000)
         if (minute !== window) { window = minute; emitted = 0 }
         if (++emitted > maxPerMinute) { dropped++; return }
@@ -137,8 +146,8 @@ export function safeDiagnosticRecord(value) {
   if (typeof value.route === 'string' && /^(?:\/mcp|\/api\/connector\/mcp|\/api\/agent\/unknown|\/api\/agent\/v1\/(?:whoami|people|people\/\{id\}|connections|connection-requests(?:\/(?:send|accept|ignore|withdraw))?|notifications|ai-search|search-network|search-everyone|provision-grant))$/.test(value.route ?? '')) result.route = value.route
   if (value.auth_outcome === 'accepted' && typeof value.account_id === 'string' && /^[a-f0-9]{64}$/.test(value.account_id ?? '')) result.account_id = value.account_id
   if (value.transport === 'gateway_mcp' && typeof value.gateway_assertion_hash === 'string' && /^[a-f0-9]{64}$/.test(value.gateway_assertion_hash ?? '')) result.gateway_assertion_hash = value.gateway_assertion_hash
-  for (const key of ['duration_ms', 'query_chars', 'page_limit', 'requested_timeout_ms', 'request_bytes_observed', 'response_bytes', 'result_count', 'considered', 'indexed', 'lexical_matches', 'model_candidates', 'dropped_since_last_emit', 'sink_dropped_since_last_write']) if (count(value[key]) !== undefined) result[key] = count(value[key])
-  for (const key of ['cancelled', 'timed_out', 'rate_limited', 'cursor_supplied', 'has_next_page', 'truncated', 'request_complete', 'response_complete']) if (typeof value[key] === 'boolean') result[key] = value[key]
+  for (const key of ['rpc_message_count', 'duration_ms', 'query_chars', 'page_limit', 'requested_timeout_ms', 'request_bytes_observed', 'response_bytes', 'result_count', 'considered', 'indexed', 'lexical_matches', 'model_candidates', 'dropped_since_last_emit', 'sink_dropped_since_last_write']) if (count(value[key]) !== undefined) result[key] = count(value[key])
+  for (const key of ['rpc_batch', 'cancelled', 'timed_out', 'rate_limited', 'cursor_supplied', 'has_next_page', 'truncated', 'request_complete', 'response_complete']) if (typeof value[key] === 'boolean') result[key] = value[key]
   if (value.http_status === null || Number.isSafeInteger(value.http_status) && value.http_status >= 100 && value.http_status <= 599) result.http_status = value.http_status
-  return result
+  return suppressBatchCallMetadata(result)
 }

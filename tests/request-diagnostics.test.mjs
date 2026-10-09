@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer, request as httpRequest } from 'node:http'
 import { createHash, createHmac, randomUUID } from 'node:crypto'
-import { createRequestDiagnostics, diagnosticTransport, diagnosticAccountId } from '../mcp-server/request-diagnostics.mjs'
+import { createRequestDiagnostics, diagnosticTransport, diagnosticAccountId, safeDiagnosticRecord } from '../mcp-server/request-diagnostics.mjs'
 import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountHostedHandler } from '../mcp-server/account-hosted.mjs'
 import { createIdeaflowConnectorHandler } from '../mcp-server/ideaflow-connector.mjs'
@@ -241,4 +241,65 @@ test('real People listing and degree-filtered search count profiles on REST and 
     assert.equal(f.rows.at(-1).result_count, count)
   }
   assert.ok(!JSON.stringify(f.rows).includes(SECRET))
+})
+
+
+test('concurrent MCP batches retain one request row without cross-call attribution', async t => {
+  for (const mode of ['success', 'provider-error', 'timeout']) {
+    const outputs = []
+    for (const enabled of [true, false]) {
+      let whoamiFinished
+      const ready = new Promise(resolve => { whoamiFinished = resolve })
+      const order = []
+      const actual = createAccountToolService({
+        getBackend: async () => ({ listImportIds: async () => [] }),
+        readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'private-revision', profiles: [{ id: 'private-profile-id', name: SECRET, headline: 'Engineer', positions: [], education: [], skills: [] }], connections: [] }),
+        complete: async ({ candidateIds }) => {
+          await ready
+          if (mode === 'provider-error') throw new Error('private_search_provider_http_429')
+          if (mode === 'timeout') throw new DOMException(SECRET, 'TimeoutError')
+          return { matches: [{ id: candidateIds[0], reason: SECRET }] }
+        },
+      })
+      const service = { call: async args => {
+        try { return await actual.call(args) }
+        finally {
+          order.push(args.name)
+          if (args.name === 'unlinked_whoami') whoamiFinished()
+        }
+      } }
+      const f = await fixture(t, { service, enabled })
+      const batch = [
+        { ...call('unlinked_ai_search', { query: 'engineer ' + SECRET }), id: SECRET + '-search' },
+        { ...call('unlinked_whoami'), id: SECRET + '-whoami' },
+      ]
+      const response = await f.rpc(batch)
+      assert.equal(response.status, 200)
+      const text = await response.text(), result = JSON.parse(text)
+      outputs.push(result)
+      assert.deepEqual(order, ['unlinked_whoami', 'unlinked_ai_search'])
+      assert.equal(result.length, 2)
+      assert.equal(result.find(value => value.id.endsWith('-whoami')).result.isError, undefined)
+      assert.equal(result.find(value => value.id.endsWith('-search')).result.isError, mode === 'success' ? undefined : true)
+      assert.equal(f.rows.length, enabled ? 1 : 0)
+      if (!enabled) continue
+      const row = f.rows[0]
+      assert.equal(row.rpc_batch, true)
+      assert.equal(row.rpc_message_count, 2)
+      assert.equal(row.account_id, diagnosticAccountId(owner.ownerId))
+      assert.equal(row.auth_outcome, 'accepted')
+      assert.equal(row.http_status, 200)
+      assert.equal(row.request_id, response.headers.get('x-request-id'))
+      assert.equal(row.request_bytes_observed, Buffer.byteLength(JSON.stringify(batch)))
+      assert.equal(row.response_bytes, Buffer.byteLength(text))
+      assert.equal(row.response_complete, true)
+      assert.equal(row.cancelled, false)
+      assert.ok(row.duration_ms >= 0)
+      assert.ok(Date.parse(row.at)); assert.ok(Date.parse(row.completed_at))
+      for (const field of ['tool', 'rpc_method', 'query_chars', 'result_count', 'considered', 'indexed', 'lexical_matches', 'model_candidates', 'error_class', 'failure_stage', 'timed_out', 'rate_limited', 'requested_timeout_ms', 'has_next_page', 'truncated', 'page_limit', 'cursor_supplied']) assert.equal(Object.hasOwn(row, field), false, field)
+      assert.deepEqual(safeDiagnosticRecord(row), row)
+      for (const secret of [SECRET, owner.ownerId, owner.userId, 'private-profile-id', 'private-revision']) assert.ok(!JSON.stringify(row).includes(secret))
+    }
+    assert.deepEqual(outputs[0], outputs[1])
+  }
 })

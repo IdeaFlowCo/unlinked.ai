@@ -45,6 +45,18 @@ zero. A 200 MCP response can still have a typed tool error or `protocol_error`
 persisted. Result counts do not prove search completeness. A top-ten AI answer
 is not labeled truncated unless the result contract explicitly says so.
 
+Accepted MCP requests with multiple SDK-dispatched messages are marked
+`rpc_batch: true`; `rpc_message_count` counts dispatched messages, including
+notifications, without retaining their IDs. They still emit only one row per
+HTTP request. Batch rows retain authentication, correlation, HTTP status,
+bytes, timing and response-level cancellation. RPC method, tool, input/result
+counts, pagination, typed error, provider cause, timeout and rate-limit fields
+are omitted because concurrent calls cannot be attributed to one tool. A batch
+HTTP200 does not establish that all calls succeeded; inspect the client response
+or reproduce the failing call individually. Empty, rejected-before-dispatch and
+single-message arrays cannot be identified as batches at this boundary; no
+cross-call attribution occurs for those requests.
+
 No Authorization, Cookie, credentials, raw query, path ID, URL parameters, RPC
 arguments, result contents, cursor, model input/output, arbitrary tool/method
 name, error message or stack can enter the record. The sink and reader apply

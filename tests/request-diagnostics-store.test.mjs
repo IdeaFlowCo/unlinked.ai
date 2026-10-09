@@ -61,3 +61,20 @@ test('backwards clock drops new date files instead of growing the retention capa
  sink.emit(row()); await sink.flush(); now = new Date('2026-10-08'); sink.emit(row()); await sink.flush()
  assert.deepEqual(await readdir(dir), ['requests-2026-10-09.jsonl']); assert.equal(sink.stats().dropped, 1)
 })
+
+
+test('persisted batch records and operator reads suppress ambiguous call fields', async t => {
+ const dir = await directory(t)
+ const sink = await createDiagnosticsStore({ directory: dir, now: () => new Date('2026-10-09') }); t.after(() => sink.close())
+ const batch = { ...row(), transport: 'direct_mcp', route: '/mcp', rpc_batch: true, rpc_message_count: 2, http_status: 200,
+   tool: 'unlinked_whoami', rpc_method: 'tools/call', result_count: 17, error_class: 'upstream_unavailable', failure_stage: 'provider_http', timed_out: true, rate_limited: true, query_chars: 12, cancelled: false }
+ sink.emit(batch); await sink.flush()
+ const persisted = JSON.parse(await readFile(join(dir, 'requests-2026-10-09.jsonl'), 'utf8'))
+ const result = await readDiagnostics({ directory: dir, requestId: batch.request_id })
+ for (const record of [persisted, result.records[0]]) {
+   assert.equal(record.rpc_batch, true); assert.equal(record.rpc_message_count, 2); assert.equal(record.http_status, 200)
+   assert.equal(record.cancelled, false)
+   for (const field of ['tool', 'rpc_method', 'result_count', 'error_class', 'failure_stage', 'timed_out', 'rate_limited', 'query_chars']) assert.equal(Object.hasOwn(record, field), false, field)
+   assert.ok(!JSON.stringify(record).includes(privateText))
+ }
+})
