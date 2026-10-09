@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { createQueryMatcher, rankMatches, words } from './text-match.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
 
@@ -11,7 +12,7 @@ export function createSharedPeopleSearch({ readPublishedSnapshot, complete }) {
     if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('shared_search_query_invalid')
     signal?.throwIfAborted()
     const data = await readPublishedSnapshot({ signal })
-    if (!data || data.state !== 'published' || data.complete !== true || typeof data.revision !== 'string' || !Array.isArray(data.profiles) || data.profiles.length > 20000) throw new Error('shared_people_unavailable')
+    if (!data || data.state !== 'published' || data.complete !== true || typeof data.revision !== 'string' || !Array.isArray(data.profiles) || data.profiles.length > PUBLIC_INDEX_MAX_PROFILES) throw new Error('shared_people_unavailable')
     const matcher = createQueryMatcher(query, 'best')
     // Word forms count (“investors” reaches “investor”). Profiles with every word lead the
     // shortlist; the rest follow with rarer words first, so each part of the query is represented.
