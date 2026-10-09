@@ -29,7 +29,7 @@ import { createConnectionActions } from './connection-actions.mjs'
 import { ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
@@ -208,7 +208,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const match = matches[index]
         return match ? { ...value, id: match.id, ...(match.photo ? { photo: match.photo } : {}), ...(match.presence ? { presence: match.presence, connectionCount: match.connectionCount } : {}) } : value
       })
-    } catch { return plainRows }
+    } catch {
+      // Without the index, a row whose source names its profile still links there.
+      return plainRows.map((value, index) => {
+        const id = rows[index].provenance?.toId !== undefined ? usableTarget(publicTarget(rows[index])) : null
+        return id ? { ...value, id } : value
+      })
+    }
   }
   // One reader per page view: every read of the index on that page shares one build.
   const pageReader = () => createPublicPeopleReader({ readPublishedSnapshot, reuse: true, photoFor })
@@ -669,6 +675,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
+          // People and company pages answer people with a page; the APIs keep JSON.
+          if (status === 503 && !url.pathname.startsWith('/api/') && url.pathname !== '/search-public') { journey(response, renderPeopleUnavailable(chrome), null, '', 503); return }
           response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' })); return
         } finally { publicBusy-- }
       }
@@ -1360,13 +1368,24 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const scope = publicProfessionalSearch ? input.getAll('scope').at(-1) ?? 'everyone' : 'own'
           if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
           if (scope === 'everyone') {
-            const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
+            let result = null
+            try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) }) }
+            catch { /* The page still shows the people this account knows, with a notice. */ }
             const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
             const reader = pageReader()
-            const own = network.imports.length || network.legacyProfileId ? await withConnect(session.owner, await contactRows(network.assertions.filter(row => row.category === 'connections').slice(0, 100), reader), reader) : undefined
-            const aiMatches = await withConnect(session.owner, result.matches, reader)
-            const view = renderPeople({ ...props, scope, aiMatches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.`, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
-            journey(response, view, props.importJob); return
+            const connections = network.assertions.filter(row => row.category === 'connections')
+            // On failure, the account's own people for the same words stand in for the AI picks.
+            const ownRows = async () => {
+              const rows = await contactRows(result ? connections.slice(0, 100) : connections, reader)
+              const typed = input.get('query').trim()
+              return result || !typed ? rows.slice(0, 100) : rankMatches(rows, createQueryMatcher(typed, 'best'), row => ({ name: words(row.name), text: words([row.name, row.company, row.headline].filter(Boolean).join(' ')) })).rows.slice(0, 100)
+            }
+            const own = network.imports.length || network.legacyProfileId ? await withConnect(session.owner, await ownRows(), reader) : undefined
+            const ai = result
+              ? { aiMatches: await withConnect(session.owner, result.matches, reader), aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }
+              : { aiError: own === undefined ? 'AI search could not finish. Try again in a minute.' : 'AI search could not finish. Try again in a minute; your own matching people are below.' }
+            const view = renderPeople({ ...props, scope, ...ai, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
+            journey(response, view, props.importJob, '', result ? 200 : 503); return
           }
           const account = createAccountNetwork({ owner: session.owner, getBackend, complete })
           const result = await account.search({ query: input.get('query'), signal: controller.signal })

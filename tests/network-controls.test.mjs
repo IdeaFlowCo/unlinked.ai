@@ -48,6 +48,7 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   const owner = { ownerId: 'controls-owner', userId: 'controls-user' }
   const importId = '3'.repeat(64), rowId = '4'.repeat(64)
   const importedAt = Date.UTC(2026, 2, 1)
+  let indexDown = false
   const resources = new Map([
     [importId, { sourceOwnerId: owner.ownerId, sourceRevision: 1, deleted: false, payload: { id: importId, createdAt: importedAt, status: 'indexed', assertionIds: [rowId], counts: { accepted: 1, indexed: 1, rejected: 0, skippedFiles: 0, failedFiles: 0 }, consent: COMBINED_UPLOAD_CONSENT } }],
     [rowId, { sourceOwnerId: owner.ownerId, deleted: false, payload: { id: rowId, ownerId: owner.ownerId, importId, category: 'connections', fields: { 'first name': 'Person', 'last name': '119', url: 'https://www.linkedin.com/in/person-119', 'connected on': '01 Jan 2014' } } }],
@@ -56,7 +57,7 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   const server = createServer((req, res) => void handler(req, res))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
   const endpoint = `http://127.0.0.1:${server.address().port}`
-  handler = createPrivateBrowserHandler({ baseUrl: endpoint.replace('http:', 'https:'), login: { begin: async () => ({ location: 'https://identity.invalid/', transaction: { state: 'test' } }), finish: async () => ({ issuer: 'https://identity.invalid', subject: 'test' }) }, resolveOwner: async () => owner, signup: async () => owner, issueAccountGrant: async () => ({}), revokeAccountGrant: async () => {}, readPublishedSnapshot: async () => ({ ...snapshot, connections: [{ fromId: 'p118', toId: 'p119' }] }), ownProfileId: async () => 'p118',
+  handler = createPrivateBrowserHandler({ baseUrl: endpoint.replace('http:', 'https:'), login: { begin: async () => ({ location: 'https://identity.invalid/', transaction: { state: 'test' } }), finish: async () => ({ issuer: 'https://identity.invalid', subject: 'test' }) }, resolveOwner: async () => owner, signup: async () => owner, issueAccountGrant: async () => ({}), revokeAccountGrant: async () => {}, readPublishedSnapshot: async () => { if (indexDown) throw Error('index down'); return { ...snapshot, connections: [{ fromId: 'p118', toId: 'p119' }] } }, ownProfileId: async () => 'p118',
     selfClaims: { lookupSlug: async slug => slug === 'person-119' ? 'p119' : null, lookupName: async () => null, claimable: async () => null, claim: async () => null },
     getBackend: async () => ({ adapter: {}, listImportIds: async () => [importId], listImportJobIds: async () => [], readResource: async (_, id) => structuredClone(resources.get(id) ?? null), readMemberConnections: async () => [{ requestId: 'first', name: 'Person 000', publicProfileId: 'p0', connectedAt: Date.UTC(2025, 1, 1) }, { requestId: 'last', name: 'Person 119', publicProfileId: 'p119', connectedAt: Date.UTC(2026, 1, 1) }] }) })
   const go = (path, cookie) => fetch(endpoint + path, { redirect: 'manual', headers: cookie ? { Cookie: cookie } : {} })
@@ -102,6 +103,15 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   assert.equal(new Set(rows.map(row => row[1])).size, 3)
   for (const row of rows) assert.match(row[2], /href="\/people\/p119"/)
   assert.doesNotMatch(await (await go('/network')).text(), /data-network-row=/)
+
+  // With the index down, an accepted connection still links to the profile it names;
+  // imported rows that need the index to resolve stay plain text.
+  indexDown = true
+  const downPage = await (await go('/network?q=Person', cookie)).text()
+  const downRows = [...downPage.match(/<section[^>]*aria-label="People you know"[^>]*>([\s\S]*?)<\/section>/)[1].matchAll(/<article[^>]*>([\s\S]*?)<\/article>/g)].map(row => row[1])
+  assert.ok(downRows.some(row => /href="\/people\/p0"/.test(row) && /Person 000/.test(row)))
+  assert.ok(downRows.some(row => /Person Engineer/.test(row) && !/href="\/people\//.test(row)))
+  indexDown = false
 
 })
 
