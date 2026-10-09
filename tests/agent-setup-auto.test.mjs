@@ -125,7 +125,7 @@ test('agent setup is prepared automatically, idempotently, stays revoked after r
   }
 })
 
-test('ensureGrant reuses a manually created grant instead of minting an automatic duplicate', async t => {
+test('ensureGrant reuses a manually created grant instead of minting an automatic duplicate', async () => {
   const owner = { ownerId: 'synthetic-manual-owner', userId: 'synthetic-manual-user' }
   const f = fixture(owner)
   const grants = createAccountGrantService({ issuer: 'https://synthetic-private.invalid', signingKey: randomBytes(32), getBackend: f.getBackend })
