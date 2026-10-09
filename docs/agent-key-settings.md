@@ -7,6 +7,14 @@ keys and can still be disconnected individually. The shared Ideaflow hub is a
 separate account connection at `https://id.ideaflow.app/agents`; direct keys belong
 only to Unlinked. Legacy Supabase `ul_` keys are not this runtime's key manager.
 
+The **For agents** page (`/agents`) leads with **Set up your agent**. Signed-in
+readers see **Open API keys in Settings**, which navigates to `/settings#api-keys`;
+anonymous readers see **Sign in to open API keys**, returning to Settings after
+sign-in. **Connect Claude or ChatGPT** jumps to the sign-in connector instructions.
+The guide restores existing sessions and is served with `Cache-Control: no-store`.
+Visiting it does not read, create or reveal an API key; copy controls remain in
+Settings. The guide link itself never claims to copy anything.
+
 ## Manual setup, including Muse
 
 1. Sign in to Unlinked and open **Settings → API keys**.
