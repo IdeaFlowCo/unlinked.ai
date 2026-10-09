@@ -351,7 +351,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .private-context .pc-head{display:flex;align-items:center;gap:10px}
 .unlinked-onboarding .private-context h3{margin:0}
 .unlinked-onboarding .private-context .pc-only{display:inline-flex;font-size:12px;font-weight:600;color:var(--brand);background:var(--tint);border-radius:99px;padding:2px 8px;margin-left:auto;white-space:nowrap}
-.unlinked-onboarding .private-context summary{display:flex;align-items:center;gap:6px;flex-wrap:wrap;cursor:pointer;min-height:32px;font-size:16px}
+.unlinked-onboarding .private-context details{margin:0;padding:0;border:0}
+.unlinked-onboarding .private-context summary{padding:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;cursor:pointer;min-height:32px;font-size:16px}
 .unlinked-onboarding .private-context summary .small{margin:0}
 .unlinked-onboarding .private-context h4{margin:14px 0 4px;font-size:15px}
 .unlinked-onboarding .private-context h5{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
