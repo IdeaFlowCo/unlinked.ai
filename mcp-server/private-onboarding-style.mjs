@@ -124,6 +124,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .phead h1{font:600 28px/1.15 "Public Sans",system-ui,sans-serif;letter-spacing:-.01em;margin:12px 24px 2px}
 .unlinked-onboarding .phead .hl{margin:0 24px 4px;font-size:17px}
 .unlinked-onboarding .phead>.small{margin:0 24px;display:block}
+.unlinked-onboarding .phead>.profile-links{margin-top:8px}
+.unlinked-onboarding .profile-links a{display:inline-block;padding:5px 0}
 .unlinked-onboarding .phead .actions{margin:16px 24px 0}
 .unlinked-onboarding .phead .notice{margin:16px 24px 0}
 .unlinked-onboarding .qr{margin:18px 24px 0;max-width:260px;background:#fff}

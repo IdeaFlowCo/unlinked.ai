@@ -171,7 +171,7 @@
             "description": "Index unavailable"
           }
         },
-        "description": " Public summaries and profiles include detailLevel (basic or detailed), derived only from visible content independently of membership. Profile connectionCount is the full published count and connectionsTotal is the current filtered count. Browser-only connections browsing is /people/{id}/connections?q=...&sort=detail|name; API cursor ordering remains alphabetical."
+        "description": " Public summaries and profiles include detailLevel (basic or detailed), derived only from visible content independently of membership. Profile connectionCount is the full published count and connectionsTotal is the current filtered count. Browser-only connections browsing is /people/{id}/connections?q=...&sort=detail|name; API cursor ordering remains alphabetical. Professional detail fields are defined by detailSchema in src/components/public-directory/contract.ts; link sourcing and privacy are documented in docs/profile-details.md."
       },
       "head": {
         "summary": "Probe public People status and JSON headers without a response body",

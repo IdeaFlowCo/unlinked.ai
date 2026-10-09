@@ -66,6 +66,8 @@ OpenChat messaging uses the same Ideaflow account. Profile recipients resolve on
 
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
+Professional profile details, outbound links and their privacy boundaries are documented in `docs/profile-details.md` in source.
+
 ## Direct OpenChat credentials
 
 For direct OpenChat setup, use https://chat.globalbr.ai/agents: API keys,

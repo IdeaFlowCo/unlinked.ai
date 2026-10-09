@@ -176,6 +176,9 @@
     "agentSetup": "https://chat.globalbr.ai/agents",
     "agentCredential": "Separate OpenChat oc_ key for messages and Context; Unlinked grants cannot send messages."
   },
+  "publicProfileDetails": {
+    "documentation": "docs/profile-details.md"
+  },
   "shared_connector": {
     "url": "https://id.ideaflow.app/mcp",
     "setup_url": "https://id.ideaflow.app/agents",

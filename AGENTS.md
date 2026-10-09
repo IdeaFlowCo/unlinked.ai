@@ -150,6 +150,8 @@ Unlinked is the network and OpenChat its messenger. The confidential `/api/messa
 
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
+Professional profile links and the in-memory enrichment of immutable published rows are documented in `docs/profile-details.md`; never copy raw assertion or contact-card fields into public profiles.
+
 ## People directory controls
 
 The standalone browser's progressive filtering, URL state, ordering and private date provenance are described in `docs/network-controls.md`. Browser ordering is not an agent API contract change; preserve existing agent defaults and keep owner relationship dates out of public profile projections.
