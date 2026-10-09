@@ -28,6 +28,16 @@ export const ACCOUNT_TOOL_ERROR_STATUS = Object.freeze({
   ambiguous_name: 409, identity_unavailable: 409,
 })
 
+// unlinked_search_network's text-first path: name the AI fallback's own
+// failures (missing provider, spent time budget) instead of a generic outage.
+export function networkSearchFailure(error, signal) {
+  if (error instanceof AccountToolError) return error
+  if (error?.message === 'private_search_configuration_required') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking is not configured.')
+  if (error?.message === 'private_search_query_limit') return new AccountToolError('invalid_input', 'The query was empty or too long.')
+  if (!signal?.aborted && error?.name === 'TimeoutError') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking did not finish within 25 s; search a name, company or title word, or page through unlinked_list_connections.')
+  return error
+}
+
 export class AccountToolError extends Error {
   // details: extra owner-only fields for the error body (ambiguous_name candidates).
   constructor(code, message, details) {
@@ -435,10 +445,11 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
           // with the hosted MCP launch tool's historical 100-row pages.
           return await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal, pageSize: 50 })
         }
-        if (typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'AI ranking is not configured.')
-        return await createAccountNetwork({ owner, getBackend, complete }).search({ query, signal })
+        return await createAccountNetwork({ owner, getBackend, complete }).searchNetwork({ query, signal })
       } catch (error) {
         if (error instanceof AccountToolError) throw error
+        const typed = networkSearchFailure(error, signal)
+        if (typed instanceof AccountToolError) throw typed
         if (error.message === 'known_connections_anchor_unavailable') throw new AccountToolError('degree_unproven', 'Recorded public paths require a confirmed legacy profile anchor; none is linked.')
         if (error.message === 'known_connections_cursor_invalid') throw new AccountToolError('cursor_invalid', 'The cursor does not match the current listing; restart from the first page.')
         if (error.message === 'known_connections_input_invalid') throw new AccountToolError('invalid_input', 'The search request was invalid (query, degree or cursor).')

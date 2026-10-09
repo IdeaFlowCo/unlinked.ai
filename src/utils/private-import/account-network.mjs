@@ -3,6 +3,11 @@ import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from './consent.mjs'
 import { createPrivateSearch } from './ai-search.mjs'
+import { matchNetworkText } from './network-text-search.mjs'
+
+// unlinked_search_network answers literal queries from text alone; only a
+// query with no literal match pays for AI ranking, within this budget.
+export const NETWORK_AI_BUDGET_MS = 25000
 
 // One authenticated account, all its currently published imports. Source
 // assertions keep their original IDs and provenance; no email/URL ownership.
@@ -65,8 +70,27 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
     }
     return { legacyProfileId: legacy?.profileId, id: networkId, ownerId: owner.ownerId, imports, indexed, assertions, consent: COMBINED_UPLOAD_CONSENT }
   }
-  return { readNetwork, search: typeof complete === 'function' ? async ({ query, signal }) => {
-    const result = await createPrivateSearch({ readImport: readNetwork, complete })({ importId: networkId, query, signal })
+  const search = typeof complete === 'function' ? async ({ query, signal, readFirst = readNetwork }) => {
+    const result = await createPrivateSearch({ readImport: readFirst, complete })({ importId: networkId, query, signal })
     return { ...result, scope: 'owner_network' }
-  } : null }
+  } : null
+  // Text first: every literal name/company/title match, no model call. A query
+  // with no literal match falls back to AI ranking under one overall budget.
+  const searchNetwork = async ({ query, signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
+    if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
+    const network = await readNetwork(networkId, { signal })
+    const text = matchNetworkText(network.assertions, query)
+    const considered = network.assertions.filter(row => row.category === 'connections').length
+    if (text?.total) return { importId: networkId, mode: 'text_match', indexed: network.indexed, considered, total: text.total, truncated: text.truncated,
+      matches: text.matches.map(({ row, matchedIn }) => ({ assertionId: row.id, sourceId: row.sourceId, rowId: row.rowId, subject: row.subject,
+        fields: Object.fromEntries(['first name', 'last name', 'company', 'position', 'connected on'].filter(key => typeof row.fields?.[key] === 'string').map(key => [key, row.fields[key].slice(0, 256)])),
+        reason: `Text match in ${matchedIn.join(' and ')}` })), scope: 'owner_network' }
+    if (!search) throw new Error('private_search_configuration_required')
+    // The already-read network seeds the ranking; its final consistency re-read stays live.
+    let first = network
+    const readFirst = async (id, options) => { if (first) { const value = first; first = null; return value } return readNetwork(id, options) }
+    const budget = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(aiBudgetMs)])
+    return search({ query, signal: budget, readFirst })
+  }
+  return { readNetwork, search, searchNetwork }
 }
