@@ -155,7 +155,8 @@ tools for each scope; historical entries are immutable.
   copying a new key is not a tool refresh. This stateless POST-only MCP transport
   does not deliver tool-list-change or notification pushes (`listChanged: false`).
   The notification tool reads the in-app feed on demand.
-- Current issuance is catalog v5. New permission categories still need explicit
+- Current issuance is catalog v6 (v5 plus the read-only, owner-scoped
+  `unlinked_lookup_contact` in every scope). New permission categories still need explicit
   consent. Manual-key connection-request permission can be edited in Settings;
   OAuth apps require actual consent/reconsent for additional permissions.
 
@@ -256,7 +257,11 @@ All JSON. GET parameters are query-string; POST bodies are
 
 ### `GET /api/agent/v1/whoami` ⇄ `unlinked_whoami`
 Response: `{ kind, ownerId, grant: { scope, version, tools, toolRefresh }, importCount,
-legacyProfile: { profileId, name, revision } | null, publicIndexAvailable }`.
+imports: { uploaded, recoveredArchive }, legacyProfile: { profileId, name, revision } | null, publicIndexAvailable }`.
+`importCount` counts every source of `owner_import` connections: uploaded imports
+plus a recovered legacy archive (`imports.recoveredArchive`). Before 0.6.2 it
+counted uploads only, so an owner whose contacts came from the recovered archive
+read `importCount: 0` while `unlinked_list_connections` listed them.
 `ownerId` is the stable identifier for fail-closed linkage verification.
 `grant.toolRefresh` explains same-key tool refresh and explicit permissions; see the
 [permission and tool-refresh policy](#optional-connection-actions).
@@ -296,6 +301,28 @@ Response: `{ kind, unseen, unread, notifications: [{ id, kind, actorName,
 actorProfileId?, createdAt, read }], visibility: "owner_private" }`. Kinds:
 `connection_request_received`, `connection_request_accepted`,
 `invite_accepted`, `profile_claimed`. Reading here marks nothing seen or read.
+
+### `POST /api/agent/v1/contacts/lookup` `{ connectionId | linkedinUrl | profileId | refHashes }` ⇄ `unlinked_lookup_contact`
+Read-only, owner-scoped, catalog v6 (every scope). Resolves one of the owner's
+own contacts without paging; give exactly one input:
+- `connectionId`: an `id` from `unlinked_list_connections` (degree 1).
+- `linkedinUrl`: a `linkedin.com/in/` address, with or without scheme.
+- `profileId`: a published profile id; answers with the owner's connection to
+  that person when there is one, otherwise the public profile only.
+- `refHashes`: up to 100 `linkedinRefHash` values; answers the owner's contacts
+  among them (`{ kind, contacts: [...] }`, unmatched hashes are omitted).
+
+Response: `{ kind, contact: { connectionId | null, name, headline?, company?,
+linkedinRefHash | null, publishedProfileId | null, provenance? }, visibility }`.
+`linkedinRefHash` is the SHA-256 hex of the canonical LinkedIn slug
+(`linkedinSlug()` in `src/utils/public-people/url-identity.mjs`: decoded,
+lowercased) — the value of the Ideaflow people-overlay ref `linkedin:in:<hash>`
+OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`).
+`publishedProfileId` is set when the same person has a published profile (the
+row's own published profile, or one with the same LinkedIn address).
+`visibility` is `owner_private` when the answer comes from the owner's own
+contacts and `public` when only a published profile matched. Only the caller's
+own imports are ever read; nothing matching is typed `not_found`.
 
 ### `POST /api/agent/v1/ai-search` `{ query, scope?, timeoutMs? }` ⇄ `unlinked_ai_search`
 Explicit AI tool. `scope: "mine"` ranks only the owner's imported network

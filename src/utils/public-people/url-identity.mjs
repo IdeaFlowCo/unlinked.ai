@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 // A member's import mints a `public-<row>` person for every connection row. When
 // that row's LinkedIn address is the address of a recovered legacy profile, it
 // is the same person: these automatic merges fold the minted copy into the
@@ -22,4 +23,12 @@ export function urlIdentityMerges({ rows, slugIndex, explicit = [] }) {
     merges.push({ id: `url:${row.publicId}`, kind: 'merge', profileId: row.publicId, survivorId: survivorOf.get(legacyId) ?? legacyId })
   }
   return merges
+}
+
+// The canonical LinkedIn slug as a private-graph reference value: the Ideaflow
+// people overlay names an imported contact `linkedin:in:<sha256 hex of slug>`
+// (Noos docs/PEOPLE_OVERLAY.md), so no plaintext address is stored there.
+export function linkedinRefHash(slug) {
+  if (typeof slug !== 'string' || !slug) return null
+  return createHash('sha256').update(slug, 'utf8').digest('hex')
 }

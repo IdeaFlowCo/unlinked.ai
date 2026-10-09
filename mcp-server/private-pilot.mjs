@@ -36,7 +36,7 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagi
     oauth: oauth ?? undefined, listAccountGrants: accountGrants?.listGrants, accountKeys: accountGrants, ...(lookupCompanyFacts ? { lookupCompanyFacts } : {}), profilePhotos, autoSignIn })
   // One tool service instance backs both agent surfaces, so the MCP tools and
   // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
-  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations }) : null
+  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined }) : null
   const mcp = accountGrants ? createAccountHostedHandler({ authenticateGrant: accountGrants.authenticateGrant, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService, challenge: oauth?.challenge }) : createPrivateHostedHandler({ authenticateGrant: grants.authenticateGrant, complete, allowedHosts: [base.host], allowedOrigins: [base.origin],
     readResource: async (grant, type, id) => (await getBackend(grant)).readResource(type, id),
     readAsset: async (grant, sha256) => (await getBackend(grant)).readAsset(sha256),

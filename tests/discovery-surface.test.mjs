@@ -44,7 +44,7 @@ test('public/.well-known/mcp/server-card.json describes canonical account MCP', 
   assert.ok(!card.transports?.stdio, 'canonical card must not advertise legacy stdio bootstrap');
 
   const toolNames = card.tools.map((t) => t.name);
-  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']);
+  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']);
   const searchTool = card.tools[0];
   assert.deepEqual(searchTool.inputSchema.required, ['query']);
   assert.equal(searchTool.inputSchema.additionalProperties, false);
@@ -69,7 +69,7 @@ test('public/.well-known/unlinked.json product descriptor is valid', () => {
   assert.equal(descriptor.data.rawArchiveAgentAccess, false);
   assert.equal(descriptor.mcp.url, 'https://www.unlinked.ai/mcp');
   assert.equal(descriptor.mcp.transport, 'streamable-http');
-  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']);
+  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact']);
 });
 
 test('machine-readable MCP config never advertises legacy local launch bootstrap', () => {

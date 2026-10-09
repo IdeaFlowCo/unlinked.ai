@@ -52,7 +52,7 @@ async function site(t, limits) {
 
 test('catalog 1–3 retains main semantics; v4 is a sibling and defaults are read-only', async t => {
   for (const version of [1,2,3]) assert.deepEqual(ACCOUNT_GRANT_TOOL_VERSIONS[version], MAIN_ACCOUNT_GRANT_TOOL_VERSIONS[version])
-  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION,5)
+  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION,6)
   assert.ok(ACCOUNT_GRANT_TOOL_VERSIONS[4][ACCOUNT_WRITE_SCOPE])
   const p=await site(t), issued=await p.grants.issueGrant(a)
   assert.ok(!issued.tools.some(x=>/unlinked_(send|accept|ignore|withdraw)_/.test(x)))

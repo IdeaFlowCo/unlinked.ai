@@ -9,6 +9,15 @@ const audience = 'unlinked-account-tools-v1'
 // the catalog entry for its (version, scope). Valid historical records resolve
 // to current tools within that same permission and data boundary. New permission
 // categories still require explicit owner consent; viewing never rewrites a grant.
+// Version 5 permits connection actions without widening owner-only reads.
+const ACCOUNT_GRANT_V5 = Object.freeze({
+  owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
+  owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
+  owner_network_and_write: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
+    'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
+  owner_network_and_public_and_write: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
+    'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
+})
 export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
   1: Object.freeze({
     owner_network: Object.freeze(['unlinked_search_network']),
@@ -34,17 +43,18 @@ export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
     owner_network_and_public_and_write: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
       'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
   }),
-  // Version 5 permits connection actions without widening owner-only reads.
-  5: Object.freeze({
-    owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
-    owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
-    owner_network_and_write: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
-      'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
-    owner_network_and_public_and_write: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
-      'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
-  }),
+  5: ACCOUNT_GRANT_V5,
+  // Version 6 adds one read-only, owner-scoped tool to every scope: resolve
+  // one of the owner's own contacts (connection id, LinkedIn address or
+  // published profile id) without paging. Same data boundary as the
+  // connections listing, so existing keys gain it without reconsent.
+  6: Object.freeze(Object.fromEntries(['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write'].map(scope => {
+    const tools = [...ACCOUNT_GRANT_V5[scope]]
+    tools.splice(tools.indexOf('unlinked_list_notifications') + 1, 0, 'unlinked_lookup_contact')
+    return [scope, Object.freeze(tools)]
+  }))),
 })
-export const CURRENT_ACCOUNT_GRANT_VERSION = 5
+export const CURRENT_ACCOUNT_GRANT_VERSION = 6
 export const accountGrantTools = (version, scope) => ACCOUNT_GRANT_TOOL_VERSIONS[version]?.[scope] ?? null
 // The opt-in scope that adds connection-request write tools.
 export const ACCOUNT_WRITE_SCOPE = 'owner_network_and_public_and_write'
