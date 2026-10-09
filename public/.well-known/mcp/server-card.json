@@ -357,6 +357,447 @@
         ],
         "additionalProperties": false
       }
+    },
+    {
+      "name": "unlinked_get_person_private",
+      "description": "Read the owner’s private card about an Unlinked person: profileId may be a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. Returns the notes and relations recorded about that person (with note and link ids for corrections), plus profileId, connectionId and linkedinRefHash when they apply. entities is empty when nothing is recorded yet. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "profileId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_get_private_thing",
+      "description": "Read one of the owner’s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "thingId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "thingId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_list_private_things",
+      "description": "List the owner’s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind. Use an id with unlinked_get_private_thing. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "person",
+              "company",
+              "idea",
+              "project"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_search_private",
+      "description": "Search the owner’s private people knowledge in one call: entities matched by name or private note text, and relations matched by relation text, either end’s name, or relationType (knows, family, works_at, worked_with, works_on, attended, interested_in, other). Give at least one of query, relationType or kind. At most 50 of each; truncated says more matched. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "relationType": {
+            "type": "string",
+            "enum": [
+              "knows",
+              "family",
+              "works_at",
+              "worked_with",
+              "works_on",
+              "attended",
+              "interested_in",
+              "other"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "person",
+              "company",
+              "idea",
+              "project"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_get_neighbourhood",
+      "description": "Read one person or thing and what surrounds it in the owner’s private graph: everything one (default) or two private relations away, and those relations (fromId/toId). subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Never creates anything; empty when nothing is recorded. Bounded; truncated says it was cut. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subjectKind": {
+            "type": "string",
+            "enum": [
+              "unlinked",
+              "thing",
+              "user"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "depth": {
+            "anyOf": [
+              {
+                "type": "number",
+                "enum": [
+                  1
+                ]
+              },
+              {
+                "type": "number",
+                "enum": [
+                  2
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "subjectKind",
+          "subjectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_save_private_thing",
+      "description": "Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”). Returns its id for notes and links. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one. Set createNew true with a clientRequestId only to save a different one with an existing name; retries return the same entity. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "person",
+              "company",
+              "idea",
+              "project"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "createNew": {
+            "type": "boolean"
+          },
+          "clientRequestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_add_private_note",
+      "description": "Add a private note about a person or thing. subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Adding the same text again returns the existing note. Recorded as written by this agent (author agent:<key or app name>, source direct-key). Set assertion “inferred” when you concluded it yourself. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subjectKind": {
+            "type": "string",
+            "enum": [
+              "unlinked",
+              "thing",
+              "user"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "assertion": {
+            "type": "string",
+            "enum": [
+              "stated",
+              "inferred"
+            ]
+          }
+        },
+        "required": [
+          "subjectKind",
+          "subjectId",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_delete_private_note",
+      "description": "Delete (undo) one of the owner’s private notes by note id. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "noteId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_add_private_link",
+      "description": "Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another. Subject: subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Target: toKind “unlinked” + toId (published profile id, connection id or linkedin.com/in/ address), toKind “user” + toId (OpenChat user id already in the owner’s private notes), or toKind person/company/idea/project with toId (saved thing id) or toName. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one, then pass its id. Set createNew true with a clientRequestId only to save a different one with an existing name. The same subject, relation and target is one link, so retries never duplicate. Recorded as written by this agent (author agent:<key or app name>, source direct-key). relationType is derived from the words. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subjectKind": {
+            "type": "string",
+            "enum": [
+              "unlinked",
+              "thing",
+              "user"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "relation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "toKind": {
+            "type": "string",
+            "enum": [
+              "unlinked",
+              "user",
+              "person",
+              "company",
+              "idea",
+              "project"
+            ]
+          },
+          "toId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "toName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "createNew": {
+            "type": "boolean"
+          },
+          "clientRequestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "assertion": {
+            "type": "string",
+            "enum": [
+              "stated",
+              "inferred"
+            ]
+          }
+        },
+        "required": [
+          "subjectKind",
+          "subjectId",
+          "relation",
+          "toKind"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_update_private_link",
+      "description": "Correct one of the owner’s private relations in place by link id, for example “sister of” to “cousin of”. The relation text, its relationType and the link’s identity change together; if the owner already has that exact relation between the same two ends, the two become one and the existing link is returned with merged true. Recorded as written by this agent (author agent:<key or app name>, source direct-key). Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "linkId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "relation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "assertion": {
+            "type": "string",
+            "enum": [
+              "stated",
+              "inferred"
+            ]
+          }
+        },
+        "required": [
+          "linkId",
+          "relation"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_delete_private_link",
+      "description": "Delete (undo) one of the owner’s private relations by link id. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "linkId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "linkId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_delete_private_thing",
+      "description": "Delete (undo) one of the owner’s private entities by id: removes it with its private notes and every private relation to or from it. Cannot be reversed. Deleting an entity about an Unlinked person forgets only the owner’s private notes; the profile and contact are untouched. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "thingId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "thingId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "permission": "private_notes"
     }
   ],
   "connectionBrowsing": {

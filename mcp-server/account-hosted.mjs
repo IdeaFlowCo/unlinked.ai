@@ -4,8 +4,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
-import { accountGrantTools } from './account-grants.mjs'
-import { ACCOUNT_TOOL_DESCRIPTIONS, ACCOUNT_TOOL_SCHEMAS, AccountToolError, WRITE_TOOLS, createAccountToolService } from './account-tools.mjs'
+import { PRIVATE_NOTES_TOOLS, accountGrantTools } from './account-grants.mjs'
+import { PRIVATE_NOTES_DESTRUCTIVE } from './private-notes-tools.mjs'
+import { ACCOUNT_TOOL_DESCRIPTIONS, ACCOUNT_TOOL_SCHEMAS, AccountToolError, MUTATING_TOOLS, createAccountToolService } from './account-tools.mjs'
 
 // Tool failures carry sanitized typed causes (code/message plus an internal
 // error identifier) so a provider or aggregation failure is distinguishable
@@ -37,7 +38,9 @@ export function typedToolFailure(error) {
 // the MCP surface and the HTTP agent API (docs/agent-api.md) stay one contract.
 const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact',
   // Registered only for grants whose opt-in scope includes them.
-  'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']
+  'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request',
+  // Registered only for grants with the private-notes permission (catalog v7).
+  ...PRIVATE_NOTES_TOOLS]
 
 export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
   const base = new URL(origin)
@@ -99,7 +102,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     for (const name of SERVICE_TOOLS) {
       if (!grant.tools.includes(name)) continue
       // Clients that ask before acting see which tools change something.
-      const annotations = WRITE_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
+      const annotations = MUTATING_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: PRIVATE_NOTES_DESTRUCTIVE.has(name), idempotentHint: PRIVATE_NOTES_TOOLS.includes(name), openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
       server.registerTool(name, { description: ACCOUNT_TOOL_DESCRIPTIONS[name], inputSchema: ACCOUNT_TOOL_SCHEMAS[name], annotations }, async input => {
         const controller = new AbortController()
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
@@ -109,7 +112,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
           return { content: [{ type: 'text', text }] }
         } catch (error) {
           const typed = error instanceof AccountToolError ? error : new AccountToolError('upstream_unavailable', 'The tool could not finish; retry.')
-          return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: typed.code, message: typed.message } }) }] }
+          return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: typed.code, message: typed.message, ...(typed.details ?? {}) } }) }] }
         }
       })
     }

@@ -52,9 +52,16 @@ connections keep working; there is no forced migration. New OAuth permissions
 require consent/reconsent, not this manual-key switch. Muse's observed manual form
 uses the direct Unlinked key/OpenAPI instructions above; Muse OAuth remains untested.
 
-“X knows Y” private relationship assertions are not connection requests. Existing
-OpenChat private-link capability is a separately reviewed adapter/surface follow-up
-(`unlinked-47t` design gate); this release creates no relationship backend or toggle.
+“X knows Y” private relationship assertions are not connection requests. Since
+catalog v7 (unlinked-9kk.5) they have their own switch under the selected key:
+**Private people notes & relations**, on by default for new and existing keys
+(Jacob's decision, unlinked-lf4). It sits beside the connection-request switch in
+the same **Save permissions** form and uses the same compare-and-set edit (token,
+jti, issue time and generation unchanged). **Create API key** offers it as a
+ticked checkbox. Off hides the twelve private-notes tools from that key's
+`tools/list` and refuses them with `scope_not_granted`. The notes live in the
+owner's Ideaflow people overlay (shared with OpenChat); each agent-written note
+or relation is labelled with the key's name. Contract: [agent-api.md](agent-api.md#private-people-notes--relations-catalog-v7).
 Legacy Thoughtstream/Ideaflow and NoteStream destinations remain distinct.
 
 ## Independent lifecycle

@@ -76,7 +76,30 @@
       ],
       "ownerOnlyScope": "owner_network_and_write"
     },
-    "toolListChangePush": false
+    "toolListChangePush": false,
+    "privateNotesScope": {
+      "permission": "Private people notes & relations",
+      "scopeSuffix": "_and_private_notes",
+      "oauthScope": "private_notes",
+      "defaultForApiKeys": true,
+      "oauthConsent": "checkbox, starts ticked; connections made before catalog v7 reconnect",
+      "tools": [
+        "unlinked_get_person_private",
+        "unlinked_get_private_thing",
+        "unlinked_list_private_things",
+        "unlinked_search_private",
+        "unlinked_get_neighbourhood",
+        "unlinked_save_private_thing",
+        "unlinked_add_private_note",
+        "unlinked_delete_private_note",
+        "unlinked_add_private_link",
+        "unlinked_update_private_link",
+        "unlinked_delete_private_link",
+        "unlinked_delete_private_thing"
+      ],
+      "visibility": "owner-only; shown in Unlinked and OpenChat; never notifies anyone; not a connection request; not messaging",
+      "messaging": "OpenChat via the shared Ideaflow connector https://id.ideaflow.app/mcp (OpenChat permission); never an Unlinked key permission"
+    }
   },
   "agentHttpApi": {
     "base": "https://www.unlinked.ai/api/agent/v1/",

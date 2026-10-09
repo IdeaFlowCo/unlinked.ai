@@ -27,7 +27,7 @@ import { CONNECTION_FEEDBACK_SCRIPT } from './connection-feedback.mjs'
 import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
 import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
-import { ACCOUNT_WRITE_SCOPE, effectiveAccountGrant } from './account-grants.mjs'
+import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
 import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
@@ -430,14 +430,16 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // request and shows consent (signing in first when needed); POST carries the
   // same parameters plus the session CSRF token and re-validates everything.
   async function authorizeConnector(request, response, url, session, chrome) {
-    let params = url.searchParams, decision = null, access = 'read'
+    let params = url.searchParams, decision = null, access = 'read', privateNotes = false
     if (request.method === 'POST') {
       const input = new URLSearchParams((await body(request, 16384)).toString('utf8'))
-      if (!session || input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('decision').length !== 1 || input.getAll('access').length > 1) throw new Error('private_browser_csrf')
+      if (!session || input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('decision').length !== 1 || input.getAll('access').length > 1 || input.getAll('private_notes').length > 1) throw new Error('private_browser_csrf')
       decision = input.get('decision')
       access = input.get('access') ?? 'read'
-      if (!['allow', 'deny'].includes(decision) || !['read', 'connections'].includes(access)) throw new Error('private_browser_csrf')
-      params = new URLSearchParams([...input].filter(([key]) => !['csrf', 'decision', 'access'].includes(key)))
+      // An unticked checkbox sends nothing: private notes off for this app.
+      privateNotes = input.get('private_notes') === 'on'
+      if (!['allow', 'deny'].includes(decision) || !['read', 'connections'].includes(access) || ![null, 'on'].includes(input.get('private_notes'))) throw new Error('private_browser_csrf')
+      params = new URLSearchParams([...input].filter(([key]) => !['csrf', 'decision', 'access', 'private_notes'].includes(key)))
     } else if (request.method !== 'GET') { response.writeHead(405).end(); return }
     const result = await oauth.readAuthorization(params)
     if (!result.ok) {
@@ -455,8 +457,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     if (access === 'connections' && !offerConnections) throw new Error('private_browser_csrf')
     const ownerHash = createHash('sha256').update(session.owner.ownerId).digest('hex')
     if (decision === 'deny') { await recordAudit({ event: 'oauth_connection_denied', app: result.request.app, ownerHash }); redirect(response, oauth.deny(result.request)); return }
-    const location = oauth.approve(result.request, session.owner, { connections: access === 'connections' })
-    await recordAudit({ event: 'oauth_connection_approved', app: result.request.app, ownerHash, access })
+    const location = oauth.approve(result.request, session.owner, { connections: access === 'connections', privateNotes })
+    await recordAudit({ event: 'oauth_connection_approved', app: result.request.app, ownerHash, access, privateNotes })
     response.setHeader('Referrer-Policy', 'no-referrer')
     redirect(response, location)
   }
@@ -1336,17 +1338,21 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (signup && accountKeys && request.method === 'POST' && url.pathname === '/settings/api-keys') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
         const action = input.get('action'), id = input.get('grantId')
-        const allowed = action === 'create' ? ['csrf', 'action', 'name', 'access'] : action === 'rename' ? ['csrf', 'action', 'grantId', 'name'] : action === 'permissions' ? ['csrf', 'action', 'grantId', 'access'] : ['csrf', 'action', 'grantId']
+        const allowed = action === 'create' ? ['csrf', 'action', 'name', 'access', 'private_notes'] : action === 'rename' ? ['csrf', 'action', 'grantId', 'name'] : action === 'permissions' ? ['csrf', 'action', 'grantId', 'access', 'private_notes'] : ['csrf', 'action', 'grantId']
         if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || [...input.keys()].some(key => !allowed.includes(key) || input.getAll(key).length !== 1)) throw new Error('private_browser_csrf')
         let selected = id
         if (action === 'create') {
-          const access = input.get('access')
+          const access = input.get('access'), notes = input.get('private_notes')
           if (access !== null && (access !== 'connections' || !connectionActionsAvailable)) throw new Error('private_browser_csrf')
-          selected = (await issueAccountGrant(session.owner, undefined, { name: input.get('name'), ...(access ? { scope: ACCOUNT_WRITE_SCOPE } : {}) })).grantId
+          if (notes !== null && notes !== 'on') throw new Error('private_browser_csrf')
+          selected = (await issueAccountGrant(session.owner, undefined, { name: input.get('name'),
+            ...(access ? { scope: composeAccountScope({ public: true, write: true }) } : {}), privateNotes: notes === 'on' })).grantId
         } else if (action === 'permissions') {
-          const access = input.get('access')
+          const access = input.get('access'), notes = input.get('private_notes')
           if (access !== null && (access !== 'connections' || !connectionActionsAvailable)) throw new Error('private_browser_csrf')
-          await accountKeys.setConnectionActions(session.owner, id, access === 'connections')
+          if (notes !== null && notes !== 'on') throw new Error('private_browser_csrf')
+          // One CAS write for both switches; the key's token, jti and generation are unchanged.
+          await accountKeys.setPermissions(session.owner, id, { connections: access === 'connections', privateNotes: notes === 'on' })
         } else if (action === 'rename') await accountKeys.renameKey(session.owner, id, input.get('name'))
         else if (action === 'replace') await accountKeys.replaceKey(session.owner, id)
         else if (action === 'revoke') { await accountKeys.readKey(session.owner, id); await revokeAccountGrant(session.owner, id); selected = null }
@@ -1460,13 +1466,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // another client. Replacement now targets a key explicitly in Settings.
         const access = input.getAll('access')
         if (access.length > 1 || (access.length && !['read', 'connections'].includes(access[0])) || (access[0] === 'connections' && !connectionActionsAvailable) || [...input.keys()].some(key => !['csrf', 'access'].includes(key))) throw new Error('private_browser_csrf')
-        const issued = await issueAccountGrant(session.owner, undefined, access[0] === 'connections' ? { scope: ACCOUNT_WRITE_SCOPE } : {})
+        const issued = await issueAccountGrant(session.owner, undefined, access[0] === 'connections' ? { scope: composeAccountScope({ public: true, write: true, privateNotes: true }) } : {})
         const { accessToken, grantId: replacement } = issued
         const configuration = scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken })
         const setups = agentClientSetups({ endpoint: mcpEndpoint, accessToken })
         const jobs = await jobResources(), props = jobProps(jobs)
         journey(response, renderSettings({ ...props, selectedKeyId: replacement, keyManagement: Boolean(accountKeys), imports: summaries(jobs), grants: settingsGrants(await grantList(session.owner, backend)), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector,
-          agentAccess: { scope: issued.scope ?? (access[0] === 'connections' ? ACCOUNT_WRITE_SCOPE : undefined), missingTools: [], regenerated: true }, connectionActionsAvailable }), props.importJob, agentSetupCopyScript()); return
+          agentAccess: { scope: issued.scope, missingTools: [], regenerated: true }, connectionActionsAvailable }), props.importJob, agentSetupCopyScript()); return
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         if (uploadBusy) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
