@@ -384,8 +384,14 @@ lexicalMatches, modelCandidates, matches: [{ id, name, headline?, location?,
 company?, reason }], visibility: "public" }`.
 
 ### `POST /api/agent/v1/search-network` `{ query, degree?, cursor? }` ⇄ `unlinked_search_network`
-Launch tool, unchanged semantics: free-text AI search of the owner network, or
-recorded-path reading with `degree`. On HTTP, failures are typed
+Launch tool. Without `degree` it is **text first**: when every query word
+starts a word in a connection's name, company or position, it returns all such
+connections at once with no model call (`mode: "text_match"`, sorted by name,
+at most 500 rows with `total` and `truncated`, `reason` naming the matched
+fields). Only a query with no literal match is AI-ranked (`mode:
+"query_time_ai"`, top ten), within one 25 s budget; a spent budget returns
+`upstream_unavailable` naming the text-query and `list_connections`
+alternatives. With `degree` it reads recorded paths. On HTTP, failures are typed
 (`degree_unproven`, `cursor_invalid`, ...) and recorded-path pages cap at 50
 rows; on MCP it returns the same typed failure shape and keeps 100-row pages
 (offset cursors are interchangeable between the two).
