@@ -142,11 +142,8 @@ A grant record stores the exact tool list it was issued with plus a catalog
 the catalog entry for `(version, scope)` in
 `ACCOUNT_GRANT_TOOL_VERSIONS` (`mcp-server/account-grants.mjs`):
 
-| Version | `owner_network` scope | `owner_network_and_public` scope |
-|---|---|---|
-| 1 (pre-existing grants) | `unlinked_search_network` | + `unlinked_search_everyone` |
-| 2 | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
-| 3 | version 2 + `unlinked_list_connection_requests`, `unlinked_list_notifications` (read-only) | version 2 + the same two tools |
+The implementation catalog is the authoritative list of historical and current
+tools for each scope; historical entries are immutable.
 
 - Valid v1/v2 and later records resolve to the current catalog **within the same
   enabled permission and data boundary**. Owner-only keys stay owner-only; reads
@@ -287,14 +284,14 @@ connections: [{ id, name, headline?, company?, linkedinUrl?, provenance,
 visibility }], nextCursor? }`.
 
 ### `GET /api/agent/v1/connection-requests?direction` ⇄ `unlinked_list_connection_requests`
-Read-only, grant catalog version 3. `direction` `received` (default: requests
+Read-only; availability follows [grant-scope normalization](#grant-scope-versioning-how-old-grants-keep-working). `direction` `received` (default: requests
 waiting for the owner's answer) or `sent` (the owner's requests still pending;
 a request the recipient ignored still reads as pending, as it does in the app).
 Response: `{ kind, direction, total, requests: [{ id, direction, status, name,
 profileId?, note?, createdAt }], visibility: "owner_private" }`. Sending, accepting, ignoring and withdrawing require the separate explicit opt-in connection scope in catalog v5.
 
 ### `GET /api/agent/v1/notifications?limit` ⇄ `unlinked_list_notifications`
-Read-only, grant catalog version 3. Newest first, `limit` 1–50 (default 20).
+Read-only; availability follows [grant-scope normalization](#grant-scope-versioning-how-old-grants-keep-working). Newest first, `limit` 1–50 (default 20).
 Response: `{ kind, unseen, unread, notifications: [{ id, kind, actorName,
 actorProfileId?, createdAt, read }], visibility: "owner_private" }`. Kinds:
 `connection_request_received`, `connection_request_accepted`,
@@ -387,7 +384,7 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
   subject>"}` — the pair the caller verified itself. Unknown fields, non-https
   issuers or malformed subjects are `invalid_input`.
 - **Settings auto-setup (`ensureGrant(owner)`):** reuses the newest live,
-  non-OAuth credential at its issued scope and version, including an opted-in
+  non-OAuth credential with its existing scope and effective current catalog, including an opted-in
   write credential. With none, it prepares the deterministic default read
   grant unless that automatic grant was revoked. Explicit key selection reads
   only that existing key. Manual creation and selected-key lifecycle are owned
@@ -479,10 +476,8 @@ adds `owner_network_and_write` so an owner-only key can enable connection action
 without gaining public read tools. `owner_network_and_public_and_write` remains
 supported. Both write scopes authorize exactly the four actions below.
 
-Settings → API keys puts selection, Show/Copy API key and Copy agent setup before
-client instructions. **Send and manage connection requests → Save permissions**
-enables/disables writes for just the selected manual key, with the same token.
-Creation defaults to read-only and has a visible opt-in. The browser requires a
+The [Settings guide](agent-key-settings.md#permissions-and-connector-choice) owns
+manual-key controls and connector choice. The browser requires a
 session, exact CSRF, same origin, validated fields and durable owner checks. A CAS
 updates scope/catalog while preserving jti, issuedAt and generation. It cannot
 resurrect a revoked grant or overwrite a concurrent replacement. OAuth grants

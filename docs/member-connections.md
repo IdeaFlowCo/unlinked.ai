@@ -99,7 +99,7 @@ for updates on already-open pages.
 
 ## Agents
 
-The [agent API contract](agent-api.md#catalog-v4-optional-connection-actions)
+The [agent API contract](agent-api.md#optional-connection-actions)
 owns the read tools, explicit opt-in write scope and grant compatibility.
 
 ## Not yet

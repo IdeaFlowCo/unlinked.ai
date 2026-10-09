@@ -8,6 +8,30 @@ import { createAccountHostedHandler } from '../mcp-server/account-hosted.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
 
 const authenticate = (f, token) => f.grants.authenticateGrant({ headers: { authorization: `Bearer ${token}` } })
+
+test('malformed historical catalogs fail closed through authentication, REST, MCP and Settings management', async t => {
+  const f = await fixture(t)
+  for (const version of [1, 2]) {
+    const key = await f.grants.issueGrant(f.owner, undefined, { scope: 'owner_network' })
+    const record = f.resources.get(key.grantId)
+    for (const tools of [null, [], [...accountGrantTools(version, 'owner_network'), 'unlinked_send_connection_request']]) {
+      record.payload.version = version
+      record.payload.tools = tools
+      const before = structuredClone(record)
+      assert.equal(await authenticate(f, key.accessToken), null)
+      assert.equal((await f.rest(key.accessToken, 'whoami')).status, 401)
+      const mcp = await fetch(f.mcpEndpoint, { method: 'POST', headers: { Authorization: `Bearer ${key.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })
+      assert.equal(mcp.status, 401)
+      await mcp.text()
+      await assert.rejects(f.grants.readKey(f.owner, key.grantId), /account_grant_not_found/)
+      await assert.rejects(f.grants.setConnectionActions(f.owner, key.grantId, true), /account_grant_not_found/)
+      assert.ok(!(await f.grants.listGrants(f.owner)).some(row => row.id === key.grantId))
+      assert.deepEqual(f.resources.get(key.grantId), before)
+    }
+  }
+  assert.equal(f.writes(), 0)
+})
+
 async function fixture(t) {
   const f = await manualKeyFixture({ connectionActions: true, connectorPreview: true }); t.after(f.close)
   let beforeCall, duringRead, beforeSend, afterWrite, writes = 0
@@ -28,7 +52,7 @@ async function fixture(t) {
   const rest = async (token, route, input) => { const r = await fetch(`${endpoint}/api/agent/v1/${route}`, { method: input ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, ...(input ? { 'Content-Type': 'application/json' } : {}) }, ...(input ? { body: JSON.stringify(input) } : {}) }); return { status: r.status, body: await r.json() } }
   const rpc = async (token, method, params = {}) => { const r = await fetch(`${endpoint}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }); return r.json() }
   const call = async (token, name, args = {}) => { const value = await rpc(token, 'tools/call', { name, arguments: args }); return value.result?.content ? JSON.parse(value.result.content[0].text) : value }
-  return { ...f, rest, rpc, call, writes: () => writes, beforeCall: fn => { beforeCall = fn }, duringRead: fn => { duringRead = fn }, beforeSend: fn => { beforeSend = fn }, afterWrite: fn => { afterWrite = fn } }
+  return { ...f, mcpEndpoint: `${endpoint}/mcp`, rest, rpc, call, writes: () => writes, beforeCall: fn => { beforeCall = fn }, duringRead: fn => { duringRead = fn }, beforeSend: fn => { beforeSend = fn }, afterWrite: fn => { afterWrite = fn } }
 }
 
 for (const version of [1, 2]) for (const scope of ['owner_network', 'owner_network_and_public']) {

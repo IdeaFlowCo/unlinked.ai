@@ -34,7 +34,7 @@
       ],
       "revocation": "Settings → Connected apps, or RFC 7009 at /oauth/revoke"
     },
-    "manualKeyPermissions": "Existing valid keys automatically receive current tools within enabled permissions, with unchanged key bytes and data scope. In Settings → API keys, turn “Send and manage connection requests” on/off and Save permissions for only the selected manual key; no replacement or reconnection is needed. Refresh cached MCP tools/list after changing permission. This POST-only transport has no push notifications. OAuth permission additions require consent/reconsent."
+    "manualKeyPermissions": "Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository)."
   },
   "tools": [
     {

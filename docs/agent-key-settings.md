@@ -68,16 +68,9 @@ cached tool list instead of replacing a key. Names are display-only,
 appear as Default key or Existing key with a date and short identifier. Revoked
 automatic grants stay revoked; visiting Settings does not undo that choice.
 
-When the automatic Default key has connection actions enabled and no read-only
-manual key exists, authorized server-to-server provisioning creates one separate
-**Read-only provisioning key**. It retains the default key's owner-only or public
-read boundary and does not change that key's secret or permissions. Show/Copy
-never issues this fallback. Its fixed per-account identity makes concurrent and
-repeated provisioning reuse the same grant. It is an independent Settings key:
-replacement is reused, revocation remains a tombstone, and enabling writes on it
-blocks further automatic fallback issuance. No additional fallback identities are
-created. Create an explicit read-only key in Settings to resume provisioning.
-An already revoked automatic default does not authorize fallback creation.
+Server-to-server read-only fallback issuance and reuse are owned by the
+[grant provisioning contract](agent-api.md#grant-provisioning-v11--post-apiagentv1provision-grant). The fallback appears
+as an independent **Read-only provisioning key** in Settings.
 
 The grant service stores optional name and generation metadata in existing owner
 resources. Tokens remain deterministically re-derived, not stored in plaintext.
