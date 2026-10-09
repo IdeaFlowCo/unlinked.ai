@@ -28,7 +28,7 @@
       "repeatableReveal": true,
       "namedIndependentKeys": true,
       "expiry": "until revoked",
-      "instructions": "Settings \u2192 API keys exposes Copy API key (raw credential only, no Bearer prefix or JSON), Show/Hide, and Copy agent setup (existing MCP URL/headers JSON for compatible clients). Keys can be shown and copied again anytime while signed in; copying never creates or replaces a key. Create API key makes a named independent key. Save name only changes its label; Replace this key and Revoke this key affect only the selected key. Existing credentials and OAuth apps keep working. No forced expiry. Muse: ask for a custom API connector using https://www.unlinked.ai/openapi.json; paste Copy API key into its key/access-token field. Only a full Authorization-header field takes Bearer followed by one space and the key. Muse OAuth remains unverified."
+      "instructions": "Manual key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository."
     }
   },
   "data": {

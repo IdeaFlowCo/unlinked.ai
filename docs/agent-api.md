@@ -385,9 +385,9 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
 - **Settings auto-setup (`ensureGrant(owner)`):** reuses the newest live,
   non-OAuth credential at its issued scope and version, including an opted-in
   write credential. With none, it prepares the deterministic default read
-  grant unless that automatic grant was revoked. Regenerate issues a new
-  credential first, then revokes all other non-OAuth grants; connected apps
-  stay connected.
+  grant unless that automatic grant was revoked. Explicit key selection reads
+  only that existing key. Manual creation and selected-key lifecycle are owned
+  by [Settings key management](agent-key-settings.md#independent-lifecycle).
 - **Provisioning semantics (`ensureGrant(owner, { readOnly: true })`):**
   reuses the newest live, non-OAuth **read-only** grant of any catalog version for that owner.
   It never returns an opted-in write credential. Tokens are deterministically
@@ -500,6 +500,5 @@ The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` 
 
 ### Named manual keys
 
-Settings → API keys exposes Copy API key (raw credential only, no Bearer prefix or JSON), Show/Hide, and Copy agent setup (existing MCP URL/headers JSON for compatible clients). Keys can be shown and copied again anytime while signed in; copying never creates or replaces a key. Create API key makes a named independent key. Save name only changes its label; Replace this key and Revoke this key affect only the selected key. Existing credentials and OAuth apps keep working. No forced expiry. Muse: ask for a custom API connector using https://www.unlinked.ai/openapi.json; paste Copy API key into its key/access-token field. Only a full Authorization-header field takes Bearer followed by one space and the key. Muse OAuth remains unverified.
-
-Replacement keeps the original scope and catalog version; create a new key to opt into different permissions or newer tools. See [key management](agent-key-settings.md).
+See [Settings key management](agent-key-settings.md) for manual setup, Muse field
+formats, independent key lifecycle, compatibility and generation-aware rollback.

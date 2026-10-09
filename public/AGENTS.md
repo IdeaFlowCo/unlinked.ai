@@ -4,7 +4,7 @@ For connector-free public search, use [the public search page](https://www.unlin
 
 Use https://www.unlinked.ai/login for Ideaflow ID sign-in. Settings preserves your automatically prepared credential; revoked automatic access stays revoked until you explicitly create a key. No archive is needed to connect.
 
-Settings → API keys exposes Copy API key (raw credential only, no Bearer prefix or JSON), Show/Hide, and Copy agent setup (existing MCP URL/headers JSON for compatible clients). Keys can be shown and copied again anytime while signed in; copying never creates or replaces a key. Create API key makes a named independent key. Save name only changes its label; Replace this key and Revoke this key affect only the selected key. Existing credentials and OAuth apps keep working. No forced expiry. Muse: ask for a custom API connector using https://www.unlinked.ai/openapi.json; paste Copy API key into its key/access-token field. Only a full Authorization-header field takes Bearer followed by one space and the key. Muse OAuth remains unverified.
+Manual keys: open [Settings → API keys](https://www.unlinked.ai/settings#api-keys) for **Copy API key** or **Copy agent setup**. See [key management](https://www.unlinked.ai/agents) for setup and Muse field formats; the lifecycle and release contract is `docs/agent-key-settings.md` in the repository.
 On a signed recovered-account match, the browser may ask once whether to continue with the old Unlinked profile.
 Import a full LinkedIn ZIP or Connections-only ZIP/CSV, maximum 64 MiB.
 The server processes imports durably; /profile and /network show progress.

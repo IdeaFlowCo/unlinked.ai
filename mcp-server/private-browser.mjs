@@ -1262,7 +1262,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // The agent setup is prepared automatically: reuse the owner's live
         // grant or mint the one idempotent automatic grant. A revoked automatic
-        // setup stays revoked (ensure returns null) until the owner regenerates.
+        // setup stays revoked (ensure returns null); explicit selection reads only.
         const selectedId = url.searchParams.get('key')
         const ensured = selectedId && accountKeys ? await accountKeys.readKey(session.owner, selectedId) : typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner) : null
         const configuration = ensured ? scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
