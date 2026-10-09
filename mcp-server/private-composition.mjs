@@ -24,6 +24,7 @@ import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
 import { createIdeaflowLogin, autoSignInEnabled } from './private-browser.mjs'
+import { createOverlayClient } from './private-context.mjs'
 import { CLIENT_ID_PATTERN } from './account-api.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
@@ -40,6 +41,29 @@ export function earliestConnectionDates(invitations, requests) {
 }
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+// The overlay client and the owner's Ideaflow identity for it. Only an identity
+// from this runtime's own Ideaflow issuer names an overlay owner; the reverse
+// lookup is the durable OperationalOwner/OperationalIdentity binding made at
+// sign-in, so sessions restored after a restart need no new sign-in.
+export function privateOverlay({ secret, url, networkMode, issuer, identityForOwner, cacheMs = 300000 }) {
+  // A missing or short secret leaves private context off, never the site.
+  if (typeof secret !== 'string' || secret.length < 32) return {}
+  const baseUrl = url || (networkMode === 'shared-noos' ? 'http://noos_api:4000/api/overlay' : null)
+  if (!baseUrl) return {}
+  const overlay = createOverlayClient({ baseUrl, secret })
+  const cache = new Map()
+  const overlayIdentity = async owner => {
+    const key = `${owner.ownerId}\n${owner.userId}`, hit = cache.get(key)
+    if (hit && hit.until > Date.now()) return hit.value
+    const found = await identityForOwner(owner)
+    const value = found && found.issuer === issuer && typeof found.subject === 'string' && found.subject ? Object.freeze({ issuer: found.issuer, subject: found.subject }) : null
+    if (cache.size > 5000) cache.clear()
+    cache.set(key, { value, until: Date.now() + cacheMs })
+    return value
+  }
+  return { overlay, overlayIdentity }
+}
 
 function loadNoos(root) {
   const directory = join(root, 'runtime', 'noos'), require = createRequire(join(directory, 'package.json'))
@@ -70,7 +94,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // Optional signup profile lookup (docs/signup-profile-lookup.md): UNLINKED_PROFILE_LOOKUP_*.
   profileLookupEnv = process.env, profileLookupLoader = loadProfileLookupAdapter,
   // Automatic sign-in kill switch: UNLINKED_AUTO_SIGNIN=off.
-  autoSignInEnv = process.env }) {
+  autoSignInEnv = process.env,
+  // Private context from the Ideaflow people overlay: NOOS_OVERLAY_APP_UNLINKED_SECRET, NOOS_OVERLAY_URL.
+  overlayEnv = process.env }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : ((networkMode === 'isolated-container' && bolt.hostname === 'graph') || (networkMode === 'shared-noos' && bolt.hostname === 'noos_neo4j')) && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -439,6 +465,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       messagingSecret: process.env.UNLINKED_MESSAGING_SECRET || undefined,
       resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }),
       createMessagingSession: createMessagingSession({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
+      // Read-only Ideaflow people overlay (docs/private-context.md): the owner's
+      // own notes and relations, fetched from Noos with an app assertion for the
+      // owner's verified Ideaflow identity. Off unless runtime.env sets
+      // NOOS_OVERLAY_APP_UNLINKED_SECRET (the value Noos holds for app
+      // "unlinked"); the shared-noos network reaches noos_api directly.
+      ...privateOverlay({ secret: overlayEnv.NOOS_OVERLAY_APP_UNLINKED_SECRET, url: overlayEnv.NOOS_OVERLAY_URL, networkMode, issuer: config.issuer, identityForOwner }),
       // Operator-published photos (publish-profile-photos.mjs), read-only here.
       // No member hide-photo choice exists yet; when it does, pass it as
       // `hidden` so it outranks the operator set (docs/profile-photos.md).

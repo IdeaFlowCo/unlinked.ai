@@ -81,4 +81,4 @@ Connect an agent at https://id.ideaflow.app/agents using one account connection 
 
 Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository).
 
-For compatible hosts needing several apps or messages, use https://id.ideaflow.app/agents and its separate OpenChat permissions. Existing direct Claude/ChatGPT sign-in remains supported. Muse’s observed manual form uses the direct Unlinked key; Muse OAuth is unverified. Connection requests do not record private “X knows Y” relationships.
+For compatible hosts needing several apps or messages, use https://id.ideaflow.app/agents and its separate OpenChat permissions. Existing direct Claude/ChatGPT sign-in remains supported. Muse’s observed manual form uses the direct Unlinked key; Muse OAuth is unverified. Connection requests do not record private “X knows Y” relationships; those are saved with the connector’s OpenChat private-people tools and shown only to their owner on Unlinked person and contact pages (“Your private context”).

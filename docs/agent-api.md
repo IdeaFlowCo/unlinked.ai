@@ -324,6 +324,12 @@ row's own published profile, or one with the same LinkedIn address).
 contacts and `public` when only a published profile matched. Only the caller's
 own imports are ever read; nothing matching is typed `not_found`.
 
+Notes and relations an agent saves about these people through the shared
+Ideaflow connector (OpenChat private-people tools, keyed by the same refs) are
+shown to the owner, and only the owner, on Unlinked person and contact pages;
+see [private-context.md](private-context.md). Unlinked reads them from the
+Noos overlay; this API does not return them.
+
 ### `POST /api/agent/v1/ai-search` `{ query, scope?, timeoutMs? }` ⇄ `unlinked_ai_search`
 Explicit AI tool. `scope: "mine"` ranks only the owner's imported network
 (works on every grant); `scope: "everyone"` ranks the published public index
@@ -454,7 +460,9 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
 ## Future consumers (design-level notes, nothing here is built)
 
 Beyond the Ideaflow MCP connector, two planned consumers are expected to use
-this same HTTP JSON API: an Unlinked people-context overlay and a
+this same HTTP JSON API: an Unlinked people-context overlay (since built
+differently: it reads the Noos people overlay directly, see
+[private-context.md](private-context.md)) and a
 cross-product "OpenChat asks on profiles" feature (both centered on person
 read, `whoami`/linkage verification and the typed error vocabulary). A
 Superconnector→Neo4j projection is also under design consideration. For
