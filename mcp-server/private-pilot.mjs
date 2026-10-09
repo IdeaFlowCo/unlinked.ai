@@ -33,7 +33,9 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagi
     issueGrant: accountGrants.issueGrant, revokeConnectionToken: accountGrants.revokeConnectionToken, audit }) : null
   // One tool service instance backs both agent surfaces, so the MCP tools and
   // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
-  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined }) : null
+  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined,
+    // Private people notes & relations (catalog v7) call the same Noos overlay as the private-context panel.
+    ...(overlay && typeof overlayIdentity === 'function' ? { overlay, identityFor: overlayIdentity } : {}) }) : null
   // Owner-only private context from the Ideaflow people overlay
   // (docs/private-context.md). The owner's contact lookup is the same
   // owner-scoped unlinked_lookup_contact the agent tools use, run for the

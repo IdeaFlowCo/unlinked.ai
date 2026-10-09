@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { manualKeyFixture } from './helpers/manual-key-fixture.mjs'
-import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE, ACCOUNT_OWNER_WRITE_SCOPE } from '../mcp-server/account-grants.mjs'
+import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE, ACCOUNT_OWNER_WRITE_SCOPE, PRIVATE_NOTES_TOOLS } from '../mcp-server/account-grants.mjs'
 import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountHostedHandler } from '../mcp-server/account-hosted.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
@@ -62,7 +62,8 @@ for (const version of [1, 2]) for (const scope of ['owner_network', 'owner_netwo
     const stored = f.resources.get(key.grantId); stored.payload.version = version; stored.payload.tools = [...accountGrantTools(version, scope)]
     const original = structuredClone(stored)
     const session = await f.signIn()
-    const current = accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)
+    // Historical API keys gain the default-on private-notes permission (catalog v7).
+    const current = accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, `${scope}_and_private_notes`)
     assert.equal((await f.grants.ensureGrant(f.owner)).accessToken, key.accessToken)
     assert.equal((await f.grants.readKey(f.owner, key.grantId)).accessToken, key.accessToken)
     assert.deepEqual((await authenticate(f, key.accessToken)).tools, current)
@@ -151,4 +152,35 @@ test('send rechecks permission after target lookup; a write already committed st
   f.afterWrite(() => f.grants.setConnectionActions(f.owner, key.grantId, false))
   assert.equal((await f.rest(key.accessToken, 'connection-requests/accept', { id: 'synthetic' })).status, 200)
   assert.equal(f.writes(), 1)
+})
+
+test('private notes switch (unlinked-9kk.5): default on, off and on again with the same token; connection switch unaffected', async t => {
+  const f = await fixture(t), session = await f.signIn()
+  const key = await f.grants.issueGrant(f.owner, undefined, { name: 'Muse' })
+  const original = structuredClone(f.resources.get(key.grantId))
+  const privateTools = PRIVATE_NOTES_TOOLS
+  const listed = async () => (await f.rpc(key.accessToken, 'tools/list')).result.tools.map(x => x.name)
+  assert.ok(privateTools.every(name => key.tools.includes(name)), 'new keys have private notes on by default')
+  let page = await (await f.page(session, key.grantId)).text()
+  assert.match(page, /id="key-private-notes"[^>]* checked/)
+  assert.match(page, /Private people notes &amp; relations/)
+  for (const [fields, notesOn, writeOn] of [[{ access: 'connections', private_notes: 'on' }, true, true], [{ access: 'connections' }, false, true], [{}, false, false], [{ private_notes: 'on' }, true, false]]) {
+    assert.equal((await f.post(session, { action: 'permissions', grantId: key.grantId, ...fields })).status, 303)
+    assert.equal((await f.grants.readKey(f.owner, key.grantId)).accessToken, key.accessToken, 'same token')
+    for (const field of ['jti', 'issuedAt', 'generation']) assert.equal(f.resources.get(key.grantId).payload[field], original.payload[field])
+    const tools = await listed()
+    assert.equal(privateTools.every(name => tools.includes(name)), notesOn)
+    assert.equal(privateTools.some(name => tools.includes(name)), notesOn)
+    assert.equal(tools.includes('unlinked_accept_connection_request'), writeOn)
+    const refused = await f.rest(key.accessToken, 'private/things')
+    assert.equal(refused.status, notesOn ? 503 : 403, 'off is scope_not_granted; on reaches the (unconfigured) overlay')
+    assert.equal(refused.body.error.code, notesOn ? 'upstream_unavailable' : 'scope_not_granted')
+    page = await (await f.page(session, key.grantId)).text()
+    assert.equal(/id="key-private-notes"[^>]* checked/.test(page), notesOn)
+    assert.equal(/id="key-connection-actions"[^>]* checked/.test(page), writeOn)
+  }
+  for (const bad of [{ private_notes: 'yes' }, { private_notes: 'on', extra: '1' }]) assert.equal((await f.post(session, { action: 'permissions', grantId: key.grantId, ...bad })).status, 400)
+  // OAuth connections are not edited from Settings: they reconnect to consent.
+  const oauth = await f.grants.issueGrant(f.owner, undefined, { connection: { kind: 'oauth', app: 'Claude', clientName: null, redirectHost: 'claude.ai', clientKey: 'b'.repeat(64), resource: null } })
+  assert.equal((await f.post(session, { action: 'permissions', grantId: oauth.grantId, private_notes: 'on' })).status, 400)
 })

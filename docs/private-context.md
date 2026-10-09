@@ -2,7 +2,7 @@
 
 Since 0.6.3 (unlinked-9kk.4), a signed-in member sees **Your private context** on a person's page: the notes, relations, importance and catch-up cadence they keep about that person. Only the owner sees it.
 
-The data is not stored by Unlinked. It is the owner's **Ideaflow people overlay** in Noos (`/api/overlay`, contract in Noos `docs/PEOPLE_OVERLAY.md`). OpenChat writes the same records, and so does any agent using the shared Ideaflow connector's private-people tools (`openchat__oc_*private*`). Unlinked reads them and does not write them. Noos owns every overlay rule, including name ambiguity, provenance, relation types, search and neighbourhood, so Unlinked has no copy of that logic.
+The data is not stored by Unlinked. It is the owner's **Ideaflow people overlay** in Noos (`/api/overlay`, contract in Noos `docs/PEOPLE_OVERLAY.md`). OpenChat writes the same records, and so does any agent using the shared Ideaflow connector's private-people tools (`openchat__oc_*private*`) or, since catalog v7 (unlinked-9kk.5), the direct Unlinked key's private notes & relations tools (`unlinked_*private*`, `mcp-server/private-notes-tools.mjs`, which only forwards to `/api/overlay` as the grant owner with `source: direct-key` provenance). The panel itself only reads. Noos owns every overlay rule, including name ambiguity, provenance, relation types, search and neighbourhood, so Unlinked has no copy of that logic.
 
 This replaces the separate Unlinked `note` store sketched in the 2026-10-02 overlay design (§1, unlinked-47t). That design's UX states and privacy boundaries still apply.
 
@@ -39,7 +39,7 @@ States, as in the design: anonymous visitors get nothing at all, not even an emp
   - Over 60 requests per minute per owner: 429.
 - Every answer carries `Cache-Control: no-store, private`, `Vary: Cookie` and `Cross-Origin-Resource-Policy: same-origin`. The service worker never caches API responses.
 - The panel script builds DOM with `textContent` only.
-- Overlay data is never placed in public HTML, `/api/people*`, `/search-public`, the public projection, the published People index, the agent tools, or any model or AI-search input. `tests/private-context.test.mjs` checks this for anonymous visitors, another account, the public pages and APIs, and AI search.
+- Overlay data is never placed in public HTML, `/api/people*`, `/search-public`, the public projection, the published People index, or any model or AI-search input. The only agent tools that return it are the owner's own private-notes tools (separate permission, owner-scoped). `tests/private-context.test.mjs` checks this for anonymous visitors, another account, the public pages and APIs, and AI search.
 - Answers carry no refs, overlay identity, issuer or subject. They contain names, text, labels and same-origin links only.
 
 ## Owner identity (the bridge)

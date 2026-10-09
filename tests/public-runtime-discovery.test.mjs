@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer, request as httpRequest } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+import { PRIVATE_NOTES_TOOLS } from '../mcp-server/account-grants.mjs'
 
 test('canonical anonymous discovery GET/HEAD works while owner and mutation routes remain protected', async t => {
   let handler, ownerReads = 0
@@ -21,7 +22,7 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
   assert.equal((await fetch(endpoint+'/agents',{method:'POST',headers:{Origin:'https://wrong.invalid'}})).status,403)
   assert.equal((await fetch(endpoint+'/network',{method:'HEAD'})).status,503) // Same unavailable public source as GET.
   assert.equal(await new Promise((resolve,reject)=>{const req=httpRequest(endpoint+'/meet',{headers:{Host:'wrong.invalid'}},res=>{res.resume();resolve(res.statusCode)});req.on('error',reject);req.end()}),403)
-  const card=await(await fetch(endpoint+'/.well-known/mcp/server-card.json')).json();assert.equal(card.transports['streamable-http'].url,'https://www.unlinked.ai/mcp');assert.deepEqual(card.tools.map(t=>t.name),['unlinked_search_network','unlinked_search_everyone','unlinked_whoami','unlinked_list_people','unlinked_list_connections','unlinked_get_profile','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact','unlinked_send_connection_request','unlinked_accept_connection_request','unlinked_ignore_connection_request','unlinked_withdraw_connection_request'])
+  const card=await(await fetch(endpoint+'/.well-known/mcp/server-card.json')).json();assert.equal(card.transports['streamable-http'].url,'https://www.unlinked.ai/mcp');assert.deepEqual(card.tools.map(t=>t.name),['unlinked_search_network','unlinked_search_everyone','unlinked_whoami','unlinked_list_people','unlinked_list_connections','unlinked_get_profile','unlinked_ai_search','unlinked_list_connection_requests','unlinked_list_notifications','unlinked_lookup_contact','unlinked_send_connection_request','unlinked_accept_connection_request','unlinked_ignore_connection_request','unlinked_withdraw_connection_request',...PRIVATE_NOTES_TOOLS])
   const meet=await fetch(endpoint+'/meet');assert.match(meet.headers.get('content-security-policy'),/script-src 'self' 'nonce-/)
   const meetHtml=await meet.text()
   // Scans classify through one validator and always stop at a visible confirm step.

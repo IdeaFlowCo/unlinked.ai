@@ -46,7 +46,28 @@ export function createOverlayClient({ baseUrl, secret, app = OVERLAY_APP, fetchI
     if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new OverlayUnavailable() }
     try { return await response.json() } catch { throw new OverlayUnavailable() }
   }
+  // Writes and owner-scoped reads for agent tools (account-tools.mjs). Noos
+  // owns every rule; a 4xx answer comes back as { status, body } so the tool
+  // can name the overlay's own code (ambiguous_name with the owner's own
+  // candidates, invalid_relation, not_found …). 5xx and transport failures
+  // are OverlayUnavailable, without the body.
+  const request = async (identity, method, path, body) => {
+    if (!identity || typeof identity.issuer !== 'string' || typeof identity.subject !== 'string' || !identity.issuer || !identity.subject) throw new OverlayUnavailable('overlay_identity_required')
+    const token = await signOverlayAssertion(app, secret, identity)
+    let response
+    try {
+      response = await fetchImpl(new URL(path, root), { method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}) })
+    } catch { throw new OverlayUnavailable() }
+    if (response.status >= 500 || response.status === 401 || response.status === 403) { await response.body?.cancel().catch(() => {}); throw new OverlayUnavailable() }
+    if (response.status === 204) return { status: 204, body: null }
+    let value
+    try { value = await response.json() } catch { throw new OverlayUnavailable() }
+    return { status: response.status, body: value }
+  }
   return {
+    request,
     async lookup(identity, ref) { return (await call(identity, 'POST', 'lookup', { ref }))?.entity ?? null },
     async neighbourhood(identity, entityId, depth = 1) {
       if (!ENTITY_ID.test(entityId)) return null

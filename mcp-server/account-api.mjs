@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { AccountToolError } from './account-tools.mjs'
+import { parseAccountScope, scopeAllowsConnectionActions } from './account-grants.mjs'
 
 export const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]{4,64}$/
 const sha256 = value => createHash('sha256').update(value).digest()
@@ -36,6 +37,19 @@ const ROUTES = Object.freeze({
   'POST /api/agent/v1/connection-requests/ignore': { tool: 'unlinked_ignore_connection_request', body: ['id'] },
   'POST /api/agent/v1/connection-requests/withdraw': { tool: 'unlinked_withdraw_connection_request', body: ['id'] },
   'POST /api/agent/v1/contacts/lookup': { tool: 'unlinked_lookup_contact', body: ['connectionId', 'linkedinUrl', 'profileId', 'refHashes'] },
+  // Private people notes & relations (catalog v7, separate permission).
+  'GET /api/agent/v1/private/person': { tool: 'unlinked_get_person_private', query: ['profileId'] },
+  'GET /api/agent/v1/private/thing': { tool: 'unlinked_get_private_thing', query: ['thingId'] },
+  'GET /api/agent/v1/private/things': { tool: 'unlinked_list_private_things', query: ['query', 'kind'] },
+  'GET /api/agent/v1/private/search': { tool: 'unlinked_search_private', query: ['query', 'relationType', 'kind', 'limit'], numbers: ['limit'] },
+  'GET /api/agent/v1/private/neighbourhood': { tool: 'unlinked_get_neighbourhood', query: ['subjectKind', 'subjectId', 'depth'], numbers: ['depth'] },
+  'POST /api/agent/v1/private/things': { tool: 'unlinked_save_private_thing', body: ['kind', 'name', 'createNew', 'clientRequestId'] },
+  'POST /api/agent/v1/private/things/delete': { tool: 'unlinked_delete_private_thing', body: ['thingId'] },
+  'POST /api/agent/v1/private/notes': { tool: 'unlinked_add_private_note', body: ['subjectKind', 'subjectId', 'text', 'assertion'], limit: 20480 },
+  'POST /api/agent/v1/private/notes/delete': { tool: 'unlinked_delete_private_note', body: ['noteId'] },
+  'POST /api/agent/v1/private/links': { tool: 'unlinked_add_private_link', body: ['subjectKind', 'subjectId', 'relation', 'toKind', 'toId', 'toName', 'createNew', 'clientRequestId', 'assertion'] },
+  'POST /api/agent/v1/private/links/update': { tool: 'unlinked_update_private_link', body: ['linkId', 'relation', 'assertion'] },
+  'POST /api/agent/v1/private/links/delete': { tool: 'unlinked_delete_private_link', body: ['linkId'] },
   'POST /api/agent/v1/ai-search': { tool: 'unlinked_ai_search', body: ['query', 'scope', 'timeoutMs'] },
   'POST /api/agent/v1/search-network': { tool: 'unlinked_search_network', body: ['query', 'degree', 'cursor'] },
   'POST /api/agent/v1/search-everyone': { tool: 'unlinked_search_everyone', body: ['query'] },
@@ -48,7 +62,7 @@ async function readJsonBody(request, limit = 8192) {
   let size = 0
   for await (const part of request) {
     size += part.length
-    if (size > limit) throw new AccountToolError('invalid_input', 'The request body exceeds 8 KiB.')
+    if (size > limit) throw new AccountToolError('invalid_input', `The request body exceeds ${limit / 1024} KiB.`)
     parts.push(part)
   }
   if (!size) return {}
@@ -111,7 +125,10 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     if (verified.error === 'grant_revoked') throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
     if (!verified.grant || verified.grant.ownerId !== owner.ownerId) throw new AccountToolError('upstream_unavailable', 'The provisioned grant could not be verified right now; retry.')
     const grant = verified.grant
-    if (!['owner_network', 'owner_network_and_public'].includes(grant.scope)) throw new AccountToolError('grant_revoked', 'The provisioned key no longer permits read-only provisioning.')
+    // Provisioned grants never carry connection actions. They may carry the
+    // owner's default-on private-notes permission (their own overlay data,
+    // which the provisioning app already holds for this owner).
+    if (!parseAccountScope(grant.scope) || scopeAllowsConnectionActions(grant.scope)) throw new AccountToolError('grant_revoked', 'The provisioned key no longer permits read-only provisioning.')
     // Audit the event — never the token. The contract promises an audit row
     // for every issuance/reuse, so an unauditable provisioning fails closed:
     // the token is simply not returned (the grant record itself is unchanged).
@@ -130,7 +147,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
   }
   const failure = (response, error) => {
     const typed = error instanceof AccountToolError ? error : new AccountToolError('upstream_unavailable', 'The request could not finish; retry.')
-    send(response, typed.status, { error: { code: typed.code, message: typed.message } }, typed.code === 'rate_limited' ? { 'Retry-After': '60' } : {})
+    send(response, typed.status, { error: { code: typed.code, message: typed.message, ...(typed.details ?? {}) } }, typed.code === 'rate_limited' ? { 'Retry-After': '60' } : {})
   }
   return async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -170,7 +187,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       const grant = detailed.grant
       const input = {}
       if (route.body) {
-        const body = await readJsonBody(request)
+        const body = await readJsonBody(request, route.limit)
         const unknown = Object.keys(body).find(key => !route.body.includes(key))
         if (unknown) throw new AccountToolError('invalid_input', `Unknown field: ${unknown}`)
         for (const key of route.body) if (body[key] !== undefined) input[key] = body[key]

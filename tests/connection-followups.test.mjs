@@ -52,7 +52,7 @@ async function site(t, limits) {
 
 test('catalog 1–3 retains main semantics; v4 is a sibling and defaults are read-only', async t => {
   for (const version of [1,2,3]) assert.deepEqual(ACCOUNT_GRANT_TOOL_VERSIONS[version], MAIN_ACCOUNT_GRANT_TOOL_VERSIONS[version])
-  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION,6)
+  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION,7)
   assert.ok(ACCOUNT_GRANT_TOOL_VERSIONS[4][ACCOUNT_WRITE_SCOPE])
   const p=await site(t), issued=await p.grants.issueGrant(a)
   assert.ok(!issued.tools.some(x=>/unlinked_(send|accept|ignore|withdraw)_/.test(x)))
@@ -117,9 +117,9 @@ test('Settings explicit choice is validated and historical grants receive curren
   assert.equal((await p.post(s,'/setup-account',{access:'surprise'})).status,400)
   assert.equal((await p.post(s,'/setup-account',{write_scope:'yes'})).status,400)
   const enabled=await p.post(s,'/setup-account',{access:'connections'});assert.equal(enabled.status,200);assert.match(await enabled.text(),/id="key-connection-actions"[^>]* checked/)
-  const write=(await p.grants.listGrants(a)).find(g=>g.scope===ACCOUNT_WRITE_SCOPE);assert.ok(write)
-  await p.post(s,'/setup-account',{});assert.ok((await p.grants.listGrants(a)).some(g=>g.scope==='owner_network_and_public'));assert.ok(await p.grants.readKey(a,write.id))
-  const read=(await p.grants.listGrants(a)).find(g=>g.scope==='owner_network_and_public'), current=await p.grants.readKey(a,read.id), record=p.resources.get(current.grantId);record.payload.version=2;record.payload.tools=[...ACCOUNT_GRANT_TOOL_VERSIONS[2].owner_network_and_public]
+  const write=(await p.grants.listGrants(a)).find(g=>g.scope===ACCOUNT_WRITE_SCOPE+'_and_private_notes');assert.ok(write)
+  await p.post(s,'/setup-account',{});assert.ok((await p.grants.listGrants(a)).some(g=>g.scope==='owner_network_and_public_and_private_notes'));assert.ok(await p.grants.readKey(a,write.id))
+  const read=(await p.grants.listGrants(a)).find(g=>g.scope==='owner_network_and_public_and_private_notes'), current=await p.grants.readKey(a,read.id), record=p.resources.get(current.grantId);record.payload.version=2;record.payload.scope='owner_network_and_public';record.payload.tools=[...ACCOUNT_GRANT_TOOL_VERSIONS[2].owner_network_and_public]
   const outdated=await(await p.go('/settings?key='+current.grantId,{headers:{Cookie:s.cookie}})).text();assert.doesNotMatch(outdated,/earlier tool set/);assert.match(outdated,/New tools within enabled permissions use this same key/)
   const who=await(await p.agent(current.accessToken,'whoami')).json();assert.equal(who.grant.version,CURRENT_ACCOUNT_GRANT_VERSION);assert.ok(who.grant.tools.includes('unlinked_list_notifications'));assert.equal(who.grant.update,undefined)
   assert.doesNotThrow(()=>renderSettings({agentAccess:undefined,grants:[]}))

@@ -18,6 +18,20 @@ const ACCOUNT_GRANT_V5 = Object.freeze({
   owner_network_and_public_and_write: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
     'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
 })
+// Version 6 adds one read-only, owner-scoped tool to every scope: resolve
+// one of the owner's own contacts (connection id, LinkedIn address or
+// published profile id) without paging. Same data boundary as the
+// connections listing, so existing keys gain it without reconsent.
+const ACCOUNT_GRANT_TOOL_VERSIONS_V6 = Object.freeze(Object.fromEntries(['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write'].map(scope => {
+  const tools = [...ACCOUNT_GRANT_V5[scope]]
+  tools.splice(tools.indexOf('unlinked_list_notifications') + 1, 0, 'unlinked_lookup_contact')
+  return [scope, Object.freeze(tools)]
+})))
+// The owner's private people notes and relations (catalog version 7). Reads
+// first, then writes; order is part of the stored catalog and never changes.
+export const PRIVATE_NOTES_READ_TOOLS = Object.freeze(['unlinked_get_person_private', 'unlinked_get_private_thing', 'unlinked_list_private_things', 'unlinked_search_private', 'unlinked_get_neighbourhood'])
+export const PRIVATE_NOTES_WRITE_TOOLS = Object.freeze(['unlinked_save_private_thing', 'unlinked_add_private_note', 'unlinked_delete_private_note', 'unlinked_add_private_link', 'unlinked_update_private_link', 'unlinked_delete_private_link', 'unlinked_delete_private_thing'])
+export const PRIVATE_NOTES_TOOLS = Object.freeze([...PRIVATE_NOTES_READ_TOOLS, ...PRIVATE_NOTES_WRITE_TOOLS])
 export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
   1: Object.freeze({
     owner_network: Object.freeze(['unlinked_search_network']),
@@ -44,31 +58,47 @@ export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
       'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
   }),
   5: ACCOUNT_GRANT_V5,
-  // Version 6 adds one read-only, owner-scoped tool to every scope: resolve
-  // one of the owner's own contacts (connection id, LinkedIn address or
-  // published profile id) without paging. Same data boundary as the
-  // connections listing, so existing keys gain it without reconsent.
-  6: Object.freeze(Object.fromEntries(['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write'].map(scope => {
-    const tools = [...ACCOUNT_GRANT_V5[scope]]
-    tools.splice(tools.indexOf('unlinked_list_notifications') + 1, 0, 'unlinked_lookup_contact')
-    return [scope, Object.freeze(tools)]
+  6: ACCOUNT_GRANT_TOOL_VERSIONS_V6,
+  // Version 7 adds a separate permission, "Private people notes & relations"
+  // (scope suffix `_and_private_notes`): the owner's own private notes and
+  // relations in the Ideaflow people overlay, shared with OpenChat. It is
+  // independent of connection actions. Every v6 scope keeps its exact list;
+  // each gains a `_and_private_notes` twin with the private tools appended.
+  // Jacob's decision (unlinked-lf4): on by default for API keys, so a valid
+  // pre-v7 key (not an OAuth connection) resolves to its private-notes twin
+  // without rotation; OAuth connections must consent to `private_notes`.
+  7: Object.freeze(Object.fromEntries(['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write'].flatMap(scope => {
+    const base = Object.freeze([...ACCOUNT_GRANT_TOOL_VERSIONS_V6[scope]])
+    return [[scope, base], [`${scope}_and_private_notes`, Object.freeze([...base, ...PRIVATE_NOTES_TOOLS])]]
   }))),
 })
-export const CURRENT_ACCOUNT_GRANT_VERSION = 6
+export const CURRENT_ACCOUNT_GRANT_VERSION = 7
 export const accountGrantTools = (version, scope) => ACCOUNT_GRANT_TOOL_VERSIONS[version]?.[scope] ?? null
+// Scope grammar: owner_network[_and_public][_and_write][_and_private_notes].
+const SCOPE_PATTERN = /^owner_network(_and_public)?(_and_write)?(_and_private_notes)?$/
+export function parseAccountScope(scope) {
+  const match = typeof scope === 'string' ? SCOPE_PATTERN.exec(scope) : null
+  return match ? { public: Boolean(match[1]), write: Boolean(match[2]), privateNotes: Boolean(match[3]) } : null
+}
+export const composeAccountScope = ({ public: covers = false, write = false, privateNotes = false } = {}) =>
+  `owner_network${covers ? '_and_public' : ''}${write ? '_and_write' : ''}${privateNotes ? '_and_private_notes' : ''}`
 // The opt-in scope that adds connection-request write tools.
 export const ACCOUNT_WRITE_SCOPE = 'owner_network_and_public_and_write'
 export const ACCOUNT_OWNER_WRITE_SCOPE = 'owner_network_and_write'
-export const scopeAllowsConnectionActions = scope => scope === ACCOUNT_WRITE_SCOPE || scope === ACCOUNT_OWNER_WRITE_SCOPE
+export const scopeAllowsConnectionActions = scope => parseAccountScope(scope)?.write === true
+export const scopeAllowsPrivateNotes = scope => parseAccountScope(scope)?.privateNotes === true
 export const ACCOUNT_WRITE_TOOLS = Object.freeze(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
 // Scopes that read the published People index.
-export const scopeCoversPublic = scope => scope === 'owner_network_and_public' || scope === ACCOUNT_WRITE_SCOPE
+export const scopeCoversPublic = scope => parseAccountScope(scope)?.public === true
 // First validate the historical stored catalog; only then resolve effective
 // current tools. Never normalize a malformed record into an authorized grant.
+// A pre-v7 API key gains the default-on private-notes permission; a pre-v7
+// OAuth connection does not (its app never asked for it: reconnect to consent).
 export function effectiveAccountGrant(grant) {
   const stored = accountGrantTools(grant?.version, grant?.scope)
   if (!stored || !Array.isArray(grant?.tools) || JSON.stringify(stored) !== JSON.stringify(grant.tools)) return null
-  return { version: CURRENT_ACCOUNT_GRANT_VERSION, scope: grant.scope, tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, grant.scope)] }
+  const scope = grant.version < 7 && !grant.connection ? composeAccountScope({ ...parseAccountScope(grant.scope), privateNotes: true }) : grant.scope
+  return { version: CURRENT_ACCOUNT_GRANT_VERSION, scope, tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] }
 }
 
 // Deterministic jti for the one automatically prepared grant per owner, so
@@ -97,7 +127,9 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   // The write scope needs the People index (requests are sent to published
   // profiles), so it exists only where public search does. It is grantable but
   // never the default: every caller that wants it names it explicitly.
-  const grantableScopes = publicSearchEnabled ? ['owner_network', 'owner_network_and_public', ACCOUNT_WRITE_SCOPE, ACCOUNT_OWNER_WRITE_SCOPE] : ['owner_network']
+  // The private-notes permission combines with every read/write scope.
+  const grantableScopes = (publicSearchEnabled ? ['owner_network', 'owner_network_and_public', ACCOUNT_WRITE_SCOPE, ACCOUNT_OWNER_WRITE_SCOPE] : ['owner_network'])
+    .flatMap(scope => [scope, `${scope}_and_private_notes`])
   // HS256 signing is deterministic, so the bearer credential for an existing
   // grant is re-derived from its durable record; viewing setup mints nothing.
   const signGrant = (id, owner, jti, issuedAt, generation) => new SignJWT({ ...(generation ? { generation } : {}), grantId: id, ownerId: owner.ownerId, token_use: 'account_tools' })
@@ -108,8 +140,14 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   // Connection grants are listed and revoked individually in Settings and are
   // never reused as the copyable Settings credential.
   const issueGrant = async (owner, jti = randomBytes(32).toString('hex'), options = {}) => {
-    const defaultScope = publicSearchEnabled ? 'owner_network_and_public' : 'owner_network'
-    const scope = options.scope ?? defaultScope
+    // API keys default to read access plus private notes (on by default, unlinked-lf4).
+    const defaultScope = composeAccountScope({ public: publicSearchEnabled, privateNotes: true })
+    // options.privateNotes switches the private-notes permission on the chosen scope.
+    let scope = options.scope ?? defaultScope
+    if (options.privateNotes !== undefined) {
+      if (typeof options.privateNotes !== 'boolean' || !parseAccountScope(scope)) throw new Error('account_grant_scope_invalid')
+      scope = composeAccountScope({ ...parseAccountScope(scope), privateNotes: options.privateNotes })
+    }
     if (!grantableScopes.includes(scope)) throw new Error('account_grant_scope_invalid')
     const name = options.name === undefined ? undefined : keyName(options.name)
     const connection = options.connection === undefined ? undefined : validConnection(options.connection)
@@ -137,7 +175,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const derive = (record, onlyReads = readOnly) => record && !record.deleted && record.sourceOwnerId === owner.ownerId && record.payload?.kind === 'account_tool_grant' &&
       record.payload.ownerId === owner.ownerId && record.payload.userId === owner.userId && record.payload.issuer === issuer && record.payload.audience === audience &&
       typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) && !record.payload.connection && effectiveAccountGrant(record.payload) &&
-      (!onlyReads || ['owner_network', 'owner_network_and_public'].includes(record.payload.scope)) ? record : null
+      (!onlyReads || !scopeAllowsConnectionActions(record.payload.scope)) ? record : null
     const ids = await backend.listAccountGrantIds()
     const records = []
     for (let start = 0; start < ids.length; start += 8) records.push(...(await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id)))).map(record => derive(record)).filter(Boolean))
@@ -149,7 +187,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const fallback = readOnly && derive(existing, false) && scopeAllowsConnectionActions(existing.payload.scope)
     const jti = fallback ? READ_ONLY_JTI : AUTO_JTI
     const id = privateId(owner.ownerId, 'account-grant-v1', jti)
-    const options = fallback ? { name: 'Read-only provisioning key', scope: scopeCoversPublic(existing.payload.scope) ? 'owner_network_and_public' : 'owner_network' } : {}
+    const options = fallback ? { name: 'Read-only provisioning key', scope: composeAccountScope({ ...parseAccountScope(effectiveAccountGrant(existing.payload).scope), write: false }) } : {}
     if (fallback) {
       const stored = await backend.readResource('import', id)
       if (stored) {
@@ -196,7 +234,11 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     if (!record || record.deleted || record.sourceOwnerId !== payload.ownerId || grant?.kind !== 'account_tool_grant' || !tools ||
         grant.ownerId !== payload.ownerId || grant.userId !== payload.sub || grant.jti !== payload.jti || grant.issuer !== issuer || grant.audience !== audience ||
         grant.issuedAt !== payload.iat || grant.generation !== payload.generation || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(tools)) return { error: 'grant_revoked' }
-    return { grant: { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, ...effectiveAccountGrant(grant) } }
+    // agent: who writes as this grant, for provenance on private notes
+    // (`agent:<key name>` or `agent:<connected app>`).
+    const agent = grant.connection ? (grant.connection.app === 'An app on this computer' && grant.connection.clientName ? grant.connection.clientName : grant.connection.app)
+      : grant.name ?? (grant.jti === AUTO_JTI ? 'Default key' : 'API key')
+    return { grant: { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, agent, ...effectiveAccountGrant(grant) } }
   }
   const authenticateGrant = async request => (await authenticateGrantDetailed(request)).grant ?? null
   const revoke = async (owner, grantId) => {
@@ -256,17 +298,24 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const normalized = keyName(name), { backend, record } = await manualRecord(owner, id)
     await backend.writeResource({ ...record, sourceRevision: record.sourceRevision + 1, expectedRevision: record.sourceRevision, payload: { ...record.payload, name: normalized } })
   }
-  const setConnectionActions = async (owner, id, enabled) => {
-    if (typeof enabled !== 'boolean' || (enabled && !publicSearchEnabled)) throw new Error('account_grant_scope_invalid')
+  // Switch a key's separate permissions in one CAS write. Unnamed switches
+  // keep their current (effective) value, so turning connection actions on
+  // or off never drops a key's default-on private notes, and vice versa.
+  const setPermissions = async (owner, id, { connections, privateNotes } = {}) => {
+    if (![connections, privateNotes].every(value => value === undefined || typeof value === 'boolean') || (connections && !publicSearchEnabled)) throw new Error('account_grant_scope_invalid')
     const { backend, record } = await manualRecord(owner, id)
-    const scope = scopeCoversPublic(record.payload.scope)
-      ? (enabled ? ACCOUNT_WRITE_SCOPE : 'owner_network_and_public')
-      : (enabled ? ACCOUNT_OWNER_WRITE_SCOPE : 'owner_network')
+    const current = parseAccountScope(effectiveAccountGrant(record.payload).scope)
+    const scope = composeAccountScope({ ...current, ...(connections === undefined ? {} : { write: connections }), ...(privateNotes === undefined ? {} : { privateNotes }) })
+    if (!grantableScopes.includes(scope)) throw new Error('account_grant_scope_invalid')
     // Identity, issue time and secret generation stay identical. CAS makes
     // permission edits race safely with rename, replacement and revocation.
     await backend.writeResource({ ...record, sourceRevision: record.sourceRevision + 1, expectedRevision: record.sourceRevision,
       payload: { ...record.payload, version: CURRENT_ACCOUNT_GRANT_VERSION, scope, tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] } })
     return readKey(owner, id)
+  }
+  const setConnectionActions = (owner, id, enabled) => {
+    if (typeof enabled !== 'boolean') throw new Error('account_grant_scope_invalid')
+    return setPermissions(owner, id, { connections: enabled })
   }
   const replaceKey = async (owner, id) => {
     const { backend, record } = await manualRecord(owner, id)
@@ -288,5 +337,5 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     await revoke(owner, verified.grant.grantId)
     return true
   }
-  return { readKey, renameKey, setConnectionActions, replaceKey, issueGrant, ensureGrant, authenticateGrant, authenticateGrantDetailed, revoke, listGrants, revokeConnectionToken }
+  return { readKey, renameKey, setConnectionActions, setPermissions, replaceKey, issueGrant, ensureGrant, authenticateGrant, authenticateGrantDetailed, revoke, listGrants, revokeConnectionToken }
 }

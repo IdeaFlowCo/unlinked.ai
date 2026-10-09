@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
-import { createAccountGrantService, accountGrantTools, ACCOUNT_GRANT_TOOL_VERSIONS, CURRENT_ACCOUNT_GRANT_VERSION } from '../mcp-server/account-grants.mjs'
+import { createAccountGrantService, accountGrantTools, PRIVATE_NOTES_TOOLS, ACCOUNT_GRANT_TOOL_VERSIONS, CURRENT_ACCOUNT_GRANT_VERSION } from '../mcp-server/account-grants.mjs'
 import { createAccountHostedHandler } from '../mcp-server/account-hosted.mjs'
 import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountToolService, AccountToolError } from '../mcp-server/account-tools.mjs'
@@ -119,7 +119,7 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   const whoami = await who.json()
   assert.equal(whoami.ownerId, app.owner.ownerId)
   assert.equal(whoami.grant.version, CURRENT_ACCOUNT_GRANT_VERSION)
-  assert.deepEqual(whoami.grant.tools, [...ACCOUNT_GRANT_TOOL_VERSIONS[6].owner_network_and_public])
+  assert.deepEqual(whoami.grant.tools, [...ACCOUNT_GRANT_TOOL_VERSIONS[7].owner_network_and_public_and_private_notes])
   assert.equal(whoami.importCount, 1)
   assert.deepEqual(whoami.imports, { uploaded: 1, recoveredArchive: false })
   assert.equal(whoami.publicIndexAvailable, true)
@@ -225,7 +225,7 @@ test('old v1 token keeps exact bytes and gains current permitted reads across RE
   const app = await launch(t, { f, readPublishedSnapshot: async () => publishedSnapshot(), complete })
   const signed = await app.signIn()
   await app.upload(signed)
-  const { accessToken, grantId } = await app.grants.issueGrant(app.owner)
+  const { accessToken, grantId } = await app.grants.issueGrant(app.owner, undefined, { privateNotes: false })
 
   // Rewrite the stored record to the exact shape the v1 issuer produced; the
   // bearer token is unchanged. This is what production grants look like today.
@@ -235,7 +235,9 @@ test('old v1 token keeps exact bytes and gains current permitted reads across RE
   assert.deepEqual(record.payload.tools, ['unlinked_search_network', 'unlinked_search_everyone'])
   const grant = await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${accessToken}` } })
   assert.equal(grant.version, CURRENT_ACCOUNT_GRANT_VERSION)
-  assert.deepEqual(grant.tools, [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, record.payload.scope)])
+  // A pre-v7 API key also gains the default-on private-notes permission (unlinked-lf4).
+  assert.equal(grant.scope, `${record.payload.scope}_and_private_notes`)
+  assert.deepEqual(grant.tools, [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, `${record.payload.scope}_and_private_notes`)])
   assert.equal((await app.grants.readKey(app.owner, grantId)).accessToken, accessToken)
   assert.equal(record.payload.version, 1)
 
@@ -276,7 +278,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   await narrowApp.upload(narrowSigned)
   const narrow = await narrowApp.grants.issueGrant(narrowApp.owner)
   const narrowWho = await (await call(narrowApp.endpoint, narrow.accessToken, 'whoami')).json()
-  assert.equal(narrowWho.grant.scope, 'owner_network')
+  assert.equal(narrowWho.grant.scope, 'owner_network_and_private_notes')
   assert.equal(narrowWho.publicIndexAvailable, false)
   for (const [path, options] of [
     ['people', {}],
@@ -325,7 +327,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const mcpTransport = new StreamableHTTPClientTransport(new URL(`${narrowApp.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${narrow.accessToken}` } } })
   try {
     await mcpClient.connect(mcpTransport)
-    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact'])
+    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact', ...PRIVATE_NOTES_TOOLS])
     const who = await mcpClient.callTool({ name: 'unlinked_whoami', arguments: {} })
     assert.ok(!who.isError)
     assert.equal(JSON.parse(who.content[0].text).ownerId, narrowApp.owner.ownerId)
