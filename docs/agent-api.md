@@ -398,7 +398,13 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
   re-derived on reuse; other live grants are never clobbered. With no eligible read grant, it mints the
   deterministic automatic grant at the current catalog version and default
   read scope (public access when enabled), unless that automatic grant was
-  revoked. **Revoked stays revoked**: after the owner turns agent access off, provisioning answers `grant_revoked` until they
+  revoked. If that automatic key is live but write-enabled, explicit read-only
+  provisioning uses one stable per-account fallback, named Read-only provisioning
+  key, with the automatic key's original read boundary. Show/Copy never creates
+  this fallback. Replacement is reused; its tombstone or write-enabled state
+  prevents further fallback issuance. An explicit new read-only Settings key can
+  restore provisioning. See [key lifecycle](agent-key-settings.md).
+  **Revoked stays revoked**: after the owner turns agent access off, provisioning answers `grant_revoked` until they
   re-enable it in Settings.
 - **Response (200):** `{ kind: "unlinked_provision_grant", ownerId, grantId,
   created, version, scope, tools, accessToken }`. The token is verified

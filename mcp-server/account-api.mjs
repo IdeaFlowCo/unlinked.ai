@@ -110,6 +110,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     if (verified.error === 'grant_revoked') throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
     if (!verified.grant || verified.grant.ownerId !== owner.ownerId) throw new AccountToolError('upstream_unavailable', 'The provisioned grant could not be verified right now; retry.')
     const grant = verified.grant
+    if (!['owner_network', 'owner_network_and_public'].includes(grant.scope)) throw new AccountToolError('grant_revoked', 'The provisioned key no longer permits read-only provisioning.')
     // Audit the event — never the token. The contract promises an audit row
     // for every issuance/reuse, so an unauditable provisioning fails closed:
     // the token is simply not returned (the grant record itself is unchanged).

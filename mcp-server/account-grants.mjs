@@ -65,6 +65,7 @@ export function effectiveAccountGrant(grant) {
 // provisioning is an idempotent compare-and-set and its tombstone is readable:
 // a revoked automatic setup stays revoked instead of silently coming back.
 const AUTO_JTI = 'account-grant-auto-v1'
+const READ_ONLY_JTI = 'account-grant-read-only-v1'
 const keyName = value => {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > 80 || /[\x00-\x1f\x7f]/.test(value)) throw new Error('account_grant_name_invalid')
   return value.trim()
@@ -123,27 +124,42 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   const ensureGrant = async (owner, { readOnly = false } = {}) => {
     const backend = await getBackend(owner)
     const autoId = privateId(owner.ownerId, 'account-grant-v1', AUTO_JTI)
-    const derive = record => record && !record.deleted && record.sourceOwnerId === owner.ownerId && record.payload?.kind === 'account_tool_grant' &&
+    const derive = (record, onlyReads = readOnly) => record && !record.deleted && record.sourceOwnerId === owner.ownerId && record.payload?.kind === 'account_tool_grant' &&
       record.payload.ownerId === owner.ownerId && record.payload.userId === owner.userId && record.payload.issuer === issuer && record.payload.audience === audience &&
       typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) && !record.payload.connection && effectiveAccountGrant(record.payload) &&
-      (!readOnly || ['owner_network', 'owner_network_and_public'].includes(record.payload.scope)) ? record : null
+      (!onlyReads || ['owner_network', 'owner_network_and_public'].includes(record.payload.scope)) ? record : null
     const ids = await backend.listAccountGrantIds()
     const records = []
-    for (let start = 0; start < ids.length; start += 8) records.push(...(await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id)))).map(derive).filter(Boolean))
+    for (let start = 0; start < ids.length; start += 8) records.push(...(await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id)))).map(record => derive(record)).filter(Boolean))
     const latest = records.sort((a, b) => (b.payload.issuedAt - a.payload.issuedAt) || a.sourceId.localeCompare(b.sourceId))[0]
     const shape = record => effectiveAccountGrant(record.payload)
     if (latest) return { accessToken: await signGrant(latest.sourceId, owner, latest.payload.jti, latest.payload.issuedAt, latest.payload.generation), grantId: latest.sourceId, created: false, ...shape(latest) }
     const existing = await backend.readResource('import', autoId)
     if (existing?.deleted) return null // the owner revoked their agent access; it stays revoked
-    try { return { ...(await issueGrant(owner, AUTO_JTI)), created: true } }
+    const fallback = readOnly && derive(existing, false) && scopeAllowsConnectionActions(existing.payload.scope)
+    const jti = fallback ? READ_ONLY_JTI : AUTO_JTI
+    const id = privateId(owner.ownerId, 'account-grant-v1', jti)
+    const options = fallback ? { name: 'Read-only provisioning key', scope: scopeCoversPublic(existing.payload.scope) ? 'owner_network_and_public' : 'owner_network' } : {}
+    if (fallback) {
+      const stored = await backend.readResource('import', id)
+      if (stored) {
+        const live = derive(stored)
+        if (!live) return null
+        return { accessToken: await signGrant(id, owner, live.payload.jti, live.payload.issuedAt, live.payload.generation), grantId: id, created: false, ...shape(live) }
+      }
+    }
+    try { return { ...(await issueGrant(owner, jti, options)), created: true } }
     catch (error) {
       // A concurrent visit may have provisioned — or revoked — first; the
       // durable record wins either way.
-      const record = await backend.readResource('import', autoId)
+      const record = await backend.readResource('import', id)
       if (record?.deleted) return null
       const live = derive(record)
-      if (!live) throw error
-      return { accessToken: await signGrant(autoId, owner, live.payload.jti, live.payload.issuedAt, live.payload.generation), grantId: autoId, created: false, ...shape(live) }
+      if (!live) {
+        if (fallback && derive(record, false)) return null
+        throw error
+      }
+      return { accessToken: await signGrant(id, owner, live.payload.jti, live.payload.issuedAt, live.payload.generation), grantId: id, created: false, ...shape(live) }
     }
   }
   // Distinguishes "no usable bearer identity" (not_linked) from "the identity
