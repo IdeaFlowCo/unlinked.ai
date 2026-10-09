@@ -393,7 +393,10 @@ at most 500 rows with `total` and `truncated`, `reason` naming the matched
 fields). Only a query with no literal match is AI-ranked (`mode:
 "query_time_ai"`, top ten), within one 20 s deadline for the whole call, network reads included (below the shared connector's 25 s downstream timeout); a spent budget returns
 `upstream_unavailable` naming the text-query and `list_connections`
-alternatives. With `degree` it reads recorded paths. On HTTP, failures are typed
+alternatives. Ranking stops 4 s before that deadline and returns the best
+matches ranked so far with `partial: true` (`considered` then counts only the
+rows actually ranked); the error is returned only if nothing finished. The
+owner-network ranking runs eight model calls at a time. With `degree` it reads recorded paths. On HTTP, failures are typed
 (`degree_unproven`, `cursor_invalid`, ...) and recorded-path pages cap at 50
 rows; on MCP it returns the same typed failure shape and keeps 100-row pages
 (offset cursors are interchangeable between the two).

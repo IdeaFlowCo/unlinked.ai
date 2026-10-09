@@ -87,3 +87,28 @@ test('the deadline holds even when a backend read ignores the abort signal', asy
   await assert.rejects(stuck.searchNetwork({ query: 'someone to advise on hiring', aiBudgetMs: 100 }), error => error.name === 'TimeoutError')
   assert.ok(Date.now() - started < 500)
 })
+
+test('at the soft deadline, finished ranking is returned as partial instead of failing', async () => {
+  const many = Array.from({ length: 450 }, (_, n) => row(1000 + n, { 'first name': `Q${n}`, company: 'Example', position: 'Analyst' }))
+  const fast = many[0].id
+  const complete = ({ candidateIds, signal }) => candidateIds.includes(fast)
+    ? Promise.resolve({ matches: [{ id: fast, reason: 'Hiring background' }] })
+    : new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
+  const started = Date.now()
+  const result = await network(many, complete).searchNetwork({ query: 'someone to advise on hiring', aiBudgetMs: 300 })
+  assert.ok(Date.now() - started < 300)
+  assert.equal(result.mode, 'query_time_ai')
+  assert.equal(result.partial, true)
+  assert.deepEqual(result.matches.map(m => m.assertionId), [fast])
+  assert.equal(result.considered, 200)
+})
+
+test('owner-network ranking runs eight model calls at a time', async () => {
+  const many = Array.from({ length: 3400 }, (_, n) => row(5000 + n, { 'first name': `R${n}`, company: 'Example', position: 'Analyst' }))
+  let inFlight = 0, peak = 0, calls = 0
+  const complete = async () => { calls++; peak = Math.max(peak, ++inFlight); await new Promise(resolve => setTimeout(resolve, 20)); inFlight--; return { matches: [] } }
+  const result = await network(many, complete).searchNetwork({ query: 'someone to advise on hiring' })
+  assert.equal(calls, 17)
+  assert.equal(peak, 8)
+  assert.equal(result.partial, undefined)
+})
