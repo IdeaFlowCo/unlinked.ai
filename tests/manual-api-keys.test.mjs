@@ -131,3 +131,56 @@ test('unavailable explicit selection suppresses setup and all selected-key scope
     for (const forbidden of ['synthetic-stale-token', 'Access:', 'earlier tool set', 'connection actions enabled', 'name="grantId"', 'Copy API key', 'Copy agent setup']) assert.ok(!page.includes(forbidden))
   }
 })
+
+for (const route of ['/settings/api-keys', '/revoke-account']) {
+  test(`pre-automation last key revoked through ${route} stays off across Settings revisits`, async t => {
+    const f = await manualKeyFixture(); t.after(f.close)
+    // Populate the durable state before first sign-in/Settings: only random-jti
+    // manual grants, exactly as an account predating automatic setup would have.
+    const a = await f.grants.issueGrant(f.owner)
+    const b = await f.grants.issueGrant(f.owner)
+    const automatic = () => [...f.resources.values()].filter(row => row.payload?.jti === 'account-grant-auto-v1')
+    assert.equal(f.resources.size, 2)
+    assert.equal(automatic().length, 0)
+    const session = await f.signIn()
+    assert.equal(f.resources.size, 2, 'Settings reused a manual key without creating an auto record')
+    const revoke = async grantId => route === '/settings/api-keys'
+      ? f.post(session, { action: 'revoke', grantId })
+      : fetch(`${f.endpoint}${route}`, { method: 'POST', redirect: 'manual', headers: { Cookie: session.cookie, Origin: f.baseUrl }, body: new URLSearchParams({ csrf: session.csrf, grantId }) })
+    assert.equal((await revoke(a.grantId)).status, 303)
+    assert.equal(await auth(f.grants, a.accessToken), null)
+    assert.ok(await auth(f.grants, b.accessToken), 'revoking A preserves B')
+    assert.equal(tokenFrom(await (await f.page(session)).text()), b.accessToken)
+    assert.equal(f.resources.size, 2, 'another live manual key needs no auto tombstone')
+    assert.equal((await revoke(b.grantId)).status, 303)
+    assert.equal(await auth(f.grants, b.accessToken), null)
+    const tombstones = [...f.resources.values()].filter(row => row.deleted)
+    assert.equal(tombstones.length, 3, 'two revoked records plus the automatic tombstone')
+    const persisted = structuredClone([...f.resources])
+    for (let visit = 0; visit < 2; visit++) {
+      const response = await f.page(session)
+      assert.equal(response.status, 200)
+      assert.equal(tokenFrom(await response.text()), undefined)
+      assert.deepEqual([...f.resources], persisted, 'GET Settings must not write or reissue')
+    }
+    const freshSession = await f.signIn()
+    assert.equal(tokenFrom(await (await f.page(freshSession)).text()), undefined)
+    const restarted = createAccountGrantService(f.options)
+    assert.equal(await restarted.ensureGrant(f.owner), null)
+    assert.deepEqual([...f.resources], persisted)
+  })
+}
+
+test('revoking a legacy manual key preserves an existing automatic default byte-for-byte', async t => {
+  const f = await manualKeyFixture(); t.after(f.close)
+  const defaultKey = await f.grants.ensureGrant(f.owner)
+  const originalDefault = structuredClone(f.resources.get(defaultKey.grantId))
+  const legacy = await f.grants.issueGrant(f.owner)
+  const session = await f.signIn()
+  assert.equal((await f.post(session, { action: 'revoke', grantId: legacy.grantId })).status, 303)
+  assert.equal(tokenFrom(await (await f.page(session)).text()), defaultKey.accessToken)
+  assert.ok(await auth(f.grants, defaultKey.accessToken))
+  assert.equal(await auth(f.grants, legacy.accessToken), null)
+  assert.deepEqual(f.resources.get(defaultKey.grantId), originalDefault)
+  assert.equal(f.resources.size, 2)
+})
