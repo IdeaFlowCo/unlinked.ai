@@ -82,7 +82,11 @@ for (const explicitSelection of [false, true]) {
     const f = await manualKeyFixture(); t.after(f.close)
     const session = await f.signIn()
     const a = await f.grants.ensureGrant(f.owner)
-    const b = await f.grants.issueGrant(f.owner, undefined, { name: 'Independent B' })
+    const issuedB = await f.grants.issueGrant(f.owner, undefined, { name: 'Independent B' })
+    f.resources.get(issuedB.grantId).payload.issuedAt = f.resources.get(a.grantId).payload.issuedAt - 1
+    const b = await f.grants.readKey(f.owner, issuedB.grantId)
+    assert.equal((await f.grants.ensureGrant(f.owner)).grantId, a.grantId)
+    assert.equal(tokenFrom(await (await f.page(session, explicitSelection ? a.grantId : undefined)).text()), a.accessToken)
     const bBefore = structuredClone(f.resources.get(b.grantId))
     let interleaved = false
     f.beforeGrantList(async () => {
