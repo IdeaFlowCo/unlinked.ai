@@ -77,12 +77,12 @@ test('agent setup is prepared automatically, idempotently, stays revoked after r
   assert.equal(f.activeGrants().length, 1)
   assert.deepEqual(configFrom(second.html), configA)
 
-  // A migrated/expanded tool list on the live grant is tolerated: still reused, never duplicated.
+  // A corrupt catalog is not displayed as a usable credential or duplicated.
   const grantRecord = f.activeGrants()[0]
   grantRecord.payload.tools = [...grantRecord.payload.tools, 'unlinked_future_tool']
   const migrated = await settings()
   assert.equal(f.activeGrants().length, 1)
-  assert.deepEqual(configFrom(migrated.html), configA)
+  assert.equal(configFrom(migrated.html), null)
   grantRecord.payload.tools = grantRecord.payload.tools.slice(0, -1)
 
   // Revoking the only grant sticks: Settings shows no credential and mints nothing.

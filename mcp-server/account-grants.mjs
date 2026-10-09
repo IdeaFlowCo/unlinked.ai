@@ -6,9 +6,9 @@ const audience = 'unlinked-account-tools-v1'
 
 // Versioned grant-scope catalog. A grant record stores the exact tool list it
 // was issued with; authentication accepts a record only when that list equals
-// the catalog entry for its (version, scope). Adding tools later means adding
-// a new version here — existing records keep their stored version and tools,
-// so no issued grant ever changes shape or gains capability retroactively.
+// the catalog entry for its (version, scope). Valid historical records resolve
+// to current tools within that same permission and data boundary. New permission
+// categories still require explicit owner consent; viewing never rewrites a grant.
 export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
   1: Object.freeze({
     owner_network: Object.freeze(['unlinked_search_network']),
@@ -34,21 +34,31 @@ export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
     owner_network_and_public_and_write: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
       'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
   }),
+  // Version 5 permits connection actions without widening owner-only reads.
+  5: Object.freeze({
+    owner_network: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
+    owner_network_and_public: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']),
+    owner_network_and_write: Object.freeze(['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
+      'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
+    owner_network_and_public_and_write: Object.freeze(['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications',
+      'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']),
+  }),
 })
-export const CURRENT_ACCOUNT_GRANT_VERSION = 4
+export const CURRENT_ACCOUNT_GRANT_VERSION = 5
 export const accountGrantTools = (version, scope) => ACCOUNT_GRANT_TOOL_VERSIONS[version]?.[scope] ?? null
 // The opt-in scope that adds connection-request write tools.
 export const ACCOUNT_WRITE_SCOPE = 'owner_network_and_public_and_write'
+export const ACCOUNT_OWNER_WRITE_SCOPE = 'owner_network_and_write'
+export const scopeAllowsConnectionActions = scope => scope === ACCOUNT_WRITE_SCOPE || scope === ACCOUNT_OWNER_WRITE_SCOPE
 export const ACCOUNT_WRITE_TOOLS = Object.freeze(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
 // Scopes that read the published People index.
 export const scopeCoversPublic = scope => scope === 'owner_network_and_public' || scope === ACCOUNT_WRITE_SCOPE
-// Tools the current catalog gives the same scope that this grant lacks. An
-// empty list means the grant is up to date, even when its catalog version is
-// older: a new version that only adds an opt-in scope outdates no one.
-export function missingAccountGrantTools(grant) {
-  const current = accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, grant?.scope)
-  if (!current || !Array.isArray(grant?.tools)) return []
-  return current.filter(name => !grant.tools.includes(name))
+// First validate the historical stored catalog; only then resolve effective
+// current tools. Never normalize a malformed record into an authorized grant.
+export function effectiveAccountGrant(grant) {
+  const stored = accountGrantTools(grant?.version, grant?.scope)
+  if (!stored || !Array.isArray(grant?.tools) || JSON.stringify(stored) !== JSON.stringify(grant.tools)) return null
+  return { version: CURRENT_ACCOUNT_GRANT_VERSION, scope: grant.scope, tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, grant.scope)] }
 }
 
 // Deterministic jti for the one automatically prepared grant per owner, so
@@ -76,7 +86,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   // The write scope needs the People index (requests are sent to published
   // profiles), so it exists only where public search does. It is grantable but
   // never the default: every caller that wants it names it explicitly.
-  const grantableScopes = publicSearchEnabled ? ['owner_network', 'owner_network_and_public', ACCOUNT_WRITE_SCOPE] : ['owner_network']
+  const grantableScopes = publicSearchEnabled ? ['owner_network', 'owner_network_and_public', ACCOUNT_WRITE_SCOPE, ACCOUNT_OWNER_WRITE_SCOPE] : ['owner_network']
   // HS256 signing is deterministic, so the bearer credential for an existing
   // grant is re-derived from its durable record; viewing setup mints nothing.
   const signGrant = (id, owner, jti, issuedAt, generation) => new SignJWT({ ...(generation ? { generation } : {}), grantId: id, ownerId: owner.ownerId, token_use: 'account_tools' })
@@ -115,14 +125,13 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const autoId = privateId(owner.ownerId, 'account-grant-v1', AUTO_JTI)
     const derive = record => record && !record.deleted && record.sourceOwnerId === owner.ownerId && record.payload?.kind === 'account_tool_grant' &&
       record.payload.ownerId === owner.ownerId && record.payload.userId === owner.userId && record.payload.issuer === issuer && record.payload.audience === audience &&
-      typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) && !record.payload.connection &&
+      typeof record.payload.jti === 'string' && Number.isSafeInteger(record.payload.issuedAt) && !record.payload.connection && effectiveAccountGrant(record.payload) &&
       (!readOnly || ['owner_network', 'owner_network_and_public'].includes(record.payload.scope)) ? record : null
     const ids = await backend.listAccountGrantIds()
     const records = []
     for (let start = 0; start < ids.length; start += 8) records.push(...(await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id)))).map(derive).filter(Boolean))
     const latest = records.sort((a, b) => (b.payload.issuedAt - a.payload.issuedAt) || a.sourceId.localeCompare(b.sourceId))[0]
-    // The reused grant's own catalog entry, so Settings can tell an outdated setup.
-    const shape = record => ({ version: record.payload.version ?? 1, scope: record.payload.scope, tools: Array.isArray(record.payload.tools) ? [...record.payload.tools] : [] })
+    const shape = record => effectiveAccountGrant(record.payload)
     if (latest) return { accessToken: await signGrant(latest.sourceId, owner, latest.payload.jti, latest.payload.issuedAt, latest.payload.generation), grantId: latest.sourceId, created: false, ...shape(latest) }
     const existing = await backend.readResource('import', autoId)
     if (existing?.deleted) return null // the owner revoked their agent access; it stays revoked
@@ -161,7 +170,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     if (!record || record.deleted || record.sourceOwnerId !== payload.ownerId || grant?.kind !== 'account_tool_grant' || !tools ||
         grant.ownerId !== payload.ownerId || grant.userId !== payload.sub || grant.jti !== payload.jti || grant.issuer !== issuer || grant.audience !== audience ||
         grant.issuedAt !== payload.iat || grant.generation !== payload.generation || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(tools)) return { error: 'grant_revoked' }
-    return { grant: { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, tools: [...grant.tools], scope: grant.scope, version: grant.version } }
+    return { grant: { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, ...effectiveAccountGrant(grant) } }
   }
   const authenticateGrant = async request => (await authenticateGrantDetailed(request)).grant ?? null
   const revoke = async (owner, grantId) => {
@@ -195,8 +204,10 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
       const records = await Promise.all(ids.slice(start, start + 8).map(id => backend.readResource('import', id)))
       for (const record of records) {
         if (!record || record.deleted || record.sourceOwnerId !== owner.ownerId || record.payload?.kind !== 'account_tool_grant' || record.payload.userId !== owner.userId) continue
+        const effective = effectiveAccountGrant(record.payload)
+        if (!effective) continue
         const connection = record.payload.connection
-        out.push({ id: record.sourceId, name: record.payload.name ?? (record.payload.jti === AUTO_JTI ? 'Default key' : 'Existing key'), issuedAt: record.payload.issuedAt, scope: record.payload.scope, version: record.payload.version ?? 1, tools: Array.isArray(record.payload.tools) ? [...record.payload.tools] : [], ...(connection ? { connection: { app: connection.app, clientName: connection.clientName, redirectHost: connection.redirectHost } } : {}) })
+        out.push({ id: record.sourceId, name: record.payload.name ?? (record.payload.jti === AUTO_JTI ? 'Default key' : 'Existing key'), issuedAt: record.payload.issuedAt, ...effective, ...(connection ? { connection: { app: connection.app, clientName: connection.clientName, redirectHost: connection.redirectHost } } : {}) })
       }
     }
     return out.sort((a, b) => (b.issuedAt - a.issuedAt) || a.id.localeCompare(b.id))
@@ -213,11 +224,23 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   }
   const readKey = async (owner, id) => {
     const { record } = await manualRecord(owner, id), g = record.payload
-    return { grantId: id, accessToken: await signGrant(id, owner, g.jti, g.issuedAt, g.generation), version: g.version, scope: g.scope, tools: [...g.tools] }
+    return { grantId: id, accessToken: await signGrant(id, owner, g.jti, g.issuedAt, g.generation), ...effectiveAccountGrant(g) }
   }
   const renameKey = async (owner, id, name) => {
     const normalized = keyName(name), { backend, record } = await manualRecord(owner, id)
     await backend.writeResource({ ...record, sourceRevision: record.sourceRevision + 1, expectedRevision: record.sourceRevision, payload: { ...record.payload, name: normalized } })
+  }
+  const setConnectionActions = async (owner, id, enabled) => {
+    if (typeof enabled !== 'boolean' || (enabled && !publicSearchEnabled)) throw new Error('account_grant_scope_invalid')
+    const { backend, record } = await manualRecord(owner, id)
+    const scope = scopeCoversPublic(record.payload.scope)
+      ? (enabled ? ACCOUNT_WRITE_SCOPE : 'owner_network_and_public')
+      : (enabled ? ACCOUNT_OWNER_WRITE_SCOPE : 'owner_network')
+    // Identity, issue time and secret generation stay identical. CAS makes
+    // permission edits race safely with rename, replacement and revocation.
+    await backend.writeResource({ ...record, sourceRevision: record.sourceRevision + 1, expectedRevision: record.sourceRevision,
+      payload: { ...record.payload, version: CURRENT_ACCOUNT_GRANT_VERSION, scope, tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] } })
+    return readKey(owner, id)
   }
   const replaceKey = async (owner, id) => {
     const { backend, record } = await manualRecord(owner, id)
@@ -239,5 +262,5 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     await revoke(owner, verified.grant.grantId)
     return true
   }
-  return { readKey, renameKey, replaceKey, issueGrant, ensureGrant, authenticateGrant, authenticateGrantDetailed, revoke, listGrants, revokeConnectionToken }
+  return { readKey, renameKey, setConnectionActions, replaceKey, issueGrant, ensureGrant, authenticateGrant, authenticateGrantDetailed, revoke, listGrants, revokeConnectionToken }
 }

@@ -26,7 +26,7 @@ import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
 import { CONNECTION_FEEDBACK_SCRIPT } from './connection-feedback.mjs'
 import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
-import { ACCOUNT_WRITE_SCOPE, missingAccountGrantTools } from './account-grants.mjs'
+import { ACCOUNT_WRITE_SCOPE, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
 import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
@@ -457,9 +457,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // both the People index and connection requests, and only by explicit opt-in.
   const connectionActionsAvailable = Boolean(memberConnections) && typeof readPublishedSnapshot === 'function'
   // What the copyable setup can do, and which current tools it lacks.
-  const setupAccess = grant => ({ scope: grant.scope, missingTools: missingAccountGrantTools(grant) })
+  const setupAccess = grant => ({ scope: grant.scope })
   // Connected apps carry whether they predate tools their scope now has.
-  const settingsGrants = grants => grants.map(grant => grant.connection ? { ...grant, outdated: missingAccountGrantTools(grant).length > 0 } : grant)
+  const settingsGrants = grants => grants.map(grant => ({ ...grant, ...(effectiveAccountGrant(grant) ?? {}) }))
   // Settings grant listing: labels for OAuth-connected apps when available.
   const grantList = async (owner, backend) => typeof listAccountGrants === 'function' ? await listAccountGrants(owner) : (await backend.listAccountGrantIds()).map(id => ({ id }))
   const connector = oauth && mcpEndpoint ? { url: mcpEndpoint } : undefined
@@ -1281,13 +1281,17 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (signup && accountKeys && request.method === 'POST' && url.pathname === '/settings/api-keys') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
         const action = input.get('action'), id = input.get('grantId')
-        const allowed = action === 'create' ? ['csrf', 'action', 'name', 'access'] : action === 'rename' ? ['csrf', 'action', 'grantId', 'name'] : ['csrf', 'action', 'grantId']
+        const allowed = action === 'create' ? ['csrf', 'action', 'name', 'access'] : action === 'rename' ? ['csrf', 'action', 'grantId', 'name'] : action === 'permissions' ? ['csrf', 'action', 'grantId', 'access'] : ['csrf', 'action', 'grantId']
         if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || [...input.keys()].some(key => !allowed.includes(key) || input.getAll(key).length !== 1)) throw new Error('private_browser_csrf')
         let selected = id
         if (action === 'create') {
           const access = input.get('access')
           if (access !== null && (access !== 'connections' || !connectionActionsAvailable)) throw new Error('private_browser_csrf')
           selected = (await issueAccountGrant(session.owner, undefined, { name: input.get('name'), ...(access ? { scope: ACCOUNT_WRITE_SCOPE } : {}) })).grantId
+        } else if (action === 'permissions') {
+          const access = input.get('access')
+          if (access !== null && (access !== 'connections' || !connectionActionsAvailable)) throw new Error('private_browser_csrf')
+          await accountKeys.setConnectionActions(session.owner, id, access === 'connections')
         } else if (action === 'rename') await accountKeys.renameKey(session.owner, id, input.get('name'))
         else if (action === 'replace') await accountKeys.replaceKey(session.owner, id)
         else if (action === 'revoke') { await accountKeys.readKey(session.owner, id); await revokeAccountGrant(session.owner, id); selected = null }

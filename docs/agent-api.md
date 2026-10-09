@@ -116,7 +116,7 @@ Security decisions:
   `network`) → `owner_network_and_public`. Unknown scopes (`openid`,
   `offline_access`, `claudeai`, …) are ignored; no recognized read scope means
   all offered read access. Optional `connections` requires the separate
-  consent choice described [below](#catalog-v4-optional-connection-actions);
+  consent choice described [below](#optional-connection-actions);
   a scope request alone never enables writes. The token response states the
   granted `scope`.
 - **Tokens are account grants.** The access token is an ordinary account grant
@@ -148,15 +148,19 @@ the catalog entry for `(version, scope)` in
 | 2 | + `unlinked_whoami`, `unlinked_list_connections`, `unlinked_ai_search` | + `unlinked_whoami`, `unlinked_list_people`, `unlinked_list_connections`, `unlinked_get_profile`, `unlinked_ai_search` |
 | 3 | version 2 + `unlinked_list_connection_requests`, `unlinked_list_notifications` (read-only) | version 2 + the same two tools |
 
-- Old grants keep exactly their issued tools on both surfaces — MCP
-  `tools/list` for a v1 grant still shows only the launch tools, and the HTTP
-  API answers `scope_not_granted` for tools outside the grant.
-- Adding tools later = adding a new sibling version to the catalog and issuing
-  new grants with it. No existing record changes shape, no token is reissued, no
-  consumer breaks. This is the committed migration pattern.
-- Automatic grant provisioning composes
-  with this: `issueGrant(owner)` always writes the current catalog version,
-  and authentication tolerates every cataloged version side by side.
+- Valid v1/v2 and later records resolve to the current catalog **within the same
+  enabled permission and data boundary**. Owner-only keys stay owner-only; reads
+  never silently gain writes. Authentication, `tools/list`, `whoami`, Settings,
+  provisioning and execution agree. Historical records are validated against their
+  original exact catalog before normalization; simply editing a tool array fails.
+- New tools within enabled permissions use the same exact token bytes. No record
+  migration or token rotation is needed. Refresh an agent's cached `tools/list`;
+  copying a new key is not a tool refresh. This stateless POST-only MCP transport
+  does not deliver tool-list-change or notification pushes (`listChanged: false`).
+  The notification tool reads the in-app feed on demand.
+- Current issuance is catalog v5. New permission categories still need explicit
+  consent. Manual-key connection-request permission can be edited in Settings;
+  OAuth apps require actual consent/reconsent for additional permissions.
 
 OpenChat's production integration — stateless JSON-RPC `tools/call` POSTs to
 `/mcp` invoking `unlinked_search_network` / `unlinked_search_everyone` — is
@@ -165,8 +169,8 @@ test. Since the typed-failure fix (PR #53), the two launch tools also return
 the sanitized typed JSON failure shape below instead of their original
 free-text error sentences.
 
-Version 4 is current issuance: both read scopes retain their v3 tools; its
-separate opt-in scope is documented [below](#catalog-v4-optional-connection-actions).
+Catalog v5 keeps both read scopes and the optional connection actions described
+[below](#optional-connection-actions).
 
 ## Typed errors
 
@@ -254,11 +258,11 @@ All JSON. GET parameters are query-string; POST bodies are
 `application/json` (≤ 8 KiB). Unknown or repeated parameters are `invalid_input`.
 
 ### `GET /api/agent/v1/whoami` ⇄ `unlinked_whoami`
-Response: `{ kind, ownerId, grant: { scope, version, tools, update? }, importCount,
+Response: `{ kind, ownerId, grant: { scope, version, tools, toolRefresh }, importCount,
 legacyProfile: { profileId, name, revision } | null, publicIndexAvailable }`.
 `ownerId` is the stable identifier for fail-closed linkage verification.
-Optional `grant.update` is `{ currentVersion, missingTools, how }`; see the
-[update-hint policy](#catalog-v4-optional-connection-actions).
+`grant.toolRefresh` explains same-key tool refresh and explicit permissions; see the
+[permission and tool-refresh policy](#optional-connection-actions).
 
 ### `GET /api/agent/v1/people?q&mode&presence&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
@@ -287,7 +291,7 @@ Read-only, grant catalog version 3. `direction` `received` (default: requests
 waiting for the owner's answer) or `sent` (the owner's requests still pending;
 a request the recipient ignored still reads as pending, as it does in the app).
 Response: `{ kind, direction, total, requests: [{ id, direction, status, name,
-profileId?, note?, createdAt }], visibility: "owner_private" }`. Sending, accepting, ignoring and withdrawing require the separate explicit opt-in connection scope in catalog v4.
+profileId?, note?, createdAt }], visibility: "owner_private" }`. Sending, accepting, ignoring and withdrawing require the separate explicit opt-in connection scope in catalog v5.
 
 ### `GET /api/agent/v1/notifications?limit` ⇄ `unlinked_list_notifications`
 Read-only, grant catalog version 3. Newest first, `limit` 1–50 (default 20).
@@ -462,14 +466,21 @@ needs are served by `list_people` pagination (50/page inside the 120/min
 budget covers the full ~16k-profile index in ~3 minutes, always at the live
 revision, which is tombstone-safe by construction).
 
-## Catalog v4: optional connection actions
+## Optional connection actions
 
-Versions 1–3 are immutable. Version 4 retains the v3 read lists and adds
-`owner_network_and_public_and_write`, never a default. Creating a key in Settings
-and OAuth consent offer an unchecked optional choice; the server validates
-`access=connections`, availability and duplicate/unknown fields. Requesting
-OAuth `connections` alone does not grant it. Defaults and existing grants keep
-read access only; creating another key without that opt-in gives it read-only access.
+Historical catalogs remain immutable. V5 retains v4 read/public-write lists and
+adds `owner_network_and_write` so an owner-only key can enable connection actions
+without gaining public read tools. `owner_network_and_public_and_write` remains
+supported. Both write scopes authorize exactly the four actions below.
+
+Settings → API keys puts selection, Show/Copy API key and Copy agent setup before
+client instructions. **Send and manage connection requests → Save permissions**
+enables/disables writes for just the selected manual key, with the same token.
+Creation defaults to read-only and has a visible opt-in. The browser requires a
+session, exact CSRF, same origin, validated fields and durable owner checks. A CAS
+updates scope/catalog while preserving jti, issuedAt and generation. It cannot
+resurrect a revoked grant or overwrite a concurrent replacement. OAuth grants
+cannot use this action; their existing consent flow still governs permission.
 
 | MCP tool | HTTP POST route | JSON fields |
 |---|---|---|
@@ -489,9 +500,15 @@ profileId, id?, visibility: "owner_private" }`; the other actions return
 with status `accepted`, `ignored` or `withdrawn`. Removal remains browser-only.
 MCP annotations mark these as writes. Messaging and posting are never available.
 
-Settings and `whoami.grant.update` identify missing newer tools only when
-the grant lacks tools its own scope now provides. A v3 read grant has no nudge
-solely because v4 adds an opt-in scope. Missing grant records render safely.
+`whoami.grant` reports effective current scope/version/tools and a `toolRefresh`
+instruction; the obsolete `update`/regenerate advice is gone. Revalidation checks
+live token identity/generation and the requested tool, not whole-array equality.
+Removing permission returns `scope_not_granted`; replacement/revocation returns
+`grant_revoked`. Unrelated permission changes do not fail a read. Reads revalidate
+before returning data; writes revalidate before execution (send also after target
+lookup). An already-committed write reports success even if permission is changed
+afterward. Auth and connection storage are not a cross-resource transaction;
+in-flight operations authorized at their final check may finish.
 
 ## Shared connector delegation
 

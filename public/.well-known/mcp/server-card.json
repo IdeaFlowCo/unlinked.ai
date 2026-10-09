@@ -1,11 +1,12 @@
 {
   "name": "unlinked",
   "version": "1.0.0",
-  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants. Current grants add whoami, deterministic paginated listings and an explicit AI search tool; old grants keep exactly their issued tool list. The same tools are served as a grant-authenticated HTTP JSON API under /api/agent/v1/ (contract: docs/agent-api.md).",
+  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants. Current grants add whoami, deterministic paginated listings and an explicit AI search tool; old valid grants receive current tools within their enabled permissions and original data scope, without changing token bytes. The same tools are served as a grant-authenticated HTTP JSON API under /api/agent/v1/ (contract: docs/agent-api.md).",
   "homepage": "https://www.unlinked.ai",
   "transports": {
     "streamable-http": {
-      "url": "https://www.unlinked.ai/mcp"
+      "url": "https://www.unlinked.ai/mcp",
+      "toolListChangePush": false
     }
   },
   "authentication": {
@@ -31,8 +32,9 @@
         "people",
         "connections"
       ],
-      "revocation": "Settings \u2192 Connected apps, or RFC 7009 at /oauth/revoke"
-    }
+      "revocation": "Settings → Connected apps, or RFC 7009 at /oauth/revoke"
+    },
+    "manualKeyPermissions": "Existing valid keys automatically receive current tools within enabled permissions, with unchanged key bytes and data scope. In Settings → API keys, turn “Send and manage connection requests” on/off and Save permissions for only the selected manual key; no replacement or reconnection is needed. Refresh cached MCP tools/list after changing permission. This POST-only transport has no push notifications. OAuth permission additions require consent/reconsent."
   },
   "tools": [
     {

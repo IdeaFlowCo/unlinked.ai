@@ -3,8 +3,12 @@
 export const ONBOARDING_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap'
 export const ONBOARDING_STYLE = `
 html{-webkit-text-size-adjust:100%}
-.unlinked-onboarding #api-keys{border-top:1px solid var(--line);margin-top:24px;padding-top:20px;scroll-margin-top:24px}
-.unlinked-onboarding .key-list{display:flex;flex-direction:column;gap:6px;margin:16px 0}
+.unlinked-onboarding #api-keys{scroll-margin-top:24px}
+.unlinked-onboarding .key-permissions{padding:12px 16px;margin:16px 0;border:1px solid var(--line);border-radius:var(--r);background:var(--page)}
+.unlinked-onboarding .key-permissions label{display:flex;align-items:center;gap:10px;min-height:44px;font-weight:600}
+.unlinked-onboarding .key-permissions input{width:20px;height:20px;accent-color:var(--brand);flex-shrink:0}
+.unlinked-onboarding section[aria-label="Connect with sign-in"]{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}
+.unlinked-onboarding .key-list{display:flex;flex-direction:column;align-items:stretch;gap:6px;margin:16px 0}
 .unlinked-onboarding .key-row{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;text-decoration:none;overflow-wrap:anywhere}
 .unlinked-onboarding .key-row[aria-current]{border-color:var(--brand);background:var(--tint)}
 .unlinked-onboarding .key-value{display:flex;align-items:center;gap:8px;margin-bottom:12px}

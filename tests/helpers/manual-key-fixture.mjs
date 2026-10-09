@@ -1,9 +1,10 @@
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
+import { createConnectionRequests, createMemoryConnectionStore } from '../../mcp-server/member-connections.mjs'
 import { createPrivateBrowserHandler } from '../../mcp-server/private-browser.mjs'
 import { createAccountGrantService } from '../../mcp-server/account-grants.mjs'
 
-export async function manualKeyFixture({ connectorPreview = false } = {}) {
+export async function manualKeyFixture({ connectorPreview = false, connectionActions = false } = {}) {
   const owner = { ownerId: 'synthetic-key-owner', userId: 'synthetic-key-user' }
   const foreign = { ownerId: 'synthetic-other-owner', userId: 'synthetic-other-user' }
   const resources = new Map(), audits = []
@@ -29,6 +30,7 @@ export async function manualKeyFixture({ connectorPreview = false } = {}) {
   handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'synthetic',
     ...(connectorPreview ? { oauth: { readAuthorization: async () => { throw Error('synthetic_preview_only') }, approve: () => {}, deny: () => {} } } : {}),
     login: { begin: async () => ({ location: 'https://synthetic-idp.invalid/authorize', transaction: { state: 'synthetic-state' } }), finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'synthetic-key-subject' }) },
+    ...(connectionActions ? { memberConnections: createConnectionRequests({ store: createMemoryConnectionStore() }), accountForProfile: async () => null } : {}),
     resolveOwner: async () => owner, signup: async () => owner, getBackend,
     issueAccountGrant: grants.issueGrant, ensureAccountGrant: grants.ensureGrant, revokeAccountGrant: grants.revoke,
     listAccountGrants: async owner => {

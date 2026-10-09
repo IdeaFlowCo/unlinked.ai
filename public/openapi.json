@@ -3,7 +3,7 @@
   "info": {
     "title": "Unlinked canonical beta",
     "version": "1.0.0",
-    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository."
+    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository. Existing valid keys automatically receive current tools within enabled permissions, with unchanged key bytes and data scope. In Settings → API keys, turn “Send and manage connection requests” on/off and Save permissions for only the selected manual key; no replacement or reconnection is needed. Refresh cached MCP tools/list after changing permission. This POST-only transport has no push notifications. OAuth permission additions require consent/reconsent."
   },
   "servers": [
     {
@@ -815,7 +815,7 @@
         },
         "responses": {
           "200": {
-            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } \u2014 token only in this response body, never logged"
+            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } — token only in this response body, never logged"
           },
           "400": {
             "description": "invalid_input"
@@ -833,7 +833,7 @@
             "description": "rate_limited (per-client budget; Retry-After)"
           },
           "503": {
-            "description": "upstream_unavailable (including an unavailable audit sink \u2014 provisioning fails closed rather than going unaudited)"
+            "description": "upstream_unavailable (including an unavailable audit sink — provisioning fails closed rather than going unaudited)"
           }
         }
       }
@@ -1486,7 +1486,7 @@
             "authorizationUrl": "https://www.unlinked.ai/oauth/authorize",
             "tokenUrl": "https://www.unlinked.ai/oauth/token",
             "scopes": {
-              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile\u2019s recorded paths, and (where available) your connection requests and notifications.",
+              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile’s recorded paths, and (where available) your connection requests and notifications.",
               "people": "Search and read the published People index on Unlinked (public professional profiles only).",
               "connections": "Send connection requests to members, and accept, ignore or withdraw your connection requests, under the same rules and daily limits as the site."
             }

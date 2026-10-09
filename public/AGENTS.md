@@ -33,7 +33,7 @@ Legacy Supabase APIs and legacy stdio tools remain historical code, not current 
 
 Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
 
-Grant catalog v4 adds optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing grants and default issuance remain read-only. Unlinked grants cannot send messages or post; connect OpenChat separately for messaging and Context. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
+Grant catalog v5 supports optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing read-only grants and default issuance stay read-only. Owner-only grants can enable actions without gaining public reads. Unlinked grants cannot send messages or post; connect OpenChat separately for messaging and Context. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
 
 ## Connection browsing and page depth
 
@@ -61,3 +61,7 @@ stdio, same API key); OpenChat has no live hosted /mcp endpoint.
 ## Shared Ideaflow connector
 
 Connect an agent at https://id.ideaflow.app/agents using one account connection for Unlinked, OpenChat and Thoughtstream Vision. The shared MCP URL is https://id.ideaflow.app/mcp. Each app has separate consented read/write scopes; adding another app never silently expands an existing grant. Direct Unlinked MCP/API credentials remain supported. The internal request-bound adapter at `/api/connector/mcp` resolves only existing issuer/subject account bindings and accepts no ordinary user bearer tokens. Deployment requires a dedicated `IDEAFLOW_CONNECTOR_SECRET` shared only with the gateway.
+
+Existing valid keys automatically receive current tools within enabled permissions, with unchanged key bytes and data scope. In Settings → API keys, turn “Send and manage connection requests” on/off and Save permissions for only the selected manual key; no replacement or reconnection is needed. Refresh cached MCP tools/list after changing permission. This POST-only transport has no push notifications. OAuth permission additions require consent/reconsent.
+
+For compatible hosts needing several apps or messages, use https://id.ideaflow.app/agents and its separate OpenChat permissions. Existing direct Claude/ChatGPT sign-in remains supported. Muse’s observed manual form uses the direct Unlinked key; Muse OAuth is unverified. Connection requests do not record private “X knows Y” relationships.
