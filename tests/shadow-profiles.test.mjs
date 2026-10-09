@@ -70,7 +70,8 @@ test('signed-in People and profile rows link to the published profile of a legac
   const own = network.slice(network.indexOf('aria-label="People you know"'), network.indexOf('aria-label="Everyone on Unlinked"'))
   assert.match(own, /<a href="\/people\/second">Second Shadow<\/a><span class="shadow net"[^>]*>.*?Not on Unlinked · 2<\/span>/)
   assert.match(own, /<a href="\/people\/third">Third Stub<\/a><span class="shadow" /)
-  assert.match(own, /<h3>Unpublished Person<\/h3>/)
+  // A row without a published profile opens the owner's own contact page (private context, unlinked-9kk.4).
+  assert.match(own, /<h3><a href="\/network\/contacts\/[a-f0-9]{64}">Unpublished Person<\/a><\/h3>/)
   const profile = await (await request('/profile', { headers: { Cookie: cookie } })).text()
   assert.match(profile, /<a class="crow" href="\/people\/second">/); assert.match(profile, /<a class="crow" href="\/people\/third">/)
 })

@@ -347,4 +347,21 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .network-date{margin:4px 0}
 .unlinked-onboarding [data-network-enhanced] .network-apply{display:none}
 @media(max-width:600px){.unlinked-onboarding .network-toolbar{padding:14px}.unlinked-onboarding .network-query{min-width:100%}.unlinked-onboarding .network-sort{flex:1}.unlinked-onboarding .network-segments{width:100%;font-size:13px}.unlinked-onboarding .network-segments a{flex:1;text-align:center;padding:9px 5px}.unlinked-onboarding .network-reset{margin-left:0}}
+.unlinked-onboarding .private-context{margin-top:16px;border-left:3px solid var(--brand)}
+.unlinked-onboarding .private-context .pc-head{display:flex;align-items:center;gap:10px}
+.unlinked-onboarding .private-context h3{margin:0}
+.unlinked-onboarding .private-context .pc-only{display:inline-flex;font-size:12px;font-weight:600;color:var(--brand);background:var(--tint);border-radius:99px;padding:2px 8px;margin-left:auto;white-space:nowrap}
+.unlinked-onboarding .private-context summary{display:flex;align-items:center;gap:6px;flex-wrap:wrap;cursor:pointer;min-height:32px;font-size:16px}
+.unlinked-onboarding .private-context summary .small{margin:0}
+.unlinked-onboarding .private-context h4{margin:14px 0 4px;font-size:15px}
+.unlinked-onboarding .private-context h5{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.unlinked-onboarding .private-context ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.unlinked-onboarding .private-context li{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--page);overflow-wrap:anywhere}
+.unlinked-onboarding .private-context li p{margin:0;white-space:pre-wrap}
+.unlinked-onboarding .private-context li .small{display:block;margin:4px 0 0;font-size:12px}
+.unlinked-onboarding .private-context .pc-facts{margin:10px 0 0;font-size:14px;font-weight:600}
+.unlinked-onboarding .private-context .pc-facts.due{color:#a3461b}
+.unlinked-onboarding .private-context .pc-explore{margin-top:10px;min-height:36px}
+.unlinked-onboarding .private-context .pc-hint{margin:14px 0 0;font-size:13px}
+@media(max-width:600px){.unlinked-onboarding .private-context{margin-top:12px}}
 `

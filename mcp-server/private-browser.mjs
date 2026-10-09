@@ -26,10 +26,11 @@ import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
 import { CONNECTION_FEEDBACK_SCRIPT } from './connection-feedback.mjs'
 import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
+import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { ACCOUNT_WRITE_SCOPE, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
@@ -154,7 +155,7 @@ export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, looku
   return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
 }
 
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -178,7 +179,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     const authorization = new URL(authorizationOrigin)
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
-  const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map()
+  const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map()
   let invitationWindow = 0, invitationRequests = 0, contactWindow = 0, contactRequests = 0, unsubscribeWindow = 0, unsubscribeRequests = 0
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
@@ -195,7 +196,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
-  const contactRow = row => ({ ...(typeof row.id === 'string' ? { sourceRowId: row.id } : {}), ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
+  const contactRow = row => ({ ...(typeof row.id === 'string' ? { sourceRowId: row.id, contactHref: `/network/contacts/${encodeURIComponent(row.id)}` } : {}), ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
   const publicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite', 'unlinked-connection'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
   const usableTarget = id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
   async function contactRows(rows, reader = publicReader) {
@@ -251,7 +252,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // Overlapping requests share the public reader's snapshot build. Let a small
   // browser/crawler burst share it while retaining the site-wide minute bound.
   const PUBLIC_IN_FLIGHT = 8
-  const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
+  const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || (pathname !== '/people/add' && /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname)) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
   let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
   const PHOTO_PER_MINUTE = 6000, PHOTO_IN_FLIGHT = 32
@@ -572,6 +573,35 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         response.writeHead(viewer ? 200 : 401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
         response.end(JSON.stringify(viewer ? await readAlerts(viewer.owner, null) ?? {} : { error: 'Sign in to see notifications.' })); return
       }
+      // The signed-in owner's own private context from the Ideaflow people
+      // overlay (docs/private-context.md). Owner-only JSON, never cached, never
+      // part of a public page, the public index or model context; another
+      // account or a signed-out visitor gets nothing.
+      if (url.pathname === '/api/private-context' || url.pathname.startsWith('/api/private-context/')) {
+        const send = (status, value) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store, private', Vary: 'Cookie', 'X-Robots-Tag': 'noindex, nofollow, noarchive', 'Cross-Origin-Resource-Policy': 'same-origin' }); response.end(JSON.stringify(value)) }
+        const match = url.pathname.match(/^\/api\/private-context\/(people|contacts|entities)\/([^/]{1,480})(\/neighbourhood)?$/)
+        if (request.method !== 'GET') { send(405, { error: 'method_not_allowed' }); return }
+        if (!viewer) { send(401, { error: 'sign_in_required' }); return }
+        if (request.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(request.headers['sec-fetch-site'])) { send(403, { error: 'same_origin_required' }); return }
+        if (!match || (match[1] === 'entities') !== Boolean(match[3])) { send(404, { error: 'not_found' }); return }
+        if (!privateContext) { send(503, { state: 'unavailable' }); return }
+        const depthValues = url.searchParams.getAll('depth')
+        if ([...url.searchParams.keys()].some(key => key !== 'depth') || depthValues.length > 1 || (depthValues.length && !['1', '2'].includes(depthValues[0]))) { send(400, { error: 'invalid_input' }); return }
+        const now = Date.now(), budget = contextBudgets.get(viewer.owner.ownerId) ?? { window: now, count: 0 }
+        if (now - budget.window >= 60000) { budget.window = now; budget.count = 0 }
+        if (++budget.count > 60) { send(429, { error: 'rate_limited' }); return }
+        if (contextBudgets.size > 5000) contextBudgets.clear()
+        contextBudgets.set(viewer.owner.ownerId, budget)
+        let id
+        try { id = decodeURIComponent(match[2]) } catch { send(400, { error: 'invalid_input' }); return }
+        try {
+          const value = match[1] === 'people' ? await privateContext.forProfile(viewer.owner, id)
+            : match[1] === 'contacts' ? await privateContext.forContact(viewer.owner, id)
+            : await privateContext.neighbourhood(viewer.owner, id, depthValues[0] === '2' ? 2 : 1)
+          if (value) send(200, value); else send(404, { error: 'not_found' })
+        } catch { send(503, { state: 'unavailable' }) }
+        return
+      }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline, ...(responseAlerts.has(response) ? { alerts: responseAlerts.get(response) } : {}) } : {}
       if (await servePublicDiscovery(request, response, url.pathname, chrome, { signInOrigin: authorizationOrigin })) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
@@ -620,7 +650,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         journey(response, renderContactCard({ ...chrome, card, token: contactLink[1] }), null, '', card ? 200 : 404); return
       }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
-      const publicProfile = url.pathname.match(/^\/people\/([^/]+)(\/connections)?$/)
+      // /people/add is the signed-in Add a person page, never a profile id.
+      const publicProfile = url.pathname === '/people/add' ? null : url.pathname.match(/^\/people\/([^/]+)(\/connections)?$/)
       const publicCompanyApi = url.pathname.match(/^\/api\/companies\/([^/]+)$/)
       const publicCompany = url.pathname.match(/^\/companies\/([^/]+)$/)
       if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/people' && viewer) { redirect(response, `/network${url.search}`); return }
@@ -660,7 +691,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             const notice = url.searchParams.get('connect')
             const companies = new Map(await Promise.all([...new Set(result.profile.positions.map(position => position.company).filter(Boolean))].map(async name => [name, companyDetailLevel(await lookupCompanyFacts(name))])))
             const profile = { ...result.profile, positions: result.profile.positions.map(position => ({ ...position, companyDetailLevel: companies.get(position.company) })) }
-            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined })); return
+            // The owner's private context mounts only for a signed-in viewer and is
+            // fetched separately; the page itself never carries it.
+            const withContext = Boolean(viewer && privateContext && !publicProfile?.[2])
+            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, withContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
@@ -1267,6 +1301,19 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         journey(response, view, props.importJob)
         return
       }
+      // One of the owner's own imported contacts, with their private context.
+      const contactDetail = url.pathname.match(/^\/network\/contacts\/([^/]{1,480})$/)
+      if (signup && request.method === 'GET' && contactDetail) {
+        let id
+        try { id = decodeURIComponent(contactDetail[1]) } catch { response.writeHead(404).end(); return }
+        const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
+        const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
+        if (!row) { response.writeHead(404).end(); return }
+        const [contact] = await contactRows([row], pageReader())
+        const props = jobProps(await jobResources())
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        journey(response, renderContactDetail({ ...props, contact, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
+      }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // The agent setup is prepared automatically: reuse the owner's live
         // grant or mint the one idempotent automatic grant. A revoked automatic
@@ -1321,6 +1368,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // The contact card's details belong to the export; its link does not.
         if (contactCards) data.contactCard = await contactCards.exportOwner(session.owner).catch(() => null)
         if (memberEmail) data.email = await memberEmail.exportOwner(session.owner).catch(() => null)
+        // Private notes and relations live in the owner's Ideaflow people overlay
+        // (shared with OpenChat); the export includes the owner's copy.
+        if (privateContext) {
+          try { const overlay = await privateContext.exportOwner(session.owner); data.ideaflowPrivateContext = overlay ? { storedIn: 'Ideaflow people overlay (Noos), shared by OpenChat and Unlinked', deletedWithUnlinkedAccount: false, ...overlay } : null }
+          catch { data.ideaflowPrivateContext = { error: 'private_context_unavailable' } }
+        }
         await recordAudit({ event: 'account_data_exported', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="unlinked-export-${new Date().toISOString().slice(0, 10)}.json"` })
         response.end(JSON.stringify(data, null, 2)); return
