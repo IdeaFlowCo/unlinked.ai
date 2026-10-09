@@ -427,7 +427,7 @@ test('agent copy enhancement is nonce-ready, copies exact setup and selects it o
     const configuration = { value: '{"token":"fictional"}', focus: () => { focused = true }, select: () => { selected = true } }
     const button = { getAttribute: name => ({ 'data-copy-target': 'onboarding-agent-configuration', 'data-copy-help': 'onboarding-copy-help' }[name]), addEventListener: (event, handler) => { assert.equal(event, 'click'); click = handler } }
     const help = { textContent: '' }
-    vm.runInNewContext(agentSetupCopyScript(), { document: { querySelectorAll: selector => { assert.equal(selector, '[data-copy-target]'); return [button] }, getElementById: id => ({ 'onboarding-agent-configuration': configuration, 'onboarding-copy-help': help }[id]) }, navigator: { clipboard: { writeText: async value => { assert.equal(value, configuration.value); if (fails) throw new Error('clipboard denied') } } } })
+    vm.runInNewContext(agentSetupCopyScript(), { document: { querySelectorAll: selector => { return selector === '[data-copy-target]' ? [button] : [] }, getElementById: id => ({ 'onboarding-agent-configuration': configuration, 'onboarding-copy-help': help }[id]) }, navigator: { clipboard: { writeText: async value => { assert.equal(value, configuration.value); if (fails) throw new Error('clipboard denied') } } } })
     await click()
     assert.equal(focused, true)
     assert.equal(selected, true)

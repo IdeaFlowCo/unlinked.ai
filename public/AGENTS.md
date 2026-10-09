@@ -2,7 +2,9 @@
 
 For connector-free public search, use [the public search page](https://www.unlinked.ai/search-public). The contract and web-fetch verification requirement are owned by `docs/public-directory.md` in the repository. An experimental alternate public transport is https://unlinked-ideaflowco.vercel.app/search-public?q=gaming%20investors. Ordinary ChatGPT reader access is not established; see the alternate transport section of that contract.
 
-Use https://www.unlinked.ai/login for Ideaflow ID sign-in; /settings holds your automatically prepared agent setup (view/copy, revoke or regenerate it there). No setup click is needed, repeated visits never mint duplicate grants, and a revoked automatic setup stays revoked until the owner regenerates.
+Use https://www.unlinked.ai/login for Ideaflow ID sign-in. Settings preserves your automatically prepared credential; revoked automatic access stays revoked until you explicitly create a key. No archive is needed to connect.
+
+Settings → API keys exposes Copy API key (raw credential only, no Bearer prefix or JSON), Show/Hide, and Copy agent setup (existing MCP URL/headers JSON for compatible clients). Keys can be shown and copied again anytime while signed in; copying never creates or replaces a key. Create API key makes a named independent key. Save name only changes its label; Replace this key and Revoke this key affect only the selected key. Existing credentials and OAuth apps keep working. No forced expiry. Muse: ask for a custom API connector using https://www.unlinked.ai/openapi.json; paste Copy API key into its key/access-token field. Only a full Authorization-header field takes Bearer followed by one space and the key. Muse OAuth remains unverified.
 On a signed recovered-account match, the browser may ask once whether to continue with the old Unlinked profile.
 Import a full LinkedIn ZIP or Connections-only ZIP/CSV, maximum 64 MiB.
 The server processes imports durably; /profile and /network show progress.

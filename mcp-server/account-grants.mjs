@@ -55,6 +55,10 @@ export function missingAccountGrantTools(grant) {
 // provisioning is an idempotent compare-and-set and its tombstone is readable:
 // a revoked automatic setup stays revoked instead of silently coming back.
 const AUTO_JTI = 'account-grant-auto-v1'
+const keyName = value => {
+  if (typeof value !== 'string' || !value.trim() || value.trim().length > 80 || /[\x00-\x1f\x7f]/.test(value)) throw new Error('account_grant_name_invalid')
+  return value.trim()
+}
 
 // Display and binding metadata stored on an OAuth connection grant. `app` is
 // derived by the authorization server from the verified redirect URI (never the
@@ -75,7 +79,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   const grantableScopes = publicSearchEnabled ? ['owner_network', 'owner_network_and_public', ACCOUNT_WRITE_SCOPE] : ['owner_network']
   // HS256 signing is deterministic, so the bearer credential for an existing
   // grant is re-derived from its durable record; viewing setup mints nothing.
-  const signGrant = (id, owner, jti, issuedAt) => new SignJWT({ grantId: id, ownerId: owner.ownerId, token_use: 'account_tools' })
+  const signGrant = (id, owner, jti, issuedAt, generation) => new SignJWT({ ...(generation ? { generation } : {}), grantId: id, ownerId: owner.ownerId, token_use: 'account_tools' })
     .setProtectedHeader({ alg: 'HS256', typ: 'at+jwt' }).setIssuer(issuer).setAudience(audience)
     .setSubject(owner.userId).setJti(jti).setIssuedAt(issuedAt).sign(signingKey)
   // `options.scope` selects the catalog scope (OAuth consent or Settings opt-in); `options.connection`
@@ -86,6 +90,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const defaultScope = publicSearchEnabled ? 'owner_network_and_public' : 'owner_network'
     const scope = options.scope ?? defaultScope
     if (!grantableScopes.includes(scope)) throw new Error('account_grant_scope_invalid')
+    const name = options.name === undefined ? undefined : keyName(options.name)
     const connection = options.connection === undefined ? undefined : validConnection(options.connection)
     const tools = [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)]
     const backend = await getBackend(owner), now = Math.floor(Date.now() / 1000)
@@ -93,7 +98,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     await backend.writeResource({ namespace: 'unlinked', type: 'import', sourceId: id, sourceOwnerId: owner.ownerId,
       sourceRevision: 1, expectedRevision: null, audience: 'owner', deleted: false,
       payload: { kind: 'account_tool_grant', version: CURRENT_ACCOUNT_GRANT_VERSION, issuer, audience, userId: owner.userId, ownerId: owner.ownerId,
-        jti, tools, scope, issuedAt: now, ...(connection ? { connection } : {}) },
+        jti, tools, scope, issuedAt: now, ...(name ? { name } : {}), ...(connection ? { connection } : {}) },
     })
     const accessToken = await signGrant(id, owner, jti, now)
     return { accessToken, grantId: id, version: CURRENT_ACCOUNT_GRANT_VERSION, scope, tools }
@@ -118,7 +123,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const latest = records.sort((a, b) => (b.payload.issuedAt - a.payload.issuedAt) || a.sourceId.localeCompare(b.sourceId))[0]
     // The reused grant's own catalog entry, so Settings can tell an outdated setup.
     const shape = record => ({ version: record.payload.version ?? 1, scope: record.payload.scope, tools: Array.isArray(record.payload.tools) ? [...record.payload.tools] : [] })
-    if (latest) return { accessToken: await signGrant(latest.sourceId, owner, latest.payload.jti, latest.payload.issuedAt), grantId: latest.sourceId, created: false, ...shape(latest) }
+    if (latest) return { accessToken: await signGrant(latest.sourceId, owner, latest.payload.jti, latest.payload.issuedAt, latest.payload.generation), grantId: latest.sourceId, created: false, ...shape(latest) }
     const existing = await backend.readResource('import', autoId)
     if (existing?.deleted) return null // the owner revoked their agent access; it stays revoked
     try { return { ...(await issueGrant(owner, AUTO_JTI)), created: true } }
@@ -129,7 +134,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
       if (record?.deleted) return null
       const live = derive(record)
       if (!live) throw error
-      return { accessToken: await signGrant(autoId, owner, live.payload.jti, live.payload.issuedAt), grantId: autoId, created: false, ...shape(live) }
+      return { accessToken: await signGrant(autoId, owner, live.payload.jti, live.payload.issuedAt, live.payload.generation), grantId: autoId, created: false, ...shape(live) }
     }
   }
   // Distinguishes "no usable bearer identity" (not_linked) from "the identity
@@ -155,7 +160,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const tools = grant?.kind === 'account_tool_grant' ? accountGrantTools(grant.version, grant.scope) : null
     if (!record || record.deleted || record.sourceOwnerId !== payload.ownerId || grant?.kind !== 'account_tool_grant' || !tools ||
         grant.ownerId !== payload.ownerId || grant.userId !== payload.sub || grant.jti !== payload.jti || grant.issuer !== issuer || grant.audience !== audience ||
-        grant.issuedAt !== payload.iat || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(tools)) return { error: 'grant_revoked' }
+        grant.issuedAt !== payload.iat || grant.generation !== payload.generation || !Array.isArray(grant.tools) || JSON.stringify(grant.tools) !== JSON.stringify(tools)) return { error: 'grant_revoked' }
     return { grant: { ownerId: grant.ownerId, userId: grant.userId, grantId: payload.grantId, tools: [...grant.tools], scope: grant.scope, version: grant.version } }
   }
   const authenticateGrant = async request => (await authenticateGrantDetailed(request)).grant ?? null
@@ -191,10 +196,37 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
       for (const record of records) {
         if (!record || record.deleted || record.sourceOwnerId !== owner.ownerId || record.payload?.kind !== 'account_tool_grant' || record.payload.userId !== owner.userId) continue
         const connection = record.payload.connection
-        out.push({ id: record.sourceId, issuedAt: record.payload.issuedAt, scope: record.payload.scope, version: record.payload.version ?? 1, tools: Array.isArray(record.payload.tools) ? [...record.payload.tools] : [], ...(connection ? { connection: { app: connection.app, clientName: connection.clientName, redirectHost: connection.redirectHost } } : {}) })
+        out.push({ id: record.sourceId, name: record.payload.name ?? (record.payload.jti === AUTO_JTI ? 'Default key' : 'Existing key'), issuedAt: record.payload.issuedAt, scope: record.payload.scope, version: record.payload.version ?? 1, tools: Array.isArray(record.payload.tools) ? [...record.payload.tools] : [], ...(connection ? { connection: { app: connection.app, clientName: connection.clientName, redirectHost: connection.redirectHost } } : {}) })
       }
     }
     return out.sort((a, b) => (b.issuedAt - a.issuedAt) || a.id.localeCompare(b.id))
+  }
+  // Browser-owner management only. Tokens are re-derived, never stored or logged.
+  const manualRecord = async (owner, id) => {
+    if (typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) throw new Error('account_grant_not_found')
+    const backend = await getBackend(owner), record = await backend.readResource('import', id), grant = record?.payload
+    const tools = accountGrantTools(grant?.version, grant?.scope)
+    if (!record || record.deleted || record.sourceOwnerId !== owner.ownerId || grant?.ownerId !== owner.ownerId || grant?.userId !== owner.userId ||
+        grant.kind !== 'account_tool_grant' || grant.connection || grant.issuer !== issuer || grant.audience !== audience || !tools ||
+        JSON.stringify(grant.tools) !== JSON.stringify(tools) || id !== privateId(owner.ownerId, 'account-grant-v1', grant.jti)) throw new Error('account_grant_not_found')
+    return { backend, record }
+  }
+  const readKey = async (owner, id) => {
+    const { record } = await manualRecord(owner, id), g = record.payload
+    return { grantId: id, accessToken: await signGrant(id, owner, g.jti, g.issuedAt, g.generation), version: g.version, scope: g.scope, tools: [...g.tools] }
+  }
+  const renameKey = async (owner, id, name) => {
+    const normalized = keyName(name), { backend, record } = await manualRecord(owner, id)
+    await backend.writeResource({ ...record, sourceRevision: record.sourceRevision + 1, expectedRevision: record.sourceRevision, payload: { ...record.payload, name: normalized } })
+  }
+  const replaceKey = async (owner, id) => {
+    const { backend, record } = await manualRecord(owner, id)
+    // One CAS replaces only this key. Failed writes leave its old token valid;
+    // concurrent replacement/revocation cannot resurrect a deleted grant.
+    // Keep the original scope/catalog; replacing never silently adds permissions.
+    await backend.writeResource({ ...record, sourceRevision: record.sourceRevision + 1, expectedRevision: record.sourceRevision,
+      payload: { ...record.payload, generation: randomBytes(32).toString('hex') } })
+    return readKey(owner, id)
   }
   // RFC 7009 revocation by token possession, limited to the OAuth connection
   // issued to the same client. Unknown, invalid or foreign tokens are a no-op.
@@ -207,5 +239,5 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     await revoke(owner, verified.grant.grantId)
     return true
   }
-  return { issueGrant, ensureGrant, authenticateGrant, authenticateGrantDetailed, revoke, listGrants, revokeConnectionToken }
+  return { readKey, renameKey, replaceKey, issueGrant, ensureGrant, authenticateGrant, authenticateGrantDetailed, revoke, listGrants, revokeConnectionToken }
 }

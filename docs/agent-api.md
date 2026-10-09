@@ -28,7 +28,7 @@ grant is only valid on the origin that issued it.
 ## Authentication and linkage (fail closed)
 
 Every call requires `Authorization: Bearer <account grant token>` — the
-per-user, revocable grant (read-only by default) issued in **Settings → Connect my agent**
+per-user, revocable grant (read-only by default) issued in **Settings → API keys → Create API key**
 on the runtime, or through the OAuth connector flow below. There is no anonymous access to any `/api/agent/v1/` route and
 no email-based linkage anywhere: the grant token *is* the account linkage, and
 `unlinked_whoami` returns the stable Unlinked `ownerId` so a consumer can
@@ -126,7 +126,7 @@ Security decisions:
   refresh token is issued (`grant_types_supported: ["authorization_code"]`);
   disconnecting in **Settings → Connected apps** or `POST /oauth/revoke` (by
   the same client) stops it on the next call. Connection grants are never
-  reused as the copyable Settings credential, survive **Regenerate**, and
+  reused as the copyable Settings credential, survive manual key creation, replacement and revocation, and
   disconnecting one never turns off the copyable credential. Tokens never
   enter audit events (`oauth_connection_approved` / `_denied` / `_granted`
   record only app, owner hash, grant id and scope).
@@ -465,11 +465,11 @@ revision, which is tombstone-safe by construction).
 ## Catalog v4: optional connection actions
 
 Versions 1–3 are immutable. Version 4 retains the v3 read lists and adds
-`owner_network_and_public_and_write`, never a default. Settings regeneration
+`owner_network_and_public_and_write`, never a default. Creating a key in Settings
 and OAuth consent offer an unchecked optional choice; the server validates
 `access=connections`, availability and duplicate/unknown fields. Requesting
 OAuth `connections` alone does not grant it. Defaults and existing grants keep
-read access only; opting out at regeneration restores a read-only credential.
+read access only; creating another key without that opt-in gives it read-only access.
 
 | MCP tool | HTTP POST route | JSON fields |
 |---|---|---|
@@ -489,10 +489,17 @@ profileId, id?, visibility: "owner_private" }`; the other actions return
 with status `accepted`, `ignored` or `withdrawn`. Removal remains browser-only.
 MCP annotations mark these as writes. Messaging and posting are never available.
 
-Settings and `whoami.grant.update` suggest regeneration/reconnection only when
+Settings and `whoami.grant.update` identify missing newer tools only when
 the grant lacks tools its own scope now provides. A v3 read grant has no nudge
 solely because v4 adds an opt-in scope. Missing grant records render safely.
 
 ## Shared connector delegation
 
 The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` on that host). The gateway forwards authorized calls to `POST /api/connector/mcp` with a dedicated `IDEAFLOW_CONNECTOR_SECRET` HS256 assertion, never a personal API key. Assertions bind the exact UTF-8 JSON body hash, `https://www.unlinked.ai/mcp` audience, Ideaflow issuer/subject, consented `unlinked:read` and optional `unlinked:write`, unique jti, and at most 60 seconds. Invalid/replayed assertions fail before account lookup. No account or linking is created by a call. The existing account tool service and live owner authorization are reused; write permission exposes only existing connection actions, never messaging or raw archives. Gateway disconnect revokes future assertions; in-flight authorized operations can finish. Deploy the per-service secret in the runtime env with the release; absence keeps the internal endpoint disabled.
+
+
+### Named manual keys
+
+Settings → API keys exposes Copy API key (raw credential only, no Bearer prefix or JSON), Show/Hide, and Copy agent setup (existing MCP URL/headers JSON for compatible clients). Keys can be shown and copied again anytime while signed in; copying never creates or replaces a key. Create API key makes a named independent key. Save name only changes its label; Replace this key and Revoke this key affect only the selected key. Existing credentials and OAuth apps keep working. No forced expiry. Muse: ask for a custom API connector using https://www.unlinked.ai/openapi.json; paste Copy API key into its key/access-token field. Only a full Authorization-header field takes Bearer followed by one space and the key. Muse OAuth remains unverified.
+
+Replacement keeps the original scope and catalog version; create a new key to opt into different permissions or newer tools. See [key management](agent-key-settings.md).
