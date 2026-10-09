@@ -187,6 +187,10 @@
       "unlinked:write"
     ]
   },
+  "browserCardSharing": {
+    "ownerCard": "https://www.unlinked.ai/card",
+    "contactCardJoin": "Explicit browser-only same-origin POST /c/<token>/add preserves the card through verified signup and adds the connection. Scanning alone does not connect. Not an agent capability."
+  },
   "requestDiagnostics": {
     "enabledByDefault": false,
     "responseHeader": "X-Request-ID",

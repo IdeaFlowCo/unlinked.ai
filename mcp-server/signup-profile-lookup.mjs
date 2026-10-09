@@ -31,7 +31,16 @@ const ownerKey = owner => {
 }
 export const signupProfileId = owner => 'member-signup-' + ownerKey(owner)
 export function signupProfileSlug(address) {
-  const url = linkedinUrl(/^https:\/\//i.test(address) ? address : `https://${address}`)
+  if (typeof address !== 'string' || address.length > 2048) return null
+  let parsed
+  try {
+    parsed = new URL(/^https:\/\//i.test(address.trim()) ? address.trim() : `https://${address.trim()}`)
+    // Share my profile adds tracking query parameters and sometimes a fragment.
+    // Strip them only after validating the exact LinkedIn profile origin.
+    if (parsed.protocol !== 'https:' || !['linkedin.com', 'www.linkedin.com'].includes(parsed.hostname) || parsed.username || parsed.password || parsed.port) return null
+    parsed.search = ''; parsed.hash = ''
+  } catch { return null }
+  const url = linkedinUrl(parsed.href)
   const slug = url && linkedinSlug(url)
   return slug && /^[\p{L}\p{N}_.-]{1,120}$/u.test(slug) ? slug : null
 }
@@ -112,7 +121,13 @@ const failureCode = (error, signal) => signal.aborted || error?.code === 'timeou
 
 export const signupLookupNotice = code => ({
   slug_claimed: 'That profile is already claimed. You can continue with your name and add your LinkedIn export later.',
-  disabled: 'Your LinkedIn export will fill in your profile. You can continue with your name for now.',
+  disabled: 'LinkedIn profile lookup is not available right now. We checked saved Unlinked profiles but could not fetch LinkedIn. You can add your LinkedIn export instead.',
+  invalid_url: 'Paste a LinkedIn profile address like https://www.linkedin.com/in/your-name/. Links copied with Share my profile work, including tracking parameters.',
+  not_found: 'No profile was returned for that LinkedIn address. Check the link, try again, or add your LinkedIn export.',
+  timeout: 'LinkedIn profile lookup timed out. Your link is still below so you can try again or add your export.',
+  lookup_unavailable: 'LinkedIn profile lookup is temporarily unavailable. Your link is still below so you can try again or add your export.',
+  lookup_refused: 'The lookup provider could not retrieve that LinkedIn profile. You can add your LinkedIn export instead.',
+  storage_unavailable: 'We couldn’t complete the profile lookup. Please try again or add your LinkedIn export.',
   paced: 'Profile lookups are busy. Try again shortly, or continue with your name and add your export later.',
   daily_cap: 'Profile lookups have reached today’s limit. You can continue with your name and add your export later.',
   account_limit: 'You can continue with your name and add your LinkedIn export to build your profile.',

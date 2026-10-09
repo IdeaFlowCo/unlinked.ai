@@ -19,7 +19,6 @@ import { randomInt } from 'node:crypto'
 // the two card shapes can converge. See docs/contact-card.md.
 export const CONTACT_CARD_TOKEN = /^[0-9A-Za-z]{24}$/
 export const CONTACT_CARD_FIELDS = Object.freeze(['phone', 'whatsapp', 'email', 'link'])
-const SHOW = Object.freeze({ phone: 'showPhone', whatsapp: 'showWhatsapp', email: 'showEmail', link: 'showLink' })
 const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 const LINK_MAX = 200
 const PROFILE_PATH = /^\/people\/[A-Za-z0-9._~%-]{1,480}$/
@@ -142,6 +141,13 @@ export function createContactCards({ store, now = Date.now } = {}) {
     async open(token) {
       if (typeof token !== 'string' || !CONTACT_CARD_TOKEN.test(token)) return null
       return projectContactCard(await store.getByToken(token))
+    },
+    // Server-only bearer capability. Never included in the card projection.
+    // Recheck visibility and token rotation at the time of connecting.
+    async ownerForToken(token) {
+      if (typeof token !== 'string' || !CONTACT_CARD_TOKEN.test(token)) return null
+      const record = await store.getByToken(token)
+      return projectContactCard(record) ? { ownerId: record.ownerId, userId: record.userId } : null
     },
     // The member's own copy for their data export: details and switches, no link.
     async exportOwner(member) {

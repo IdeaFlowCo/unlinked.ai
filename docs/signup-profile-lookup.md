@@ -20,6 +20,8 @@ candidate tokens, confirms a self-asserted public professional profile. Adapter
 errors and raw adapter output are never logged, audited, sent to the browser or
 saved to the graph. Confirming or skipping returns to `/profile`.
 
+LinkedIn **Share my profile** URLs may include tracking parameters or fragments; signup normalization drops these after validating the exact HTTPS LinkedIn origin, before legacy and provider lookup. Invalid/shortened links get an explicit validation message rather than being fetched or treated as a failed person search. Lookup failures retain the entered URL and distinguish disabled service, no result, timeout, provider refusal and temporary errors. A missing result never claims a profile or proves the person is absent from LinkedIn.
+
 ## Adapter contract
 
 The adapter module's default export (or its named exports) must provide:

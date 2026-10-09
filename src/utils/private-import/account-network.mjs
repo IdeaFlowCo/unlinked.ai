@@ -6,9 +6,10 @@ import { createPrivateSearch } from './ai-search.mjs'
 import { matchNetworkText } from './network-text-search.mjs'
 
 // unlinked_search_network answers literal queries from text alone; only a
-// query with no literal match pays for AI ranking, within this budget. It stays
-// under the shared Ideaflow connector's 25 s downstream timeout so callers get
-// this typed failure, not the gateway's generic abort.
+// query with no literal match pays for AI ranking. One deadline covers the
+// whole call (network read, ranking and the final consistency re-read), so
+// it stays under the shared Ideaflow connector's 25 s downstream timeout and
+// callers get this typed failure, not the gateway's generic abort.
 export const NETWORK_AI_BUDGET_MS = 20000
 
 // One authenticated account, all its currently published imports. Source
@@ -77,10 +78,11 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
     return { ...result, scope: 'owner_network' }
   } : null
   // Text first: every literal name/company/title match, no model call. A query
-  // with no literal match falls back to AI ranking under one overall budget.
+  // with no literal match falls back to AI ranking, all inside one deadline.
   const searchNetwork = async ({ query, signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
     if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
-    const network = await readNetwork(networkId, { signal })
+    const deadline = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(aiBudgetMs)])
+    const network = await readNetwork(networkId, { signal: deadline })
     const text = matchNetworkText(network.assertions, query)
     const considered = network.assertions.filter(row => row.category === 'connections').length
     if (text?.total) return { importId: networkId, mode: 'text_match', indexed: network.indexed, considered, total: text.total, truncated: text.truncated,
@@ -91,8 +93,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
     // The already-read network seeds the ranking; its final consistency re-read stays live.
     let first = network
     const readFirst = async (id, options) => { if (first) { const value = first; first = null; return value } return readNetwork(id, options) }
-    const budget = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(aiBudgetMs)])
-    return search({ query, signal: budget, readFirst })
+    return search({ query, signal: deadline, readFirst })
   }
   return { readNetwork, search, searchNetwork }
 }

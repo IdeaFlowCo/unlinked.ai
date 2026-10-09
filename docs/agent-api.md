@@ -391,7 +391,7 @@ starts a word in a connection's name, company or position, it returns all such
 connections at once with no model call (`mode: "text_match"`, sorted by name,
 at most 500 rows with `total` and `truncated`, `reason` naming the matched
 fields). Only a query with no literal match is AI-ranked (`mode:
-"query_time_ai"`, top ten), within one 20 s budget (below the shared connector's 25 s downstream timeout); a spent budget returns
+"query_time_ai"`, top ten), within one 20 s deadline for the whole call, network reads included (below the shared connector's 25 s downstream timeout); a spent budget returns
 `upstream_unavailable` naming the text-query and `list_connections`
 alternatives. With `degree` it reads recorded paths. On HTTP, failures are typed
 (`degree_unproven`, `cursor_invalid`, ...) and recorded-path pages cap at 50

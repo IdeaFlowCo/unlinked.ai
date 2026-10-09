@@ -318,7 +318,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // `silentBack` (automatic sign-in) returns to the original page without
   // publishing a profile or opening an onboarding/confirmation step. A verified
   // Ideaflow identity receives its private account, just as in OpenChat.
-  async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null) {
+  async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null, cardToken = null) {
     let claimed
     let owner = await resolveOwner(identity)
     let newOwner = false
@@ -363,6 +363,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     }
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
+    if (cardToken) {
+      let added = false
+      try { await addCard(owner, cardToken, displayName); added = true } catch { /* Keep the new session and offer retry on the card. */ }
+      redirect(response, `/c/${cardToken}${added ? '' : '?add=failed'}`); return 'signed_in'
+    }
     // An invitation link someone signed in to answer comes first; its page then
     // continues to the old-account or find-me step when there is one.
     const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
@@ -391,6 +396,23 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     if (!response.headersSent) redirect(response, back)
   }
   // Connect rules shared with agent write tools (connection-actions.mjs).
+  const canAddCard = Boolean(memberConnections && contactCards?.ownerForToken)
+  async function addCard(owner, cardToken, displayName) {
+    const target = await contactCards.ownerForToken(cardToken)
+    const card = await contactCards.open(cardToken)
+    if (!target || !card) throw new Error('contact_card_not_found')
+    // Both accounts must still be active. No identity comes from form fields.
+    await getBackend(owner); await getBackend(target)
+    const relation = await memberConnections.between(owner, target)
+    if (['self', 'connected'].includes(relation.state)) return
+    if (relation.state === 'incoming') { await memberConnections.respond(owner, relation.requestId, 'accept'); return }
+    if (relation.state === 'outgoing') { await memberConnections.respond(target, relation.requestId, 'accept'); return }
+    const sent = await memberConnections.send({ sender: owner, senderName: displayName,
+      senderProfileId: typeof ownProfileId === 'function' ? await ownProfileId(owner) : null,
+      recipient: target, recipientName: card.name,
+      recipientProfileId: card.profilePath ? decodeURIComponent(card.profilePath.slice('/people/'.length)) : null })
+    if (sent.status !== 'accepted') await memberConnections.respond(target, sent.request.id, 'accept')
+  }
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
   // A People listing a Connect/answer/withdraw/remove form may return to: the
   // /network path with only its own filter parameters (a stale notice is dropped).
@@ -637,6 +659,24 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       // Not indexed and never cached. The token is the only way in, and a reset
       // or hidden card answers as not found. The site-wide bound only protects
       // the graph from load; an unguessable token needs no guessing limit.
+      const cardAdd = url.pathname.match(/^\/c\/([0-9A-Za-z]{24})\/add$/)
+      if (request.method === 'POST' && cardAdd && canAddCard && signup) {
+        response.setHeader('Referrer-Policy', 'no-referrer')
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (viewer ? input.getAll('csrf').length !== 1 || input.get('csrf') !== viewer.csrf || [...input.keys()].some(key => key !== 'csrf') : [...input.keys()].length > 0) throw new Error('private_browser_csrf')
+        if (!await contactCards.open(cardAdd[1])) { journey(response, renderContactCard({ ...chrome, card: null }), null, '', 404); return }
+        if (viewer) {
+          let added = false
+          try { await addCard(viewer.owner, cardAdd[1], viewer.displayName); added = true } catch { /* Retry remains available. */ }
+          redirect(response, `/c/${cardAdd[1]}${added ? '' : '?add=failed'}`); return
+        }
+        purge(pending)
+        if (pending.size >= 100) throw new Error('private_login_capacity')
+        const started = await login.begin(cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}), id = token()
+        pending.set(id, { ...started.transaction, cardToken: cardAdd[1], expiresAt: Date.now() + 5 * 60000 })
+        response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
+        redirect(response, started.location); return
+      }
       const contactLink = url.pathname.match(/^\/c\/([0-9A-Za-z]{24})(\/contact\.vcf)?$/)
       if (request.method === 'GET' && contactLink && contactCards && signup) {
         if (Date.now() - contactWindow >= 60000) { contactWindow = Date.now(); contactRequests = 0 }
@@ -649,7 +689,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           response.writeHead(200, { 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': 'attachment; filename="contact.vcf"' })
           response.end(renderContactVcard(card, base.origin)); return
         }
-        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1] }), null, '', card ? 200 : 404); return
+        const target = card && canAddCard && viewer ? await contactCards.ownerForToken(contactLink[1]) : null
+        const relation = target ? await memberConnections.between(viewer.owner, target) : null
+        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, relation: relation?.state, addError: url.searchParams.get('add') === 'failed' }), null, '', card ? 200 : 404); return
       }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
       // /people/add is the signed-in Add a person page, never a profile id.
@@ -827,7 +869,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           render(response, 'Confirm your Ideaflow account', `<p>Ideaflow returned this verified account for your invitation. Confirm it here before Unlinked creates a private owner for the invitation.</p><article><strong>${displayIdentity(identity)}</strong></article><form method="post" action="/invite/confirm"><input type="hidden" name="csrf" value="${html(csrf)}"><button name="action" value="confirm">Use this account</button><button name="action" value="restart">Use another account</button><button name="action" value="cancel">Cancel</button></form>`)
           return
         }
-        await establishSession(response, identity, null, transaction.next); return
+        await establishSession(response, identity, null, transaction.next, null, transaction.cardToken); return
       }
       if (oauth && url.pathname === '/oauth/authorize') { await authorizeConnector(request, response, url, viewer, chrome); return }
       const session = sessionFor(request)
@@ -889,12 +931,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         session.selfClaim.lookups = (session.selfClaim.lookups ?? 0) + 1
         if (session.selfClaim.lookups > 20) { response.writeHead(429, { 'Retry-After': '3600' }).end(); return }
         session.selfClaim.candidate = null
-        const page = lookupResult => journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, lookupResult }))
+        const page = lookupResult => journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, lookupResult, address }))
         let profileId = null, evidence = null
         const publicSlug = signupProfileSlug(address)
         // Preserve bare-slug legacy lookup, but only validated profile URLs
         // can trigger a profile lookup. Never parse a substring of another host.
         const legacySlug = publicSlug ?? (/^[A-Za-z0-9%._-]{1,120}$/.test(address) ? address : null)
+        if (address && !legacySlug) { page({ status: 'none', notice: signupLookupNotice('invalid_url') }); return }
         if (legacySlug) {
           profileId = await selfClaims.lookupSlug(legacySlug)
           evidence = 'self-asserted-linkedin-url-v1'
@@ -933,7 +976,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           await recordAudit({ event: 'signup_profile_lookup_refused', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), reason: result.code })
           page({ status: 'none', notice: signupLookupNotice(result.code) }); return
         }
-        page({ status: 'none' }); return
+        page({ status: 'none', notice: signupLookupNotice(profileId ? 'slug_claimed' : publicSlug ? 'disabled' : 'not_found') }); return
       }
       if (request.method === 'POST' && url.pathname === '/claim-me') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
@@ -1109,7 +1152,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           try { await contactCards.syncIdentity(session.owner, identity); contact = ownContactCard(await contactCards.read(session.owner)) } catch { contact = null }
         }
         const notice = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.' }[url.searchParams.get('done')]
-        journey(response, renderCard({ ...card, contact, share: contact && url.searchParams.get('share') === 'contact' ? 'contact' : 'public', notice }), props.importJob); return
+        journey(response, renderCard({ ...card, contact, share: contact && url.searchParams.get('share') !== 'public' ? 'contact' : 'public', notice }), props.importJob); return
       }
       if (signup && contactCards && request.method === 'POST' && ['/card/contact', '/card/contact/reset'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))

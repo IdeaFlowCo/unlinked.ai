@@ -2,9 +2,11 @@ Unlinked helps people carry their network into useful introductions. The canonic
 
 ## Meet someone
 
-`/meet` accepts only `https://chat.globalbr.ai/c/<24-letter-or-digit-token>` and `https://chat.ideaflow.app/c/<24-letter-or-digit-token>` card URLs. The standalone runtime offers live camera scanning and pasted URLs using the checked-in OpenChat card parser and locked `jsqr` dependency. A valid payload opens the public OpenChat card page on the same host as the scanned or pasted URL, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. Opening a card does not itself send a request.
+Open **My card** in the main navigation to show your card. See the [contact-card guide](docs/contact-card.md) for card versions, sharing controls and signup from a shared card.
 
-Meet is anonymous and does not resolve an Unlinked owner, read an archive, or import live profiles/cards into Unlinked.
+`/meet` supports camera scanning and pasted Unlinked profile/contact-card or OpenChat card URLs, with an explicit confirmation before opening. The accepted URL grammar is defined by `src/utils/meet-scan.js` and its card parsers. Opening a card never sends a connection request. OpenChat owns its card's sign-in, friend status and requests; Unlinked's joining flow is described in the contact-card guide.
+
+Meet is anonymous and does not read an archive or import profiles/cards into Unlinked.
 
 ## Import LinkedIn archive
 

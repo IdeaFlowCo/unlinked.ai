@@ -266,7 +266,7 @@ test('own-profile lookup is optional and uses a separate native POST with the ex
   assert.match(form, /Your LinkedIn address/)
   assert.match(form, /placeholder="linkedin.com\/in\/your-name"/)
   assert.match(form, /class="quiet" type="submit">Find me/)
-  assert.match(form, /Finds your old Unlinked profile, or builds one from your public LinkedIn page\. Nothing is claimed until you confirm\./)
+  assert.match(form, /Checks saved Unlinked profiles, then tries your public LinkedIn page when lookup is available\. Nothing is claimed until you confirm\./)
   assert.doesNotMatch(form, /required|<script|Import from LinkedIn/i)
   assert.ok(view.content.indexOf(form) > view.content.indexOf('Editing comes soon.'))
   assert.ok(view.content.indexOf(form) < view.content.indexOf('<aside>'))
