@@ -197,5 +197,13 @@
     "idTrust": "server-generated; incoming trace IDs ignored",
     "privacy": "No credentials, queries, result bodies or sensitive URL parameters. Opaque account correlation only after successful authentication.",
     "gatewayLimitation": "Shared gateway does not currently forward the downstream Unlinked request ID."
+  },
+  "publicPeoplePresence": {
+    "values": [
+      "member",
+      "legacy",
+      "shadow"
+    ],
+    "description": "Presence semantics and the historical-account reclaim boundary are owned by docs/public-people-reader.md#historical-membership in the repository."
   }
 }

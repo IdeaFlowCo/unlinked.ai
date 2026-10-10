@@ -1,3 +1,4 @@
+import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
 import { createOpenChatConnectionSync, createNeo4jOpenChatSyncStore } from './openchat-connections.mjs'
@@ -8,7 +9,7 @@ import { withLegacyProfileDetails } from '../src/utils/public-people/profile-lin
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
-import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
+import { createIndexWarmKeeper, createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
 import { normalizeLinkedinSlug, urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
@@ -123,10 +124,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, connectionSync, closed = false
+  let server, worker, memberEmail, diagnosticsStore, connectionSync, indexWarmKeeper, closed = false
   const close = async () => {
     if (closed) return
     closed = true
+    indexWarmKeeper?.stop()
     await diagnosticsStore?.close()
     await connectionSync?.stop()
     await worker?.stop()
@@ -420,8 +422,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     let legacyDetails = null
     const publicIndexFreshMs = publicIndexEnv.UNLINKED_PUBLIC_INDEX_FRESH_MS === undefined ? 20000 : Number(publicIndexEnv.UNLINKED_PUBLIC_INDEX_FRESH_MS)
     if (!Number.isSafeInteger(publicIndexFreshMs) || publicIndexFreshMs < 0 || publicIndexFreshMs > 300000) throw new Error('private_composition_configuration_required')
+    // Past the fresh window, the kept index answers while one refresh runs
+    // behind it (UNLINKED_PUBLIC_INDEX_STALE_MS, default 90 s; fresh 0 keeps
+    // next-request rebuilds unless stale is set explicitly).
+    const publicIndexStaleMs = publicIndexEnv.UNLINKED_PUBLIC_INDEX_STALE_MS === undefined ? (publicIndexFreshMs === 0 ? 0 : 90000) : Number(publicIndexEnv.UNLINKED_PUBLIC_INDEX_STALE_MS)
+    if (!Number.isSafeInteger(publicIndexStaleMs) || publicIndexStaleMs < 0 || publicIndexStaleMs > 600000 || (publicIndexStaleMs > 0 && publicIndexStaleMs < publicIndexFreshMs)) throw new Error('private_composition_configuration_required')
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLookup?.list,
-      includeDetails: true, freshMs: publicIndexFreshMs,
+      includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')
         const digest = snapshot?.revision?.match(/^legacy-public-v1:([a-f0-9]{64})$/)?.[1]
@@ -458,6 +465,17 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           return [...explicit, ...automatic]
         } finally { await session.close() }
       },
+      // Historical membership is display evidence, never an owner/login binding.
+      readLegacyMembers: async () => {
+        const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+        try {
+          const result = await session.executeRead(tx => tx.run(`MATCH (m:UnlinkedLegacyManifest {id:'recovered-legacy-accounts-v1', manifestSha256:$manifest})
+            MATCH (a:UnlinkedLegacyAccount {manifestSha256:$manifest, sourceSha256:$source, revoked:false})
+            WHERE coalesce(a.selfAsserted,false)=false AND coalesce(a.testProfile,false)=false
+            RETURN a.profileId AS id ORDER BY id LIMIT 82`, { manifest: LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256, source: LEGACY_ACCOUNT_SOURCE_SHA256 }))
+          return result.records.map(record => record.get('id'))
+        } finally { await session.close() }
+      },
       // A legacy profile is a member's once its account claim is confirmed and the owner is active.
       readMembers: async () => {
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
@@ -483,6 +501,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         } finally { await session.close() }
       },
     }) : undefined
+    // Pre-build the shared index and keep it young, so neither the first
+    // request after a restart nor the first after an idle gap pays the
+    // rebuild in-band. The interval stays well inside the stale window.
+    if (readPublishedSnapshot && publicIndexFreshMs > 0 && publicIndexStaleMs > 0) {
+      indexWarmKeeper = createIndexWarmKeeper({ read: readPublishedSnapshot, intervalMs: Math.max(publicIndexFreshMs, Math.min(45000, Math.floor(publicIndexStaleMs / 2))) })
+      indexWarmKeeper.start()
+      Promise.resolve().then(readPublishedSnapshot).catch(() => {})
+    }
     const identityForOwner = async owner => {
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
         try {

@@ -51,8 +51,14 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // decision becomes visible to everyone within `freshMs` plus one build, not on
 // the very next request. 0 (the default) keeps next-request visibility. A
 // failed or empty build is never kept, and an empty build drops what was kept.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, freshMs = 0, now = Date.now }) {
+// `staleMs` extends `freshMs` with serve-stale-while-revalidate: past the fresh
+// window but inside `staleMs`, the kept build answers immediately while one
+// refresh runs behind it, so no page view pays the rebuild in-band. A failed
+// refresh drops the kept build (fail closed, like the suggest reader). 0
+// disables it; past `staleMs` a read waits for the rebuild.
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
+  if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
   let work = null, kept = null
   const detailCache = new Map()
   // Operator merges and renames apply last, over the complete union.
@@ -171,23 +177,47 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       return result
     }
     if (typeof readMembers !== 'function') return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections})
-    // Claimed profiles are members; everyone else in the index is a shadow.
+    // Historical membership is separate display evidence, never a current owner binding.
     const claimed = await readMembers()
     if (!Array.isArray(claimed) || claimed.length > PUBLIC_INDEX_MAX_PROFILES) throw Error('public_member_presence_invalid')
     const known = new Set(profiles.map(value => value.id))
     for (const id of claimed) if (known.has(id)) members.add(id)
+    const recovered = typeof readLegacyMembers === 'function' ? await readLegacyMembers() : []
+    if (!Array.isArray(recovered) || recovered.length > 81 || recovered.some(id => !known.has(id))) throw Error('public_legacy_presence_invalid')
+    const legacyMembers = [...new Set(recovered)].sort()
+    revisions.push('legacy-members:' + hash(JSON.stringify(legacyMembers)))
     const memberIds = [...members].sort()
     revisions.push('members:' + hash(JSON.stringify(memberIds)))
-    return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds})
+    return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds,legacyMembers})
   }
   const read = async ({signal} = {}) => {
     signal?.throwIfAborted()
-    if (kept && now() - kept.at < freshMs) return kept.value
-    if (!work) work=build().then(value=>{kept=value?{value,at:now()}:null;return value}).finally(()=>{work=null})
+    const age = kept ? now() - kept.at : Infinity
+    if (age < freshMs) return kept.value
+    if (!work) work=build().then(value=>{kept=value?{value,at:now()}:null;return value},error=>{kept=null;throw error}).finally(()=>{work=null})
+    if (age < staleMs) { work.catch(() => {}); return kept.value }
     const value=await work;signal?.throwIfAborted();return value
   }
   // The revision hashes every input above (legacy, enrichment, each import,
   // links, invites, members, decisions), so readers may reuse a compiled index.
   read.revisionIdentifiesContent = true
   return read
+}
+
+// Keeps a freshness-window index warm: one read per interval triggers the
+// background refresh the stale window already allows, so an after-idle
+// visitor is answered from a young kept build instead of paying the rebuild
+// in-band. The worst-served staleness bound stays the stale window; a failed
+// refresh still fails closed through the read itself. `start` is idempotent.
+export function createIndexWarmKeeper({ read, intervalMs, schedule = (fn, ms) => setInterval(fn, ms), cancel = timer => clearInterval(timer) }) {
+  if (typeof read !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 1000 || intervalMs > 600000 || typeof schedule !== 'function' || typeof cancel !== 'function') throw new TypeError('public_member_index_warm_keeper_invalid')
+  let timer = null
+  return {
+    start() {
+      if (timer) return
+      timer = schedule(() => { Promise.resolve().then(read).catch(() => {}) }, intervalMs)
+      timer?.unref?.()
+    },
+    stop() { if (timer) { cancel(timer); timer = null } },
+  }
 }

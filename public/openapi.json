@@ -82,11 +82,12 @@
             "name": "presence",
             "in": "query",
             "required": false,
-            "description": "member: people who joined Unlinked; shadow: imported profiles not on Unlinked yet. Omit for everyone. Bound into the cursor.",
+            "description": "member: confirmed current account; legacy: verified recovered account awaiting claim; shadow: imported contact. Omit for everyone. Bound into the cursor.",
             "schema": {
               "type": "string",
               "enum": [
                 "member",
+                "legacy",
                 "shadow"
               ]
             }
@@ -401,11 +402,12 @@
             "name": "presence",
             "in": "query",
             "required": false,
-            "description": "member: people who joined Unlinked; shadow: imported profiles not on Unlinked yet. Omit for everyone. Bound into the cursor.",
+            "description": "member: confirmed current account; legacy: verified recovered account awaiting claim; shadow: imported contact. Omit for everyone. Bound into the cursor.",
             "schema": {
               "type": "string",
               "enum": [
                 "member",
+                "legacy",
                 "shadow"
               ]
             }
@@ -446,7 +448,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of public profile summaries. Each person may carry presence (member or shadow: imported, not on Unlinked yet) and connectionCount (connections in both directions)."
+            "description": "Page of public profile summaries. Each person may carry presence (member: confirmed current account; legacy: verified recovered account awaiting claim; shadow: imported contact) and connectionCount (connections in both directions)."
           },
           "400": {
             "description": "invalid_input or cursor_invalid"
@@ -1347,9 +1349,11 @@
               "type": "string",
               "enum": [
                 "member",
+                "legacy",
                 "shadow"
               ]
-            }
+            },
+            "description": "member: confirmed current account; legacy: verified recovered account awaiting claim; shadow: imported contact. Omit for everyone. Bound into the cursor."
           },
           {
             "name": "cursor",

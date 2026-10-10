@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { operateTestProfileClaims } from './test-profiles.mjs'
+import { operatorBoltUrl } from './operator-bolt-url.mjs'
 
 // Operator capability only, run inside the runtime container; never mounted as
 // a browser or agent endpoint. Works on claims of TEST profiles only
@@ -16,7 +17,7 @@ import { operateTestProfileClaims } from './test-profiles.mjs'
 async function main() {
   const root = '/srv/unlinked-private-guest-pilot-20261001', require = createRequire(join(root, 'runtime', 'noos', 'package.json'))
   const neo4j = require('neo4j-driver')
-  const driver = neo4j.driver('bolt://graph:7687', neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
+  const driver = neo4j.driver(operatorBoltUrl(), neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
   const session = driver.session({ database: 'neo4j' })
   try {
     const result = await operateTestProfileClaims({ args: process.argv.slice(2), session })

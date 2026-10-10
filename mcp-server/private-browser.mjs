@@ -364,6 +364,16 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const responseAlerts = new WeakMap()
   // Signed-in page responses that include the Messages dock.
   const responseDock = new WeakSet()
+  // Per-response route stage durations for Server-Timing on rendered pages:
+  // fixed stage names and whole milliseconds only, never identifiers or paths.
+  const responseTimings = new WeakMap()
+  const STAGES = new Set(['alerts', 'company', 'facts'])
+  const mark = (response, stage, begunMs) => {
+    if (!STAGES.has(stage)) return
+    const held = responseTimings.get(response) ?? []
+    held.push(`${stage};dur=${Math.max(0, Math.round(performance.now() - begunMs))}`)
+    responseTimings.set(response, held)
+  }
   // Both counts in parallel, each bounded: a slow graph costs a badge, never the page.
   const bounded = (work, fallback) => Promise.race([Promise.resolve().then(work).catch(() => fallback), new Promise(resolve => setTimeout(resolve, 800, fallback).unref?.())])
   // Header counts for a signed-in session. Messages is OpenChat's unread total,
@@ -374,9 +384,23 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     const [network, unseen, messages] = await Promise.all([memberConnections ? bounded(() => memberConnections.pendingCount(owner), fallback) : undefined, notifications ? bounded(() => notifications.counts(owner).then(value => value.unseen), fallback) : undefined, messaging ? bounded(() => messaging.unreadTotal(viewer).then(value => value ?? fallback), fallback) : undefined])
     return { ...(memberConnections ? { network } : {}), ...(notifications ? { notifications: unseen } : {}), ...(messaging ? { messages } : {}) }
   }
+  // The badge read (including an upstream OpenChat unread total) starts before
+  // routing and is awaited only at render time, overlapped with the route
+  // work; the residual wait is capped so a slow source costs the badges, never
+  // the page. Counts are always read live, so another account's action is
+  // visible on the very next read.
+  const responseAlertsPending = new WeakMap()
+  const settleAlerts = async response => {
+    const pending = responseAlertsPending.get(response)
+    if (pending) await Promise.race([pending, new Promise(resolve => setTimeout(resolve, 250).unref?.())])
+    return responseAlerts.get(response)
+  }
   const pageView = pathname => !pathname.startsWith('/api/') && !pathname.startsWith('/messages/api/') && !pathname.startsWith('/public-assets/') && !pathname.startsWith('/legacy-files/') && !/^\/notifications\/[^/]+$/.test(pathname) &&
     !/^\/imports\/[a-f0-9]{64}\/status$/.test(pathname) && !/\.[a-z]+$/i.test(pathname) && !['/login', '/logout', '/export', '/auth/callback/ideaflow'].includes(pathname)
-  const journey = (response, view, job = null, script = '', status = 200) => {
+  const journey = async (response, view, job = null, script = '', status = 200) => {
+    await settleAlerts(response)
+    const stages = responseTimings.get(response)
+    if (stages && !response.headersSent) response.setHeader('Server-Timing', stages.join(', '))
     const alerts = responseAlerts.get(response) ?? (readers.has(response) ? {
       ...(memberConnections ? { network: 0 } : {}),
       ...(notifications ? { notifications: 0 } : {}),
@@ -729,7 +753,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         }
       }
       if (viewer && request.method === 'GET' && pageView(url.pathname)) {
-        const alerts = await readAlerts(viewer); if (alerts) responseAlerts.set(response, alerts)
+        const begun = performance.now()
+        responseAlertsPending.set(response, readAlerts(viewer).then(alerts => { mark(response, 'alerts', begun); if (alerts && !responseAlerts.has(response)) responseAlerts.set(response, alerts); return alerts }, () => null))
         // Other signed-in pages carry the Messages dock (shown at ≥ 1024 px).
         if (messaging && url.pathname !== '/messages' && !url.pathname.startsWith('/messages/')) responseDock.add(response)
       }
@@ -766,8 +791,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         } catch { send(503, { state: 'unavailable' }) }
         return
       }
-      const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline, ...(responseAlerts.has(response) ? { alerts: responseAlerts.get(response) } : {}) } : {}
-      if (await servePublicDiscovery(request, response, url.pathname, chrome, { signInOrigin: authorizationOrigin })) return
+      const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline } : {}
+      const discoveryChrome = viewer && isPublicDiscoveryPath(url.pathname) ? { ...chrome, ...((await settleAlerts(response)) ? { alerts: responseAlerts.get(response) } : {}) } : chrome
+      if (await servePublicDiscovery(request, response, url.pathname, discoveryChrome, { signInOrigin: authorizationOrigin })) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
         if (Date.now() - invitationWindow >= 60000) { invitationWindow = Date.now(); invitationRequests = 0 }
@@ -848,9 +874,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           if (publicCompanyApi || publicCompany) {
             let name
             try { name = decodeURIComponent((publicCompanyApi ?? publicCompany)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
-            const result = await publicReader.company({ name, cursor: url.searchParams.get('cursor') ?? undefined })
-            // Graph-published facts over the static list; never throws (static fallback).
-            const facts = await lookupCompanyFacts(name)
+            // People and facts side by side; facts are bounded so a slow
+            // graph read costs the facts block, never the page.
+            const begun = performance.now()
+            const [result, facts] = await Promise.all([
+              publicReader.company({ name, cursor: url.searchParams.get('cursor') ?? undefined }).then(value => { mark(response, 'company', begun); return value }),
+              bounded(() => lookupCompanyFacts(name), null).then(value => { mark(response, 'facts', begun); return value }),
+            ])
             // A name nobody lists and we know nothing about is not a page.
             if (!result.total && !facts) { response.writeHead(404).end(); return }
             if (publicCompanyApi) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ company: { ...result, ...(facts ? { facts } : {}) } })); return }
@@ -873,7 +903,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
               else if (viewer && result.profile.presence === 'shadow' && memberInvitations) connect = { state: 'invite' }
             }
             const notice = url.searchParams.get('connect')
-            const companies = new Map(await Promise.all([...new Set(result.profile.positions.map(position => position.company).filter(Boolean))].map(async name => [name, companyDetailLevel(await lookupCompanyFacts(name))])))
+            const companies = new Map(await Promise.all([...new Set(result.profile.positions.map(position => position.company).filter(Boolean))].map(async name => [name, companyDetailLevel(await bounded(() => lookupCompanyFacts(name), null))])))
             const profile = { ...result.profile, positions: result.profile.positions.map(position => ({ ...position, companyDetailLevel: companies.get(position.company) })) }
             // The owner's private context mounts only for a signed-in viewer and is
             // fetched separately; the page itself never carries it.
@@ -1430,7 +1460,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const [received, connections] = memberConnections ? await Promise.all([memberConnections.received(session.owner), memberConnections.connections(session.owner)]) : [[], []]
         // Opening the feed clears the bell; each item stays highlighted until opened.
         await notifications.markSeen(session.owner)
-        const alerts = responseAlerts.get(response)
+        const alerts = await settleAlerts(response)
         if (alerts) responseAlerts.set(response, { ...alerts, notifications: 0 })
         journey(response, renderNotifications({ ...props, items, pending: new Map(received.map(value => [value.id, value])), connected: new Set(connections.map(value => value.requestId)), pendingCount: received.length, notice: url.searchParams.get('notice'), emailEnabled: memberEmail?.sending === true }), props.importJob); return
       }

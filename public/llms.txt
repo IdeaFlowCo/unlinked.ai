@@ -83,3 +83,5 @@ Browser-only card joining is not an agent capability. The repository guide `docs
 ## Troubleshooting request failures
 
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures.
+
+Public People presence and the historical-account reclaim boundary are owned by the repository contract `docs/public-people-reader.md` (Historical membership); filter values are published in [OpenAPI](https://www.unlinked.ai/openapi.json).

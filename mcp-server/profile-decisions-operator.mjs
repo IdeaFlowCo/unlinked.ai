@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { validateProfileDecisions } from '../src/utils/public-people/profile-decisions.mjs'
+import { operatorBoltUrl } from './operator-bolt-url.mjs'
 
 // Operator capability only, run inside the runtime container; never mounted as a
 // browser or agent endpoint. Every decision records who decided and why, and is
@@ -36,7 +37,7 @@ export async function operateProfileDecisions({ args, session, now = () => new D
 async function main() {
   const root = '/srv/unlinked-private-guest-pilot-20261001', require = createRequire(join(root, 'runtime', 'noos', 'package.json'))
   const neo4j = require('neo4j-driver')
-  const driver = neo4j.driver('bolt://graph:7687', neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 3000 })
+  const driver = neo4j.driver(operatorBoltUrl(), neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 3000 })
   const session = driver.session({ database: 'neo4j' })
   try {
     await session.executeWrite(tx => tx.run('CREATE CONSTRAINT unlinked_profile_decision_id IF NOT EXISTS FOR (d:UnlinkedProfileDecision) REQUIRE d.id IS UNIQUE'))

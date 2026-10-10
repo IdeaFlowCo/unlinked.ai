@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ENRICHMENT_DATASET } from '../src/utils/public-people/member-projection.mjs'
+import { operatorBoltUrl } from './operator-bolt-url.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const text = (value, required = false) => (required ? typeof value === 'string' && value.length > 0 : value === undefined || typeof value === 'string') && (value === undefined || value.length <= 20000)
@@ -47,7 +48,7 @@ export async function publishEnrichmentPeople({ rowsPath, root, execute = false 
   if (!process.env.NOOS_PRIVATE_PASSWORD) throw new Error('private_graph_configuration_required')
   const require = createRequire(join(root, 'runtime/noos/package.json')), neo4j = require('neo4j-driver')
   const { UnlinkedPublicPeopleStore } = require(join(root, 'runtime/noos/dist/operational/public-people.js'))
-  const driver = neo4j.driver('bolt://graph:7687', neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 5000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
+  const driver = neo4j.driver(operatorBoltUrl(), neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 5000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
   try {
     const store = new UnlinkedPublicPeopleStore(driver, 'neo4j'); await store.initialize()
     const legacy = await store.read('recovered-legacy-public-v1')

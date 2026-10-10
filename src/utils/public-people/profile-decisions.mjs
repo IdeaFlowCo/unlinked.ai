@@ -79,6 +79,7 @@ export function applyProfileDecisions(snapshot, stored) {
     profiles,
     connections: [...pairs.values()],
     ...(snapshot.members ? { members: [...new Set(snapshot.members.map(point))].sort() } : {}),
+    ...(snapshot.legacyMembers ? { legacyMembers: [...new Set(snapshot.legacyMembers.map(point))].sort() } : {}),
     aliases: Object.fromEntries([...merges].sort()),
   }
 }
