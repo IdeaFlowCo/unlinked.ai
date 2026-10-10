@@ -176,6 +176,9 @@
     "agentSetup": "https://chat.globalbr.ai/agents",
     "agentCredential": "Separate OpenChat oc_ key for messages and Context; Unlinked grants cannot send messages."
   },
+  "publicProfileDetails": {
+    "documentation": "docs/profile-details.md"
+  },
   "shared_connector": {
     "url": "https://id.ideaflow.app/mcp",
     "setup_url": "https://id.ideaflow.app/agents",
@@ -183,6 +186,10 @@
       "unlinked:read",
       "unlinked:write"
     ]
+  },
+  "browserCardSharing": {
+    "ownerCard": "https://www.unlinked.ai/card",
+    "contactCardJoin": "Explicit browser-only same-origin POST /c/<token>/add preserves the card through verified signup and adds the connection. Scanning alone does not connect. Not an agent capability."
   },
   "requestDiagnostics": {
     "enabledByDefault": false,

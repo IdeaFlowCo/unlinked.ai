@@ -3,12 +3,14 @@ import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
 import { createOpenChatConnectionSync, createNeo4jOpenChatSyncStore } from './openchat-connections.mjs'
 import { validTimestamp } from '../src/utils/network-order.mjs'
 import { createMessagingResolver, createMessagingSession } from './messaging.mjs'
+
+import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
-import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
+import { normalizeLinkedinSlug, urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
 import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
@@ -99,7 +101,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // Automatic sign-in kill switch: UNLINKED_AUTO_SIGNIN=off.
   autoSignInEnv = process.env, diagnosticsEnv = process.env,
   // Private context from the Ideaflow people overlay: NOOS_OVERLAY_APP_UNLINKED_SECRET, NOOS_OVERLAY_URL.
-  overlayEnv = process.env }) {
+  overlayEnv = process.env,
+  // Shared public index freshness window: a build this young is served as-is,
+  // so page views do not each rebuild the index. Revocations and publications
+  // reach anonymous and member pages within the window plus one build.
+  // UNLINKED_PUBLIC_INDEX_FRESH_MS=0 restores next-request rebuilds.
+  publicIndexEnv = process.env }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : ((networkMode === 'isolated-container' && bolt.hostname === 'graph') || (networkMode === 'shared-noos' && bolt.hostname === 'noos_neo4j')) && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -381,7 +388,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         const index = new Map()
         for (const name of names) {
           const manifest = JSON.parse(await readFile(join(directory, name), 'utf8'))
-          for (const row of manifest.profiles ?? []) if (row.linkedinSlug && row.legacyId) index.set(String(row.linkedinSlug).toLowerCase(), row.legacyId)
+          for (const row of manifest.profiles ?? []) {
+            // Keys are canonical (decoded, lowercased) like linkedinSlug(): unlinked-ade.
+            const slug = row.linkedinSlug && row.legacyId ? normalizeLinkedinSlug(String(row.linkedinSlug)) : null
+            if (slug) index.set(slug, row.legacyId)
+          }
         }
         return index
       })().catch(error => { slugs = null; throw error })
@@ -406,8 +417,20 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       }
       return rows
     }
+    let legacyDetails = null
+    const publicIndexFreshMs = publicIndexEnv.UNLINKED_PUBLIC_INDEX_FRESH_MS === undefined ? 20000 : Number(publicIndexEnv.UNLINKED_PUBLIC_INDEX_FRESH_MS)
+    if (!Number.isSafeInteger(publicIndexFreshMs) || publicIndexFreshMs < 0 || publicIndexFreshMs > 300000) throw new Error('private_composition_configuration_required')
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLookup?.list,
-      readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
+      includeDetails: true, freshMs: publicIndexFreshMs,
+      readLegacy: async () => {
+        const snapshot = await publicPeople.read('recovered-legacy-public-v1')
+        const digest = snapshot?.revision?.match(/^legacy-public-v1:([a-f0-9]{64})$/)?.[1]
+        if (!digest) return snapshot
+        try {
+          if (legacyDetails?.sourceSha256 !== digest) legacyDetails = JSON.parse(await readFile(join(root, 'audit', `legacy-public-source-manifest-${digest}.json`), 'utf8'))
+          return withLegacyProfileDetails(snapshot, legacyDetails)
+        } catch { return snapshot }
+      },
       // An accepted invite is a connection both people agreed to: it joins the
       // public graph when both accounts have a public profile.
       // An accepted connection request is the same kind of agreed connection.

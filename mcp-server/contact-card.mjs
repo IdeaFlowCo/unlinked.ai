@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto'
+import { publicLinkedinUrl } from '../src/utils/public-people/profile-links.mjs'
 
 // A member's contact card: the business-card version of their profile, with
 // the phone number, WhatsApp, email address and link they choose to show.
@@ -19,7 +20,6 @@ import { randomInt } from 'node:crypto'
 // the two card shapes can converge. See docs/contact-card.md.
 export const CONTACT_CARD_TOKEN = /^[0-9A-Za-z]{24}$/
 export const CONTACT_CARD_FIELDS = Object.freeze(['phone', 'whatsapp', 'email', 'link'])
-const SHOW = Object.freeze({ phone: 'showPhone', whatsapp: 'showWhatsapp', email: 'showEmail', link: 'showLink' })
 const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 const LINK_MAX = 200
 const PROFILE_PATH = /^\/people\/[A-Za-z0-9._~%-]{1,480}$/
@@ -71,11 +71,12 @@ export function normalizeLink(value) {
 // Who the card is for: the member's own public professional identity, kept
 // with the card so the link can be opened without the member's session.
 const plain = (value, max) => { const typed = text(value); return typed && [...typed].length <= max && !/[\u0000-\u001f\u007f]/.test(typed) ? typed : null }
-// A `profilePath` left undefined means "not known right now" (the public index
-// could not be read): the stored one is kept rather than cleared.
+// A `profilePath` or `linkedinUrl` left undefined means "not known right now"
+// (that source could not be read): the stored one is kept rather than cleared.
 const identityOf = (value, existing) => ({ name: plain(value?.name, 120), headline: plain(value?.headline, 220), location: plain(value?.location, 120),
+  linkedinUrl: value?.linkedinUrl === undefined && existing ? existing.linkedinUrl ?? null : publicLinkedinUrl(value?.linkedinUrl),
   profilePath: value?.profilePath === undefined && existing ? existing.profilePath ?? null : typeof value?.profilePath === 'string' && PROFILE_PATH.test(value.profilePath) ? value.profilePath : null })
-const IDENTITY_KEYS = ['name', 'headline', 'location', 'profilePath']
+const IDENTITY_KEYS = ['name', 'headline', 'location', 'linkedinUrl', 'profilePath']
 
 const settingsOf = record => ({ phone: record?.phone ?? null, showPhone: record?.showPhone === true, whatsapp: record?.whatsapp ?? null, showWhatsapp: record?.showWhatsapp === true,
   email: record?.email ?? null, showEmail: record?.showEmail === true, link: record?.link ?? null, showLink: record?.showLink === true })
@@ -143,6 +144,13 @@ export function createContactCards({ store, now = Date.now } = {}) {
       if (typeof token !== 'string' || !CONTACT_CARD_TOKEN.test(token)) return null
       return projectContactCard(await store.getByToken(token))
     },
+    // Server-only bearer capability. Never included in the card projection.
+    // Recheck visibility and token rotation at the time of connecting.
+    async ownerForToken(token) {
+      if (typeof token !== 'string' || !CONTACT_CARD_TOKEN.test(token)) return null
+      const record = await store.getByToken(token)
+      return projectContactCard(record) ? { ownerId: record.ownerId, userId: record.userId } : null
+    },
     // The member's own copy for their data export: details and switches, no link.
     async exportOwner(member) {
       const record = await store.get(owner(member))
@@ -164,7 +172,7 @@ export function createMemoryContactCardStore() {
   }
 }
 
-const RECORD_KEYS = ['ownerKey', 'ownerId', 'userId', 'token', 'phone', 'showPhone', 'whatsapp', 'showWhatsapp', 'email', 'showEmail', 'link', 'showLink', 'name', 'headline', 'location', 'profilePath', 'createdAt', 'updatedAt']
+const RECORD_KEYS = ['ownerKey', 'ownerId', 'userId', 'token', 'phone', 'showPhone', 'whatsapp', 'showWhatsapp', 'email', 'showEmail', 'link', 'showLink', 'name', 'headline', 'location', 'linkedinUrl', 'profilePath', 'createdAt', 'updatedAt']
 const fromNode = properties => {
   const value = {}
   for (const name of RECORD_KEYS) if (properties[name] !== undefined && properties[name] !== null) value[name] = typeof properties[name]?.toNumber === 'function' ? properties[name].toNumber() : properties[name]
@@ -192,7 +200,7 @@ export function createNeo4jContactCardStore(driver, database = 'neo4j') {
     },
     // Setting a property to null removes it.
     async setIdentity(member, identity) {
-      await write('MATCH (c:UnlinkedContactCard {ownerKey: $ownerKey}) SET c.name = $name, c.headline = $headline, c.location = $location, c.profilePath = $profilePath', { ownerKey: ownerKey(member), ...Object.fromEntries(IDENTITY_KEYS.map(key => [key, identity[key] ?? null])) })
+      await write('MATCH (c:UnlinkedContactCard {ownerKey: $ownerKey}) SET c.name = $name, c.headline = $headline, c.location = $location, c.linkedinUrl = $linkedinUrl, c.profilePath = $profilePath', { ownerKey: ownerKey(member), ...Object.fromEntries(IDENTITY_KEYS.map(key => [key, identity[key] ?? null])) })
     },
     async delete(member) {
       const result = await write('MATCH (c:UnlinkedContactCard {ownerKey: $ownerKey}) WITH c, c.ownerKey AS key DETACH DELETE c RETURN count(key) AS removed', { ownerKey: ownerKey(member) })
@@ -224,6 +232,7 @@ export function renderContactVcard(card, origin) {
   if (card.whatsapp && card.whatsapp !== card.phone) lines.push(`TEL;TYPE=CELL:${card.whatsapp}`)
   if (card.email) lines.push(`EMAIL;TYPE=INTERNET:${vcardText(card.email)}`)
   if (card.link && isSafeContactLink(card.link)) lines.push(`URL:${card.link}`)
+  if (card.linkedinUrl && publicLinkedinUrl(card.linkedinUrl)) lines.push(`URL:${publicLinkedinUrl(card.linkedinUrl)}`)
   if (card.whatsapp) lines.push(`URL:${whatsappUrl(card.whatsapp)}`)
   if (card.profilePath && PROFILE_PATH.test(card.profilePath)) lines.push(`URL:${origin}${card.profilePath}`)
   lines.push('END:VCARD')

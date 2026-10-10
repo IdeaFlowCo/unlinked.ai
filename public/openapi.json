@@ -171,7 +171,7 @@
             "description": "Index unavailable"
           }
         },
-        "description": " Public summaries and profiles include detailLevel (basic or detailed), derived only from visible content independently of membership. Profile connectionCount is the full published count and connectionsTotal is the current filtered count. Browser-only connections browsing is /people/{id}/connections?q=...&sort=detail|name; API cursor ordering remains alphabetical."
+        "description": " Public summaries and profiles include detailLevel (basic or detailed), derived only from visible content independently of membership. Profile connectionCount is the full published count and connectionsTotal is the current filtered count. Browser-only connections browsing is /people/{id}/connections?q=...&sort=detail|name; API cursor ordering remains alphabetical. Professional detail fields are defined by detailSchema in src/components/public-directory/contract.ts; link sourcing and privacy are documented in docs/profile-details.md."
       },
       "head": {
         "summary": "Probe public People status and JSON headers without a response body",
@@ -411,6 +411,21 @@
             }
           },
           {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "best (default): relevance with q, else stored name order; name: A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case (names are returned as written); name-desc; raw: Unicode code-point order of the name as written. Bound into the cursor.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "best",
+                "name",
+                "name-desc",
+                "raw"
+              ]
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -490,7 +505,7 @@
     },
     "/api/agent/v1/connections": {
       "get": {
-        "summary": "Deterministic owner connections: degree 1 includes owner-imported contacts; degree 2 only recorded public paths with proving provenance",
+        "summary": "Deterministic owner connections: degree 1 includes owner-imported contacts, one entry per person with sources[] (or one row per source with grouping=none); degree 2 only recorded public paths with proving provenance",
         "security": [
           {
             "accountGrant": []
@@ -519,6 +534,36 @@
             }
           },
           {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "name (default): A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case (names are returned exactly as written); raw: Unicode code-point order of the name as written; name-desc; connected: most recently connected first; imported: most recently imported first; company: A–Z by company, none last. Bound into the cursor.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "raw",
+                "name-desc",
+                "connected",
+                "imported",
+                "company"
+              ]
+            }
+          },
+          {
+            "name": "grouping",
+            "in": "query",
+            "required": false,
+            "description": "Degree 1. person (default): one entry per person, grouped only on exact identity evidence — the same published profile (merges followed) or the same LinkedIn address, never a name — with sources[] listing every underlying record and top-level fields from the owner import; total counts people. none: one row per source record (pre-grouping shape). Bound into the cursor.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "person",
+                "none"
+              ]
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -539,7 +584,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of connection entries with typed provenance and visibility labels"
+            "description": "Page of connection entries with typed provenance and visibility labels. Grouped entries (degree 1, grouping person) also carry sources[] ({ id, name, provenance, visibility }) and, when known, publishedProfileId, linkedinRefHash, connectedAt and importedAt."
           },
           "400": {
             "description": "invalid_input or cursor_invalid"
@@ -1457,6 +1502,37 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/c/{token}/add": {
+      "post": {
+        "summary": "Browser-only: join and add the owner of a shared contact card",
+        "description": "Requires a same-origin form POST and session CSRF when signed in. Guests complete verified Ideaflow login before connecting. Card visibility and owner activity are rechecked. No bearer/agent access. Viewing alone never connects.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-Za-z]{24}$"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Provider signup/sign-in or contact card result"
+          },
+          "400": {
+            "description": "Invalid intent or CSRF"
+          },
+          "403": {
+            "description": "Wrong origin"
+          },
+          "404": {
+            "description": "Card unavailable"
           }
         }
       }

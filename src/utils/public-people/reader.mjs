@@ -1,8 +1,10 @@
+import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
-import { PUBLIC_NETWORK_SORTS, orderNetwork } from '../network-order.mjs'
+import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
+import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-index.mjs'
 
 export class PublicPeopleReaderError extends Error {
   constructor(status, code) { super(code); this.name = 'PublicPeopleReaderError'; this.status = status; this.code = code }
@@ -17,6 +19,7 @@ const bounded = (value, max) => Number.isSafeInteger(value) && value > 0 && valu
 const plain = value => value !== null && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 const hash = value => createHash('sha256').update(value).digest('hex')
 // Same grammar as PHOTO_URL in mcp-server/profile-photos.mjs: only a same-origin photo path.
+const SUGGESTED_PEOPLE = 5
 const PHOTO_URL = /^\/people\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/photo\?v=[a-f0-9]{16}$/
 
 const dense = value => {
@@ -57,6 +60,9 @@ const requestValue = value => {
 // (`revisionIdentifiesContent`), so an unchanged revision skips the rebuild
 // while any change to the publication yields a new revision and a new build.
 const compiled = new WeakMap()
+// One autocomplete prefix index per compiled snapshot, shared by every reader.
+const suggestIndexes = new WeakMap()
+const suggestIndexFor = data => { let index = suggestIndexes.get(data); if (!index) suggestIndexes.set(data, index = buildSuggestIndex(data)); return index }
 const deepFreeze = value => {
   if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
   if (!(value instanceof Map) && !(value instanceof Set)) for (const key of Reflect.ownKeys(value)) deepFreeze(value[key])
@@ -65,19 +71,38 @@ const deepFreeze = value => {
 
 // `photoFor(id)` optionally names a same-origin profile photo URL
 // (mcp-server/profile-photos.mjs); summaries and details then carry `photo`.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
+// `suggestFreshMs` / `suggestStaleMs` (default 0: every suggestion checks the
+// source) let `suggest` reuse the last verified index: as-is while younger than
+// the fresh window, and while younger than the stale bound with one background
+// refresh. A failed refresh drops it, so a revoked publication fails closed.
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor, suggestFreshMs = 0, suggestStaleMs = 0, now = Date.now } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean' || !Number.isSafeInteger(suggestFreshMs) || suggestFreshMs < 0 || !Number.isSafeInteger(suggestStaleMs) || suggestStaleMs < suggestFreshMs || suggestStaleMs > 300000 || typeof now !== 'function') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
   // once, and building it is slow. With the default `reuse: false`, each new
   // read checks the source before reusing any compiled public index. A
   // caller's own signal reads alone unless a reusable snapshot is already kept.
-  let inflight = null, kept = null
+  let inflight = null, kept = null, latest = null
   async function snapshot(signal) {
     if (kept) return kept
-    if (signal) return build(signal)
-    if (!inflight) inflight = build().then(value => { if (reuse) kept = value; return value }).finally(() => { inflight = null })
+    if (signal) return build(signal).then(value => { hold(value); return value })
+    if (!inflight) inflight = build().then(value => { if (reuse) kept = value; hold(value); return value }, error => { latest = null; throw error }).finally(() => { inflight = null })
     return inflight
+  }
+  // A suggesting reader prepares the autocomplete index for each new snapshot
+  // off the request path, so no keystroke waits for it.
+  const hold = value => {
+    latest = { data: value, at: now() }
+    if (suggestStaleMs > 0 && !suggestIndexes.has(value)) setImmediate(() => { try { suggestIndexFor(value) } catch { /* built on demand instead */ } })
+  }
+  const age = () => latest ? now() - latest.at : Infinity
+  const refresh = () => { if (!inflight) snapshot().catch(() => {}) }
+  // Suggestions: the last verified index while recent, else a fresh read.
+  async function recent(signal) {
+    const held = latest, elapsed = age()
+    if (held && elapsed < suggestFreshMs) return held.data
+    if (held && elapsed < suggestStaleMs) { refresh(); return held.data }
+    return snapshot(signal)
   }
   async function build(signal) {
     if (!readPublishedSnapshot) unavailable()
@@ -113,6 +138,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         optional(summary, 'headline', input.headline); optional(summary, 'location', input.location)
         const detail = { ...summary }
         optional(detail, 'about', input.about)
+        for (const key of ['company', 'industry']) optional(detail, key, input[key])
+        const linkedinUrl = publicLinkedinUrl(input.linkedinUrl), website = publicWebsite(input.website)
+        if (linkedinUrl) optional(detail, 'linkedinUrl', linkedinUrl)
+        if (website) optional(detail, 'website', website)
         detail.positions = array(input.positions, 100).map(position => {
           if (!plain(position)) unavailable()
           const result = { title: text(position.title, true), company: text(position.company, true) }
@@ -157,7 +186,13 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (!plain(value.aliases) || Object.keys(value.aliases).length > maxProfiles) unavailable()
         for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to) }
       }
-      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases }
+      // Autocomplete companies come only from visible positions, never raw imports.
+      const companies = new Map()
+      for (const detail of details.values()) for (const position of detail.positions) {
+        const name = position.company.trim(), key = normalized(name), tokens = words(name)
+        if (name.length <= 200 && tokens.length > 0 && tokens.length <= 12 && !companies.has(key)) companies.set(key, { name, tokens })
+      }
+      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(readPublishedSnapshot, { key: cacheKey, data }) }
       return data
@@ -198,20 +233,42 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     return { profiles, ...(nextCursor ? { nextCursor } : {}) }
   }
   return {
+    // Start loading the index (e.g. when the search field gains focus) so the
+    // first keystroke finds it ready. Never waits and never returns data.
+    warm() { if (age() >= suggestFreshMs) refresh() },
+    // `known`: published ids the signed-in member is connected to; they are
+    // marked and preferred among equal matches. Never read here.
+    async suggest(request = {}) {
+      const { query = '', signal, known } = requestValue(request)
+      if (known !== undefined && !(known instanceof Set)) invalid()
+      const search = queryValue(query)
+      if (search.length < 2 || !words(search).length) return { people: [], companies: [] }
+      const data = await recent(signal), index = suggestIndexFor(data)
+      return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
+    },
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false } = requestValue(request)
-      if (!PUBLIC_NETWORK_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
+      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [] } = requestValue(request)
+      if (!PUBLIC_LIST_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
+      // `exclude`: published ids the caller already shows elsewhere on the page
+      // (a signed-in owner's own people), left out before paging and totals.
+      if (!Array.isArray(exclude) || exclude.length > maxProfiles || !exclude.every(idValid)) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
-      // The presence filter is part of the cursor scope, so a page never mixes filters.
+      // The presence filter and exclusions are part of the cursor scope, so a page never mixes filters.
       const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}`
-      const scope = matcher ? `list:${filter}${mode}:${normalizedQuery}` : `list:${filter}`
-      const decodedCursor = cursorValue(cursor, scope), data = await snapshot(signal)
+      const data0 = exclude.length ? await snapshot(signal) : null
+      const excluded = data0 ? new Set(exclude.map(id => data0.aliases.get(id) ?? id)) : null
+      const without = excluded?.size ? `x=${hash([...excluded].sort().join('\n'))}:` : ''
+      const scope = matcher ? `list:${filter}${without}${mode}:${normalizedQuery}` : `list:${filter}${without}`
+      const decodedCursor = cursorValue(cursor, scope), data = data0 ?? await snapshot(signal)
       // A snapshot that does not name its members has no presence, so it matches no filter.
       const people = presence ? data.ordered.filter(person => person.presence === presence) : data.ordered
-      if (!matcher) return { ...page(orderNetwork(people, sort), decodedCursor, scope, data.revision), ...(presence || includeTotal ? { total: people.length } : {}) }
+      // Exclusions apply after ranking, so leaving out the full matches the
+      // page already shows never promotes people who match only some words.
+      const kept = rows => excluded?.size ? rows.filter(person => !excluded.has(person.id)) : rows
+      if (!matcher) { const rows = kept(people); return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), ...(presence || includeTotal ? { total: rows.length } : {}) } }
       // `match` says whether the rows have every word ('all') or only some of them.
-      const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id))
-      return { ...page(orderNetwork(ranked.rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
+      const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id)), rows = kept(ranked.rows)
+      return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: rows.length }
     },
     async profile(request = {}) {
       const { id, cursor, signal, query = '', sort = 'name' } = requestValue(request)

@@ -48,7 +48,7 @@ The open-account private runtime adds issuer/subject signup, durable profile-fir
 The exact canonical-host callback/runtime transition is documented in `deploy/private-pilot/CANONICAL-HOST.md`.
 The standalone private runtime composition and guarded deployment/recovery commands are in `mcp-server/private-composition.mjs` and `deploy/private-pilot/README.md`; the canonical beta uses that runtime at `https://www.unlinked.ai` while the public Next.js application retains historical/source routes.
 Account grant provisioning and OAuth isolation are owned by `docs/agent-api.md` ("Grant provisioning" and "OAuth connector"). Bearer tokens are re-derived from durable grant records and must never enter logs, audit events or error messages.
-Members show a QR business card at `/card` (inline SVG from the dependency-free encoder `src/utils/qr-code.mjs`, round-trip tested with jsQR); its target is only a snapshot-verified public profile URL. The card's second version carries opt-in contact details (phone, WhatsApp, email, link) behind a random resettable link `/c/<token>`; those details must never reach public profiles, search, model context or agent tools (`docs/contact-card.md`). `/meet` classifies Unlinked profile and OpenChat QR codes through `src/utils/meet-scan.js` and always requires an explicit confirm before opening. The header search field's QR button opens `/scan` (`renderScan`): a Scan tab reusing the `/meet` scanner (`MEET_SCRIPT`, same element ids) and a My card tab; signed-in members get one `<details>` "Me" menu (`meMenu`) whose headline is filled per request via `fillMeHeadline`, enhanced by `TOP_BAR_SCRIPT` on every page's nonce. The PWA surface (`public/manifest.webmanifest`, `public/sw.js`, icons via `scripts/generate-pwa-icons.mjs`) precaches only fixed public shell assets — never member content; keep it that way when changing caching.
+Card versions, QR targets, browser-only joining and contact privacy are owned by [docs/contact-card.md](docs/contact-card.md). `/meet` classifies Unlinked profile and OpenChat QR codes through `src/utils/meet-scan.js` and always requires an explicit confirm before opening. The header search field's QR button opens `/scan` (`renderScan`): a Scan tab reusing the `/meet` scanner (`MEET_SCRIPT`, same element ids) and a My card tab; signed-in members get one `<details>` "Me" menu (`meMenu`) whose headline is filled per request via `fillMeHeadline`, enhanced by `TOP_BAR_SCRIPT` on every page's nonce. The PWA surface (`public/manifest.webmanifest`, `public/sw.js`, icons via `scripts/generate-pwa-icons.mjs`) precaches only fixed public shell assets — never member content; keep it that way when changing caching.
 
 See `docs/private-archive-import.md` for the bounded parser/job adapter contract, `docs/durable-archive-import.md` for the default-off background worker/status/profile behavior, the test adapter boundary and links to live activation gates; see `README.md` for the public archive entry.
 
@@ -108,6 +108,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
 
 The provenance-backed one/two-hop reader, signed HTTP API and account MCP degree inputs are documented in `docs/private-pilot-release-plan.md`; an explicitly confirmed recovered profile is currently required as the graph anchor.
 
+Header people/company autocomplete, its browser-only public projection boundary and keyboard behavior are documented in [docs/omni-search.md](docs/omni-search.md); enhancement: `mcp-server/omni-search.mjs`.
+
 ## Canonical anonymous discovery
 
 `mcp-server/public-discovery.mjs` mounts exact GET/HEAD discovery/import/Meet routes before session resolution; its fixed asset map never exposes owner data or request-selected files.
@@ -150,9 +152,12 @@ Unlinked is the network and OpenChat its messenger. The confidential `/api/messa
 
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
+Professional profile links and the in-memory enrichment of immutable published rows are documented in `docs/profile-details.md`; never copy raw assertion or contact-card fields into public profiles.
+
 ## People directory controls
 
 The standalone browser's progressive filtering, URL state, ordering and private date provenance are described in `docs/network-controls.md`. Browser ordering is not an agent API contract change; preserve existing agent defaults and keep owner relationship dates out of public profile projections.
+Same-person evidence for an owner's connection rows (published profile id with merges followed, or LinkedIn address — never a name) lives in `mcp-server/connection-identity.mjs`, shared by `/network`, `unlinked_lookup_contact` and the grouped `unlinked_list_connections` (`sources[]`, `grouping: none` for per-source rows); legacy index slugs are compared percent-decoded (`normalizeLinkedinSlug`). Sort keys: `src/utils/network-order.mjs`.
 
 Public setup links to the shared OpenChat + Unlinked agent hub at
 `https://chat.globalbr.ai/agents`. Identity/inbox are shared; **direct service credentials**

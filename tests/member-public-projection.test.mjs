@@ -72,11 +72,11 @@ test('legacy upgrade during final asynchronous reads rejects the retired signup 
 })
 
 test('confirmed legacy member reuses existing profile; latest uploaded profile overlays only live read, revoke removes overlay',async()=>{
- const sourceSha='e'.repeat(64), recovered={...legacy,revision:'legacy-public-v1:'+sourceSha}, link={profileId:'legacy',sourceSha256:sourceSha,receiptId:'link-receipt',revision:'legacy-public-v1:'+sourceSha}
+ const sourceSha='e'.repeat(64), recovered={...legacy,profiles:legacy.profiles.map(profile=>({...profile,linkedinUrl:'https://www.linkedin.com/in/legacy-person'})),revision:'legacy-public-v1:'+sourceSha}, link={profileId:'legacy',sourceSha256:sourceSha,receiptId:'link-receipt',revision:'legacy-public-v1:'+sourceSha}
  let active=true
  const cached=projectPublicMemberImport({job,assertions})
  const read=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[{id,owner:{ownerId:'bound-owner',userId:'bound-user'},revision:4}],getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job}),readLegacyProfile:async()=>active?link:null}),publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?null:cached}})
- const before=await read();assert.equal(before.profiles.length,2);assert.equal(before.profiles.find(p=>p.id==='legacy').name,'Test Member');assert.equal(before.connections[0].fromId,'legacy');assert.equal(cached.profiles[0].id,'member-import-'+id);assert.equal(recovered.profiles[0].name,'Legacy Person')
+ const before=await read();assert.equal(before.profiles.length,2);assert.equal(before.profiles.find(p=>p.id==='legacy').name,'Test Member');assert.equal(before.profiles.find(p=>p.id==='legacy').linkedinUrl,'https://www.linkedin.com/in/legacy-person');assert.equal(before.connections[0].fromId,'legacy');assert.equal(cached.profiles[0].id,'member-import-'+id);assert.equal(recovered.profiles[0].name,'Legacy Person')
  active=false;const after=await read();assert.equal(after.profiles.find(p=>p.id==='legacy').name,'Legacy Person');assert.notEqual(before.revision,after.revision)
 })
 
@@ -119,4 +119,36 @@ test('an account that published several imports keeps one member profile: the ne
   assert.ok(!result.profiles.some(value => value.id === 'member-import-' + older))
   // The older import's connection now hangs off the account's one profile.
   assert.ok(result.connections.some(edge => edge.fromId === 'member-import-' + newer && edge.toId === 'public-' + 'a'.repeat(64)))
+})
+
+test('a fresh index serves page views without re-reading sources; expiry, revocation and empty builds restore live reads', async () => {
+  let clock = 0, discovers = 0, items = [{ id, owner: { ownerId: 'bound-owner', userId: 'bound-user' }, revision: 4 }]
+  let legacySnapshot = legacy
+  const cached = projectPublicMemberImport({ job, assertions })
+  const read = createMemberPublicIndex({ freshMs: 20000, now: () => clock,
+    readLegacy: async () => legacySnapshot, discover: async () => { discovers++; return items },
+    getBackend: async () => ({ readResource: async () => ({ sourceId: id, sourceOwnerId: 'bound-owner', sourceRevision: 4, payload: job }) }),
+    publicPeople: { read: async dataset => dataset === ENRICHMENT_DATASET ? null : cached } })
+  const first = await read()
+  assert.equal(first.profiles.length, 3); assert.equal(discovers, 2)
+  // Every page view inside the window reuses the kept build and reads nothing.
+  items = []
+  const held = await read()
+  assert.equal(held, first); assert.equal(discovers, 2)
+  // Expiry makes the revocation visible on the next read.
+  clock = 20000
+  const rebuilt = await read()
+  assert.deepEqual(rebuilt.profiles, legacy.profiles); assert.equal(discovers, 4)
+  // An empty build is not kept, and it drops the kept one: a revoked legacy
+  // publication never serves from the window.
+  clock = 40000
+  legacySnapshot = null
+  assert.equal(await read(), null)
+  legacySnapshot = legacy
+  assert.notEqual(await read(), null); assert.equal(discovers, 6)
+  // Reads that overlap a build still share it.
+  clock = 80000
+  const [one, two] = await Promise.all([read(), read()])
+  assert.equal(one, two); assert.equal(discovers, 8)
+  for (const freshMs of [-1, 0.5, 300001]) assert.throws(() => createMemberPublicIndex({ freshMs, readLegacy: async () => legacy, discover: async () => [], publicPeople: { read: async () => null } }), /public_member_index_freshness_invalid/)
 })

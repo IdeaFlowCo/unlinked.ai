@@ -55,7 +55,7 @@ export function applyProfileDecisions(snapshot, stored) {
   const renames = new Map(decisions.filter(value => value.kind === 'rename' && known.has(value.profileId)).map(value => [value.profileId, value.name.trim()]))
   const fill = (survivor, merged) => {
     const result = { ...survivor }
-    for (const key of ['headline', 'location', 'about', 'company']) if (result[key] === undefined && merged[key] !== undefined) result[key] = merged[key]
+    for (const key of ['headline', 'location', 'about', 'company', 'industry', 'linkedinUrl', 'website']) if (result[key] === undefined && merged[key] !== undefined) result[key] = merged[key]
     for (const key of ['positions', 'education', 'skills']) if (!result[key]?.length && merged[key]?.length) result[key] = merged[key]
     return result
   }

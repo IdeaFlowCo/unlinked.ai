@@ -2,14 +2,17 @@ Unlinked helps people carry their network into useful introductions. The canonic
 
 ## Meet someone
 
-`/meet` accepts only `https://chat.globalbr.ai/c/<24-letter-or-digit-token>` and `https://chat.ideaflow.app/c/<24-letter-or-digit-token>` card URLs. The standalone runtime offers live camera scanning and pasted URLs using the checked-in OpenChat card parser and locked `jsqr` dependency. A valid payload opens the public OpenChat card page on the same host as the scanned or pasted URL, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. Opening a card does not itself send a request.
+Open **My card** in the main navigation to show your card. See the [contact-card guide](docs/contact-card.md) for card versions, sharing controls and signup from a shared card.
 
-Meet is anonymous and does not resolve an Unlinked owner, read an archive, or import live profiles/cards into Unlinked.
+`/meet` supports camera scanning and pasted Unlinked profile/contact-card or OpenChat card URLs, with an explicit confirmation before opening. The accepted URL grammar is defined by `src/utils/meet-scan.js` and its card parsers. Opening a card never sends a connection request. OpenChat owns its card's sign-in, friend status and requests; Unlinked's joining flow is described in the contact-card guide.
+
+Meet is anonymous and does not read an archive or import profiles/cards into Unlinked.
 
 ## Import LinkedIn archive
 
 The canonical app sign-in is https://www.unlinked.ai/login.
 The home page, People search (`/people`, `/network?q=`) and profile pages (`/people/{id}`) need no sign-in; a member page opened without a session offers sign-in and returns there afterwards.
+See [profile details and outbound links](docs/profile-details.md) for the professional information available on people, company and owner profile pages.
 Anyone can sign in or create an account through Ideaflow ID; no invitation is needed.
 If the signed Ideaflow email matches one of the privately seeded recovered legacy accounts, the standalone runtime may ask once whether to continue with that old Unlinked profile before showing `/profile`.
 After that explicit recovered-account confirmation, Settings may also list preserved original LinkedIn files for browser-only download; those originals are not exposed through agent grants or public People.

@@ -97,11 +97,16 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   const duplicatesPage = await (await go('/network?presence=member&q=119', cookie)).text()
   const duplicatesSection = duplicatesPage.match(/<section[^>]*aria-label="People you know"[^>]*>([\s\S]*?)<\/section>/)?.[1]
   const rows = [...duplicatesSection.matchAll(/<article[^>]*data-network-row="([^"]+)"[^>]*>([\s\S]*?)<\/article>/g)]
-  // Both imported assertions and the accepted member connection remain distinct.
-  assert.deepEqual(rows.slice(0, 2).map(row => row[1]), [rowId, duplicateId])
-  assert.equal(rows.length, 3)
-  assert.equal(new Set(rows.map(row => row[1])).size, 3)
-  for (const row of rows) assert.match(row[2], /href="\/people\/p119"/)
+  // Both imported assertions and the accepted member connection are one person
+  // (unlinked-tto.4): one card, keyed by the earliest import, listing 3 sources.
+  assert.deepEqual(rows.map(row => row[1]), [rowId])
+  assert.match(rows[0][2], /href="\/people\/p119"/)
+  assert.match(rows[0][2], /<details class="sources"><summary>3 sources<\/summary>/)
+  assert.equal([...rows[0][2].matchAll(/<li>/g)].length, 3)
+  assert.match(rows[0][2], /Accepted Unlinked connection/)
+  // Everyone on Unlinked leaves out the person already shown above; the count is cards.
+  assert.doesNotMatch(duplicatesPage.match(/<section[^>]*aria-label="On Unlinked"[^>]*>([\s\S]*?)<\/section>/)?.[1] ?? '', /href="\/people\/p119"/)
+  assert.match(duplicatesPage, /Showing 1 of 1 matching people/)
   assert.doesNotMatch(await (await go('/network')).text(), /data-network-row=/)
 
   // With the index down, an accepted connection still links to the profile it names;

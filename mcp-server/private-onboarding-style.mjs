@@ -42,7 +42,25 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .logo{text-decoration:none;letter-spacing:-.04em;color:var(--brand)}
 .unlinked-onboarding .logo strong{font-size:21px;font-weight:700;color:var(--brand)}
 .unlinked-onboarding .header-search{position:relative;display:flex;flex:1;max-width:440px;margin-right:auto}
+/* The omnibox uses the product's existing type, indigo tokens and profile faces. */
+.unlinked-onboarding .omni-panel{position:absolute;top:calc(100% + 10px);left:0;width:max(100%,390px);max-width:calc(100vw - 40px);z-index:45;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 48px #25295324;overflow:hidden}
+.unlinked-onboarding .omni-panel[hidden]{display:none}
+.unlinked-onboarding #omni-suggestions{max-height:min(58vh,540px);overflow-y:auto;overscroll-behavior:contain;padding:6px}
+.unlinked-onboarding .omni-heading{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 12px 5px}
+.unlinked-onboarding .omni-option{display:flex;gap:12px;align-items:center;min-height:58px;padding:9px 12px;border-radius:10px;color:var(--fg);text-decoration:none}
+.unlinked-onboarding .omni-option:hover,.unlinked-onboarding .omni-option[aria-selected=true]{background:var(--tint)}
+.unlinked-onboarding .omni-face{position:relative;display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;border-radius:50%;background:var(--tint);color:var(--brand-d);font-size:12px;font-weight:700;overflow:hidden}
+.unlinked-onboarding .omni-face img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.unlinked-onboarding .omni-square{border-radius:9px;background:var(--page)}
+.unlinked-onboarding .omni-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+.unlinked-onboarding .omni-name{font-size:14px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.unlinked-onboarding .omni-name mark{color:var(--brand-d);background:transparent;font-weight:700}
+.unlinked-onboarding .omni-known{margin-left:6px;padding:0 6px;border-radius:99px;background:var(--tint);color:var(--brand-d);font-size:11px;font-weight:600;vertical-align:1px;white-space:nowrap}
+.unlinked-onboarding .omni-subtitle{font-size:12px;line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unlinked-onboarding .omni-status{padding:10px 16px;border-top:1px solid var(--line);background:var(--page);font-size:11px;color:var(--muted)}
 .unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 84px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
+/* iOS Safari and WKWebView zoom into fields under 16px on focus. */
+@media(max-width:900px),(pointer:coarse){.unlinked-onboarding .header-search input[type=search]{font-size:16px}}
 /* The icon is an element, not a data: background, so the page's default-src 'none' policy allows it. */
 .unlinked-onboarding .header-search .search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
 .unlinked-onboarding .header-search input[type=search]:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--tint)}
@@ -55,6 +73,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .header-search .scan:hover{background:var(--tint)}
 .unlinked-onboarding nav{display:flex;gap:18px;align-items:center;font-size:15px}
 .unlinked-onboarding nav a{color:var(--fg);text-decoration:none;white-space:nowrap}
+.unlinked-onboarding nav .my-card-link{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(--brand-d);font-weight:600}
 .unlinked-onboarding nav a:hover{text-decoration:underline}
 .unlinked-onboarding nav .chip{display:inline-block;border:1px solid var(--line2);border-radius:99px;padding:6px 13px;background:#fff;max-width:200px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .unlinked-onboarding nav a.button{color:#fff}
@@ -123,6 +142,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .phead h1{font:600 28px/1.15 "Public Sans",system-ui,sans-serif;letter-spacing:-.01em;margin:12px 24px 2px}
 .unlinked-onboarding .phead .hl{margin:0 24px 4px;font-size:17px}
 .unlinked-onboarding .phead>.small{margin:0 24px;display:block}
+.unlinked-onboarding .phead>.profile-links{margin-top:8px}
+.unlinked-onboarding .profile-links a{display:inline-block;padding:5px 0}
 .unlinked-onboarding .phead .actions{margin:16px 24px 0}
 .unlinked-onboarding .phead .notice{margin:16px 24px 0}
 .unlinked-onboarding .qr{margin:18px 24px 0;max-width:260px;background:#fff}
@@ -308,6 +329,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .note-open:hover .note-text{text-decoration:underline}
 .unlinked-onboarding .note-text{font-size:15px}
 .unlinked-onboarding .note-time{display:block}
+.unlinked-onboarding .note-state{color:var(--brand-d);font-weight:600}
 .unlinked-onboarding .note .row-actions{margin-left:58px}
 .unlinked-onboarding .note-summary{display:flex;gap:14px;align-items:center;padding:14px 18px;margin:8px 0 0;background:#fff;border:1px solid var(--line);border-radius:var(--r);color:var(--fg);text-decoration:none}
 .unlinked-onboarding .note-summary span span{display:block}
@@ -345,6 +367,13 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .network-count{min-height:22px;margin:14px 0}
 .unlinked-onboarding [data-network-results][aria-busy=true]{opacity:.55}
 .unlinked-onboarding .network-date{margin:4px 0}
+.unlinked-onboarding details.sources{margin:4px 0;font-size:13px;color:var(--muted)}
+.unlinked-onboarding details.sources summary{cursor:pointer;width:max-content;list-style:none}
+.unlinked-onboarding details.sources summary::-webkit-details-marker{display:none}
+.unlinked-onboarding details.sources summary::after{content:" ▸"}
+.unlinked-onboarding details.sources[open] summary::after{content:" ▾"}
+.unlinked-onboarding details.sources ul{margin:4px 0 0;padding-left:18px}
+.unlinked-onboarding details.sources a{color:inherit}
 .unlinked-onboarding [data-network-enhanced] .network-apply{display:none}
 @media(max-width:600px){.unlinked-onboarding .network-toolbar{padding:14px}.unlinked-onboarding .network-query{min-width:100%}.unlinked-onboarding .network-sort{flex:1}.unlinked-onboarding .network-segments{width:100%;font-size:13px}.unlinked-onboarding .network-segments a{flex:1;text-align:center;padding:9px 5px}.unlinked-onboarding .network-reset{margin-left:0}}
 .unlinked-onboarding .private-context{margin-top:16px;border-left:3px solid var(--brand)}

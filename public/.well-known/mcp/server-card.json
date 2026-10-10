@@ -1,7 +1,7 @@
 {
   "name": "unlinked",
   "version": "1.0.0",
-  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants. Current grants add whoami, deterministic paginated listings and an explicit AI search tool; old valid grants receive current tools within their enabled permissions and original data scope, without changing token bytes. The same tools are served as a grant-authenticated HTTP JSON API under /api/agent/v1/ (contract: docs/agent-api.md).",
+  "description": "Search your owner-scoped imported network and the complete published professional People index with an explicitly revocable account grant. Recovered Connections observations require the same confirmed owner; original files are browser-only and excluded from grants. Current grants add whoami, deterministic paginated listings and an explicit AI search tool; old valid grants receive current tools within their enabled permissions and original data scope, without changing token bytes. The same tools are served as a grant-authenticated HTTP JSON API under /api/agent/v1/ (contract: docs/agent-api.md). Professional profile details and privacy boundaries: docs/profile-details.md.",
   "homepage": "https://www.unlinked.ai",
   "transports": {
     "streamable-http": {
@@ -94,7 +94,7 @@
     },
     {
       "name": "unlinked_list_people",
-      "description": "Deterministically list or lexically filter the published public People index. Opaque cursor, max 50 per page, total and snapshot revision. Public fields only.",
+      "description": "Deterministically list or lexically filter the published public People index. sort: best (default), name (ignores leading emoji/punctuation, accents and case), name-desc or raw (code-point order). Opaque cursor bound to query and sort, max 50 per page, total and snapshot revision. Public fields only.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -108,6 +108,16 @@
               "best",
               "exact"
             ]
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "best",
+              "name",
+              "name-desc",
+              "raw"
+            ],
+            "description": "best (default): relevance with q, else stored name order; name: A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case (names are returned as written); name-desc; raw: Unicode code-point order of the name as written. Bound into the cursor."
           },
           "cursor": {
             "type": "string",
@@ -124,7 +134,7 @@
     },
     {
       "name": "unlinked_list_connections",
-      "description": "Deterministically list the owner's connections. Degree 1 includes owner-imported contacts (no anchor required) plus recorded public paths when anchored; degree 2 returns only recorded public paths with the proving path, or typed degree_unproven.",
+      "description": "Deterministically list the owner's connections. Degree 1 includes owner-imported contacts (no anchor required) plus recorded public paths when anchored, grouped one entry per person (exact published-profile or LinkedIn-address evidence, never names) with sources[]; grouping none returns one row per source. Degree 2 returns only recorded public paths with the proving path, or typed degree_unproven. sort: name (default, ignores leading emoji/punctuation), raw, name-desc, connected, imported, company.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -138,6 +148,26 @@
           "q": {
             "type": "string",
             "maxLength": 256
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "name",
+              "raw",
+              "name-desc",
+              "connected",
+              "imported",
+              "company"
+            ],
+            "description": "name (default): A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case (names are returned exactly as written); raw: Unicode code-point order of the name as written; name-desc; connected: most recently connected first; imported: most recently imported first; company: A–Z by company, none last. Bound into the cursor."
+          },
+          "grouping": {
+            "type": "string",
+            "enum": [
+              "person",
+              "none"
+            ],
+            "description": "Degree 1. person (default): one entry per person, grouped only on exact identity evidence — the same published profile (merges followed) or the same LinkedIn address, never a name — with sources[] listing every underlying record and top-level fields from the owner import; total counts people. none: one row per source record (pre-grouping shape). Bound into the cursor."
           },
           "cursor": {
             "type": "string",
@@ -853,6 +883,10 @@
       "unlinked:read",
       "unlinked:write"
     ]
+  },
+  "browserCardSharing": {
+    "ownerCard": "https://www.unlinked.ai/card",
+    "contactCardJoin": "Explicit browser-only same-origin POST /c/<token>/add preserves the card through verified signup and adds the connection. Scanning alone does not connect. Not an agent capability."
   },
   "requestDiagnostics": {
     "enabledByDefault": false,

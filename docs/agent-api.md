@@ -283,27 +283,65 @@ read `importCount: 0` while `unlinked_list_connections` listed them.
 `grant.toolRefresh` explains same-key tool refresh and explicit permissions; see the
 [permission and tool-refresh policy](#optional-connection-actions).
 
-### `GET /api/agent/v1/people?q&mode&presence&cursor&limit` ⇄ `unlinked_list_people`
+### `GET /api/agent/v1/people?q&mode&presence&sort&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
 `q` ≤ 200 chars; `mode` `best` (default) or `exact`; `presence` `member` (people
 who joined: confirmed claims and members' own imports) or `shadow` (imported,
-not on Unlinked yet), omitted for everyone. The filter is bound into the cursor.
-Response: `{ kind, revision, total, match?, profiles: [{ id, name, headline?,
+not on Unlinked yet), omitted for everyone. `sort` `best` (default: relevance
+with `q`, else the stored name order), `name`, `name-desc` or `raw` (see
+[Name ordering](#name-ordering)). The filter and sort are bound into the cursor.
+Response: `{ kind, revision, sort? (when not best), total, match?, profiles: [{ id, name, headline?,
 location?, presence?, connectionCount? }], nextCursor?, visibility: "public" }`.
 `presence` and `connectionCount` (connections counted from both ends) are present
 whenever the published snapshot names its members.
 
 ### `GET /api/agent/v1/people/{id}?connectionsCursor` ⇄ `unlinked_get_profile`
 One published profile with its public connections page (50 per page).
-Response: `{ kind, revision, visibility: "public", profile: { id, name,
-headline?, location?, about?, positions, education, skills,
-connections: [...summaries], nextConnectionsCursor? } }`. Unknown id → `not_found`.
+Response: `{ kind, revision, visibility: "public", profile }`. The profile DTO
+fields and bounds are owned by `detailSchema` in
+`src/components/public-directory/contract.ts`; professional link sourcing and
+privacy are owned by [profile details](profile-details.md).
+Unknown id → `not_found`.
 
-### `GET /api/agent/v1/connections?degree&q&cursor&limit` ⇄ `unlinked_list_connections`
+### `GET /api/agent/v1/connections?degree&q&sort&grouping&cursor&limit` ⇄ `unlinked_list_connections`
 Deterministic owner-connections listing; see **Degree semantics**.
-Response: `{ kind, degree, revision, total, anchorId? (degree 2),
-connections: [{ id, name, headline?, company?, linkedinUrl?, provenance,
-visibility }], nextCursor? }`.
+`q`, `sort` and `grouping` are bound into the cursor (reusing a cursor with
+another value is `cursor_invalid`).
+
+- `grouping` (degree 1) — `person` (default) returns **one entry per person**:
+  records join only on exact identity evidence — the same published profile
+  (the row's own published copy, a recorded path/invite/connection target, or
+  the published profile with the same LinkedIn address; merged profiles are
+  followed to their survivor) or the same canonical LinkedIn address
+  (`linkedinRefHash`). A name is never evidence: two contacts called "Sam Lee"
+  with different addresses stay two entries. Top-level fields come from the
+  owner's import (the earliest import is primary, so the `id` stays stable when
+  a re-import joins), filling gaps from the other sources; `connectedAt` /
+  `importedAt` are the earliest known. `sources` lists every underlying record.
+  `total` counts people. `q` matches any source's name, headline or company.
+  `none` returns one row per source record in the pre-grouping shape (no
+  `sources`, no dates), so the same person can appear more than once.
+- `sort` — `name` (default), `raw`, `name-desc`, `connected` (most recently
+  connected first, undated last), `imported` (most recently imported first),
+  `company` (A–Z, no company last); ties fall back to name, then id. See
+  [Name ordering](#name-ordering).
+
+Response: `{ kind, degree, grouping (degree 1), sort, revision, total,
+anchorId? (degree 2), connections: [{ id, name, headline?, company?,
+linkedinUrl?, publishedProfileId?, linkedinRefHash?, connectedAt?, importedAt?,
+provenance, visibility, sources: [{ id, name, provenance, visibility }] }],
+nextCursor? }`. Grouped `provenance` is the primary source's; `visibility` is
+`owner_private` when any source is. Every source `id` (and the entry `id`) is a
+valid `connectionId` for `unlinked_lookup_contact`.
+
+#### Name ordering
+`name` compares a key that starts at the first Unicode letter or number
+(`\p{L}\p{N}`), so leading emoji, symbols, quotes and punctuation do not move a
+person (`🚀 Zoe` sorts under Z, `"Bob"` under B), with accent- and
+case-insensitive, numeric-aware collation (`Émile` sorts as `emile`). Names are
+always returned exactly as written. `raw` is plain Unicode code-point order of
+the name as written (uppercase before lowercase, punctuation and digits first,
+emoji last). Implementation: `src/utils/network-order.mjs`.
 
 ### `GET /api/agent/v1/connection-requests?direction` ⇄ `unlinked_list_connection_requests`
 Read-only; availability follows [grant-scope normalization](#grant-scope-versioning-how-old-grants-keep-working). `direction` `received` (default: requests
@@ -384,8 +422,17 @@ lexicalMatches, modelCandidates, matches: [{ id, name, headline?, location?,
 company?, reason }], visibility: "public" }`.
 
 ### `POST /api/agent/v1/search-network` `{ query, degree?, cursor? }` ⇄ `unlinked_search_network`
-Launch tool, unchanged semantics: free-text AI search of the owner network, or
-recorded-path reading with `degree`. On HTTP, failures are typed
+Launch tool. Without `degree` it is **text first**: when every query word
+starts a word in a connection's name, company or position, it returns all such
+connections at once with no model call (`mode: "text_match"`, sorted by name,
+at most 500 rows with `total` and `truncated`, `reason` naming the matched
+fields). Only a query with no literal match is AI-ranked (`mode:
+"query_time_ai"`, top ten), within one 20 s deadline for the whole call, network reads included (below the shared connector's 25 s downstream timeout); a spent budget returns
+`upstream_unavailable` naming the text-query and `list_connections`
+alternatives. Ranking stops 4 s before that deadline and returns the best
+matches ranked so far with `partial: true` (`considered` then counts only the
+rows actually ranked); the error is returned only if nothing finished. The
+owner-network ranking runs eight model calls at a time. With `degree` it reads recorded paths. On HTTP, failures are typed
 (`degree_unproven`, `cursor_invalid`, ...) and recorded-path pages cap at 50
 rows; on MCP it returns the same typed failure shape and keeps 100-row pages
 (offset cursors are interchangeable between the two).

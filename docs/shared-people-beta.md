@@ -1,6 +1,6 @@
 # Shared People beta
 
-Everyone browsing uses only the published professional Noos projection, never private owner resources or synthetic fallbacks.
+Everyone browsing exposes only the published professional Noos projection, never raw private owner resources or synthetic fallbacks. The trusted runtime reconstructs professional details from eligible public-consent imports internally; the authorization and cache boundaries are owned by [profile details](profile-details.md).
 Anonymous People reads expose only safe profile DTOs and provenanced directed connection edges; public routes and GET/HEAD support are owned by [the public directory contract](public-directory.md#search-links-for-web-assistants).
 Public reads share a bound of eight concurrent requests and 120 requests per process per 60 seconds, with overlapping reads sharing the public reader’s snapshot build; capacity exhaustion returns 429 with `Retry-After: 10`; invalid input is 400, unavailable/incomplete publication is 503, and a missing profile in a complete publication is 404.
 
