@@ -130,7 +130,7 @@ The nonce-authorized `/public-assets/connection-feedback.js` adds an immediate
 “Sending…” state and prevents a second submission while the first is navigating.
 It restores controls when the browser restores a page from its back/forward
 cache. It adds no inline handlers or styles. The authenticated, read-only
-`GET /api/nav-alerts` returns only the current account's counts, with `no-store`.
+`GET /api/nav-alerts` returns only the current account's counts, with `no-store`. On page views the counts read (including the OpenChat unread total) starts before routing and is awaited only at render time, overlapped with the route work with a 250 ms residual cap, so a slow source costs the badges on that view, never the page; each source read stays bounded at 800 ms and every read is live, so another account's action shows on the very next read. Rendered pages carry a `Server-Timing` header with fixed stage names and whole-millisecond durations only (`alerts`, and `company`/`facts` on company pages).
 Visible pages refresh badges every 15 seconds and on focus; hidden pages pause,
 expired sessions stop polling, and failed reads keep the last confirmed badge.
 Polling does not mark notifications seen or read. Without JavaScript, badges
