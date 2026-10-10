@@ -14,7 +14,7 @@ function messagesClient(config) {
   const state = {
     me: null, conversations: new Map(), threads: new Map(), open: null, loadedAt: new Date().toISOString(), readMaps: new Map(),
     stream: null, streamState: 'connecting', filter: '', unreadFirst: false, retryMs: 2000, retryTimer: null, paused: false,
-    replyTo: null, editing: null, typing: new Map(), markedUnread: new Set(), newBelow: false, people: null,
+    replyTo: null, editing: null, editText: '', picker: null, rerender: false, typing: new Map(), markedUnread: new Set(), newBelow: false, people: null,
   }
 
   // ── Local preferences (this browser only) ──────────────────────────────────
@@ -164,7 +164,8 @@ function messagesClient(config) {
   function threadShell() {
     threadEl.replaceChildren(
       h('div', { class: 'msg-thread-head', id: 'msg-thread-head' }),
-      h('div', { class: 'msg-log', id: 'msg-log', role: 'log', 'aria-live': 'polite', 'aria-label': 'Messages', tabindex: '0' }, h('p', { class: 'msg-loading' }, 'Loading…')),
+      // Redraws are not re-read: new incoming messages are announced through #msg-announce.
+      h('div', { class: 'msg-log', id: 'msg-log', role: 'log', 'aria-live': 'off', 'aria-label': 'Messages', tabindex: '0' }, h('p', { class: 'msg-loading' }, 'Loading…')),
       h('button', { class: 'msg-jump', id: 'msg-jump', type: 'button', hidden: true, onclick: () => { const log = $('msg-log'); log.scrollTop = log.scrollHeight; hideJump() } }, '↓ New messages'),
       h('div', { class: 'msg-typing', id: 'msg-typing', 'aria-live': 'polite' }),
       composer())
@@ -212,14 +213,14 @@ function messagesClient(config) {
     const peer = conversation && peerOf(conversation), title = conversation ? titleOf(conversation) : 'Conversation'
     const presence = peer ? (peer.isBot ? 'Bot' : peer.presence === 'available' ? 'Active now' : peer.presence === 'away' ? 'Away' : peer.lastSeenAt ? `Seen ${ago(peer.lastSeenAt)} ago` : '') : conversation ? `${conversation.participants.length} people` : ''
     const profile = profiles[state.open]
-    const item = (label, onclick, extra = {}) => h('button', { type: 'button', role: 'menuitem', onclick: event => { event.currentTarget.closest('details').open = false; onclick() }, ...extra }, label)
+    const item = (label, onclick, extra = {}) => h('button', { type: 'button', onclick: event => { const details = event.currentTarget.closest('details'); details.open = false; details.querySelector('summary').focus(); onclick() }, ...extra }, label)
     const menu = conversation ? h('details', { class: 'msg-menu' },
       h('summary', { 'aria-label': 'Conversation options', title: 'Options' }, '⋯'),
-      h('div', { class: 'msg-menu-panel', role: 'menu' },
+      h('div', { class: 'msg-menu-panel' },
         muted(conversation) ? item('Unmute', () => setMute(null)) : [item('Mute for 1 hour', () => setMute(new Date(Date.now() + 3600000).toISOString())), item('Mute for 8 hours', () => setMute(new Date(Date.now() + 8 * 3600000).toISOString())), item('Mute until I unmute', () => setMute('always'))],
         item('Mark as unread', markUnread),
-        h('label', { class: 'msg-menu-check', role: 'menuitemcheckbox', 'aria-checked': String(prefs.enterSends) }, h('input', { type: 'checkbox', checked: prefs.enterSends ? true : null, onchange: event => { prefs.enterSends = event.target.checked; store.set('unlinked.messages.prefs', prefs); renderThreadHeader(); updateComposerHint() } }), 'Enter sends (Shift+Enter for a new line)'),
-        h('a', { role: 'menuitem', href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'))) : null
+        h('label', { class: 'msg-menu-check' }, h('input', { type: 'checkbox', checked: prefs.enterSends ? true : null, onchange: event => { prefs.enterSends = event.target.checked; store.set('unlinked.messages.prefs', prefs); updateComposerHint() } }), 'Enter sends (Shift+Enter for a new line)'),
+        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'))) : null
     head.replaceChildren(...[
       h('button', { class: 'msg-back', type: 'button', 'aria-label': 'Back to conversations', onclick: () => closeConversation() }, '←'),
       avatar(title, peer?.id || state.open, peer?.presence),
@@ -247,7 +248,7 @@ function messagesClient(config) {
 
   function messageActions(message, own) {
     if (message.deletedAt || message.pending) return null
-    const act = (label, symbol, onclick) => h('button', { type: 'button', class: 'msg-act', 'aria-label': label, title: label, onclick }, symbol)
+    const act = (label, symbol, onclick) => h('button', { type: 'button', class: 'msg-act', 'aria-label': label, title: label, 'data-key': `act:${label}`, onclick }, symbol)
     return h('div', { class: 'msg-actions', role: 'toolbar', 'aria-label': 'Message actions' },
       act('Add reaction', '☺', event => openReactionPicker(message, event.currentTarget)),
       act('Reply', '↩', () => startReply(message)),
@@ -267,7 +268,7 @@ function messagesClient(config) {
       !own && group && !grouped ? h('span', { class: 'msg-sender' }, message.sender?.name || 'Someone') : null,
       h('div', { class: 'msg-line' }, bubble, editing ? null : messageActions(message, own)),
       ...(message.deletedAt ? [] : message.linkPreviews || []).map(preview => h('a', { class: 'msg-preview', href: preview.url, target: '_blank', rel: 'noopener noreferrer' }, h('b', {}, preview.title || preview.url), preview.description ? h('span', {}, preview.description) : null, h('span', { class: 'small' }, preview.siteName || new URL(preview.url).hostname))),
-      message.reactions?.length && !message.deletedAt ? h('div', { class: 'msg-reactions' }, message.reactions.map(reaction => h('button', { type: 'button', class: `msg-reaction${reaction.byMe ? ' mine' : ''}`, 'aria-pressed': String(Boolean(reaction.byMe)), 'aria-label': `${reaction.emoji} ${reaction.count}${reaction.byMe ? ', including you' : ''}`, onclick: () => react(message, reaction.emoji, !reaction.byMe) }, reaction.emoji, ' ', reaction.count))) : null,
+      message.reactions?.length && !message.deletedAt ? h('div', { class: 'msg-reactions' }, message.reactions.map(reaction => h('button', { type: 'button', class: `msg-reaction${reaction.byMe ? ' mine' : ''}`, 'data-key': `react:${reaction.emoji}`, 'aria-pressed': String(Boolean(reaction.byMe)), 'aria-label': `${reaction.emoji} ${reaction.count}${reaction.byMe ? ', including you' : ''}`, onclick: () => react(message, reaction.emoji, !reaction.byMe) }, reaction.emoji, ' ', reaction.count))) : null,
       message.pending === 'failed' ? h('span', { class: 'msg-meta failed' }, 'Not sent · ', h('button', { class: 'link-button', type: 'button', onclick: () => retry(message) }, 'Retry')) : status ? h('span', { class: 'msg-meta' }, status) : null)
   }
 
@@ -276,7 +277,9 @@ function messagesClient(config) {
     if (!log || !thread || !conversation) return
     const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80
     const anchor = scroll === 'anchor' ? { height: log.scrollHeight, top: log.scrollTop } : null
-    const focused = document.activeElement && log.contains(document.activeElement) ? { id: document.activeElement.closest('.msg-row')?.dataset.id, label: document.activeElement.getAttribute('aria-label') } : null
+    // While the reaction picker is open the thread is redrawn after it closes.
+    if (state.picker) { state.rerender = true; return }
+    const focused = document.activeElement && log.contains(document.activeElement) ? { id: document.activeElement.closest('.msg-row')?.dataset.id, key: document.activeElement.dataset.key } : null
     const group = conversation.type !== 'direct'
     const nodes = []
     if (thread.hasMore) nodes.push(h('div', { class: 'msg-more' }, h('button', { class: 'link-button', type: 'button', onclick: loadOlder }, 'Load earlier messages')))
@@ -294,8 +297,8 @@ function messagesClient(config) {
     if (scroll === 'bottom' || (scroll !== 'anchor' && nearBottom)) { log.scrollTop = log.scrollHeight; hideJump() }
     else if (anchor) log.scrollTop = anchor.top + (log.scrollHeight - anchor.height)
     // Keep keyboard focus on the same control across re-renders.
-    if (focused?.id) { const row = $(`m-${focused.id}`); (focused.label && row?.querySelector(`[aria-label="${CSS.escape(focused.label)}"]`) || row?.querySelector('textarea'))?.focus({ preventScroll: true }) }
-    if (state.editing) $('msg-edit')?.focus({ preventScroll: true })
+    if (focused?.id) { const row = $(`m-${focused.id}`); ((focused.key && row?.querySelector(`[data-key="${CSS.escape(focused.key)}"]`)) || row?.querySelector('textarea, .msg-reaction, .msg-act') || log).focus({ preventScroll: true }) }
+    if (state.editing) { const edit = $('msg-edit'); if (edit) { edit.focus({ preventScroll: true }); const at = Math.min(state.editCaret ?? edit.value.length, edit.value.length); edit.setSelectionRange(at, at) } }
   }
   const hideJump = () => { state.newBelow = false; const jump = $('msg-jump'); if (jump) jump.hidden = true }
   function jumpTo(id) {
@@ -331,14 +334,22 @@ function messagesClient(config) {
     if (state.open === message.conversationId) renderMessages()
   }
   function openReactionPicker(message, anchorButton) {
-    document.querySelector('.msg-react-picker')?.remove()
-    const close = () => { picker.remove(); document.removeEventListener('click', away, true); anchorButton.focus({ preventScroll: true }) }
+    state.picker?.close({ restoreFocus: false })
+    const close = ({ restoreFocus = false } = {}) => {
+      if (state.picker !== handle) return
+      state.picker = null
+      picker.remove(); document.removeEventListener('click', away, true)
+      if (state.rerender) { state.rerender = false; renderMessages() }
+      if (restoreFocus) { const row = $(`m-${message.id}`); (row?.querySelector('[data-key="act:Add reaction"]') || anchorButton).focus({ preventScroll: true }) }
+    }
     const away = event => { if (!picker.contains(event.target) && event.target !== anchorButton) close() }
-    const picker = h('div', { class: 'msg-react-picker', role: 'menu', 'aria-label': 'Add reaction', onkeydown: event => {
+    const picker = h('div', { class: 'msg-react-picker', role: 'group', 'aria-label': 'Add reaction', onkeydown: event => {
       const buttons = [...picker.querySelectorAll('button')], index = buttons.indexOf(document.activeElement)
-      if (event.key === 'Escape') { event.preventDefault(); close() }
+      if (event.key === 'Escape') { event.preventDefault(); close({ restoreFocus: true }) }
       else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') { event.preventDefault(); buttons[(index + (event.key === 'ArrowRight' ? 1 : buttons.length - 1)) % buttons.length].focus() }
-    } }, REACTIONS.map(emoji => h('button', { type: 'button', role: 'menuitem', 'aria-label': `React ${emoji}`, onclick: () => { close(); const mine = message.reactions.find(reaction => reaction.emoji === emoji)?.byMe; react(message, emoji, !mine) } }, emoji)))
+    } }, REACTIONS.map(emoji => h('button', { type: 'button', 'aria-label': `React ${emoji}`, onclick: () => { close({ restoreFocus: true }); const mine = message.reactions.find(reaction => reaction.emoji === emoji)?.byMe; react(message, emoji, !mine) } }, emoji)))
+    const handle = { close }
+    state.picker = handle
     anchorButton.closest('.msg-line').append(picker)
     picker.querySelector('button').focus()
     setTimeout(() => document.addEventListener('click', away, true))
@@ -355,26 +366,31 @@ function messagesClient(config) {
     if (!slot) return
     slot.replaceChildren(...(state.replyTo ? [h('div', { class: 'msg-reply-card' }, h('span', {}, h('b', {}, `Replying to ${state.replyTo.senderName}`), ' ', state.replyTo.content), h('button', { type: 'button', class: 'msg-act', 'aria-label': 'Cancel reply', onclick: () => { state.replyTo = null; renderReply(); $('msg-input')?.focus() } }, '×'))] : []))
   }
+  let editFocused = false
   function startEdit(message) {
-    state.editing = message.id; state.replyTo = null
+    editFocused = false
+    state.editing = message.id; state.editText = message.content; state.editCaret = message.content.length; state.replyTo = null
     renderReply(); renderMessages()
   }
   function editBox(message) {
     const input = h('textarea', { id: 'msg-edit', class: 'msg-edit', rows: String(Math.min(8, message.content.split('\n').length + 1)), maxlength: '8000', 'aria-label': 'Edit message' })
-    input.value = message.content
+    // The in-progress text survives redraws caused by incoming events.
+    input.value = state.editText
+    const remember = () => { state.editText = input.value; state.editCaret = input.selectionStart }
+    for (const name of ['input', 'keyup', 'click']) input.addEventListener(name, remember)
     const cancel = () => { state.editing = null; renderMessages(); $('msg-input')?.focus({ preventScroll: true }) }
     const save = async () => {
       const content = input.value.trim()
       if (!content || content === message.content) { cancel(); return }
-      const before = message.content
+      const before = { content: message.content, editedAt: message.editedAt }
       message.content = content; message.editedAt = new Date().toISOString(); state.editing = null; renderMessages()
       try { const value = await api(`/messages/${encodeURIComponent(message.id)}/edit`, { content }); Object.assign(message, value.message, { reactions: message.reactions }) }
-      catch { message.content = before; message.editedAt = null; announce('Edit not saved. Try again.') }
+      catch { Object.assign(message, before); announce('Edit not saved. Try again.') }
       if (state.open === message.conversationId) renderMessages()
       $('msg-input')?.focus({ preventScroll: true })
     }
     input.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); cancel() } else if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); save() } })
-    setTimeout(() => { input.focus(); input.setSelectionRange(input.value.length, input.value.length) })
+    if (!editFocused) { editFocused = true; setTimeout(() => { input.focus(); input.setSelectionRange(input.value.length, input.value.length) }) }
     return h('div', { class: 'msg-edit-wrap' }, input, h('span', { class: 'small' }, 'Enter to save · Esc to cancel '), h('button', { type: 'button', class: 'link-button', onclick: save }, 'Save'), ' ', h('button', { type: 'button', class: 'link-button', onclick: cancel }, 'Cancel'))
   }
   async function removeMessage(message) {
@@ -550,6 +566,7 @@ function messagesClient(config) {
       if (message.conversationId === state.open) {
         const log = $('msg-log'), below = log && log.scrollHeight - log.scrollTop - log.clientHeight > 80
         renderMessages(); renderTyping()
+        if (!known && message.senderId !== state.me) announce(`${message.sender?.name || 'New message'}: ${message.content.slice(0, 120)}`)
         if (below && !known && message.senderId !== state.me) { state.newBelow = true; const jump = $('msg-jump'); if (jump) jump.hidden = false }
         maybeMarkRead()
       }
@@ -614,6 +631,9 @@ function messagesClient(config) {
       if (next && next !== state.open) { event.preventDefault(); openConversation(next) }
     } else if (event.key === 'Escape' && !typingTarget && state.open && !document.querySelector('dialog[open]') && matchMedia('(max-width: 759px)').matches) closeConversation()
   })
+  // The options menu closes on Escape or a click elsewhere, and redraws then.
+  document.addEventListener('keydown', event => { const menu = document.querySelector('.msg-menu[open]'); if (event.key === 'Escape' && menu) { event.preventDefault(); menu.open = false; menu.querySelector('summary').focus(); renderThreadHeader() } })
+  document.addEventListener('click', event => { const menu = document.querySelector('.msg-menu[open]'); if (menu && !menu.contains(event.target)) { menu.open = false; renderThreadHeader() } })
   addEventListener('popstate', () => { const match = /^\/messages\/c\/([A-Za-z0-9_-]{1,80})$/.exec(location.pathname); if (match) openConversation(match[1], { push: false }); else closeConversation({ push: false }) })
   addEventListener('focus', maybeMarkRead)
   const resume = () => { if (!state.paused) return; state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }

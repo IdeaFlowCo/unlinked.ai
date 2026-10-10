@@ -103,7 +103,8 @@ body:has(.msg) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
 .unlinked-onboarding .msg-react-picker{position:absolute;bottom:calc(100% + 4px);z-index:20;display:flex;gap:2px;padding:4px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px #25295324}
 .unlinked-onboarding .msg-row.own .msg-react-picker{right:0}
 .unlinked-onboarding .msg-react-picker button{min-height:40px;min-width:40px;padding:0;background:#fff;border:0;border-radius:8px;font-size:20px;color:inherit}
-.unlinked-onboarding .msg-react-picker button:hover,.unlinked-onboarding .msg-react-picker button:focus-visible{background:var(--tint);outline:none}
+.unlinked-onboarding .msg-react-picker button:hover{background:var(--tint)}
+.unlinked-onboarding .msg-react-picker button:focus-visible{background:var(--tint);outline:2px solid var(--brand);outline-offset:1px}
 .unlinked-onboarding button.msg-reaction{min-height:28px;padding:1px 8px;color:var(--fg);font-weight:400;cursor:pointer}
 .unlinked-onboarding button.msg-reaction.mine{color:var(--brand-d)}
 .unlinked-onboarding button.msg-quote{min-height:0;width:100%;justify-content:flex-start;text-align:left;font-weight:400;cursor:pointer}
