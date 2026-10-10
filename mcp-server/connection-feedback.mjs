@@ -52,7 +52,7 @@ export function installConnectionFeedback() {
       }
       // The Messages count, unless the Messages page or an open dock already keeps it live.
       const dock = document.getElementById('msg-dock')
-      const live = (document.getElementById('msg-app') && !dock) || dock?.dataset.expanded === 'true'
+      const live = (document.getElementById('msg-app') && !dock) || (dock?.dataset.expanded === 'true' && matchMedia('(min-width: 1024px)').matches && ['live', 'polling'].includes(dock.dataset.stream))
       if (messagesLink && !live && Number.isSafeInteger(counts.messages) && counts.messages >= 0) {
         const text = counts.messages > 99 ? '99+' : String(counts.messages)
         messagesLink.querySelector('.nav-count')?.remove()

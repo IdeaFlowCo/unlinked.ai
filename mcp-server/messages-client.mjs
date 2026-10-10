@@ -173,6 +173,8 @@ function messagesClient(config) {
   }
 
   function updateUnread() {
+    // Before the dock has loaded anything, the server-rendered counts stay as they are.
+    if (docked && !state.me) return
     const total = [...state.conversations.values()].reduce((sum, conversation) => sum + (conversation.id === state.open && document.visibilityState === 'visible' ? 0 : unreadOf(conversation)), 0)
     if (!docked) document.title = `${total ? `(${total > 99 ? '99+' : total}) ` : ''}Messages · Unlinked`
     const bar = $('msg-dock-count')
@@ -683,6 +685,8 @@ function messagesClient(config) {
   }
   function setStream(value) {
     state.streamState = value
+    // The header refresher (connection-feedback.mjs) leaves the count to a dock that is actually live.
+    if (docked) dock.dataset.stream = value
     const pill = $('msg-live')
     if (pill) { pill.hidden = value === 'live' || value === 'polling'; pill.textContent = value === 'paused' ? 'Paused · open in another tab' : value === 'offline' ? 'Offline' : 'Reconnecting…' }
     if (value === 'live' || value === 'polling') { if (statusEl.dataset.offline) { delete statusEl.dataset.offline; showStatus('') } }
@@ -750,7 +754,7 @@ function messagesClient(config) {
       else if (!state.stream && !state.paused) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
       if (focus) (state.open ? $('msg-input') : filterEl)?.focus({ preventScroll: true })
     } else {
-      stopTyping(); state.stream?.close(); state.stream = null; clearTimeout(state.retryTimer)
+      stopTyping(); state.stream?.close(); state.stream = null; clearTimeout(state.retryTimer); delete dock.dataset.stream
       if (focus) $('msg-dock-toggle').focus()
     }
     saveDock()
@@ -785,7 +789,7 @@ function messagesClient(config) {
     dock.hidden = false
     if (saved.expanded && dockWide()) expandDock(true, { focus: false })
     // The dock is hidden below 1024 px: drop its stream there and resume when it shows again.
-    matchMedia('(min-width: 1024px)').addEventListener('change', event => { if (!event.matches) { stopTyping(); state.stream?.close(); state.stream = null } else if (dock.dataset.expanded === 'true' && !state.stream) { state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) } })
+    matchMedia('(min-width: 1024px)').addEventListener('change', event => { if (!event.matches) { stopTyping(); state.stream?.close(); state.stream = null; delete dock.dataset.stream } else if (dock.dataset.expanded === 'true' && !state.stream) { state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) } })
     return
   }
   if (config.conversationId) { state.open = config.conversationId; root.dataset.open = config.conversationId; threadShell() }
