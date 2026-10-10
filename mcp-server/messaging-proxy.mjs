@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { Readable } from 'node:stream'
 import { connectOpenChatSocket, OPENCHAT_SOCKET_URL } from './openchat-socket.mjs'
 import { parseUnlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 
@@ -15,6 +16,13 @@ export const OPENCHAT_ORIGIN = 'https://chat.ideaflow.app'
 // OpenChat's own reaction allowlist (chat.ts ALLOWED_EMOJI); anything else is rejected there.
 export const REACTION_EMOJI = Object.freeze(['👍', '❤️', '😂', '😮', '😢', '🙏'])
 export const MAX_CONTENT = 8000
+// OpenChat attachments are capability URLs in one public bucket (DECISIONS.md 16).
+// Only this exact grammar is ever fetched or shown, through /messages/api/file.
+export const ATTACHMENT_URL = /^https:\/\/storage\.googleapis\.com\/openchat-attachments\/attachments\/[A-Za-z0-9_-]{1,80}\/[A-Za-z0-9_-]{1,40}\/[A-Za-z0-9._-]{1,128}$/
+const FILE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'audio/m4a', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/webm', 'audio/ogg'])
+const UPLOAD_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+const FILE_MAX_BYTES = 20 * 1024 * 1024, UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+export const fileSrc = url => typeof url === 'string' && ATTACHMENT_URL.test(url) ? `/messages/api/file?u=${encodeURIComponent(url)}` : null
 const ID = /^[A-Za-z0-9_-]{1,80}$/
 const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const PRESENCE = new Set(['available', 'away', 'busy', 'offline'])
@@ -86,7 +94,7 @@ export function projectMessage(value) {
     reactions: projectReactions(value.reactions),
     // Attachment URLs are served in phase 3 through a restricted same-origin route.
     attachments: deletedAt ? [] : array(value.attachments).filter(item => item && typeof item.mimeType === 'string').slice(0, 10)
-      .map(item => ({ mimeType: text(item.mimeType, 100), name: text(item.name ?? item.filename, 200) || null, size: count(item.size ?? item.sizeBytes) || null })),
+      .map(item => { const mimeType = text(item.mimeType, 100), src = FILE_TYPES.has(mimeType) ? fileSrc(item.url) : null; return { mimeType, name: text(item.name ?? item.filename, 200) || null, size: count(item.size ?? item.sizeBytes) || null, ...(src ? { src } : {}) } }),
     linkPreviews: deletedAt ? [] : array(value.linkPreviews).map(item => { const url = httpsUrl(item?.url); return url ? { url, title: text(item.title, 300) || null, description: text(item.description, 500) || null, siteName: text(item.siteName, 120) || null } : null }).filter(Boolean).slice(0, 3),
   }
 }
@@ -108,7 +116,7 @@ const invalid = () => new MessagingError(400, 'invalid_input')
  * messaging.mjs: it returns `{ token, user: { userId } }` for the session's live owner.
  */
 export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true } = {}) {
-  const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map()
+  const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map()
   const ownerKey = session => session?.owner?.ownerId
   const trim = (map, limit) => { while (map.size > limit) map.delete(map.keys().next().value) }
 
@@ -166,7 +174,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
 
   // Per member and minute: reads, writes, and typing pings are counted separately.
   function spend(session, kind) {
-    const key = `${ownerKey(session)}:${kind}`, limit = { read: 300, write: 60, typing: 40 }[kind]
+    const key = `${ownerKey(session)}:${kind}`, limit = { read: 300, write: 60, typing: 40, file: 600, upload: 20 }[kind]
     const budget = budgets.get(key)
     if (!budget || now() - budget.at >= 60000) { budgets.set(key, { at: now(), used: 1 }); trim(budgets, 20000); return }
     if (++budget.used > limit) throw new MessagingError(429, 'rate_limited')
@@ -191,11 +199,16 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
 
   async function send(session, conversationId, input) {
     const content = typeof input.content === 'string' ? input.content.trim() : ''
-    if (!content || content.length > MAX_CONTENT || !CLIENT_ID.test(input.clientId ?? '') || (input.replyToId !== undefined && input.replyToId !== null && !validId(input.replyToId))) throw invalid()
+    // Attachments are only uploads this proxy made for this member (uploadAttachment).
+    if (input.attachments !== undefined && (!Array.isArray(input.attachments) || input.attachments.length > 4 || input.attachments.some(key => typeof key !== 'string'))) throw invalid()
+    const mine = uploads.get(ownerKey(session))
+    const attachments = (input.attachments ?? []).map(key => mine?.get(key))
+    if (attachments.some(item => !item)) throw invalid()
+    if ((!content && !attachments.length) || content.length > MAX_CONTENT || !CLIENT_ID.test(input.clientId ?? '') || (input.replyToId !== undefined && input.replyToId !== null && !validId(input.replyToId))) throw invalid()
     const credential = await credentialFor(session)
     const id = derivedId(credential.userId, input.clientId)
     remember(ownerKey(session), id, input.clientId)
-    const { value } = await upstream(session, 'POST', `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`, { content, id, ...(input.replyToId ? { replyToId: input.replyToId } : {}) })
+    const { value } = await upstream(session, 'POST', `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`, { content, id, ...(input.replyToId ? { replyToId: input.replyToId } : {}), ...(attachments.length ? { attachments: attachments.map(({ url, mimeType, name, size }) => ({ url, mimeType, name, size })) } : {}) })
     invalidateBadge(session)
     // A send into a blocked conversation reports success without delivery (OpenChat's anti-probe rule).
     if (value?.dropped === true) return { clientId: input.clientId, message: null }
@@ -242,6 +255,58 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
       ? await upstream(session, 'POST', `/api/chat/messages/${encodeURIComponent(messageId)}/reactions`, { emoji: input.emoji })
       : await upstream(session, 'DELETE', `/api/chat/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(input.emoji)}`)
     return { messageId, reactions: projectReactions(value?.reactions) }
+  }
+
+  // An image from the browser: OpenChat presigns as the member, this server PUTs
+  // the bytes to the bucket, and only the returned key can be attached later.
+  async function uploadAttachment(request, session) {
+    const mimeType = String(request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+    const declared = Number(request.headers['content-length'])
+    if (!UPLOAD_TYPES.has(mimeType) || !Number.isSafeInteger(declared) || declared <= 0 || declared > UPLOAD_MAX_BYTES) throw invalid()
+    const filename = (String(request.headers['x-filename'] ?? 'image').normalize('NFKC').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100) || 'image')
+    const parts = []; let length = 0
+    for await (const part of request) { length += part.length; if (length > UPLOAD_MAX_BYTES) throw new MessagingError(413, 'body_too_large'); parts.push(part) }
+    const bytes = Buffer.concat(parts)
+    if (bytes.length !== declared) throw invalid()
+    const { value } = await upstream(session, 'POST', '/api/chat/attachments/presign', { filename, mimeType, sizeBytes: bytes.length })
+    let put
+    try { put = new URL(value?.putUrl) } catch { throw unavailable() }
+    if (put.protocol !== 'https:' || put.host !== 'storage.googleapis.com' || !ATTACHMENT_URL.test(value?.getUrl ?? '')) throw unavailable()
+    let stored
+    try { stored = await fetchImpl(put.href, { method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(20000), headers: { 'Content-Type': mimeType, 'Content-Length': String(bytes.length) }, body: bytes }) } catch { throw unavailable() }
+    await stored.body?.cancel().catch(() => {})
+    if (!stored.ok) throw unavailable()
+    const key = randomBytes(18).toString('base64url')
+    let mine = uploads.get(ownerKey(session))
+    if (!mine) { mine = new Map(); uploads.set(ownerKey(session), mine); trim(uploads, 5000) }
+    mine.set(key, { url: value.getUrl, mimeType, name: filename, size: bytes.length }); trim(mine, 50)
+    return { attachment: { key, name: filename, mimeType, size: bytes.length, src: fileSrc(value.getUrl) } }
+  }
+
+  // Attachment bytes, same origin (CSP img-src 'self' stays). Only the exact
+  // bucket grammar is fetched; images and audio only; size-capped; sandboxed.
+  async function serveFile(request, response, url) {
+    const target = url.searchParams.get('u')
+    if ([...url.searchParams.keys()].some(key => key !== 'u') || url.searchParams.getAll('u').length !== 1 || !ATTACHMENT_URL.test(target ?? '')) throw invalid()
+    const range = request.headers.range
+    if (range !== undefined && !/^bytes=\d{0,12}-\d{0,12}$/.test(range)) throw invalid()
+    let upstreamResponse
+    try { upstreamResponse = await fetchImpl(target, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(15000), headers: range ? { Range: range } : {} }) } catch { throw unavailable() }
+    const type = String(upstreamResponse.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
+    const size = Number(upstreamResponse.headers.get('content-length'))
+    if (![200, 206].includes(upstreamResponse.status)) { await upstreamResponse.body?.cancel().catch(() => {}); throw new MessagingError(upstreamResponse.status === 404 ? 404 : 503, upstreamResponse.status === 404 ? 'not_found' : 'messaging_unavailable') }
+    if (!FILE_TYPES.has(type) || (Number.isFinite(size) && size > FILE_MAX_BYTES) || !upstreamResponse.body) { await upstreamResponse.body?.cancel().catch(() => {}); throw new MessagingError(415, 'unsupported_file') }
+    const headers = { 'Content-Type': type, 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox", 'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Disposition': 'inline', 'Accept-Ranges': 'bytes' }
+    if (Number.isFinite(size)) headers['Content-Length'] = String(size)
+    const contentRange = upstreamResponse.headers.get('content-range')
+    if (upstreamResponse.status === 206 && contentRange && /^bytes \d+-\d+\/\d+$/.test(contentRange)) headers['Content-Range'] = contentRange
+    response.writeHead(upstreamResponse.status === 206 && headers['Content-Range'] ? 206 : 200, headers)
+    let sent = 0
+    const body = Readable.fromWeb(upstreamResponse.body)
+    body.on('data', chunk => { sent += chunk.length; if (sent > FILE_MAX_BYTES) body.destroy() })
+    body.on('error', () => response.destroy())
+    response.on('close', () => body.destroy())
+    body.pipe(response)
   }
 
   async function search(session, query) {
@@ -447,6 +512,8 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const keys = [...url.searchParams.keys()]
     let match
     if (request.method === 'GET') {
+      // Attachment bytes have their own budget, so a thread full of images never starves reads.
+      if (path === '/file') { spend(session, 'file'); await serveFile(request, response, url); return null }
       spend(session, 'read')
       if (path === '/stream') { if (keys.some(key => key !== 'since')) throw invalid(); openStream(request, response, session, url); return null }
       if (path === '/conversations' && !keys.length) return [200, await listConversations(session)]
@@ -463,6 +530,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     // Same origin is already enforced for every POST; JSON writes also carry the session's CSRF token.
     if (typeof session.csrf !== 'string' || !session.csrf || request.headers['x-unlinked-csrf'] !== session.csrf) throw new MessagingError(403, 'csrf_required')
     if (keys.length) throw invalid()
+    if (path === '/attachments') { spend(session, 'upload'); return [201, await uploadAttachment(request, session)] }
     const input = await readJson(request)
     if ((match = /^\/conversations\/([^/]+)\/(messages|read|mute|typing|focus)$/.exec(path)) && validId(match[1])) {
       const [, id, action] = match
@@ -470,7 +538,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
       if (action === 'focus') { spend(session, 'read'); only(input, []); return [200, focus(session, id)] }
       if (action === 'read') { spend(session, 'read'); only(input, []); return [200, await markRead(session, id)] }
       spend(session, 'write')
-      if (action === 'messages') return [201, await send(session, id, only(input, ['content', 'clientId', 'replyToId']))]
+      if (action === 'messages') return [201, await send(session, id, only(input, ['content', 'clientId', 'replyToId', 'attachments']))]
       only(input, ['mutedUntil']); if (!Object.hasOwn(input, 'mutedUntil')) throw invalid()
       return [200, await setMute(session, id, input.mutedUntil)]
     }

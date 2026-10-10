@@ -1,4 +1,4 @@
-import { messagesScript } from './messages-client.mjs'
+import { MESSAGES_CLIENT_SOURCE, messagesConfig } from './messages-client.mjs'
 import { createMessagingProxy, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
@@ -31,7 +31,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderMessages, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
@@ -140,6 +140,9 @@ export { publishedPeopleFor }
 
 // Where a notification opens. An accepted connection request opens the direct
 // conversation OpenChat created for it (docs/openchat-accepted-connections.md).
+// The Messages client is one static script; its URL carries a content hash so it can be cached for good.
+const MESSAGES_CLIENT_VERSION = createHash('sha256').update(MESSAGES_CLIENT_SOURCE).digest('hex').slice(0, 16)
+
 export function notificationTargetFor(item, { messaging = false } = {}) {
   if (item.kind === 'connection_request_received') return '/invitations'
   const profile = messaging && item.kind === 'connection_request_accepted' ? unlinkedProfileContext(item.actorProfileId) : null
@@ -359,6 +362,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // Live header counts (My Network, the bell) for this response, when the
   // request is a signed-in page view; read once per request.
   const responseAlerts = new WeakMap()
+  // Signed-in page responses that include the Messages dock.
+  const responseDock = new WeakSet()
   // Both counts in parallel, each bounded: a slow graph costs a badge, never the page.
   const bounded = (work, fallback) => Promise.race([Promise.resolve().then(work).catch(() => fallback), new Promise(resolve => setTimeout(resolve, 800, fallback).unref?.())])
   // Header counts for a signed-in session. Messages is OpenChat's unread total,
@@ -378,6 +383,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       ...(messaging ? { messages: 0 } : {}),
     } : undefined)
     view = { ...view, content: fillNavAlerts(view.content, alerts) }
+    // Messages page or dock: the static client plus its non-executable configuration.
+    const dockOn = responseDock.has(response) && readers.has(response) && view.content.includes('</main>')
+    if (dockOn) view.content = view.content.replace('</main>', `</main>${renderMessagesDock()}`)
+    const messagesClient = view.messagesClient ?? (dockOn ? { csrf: readers.get(response).csrf, dock: true } : null)
     const nonce = token()
     // manifest-src/worker-src cover exactly the same-origin PWA manifest and the
     // static-only service worker; everything else stays locked to 'none'. The
@@ -398,7 +407,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="/public-assets/connection-feedback.js"></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${feedbackWidgetTag(nonce)}</html>`)
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="/public-assets/connection-feedback.js"></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${feedbackWidgetTag(nonce)}</html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   // `silentBack` (automatic sign-in) returns to the original page without
@@ -633,6 +642,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         } finally { suggestBusy-- }
         return
       }
+      if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/public-assets/messages-client.js') {
+        const versioned = url.searchParams.get('v') === MESSAGES_CLIENT_VERSION && [...url.searchParams.keys()].length === 1
+        response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': versioned ? 'public, max-age=31536000, immutable' : 'no-cache' })
+        response.end(request.method === 'HEAD' ? undefined : MESSAGES_CLIENT_SOURCE); return
+      }
       if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/public-assets/connection-feedback.js') {
         response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' })
         response.end(request.method === 'HEAD' ? undefined : CONNECTION_FEEDBACK_SCRIPT); return
@@ -714,7 +728,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           }
         }
       }
-      if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer); if (alerts) responseAlerts.set(response, alerts) }
+      if (viewer && request.method === 'GET' && pageView(url.pathname)) {
+        const alerts = await readAlerts(viewer); if (alerts) responseAlerts.set(response, alerts)
+        // Other signed-in pages carry the Messages dock (shown at ≥ 1024 px).
+        if (messaging && url.pathname !== '/messages' && !url.pathname.startsWith('/messages/')) responseDock.add(response)
+      }
       if (request.method === 'GET' && url.pathname === '/api/nav-alerts') {
         response.writeHead(viewer ? 200 : 401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
         response.end(JSON.stringify(viewer ? await readAlerts(viewer, null) ?? {} : { error: 'Sign in to see notifications.' })); return
@@ -1047,7 +1065,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             } catch { /* Shown as unavailable with Try again. */ }
           }
         }
-        journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, conversationId, entry, available: Boolean(messaging) }), null, messaging ? messagesScript({ csrf: session.csrf, conversationId, reactions: REACTION_EMOJI }) : ''); return
+        journey(response, { ...renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, conversationId, entry, available: Boolean(messaging) }), ...(messaging ? { messagesClient: { csrf: session.csrf, conversationId } } : {}) }); return
       }
       if (request.method === 'GET' && url.pathname === '/join') { redirect(response, '/'); return }
       if (request.method === 'GET' && url.pathname === '/legacy-account') {

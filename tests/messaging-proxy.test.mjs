@@ -50,16 +50,18 @@ test('socket framing: Engine.IO open, namespace auth, ping/pong, events, connect
 })
 
 // A signed-in browser session against a mocked OpenChat (fetch + socket).
-async function harness(t, { upstream = {}, sockets = [] } = {}) {
+async function harness(t, { upstream = {}, sockets = [], signup = false } = {}) {
   const calls = [], minted = []
   const owner = { ownerId: 'owner', userId: 'user' }
   const fetchImpl = async (url, options) => {
     const parsed = new URL(url)
-    calls.push({ method: options.method, path: parsed.pathname + parsed.search, body: options.body ? JSON.parse(options.body) : undefined, auth: options.headers.Authorization, redirect: options.redirect, signal: Boolean(options.signal) })
+    const json = typeof options.body === 'string'
+    calls.push({ method: options.method, path: parsed.pathname + parsed.search, body: json ? JSON.parse(options.body) : undefined, auth: options.headers?.Authorization, redirect: options.redirect, signal: Boolean(options.signal) })
     const key = `${options.method} ${parsed.pathname}`
     const handler = upstream[key]
     if (!handler) return new Response(JSON.stringify({ error: 'not mocked' }), { status: 500 })
-    const [status, body] = await handler({ url: parsed, body: options.body ? JSON.parse(options.body) : undefined, auth: options.headers.Authorization, calls })
+    const [status, body] = await handler({ url: parsed, body: json ? JSON.parse(options.body) : undefined, auth: options.headers?.Authorization, calls })
+    if (typeof body === 'string') return new Response(body, { status, headers: { 'Content-Type': 'image/png', 'Content-Length': String(body.length) } })
     return new Response(body === undefined ? '' : JSON.stringify(body), { status })
   }
   const connectSocket = async options => {
@@ -73,7 +75,9 @@ async function harness(t, { upstream = {}, sockets = [] } = {}) {
   const endpoint = `http://127.0.0.1:${server.address().port}`, origin = endpoint.replace('http:', 'https:')
   handler = createPrivateBrowserHandler({ baseUrl: origin, dataMode: 'synthetic',
     login: { begin: async () => ({ location: 'https://id.example.invalid/auth', transaction: { state: 'fixture-state' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: 'verified', displayName: 'Avery' }) },
-    resolveOwner: async () => owner, getBackend: async () => ({ adapter: {} }),
+    resolveOwner: async () => owner,
+    getBackend: async () => ({ adapter: {}, listImportIds: async () => [], listImportJobIds: async () => [], readResource: async () => null, readMemberConnections: async () => [] }),
+    ...(signup ? { signup: async () => { throw Error('unexpected_signup') }, issueAccountGrant: async () => { throw Error('unexpected_issue') }, revokeAccountGrant: async () => { throw Error('unexpected_revoke') } } : {}),
     createMessagingSession: async session => { minted.push(session.owner); return { token: `${TOKEN}-${minted.length}`, user: { userId: ME, name: 'Me', email: 'shared-inbox@ideaflow.invalid' } } },
     messagingOptions: { apiOrigin: 'https://chat.test', fetchImpl, connectSocket, heartbeatMs: 50, lingerMs: 10 },
   })
@@ -284,7 +288,8 @@ test('phase 2 shell: New message, unread-first, live announcer; the page script 
   const h = await harness(t, { upstream: { 'GET /api/chat/unread-total': () => [200, { unreadTotal: 0 }] } })
   const thread = await (await h.get(`/messages/c/${CONV}`)).text()
   assert.match(thread, /id="msg-new"[^>]*>New message</); assert.match(thread, /id="msg-unread-first"[^>]*aria-pressed="false"/); assert.match(thread, /id="msg-announce"/)
-  const config = /\((\{"csrf":"[^"]+","conversationId":"[^"]*","reactions":\[[^\]]*\]\})\);/.exec(thread)?.[1]
+  const config = /<script type="application\/json" id="msg-config">([^<]+)<\/script>/.exec(thread)?.[1]
+  assert.match(thread, /<script nonce="[^"]+" src="\/public-assets\/messages-client\.js\?v=[0-9a-f]{16}"><\/script>/)
   assert.ok(config, 'page config present')
   assert.deepEqual(Object.keys(JSON.parse(config)).sort(), ['conversationId', 'csrf', 'reactions'])
   assert.deepEqual(JSON.parse(config).reactions, ['👍', '❤️', '😂', '😮', '😢', '🙏'])
@@ -310,4 +315,50 @@ test('an accepted connection notification opens the direct conversation when Mes
   assert.equal(notificationTargetFor(accepted, { messaging: false }), '/people/ada-owner-profile')
   assert.equal(notificationTargetFor({ kind: 'connection_request_accepted', actorProfileId: '../x' }, { messaging: true }), '/people/..%2Fx')
   assert.equal(notificationTargetFor({ kind: 'connection_request_received', actorProfileId: 'x' }, { messaging: true }), '/invitations')
+})
+
+test('image upload: presigned as the member, PUT by the server, attachable only by its key; files are served only from the bucket grammar', async t => {
+  const putUrl = 'https://storage.googleapis.com/openchat-attachments/attachments/oc-me/abc123/chart.png?X-Goog-Signature=fixture'
+  const getUrl = 'https://storage.googleapis.com/openchat-attachments/attachments/oc-me/abc123/chart.png'
+  const h = await harness(t, { upstream: {
+    'POST /api/chat/attachments/presign': ({ body }) => { assert.deepEqual(body, { filename: 'chart.png', mimeType: 'image/png', sizeBytes: 4 }); return [200, { putUrl, getUrl, key: 'k' }] },
+    'PUT /openchat-attachments/attachments/oc-me/abc123/chart.png': () => [200],
+    'GET /openchat-attachments/attachments/oc-me/abc123/chart.png': () => [200, 'PNG!'],
+    [`POST /api/chat/conversations/${CONV}/messages`]: ({ body }) => [201, { ...message(body.id, body.content, '2026-10-10T10:05:00Z', ME), attachments: body.attachments }],
+  } })
+  const upload = (headers, body = new Uint8Array([1, 2, 3, 4])) => h.request('/messages/api/attachments', { method: 'POST', headers: { Cookie: h.cookie, Origin: h.origin, 'X-Unlinked-CSRF': h.csrf, 'Content-Type': 'image/png', 'X-Filename': 'chart.png', ...headers }, body })
+  assert.equal((await upload({ 'Content-Type': 'text/html' })).status, 400)
+  assert.equal((await upload({ 'X-Unlinked-CSRF': 'wrong' })).status, 403)
+  const uploaded = await upload({})
+  assert.equal(uploaded.status, 201)
+  const { attachment } = await uploaded.json()
+  assert.match(attachment.key, /^[A-Za-z0-9_-]{24}$/); assert.equal(attachment.src, `/messages/api/file?u=${encodeURIComponent(getUrl)}`)
+  const put = h.calls.find(call => call.method === 'PUT')
+  assert.equal(put.redirect, 'error'); assert.equal(put.auth, undefined, 'no OpenChat bearer goes to the bucket')
+  const clientId = '0b5c2c51-6f7e-4b8a-9d3c-1f2e3d4c5b6c'
+  assert.equal((await h.post(`/messages/api/conversations/${CONV}/messages`, { content: '', clientId, attachments: ['not-mine'] })).status, 400)
+  const sent = await h.post(`/messages/api/conversations/${CONV}/messages`, { content: '', clientId, attachments: [attachment.key] })
+  assert.equal(sent.status, 201)
+  assert.deepEqual(h.calls.filter(call => call.path.endsWith('/messages') && call.method === 'POST').at(-1).body.attachments, [{ url: getUrl, mimeType: 'image/png', name: 'chart.png', size: 4 }])
+  assert.equal((await sent.json()).message.attachments[0].src, attachment.src)
+  // The file route fetches only the exact bucket grammar.
+  assert.equal((await h.get(`/messages/api/file?u=${encodeURIComponent('https://evil.example/x.png')}`)).status, 400)
+  assert.equal((await h.get(`/messages/api/file?u=${encodeURIComponent(getUrl + '?x=1')}`)).status, 400)
+})
+
+test('other signed-in pages carry the Messages dock (static client, dock config, no token); /messages itself does not', async t => {
+  const h = await harness(t, { signup: true, upstream: { 'GET /api/chat/unread-total': () => [200, { unreadTotal: 2 }] } })
+  const home = await (await h.get('/')).text()
+  assert.match(home, /<aside class="msg-dock" id="msg-dock" aria-label="Messaging" hidden/)
+  assert.match(home, /<h2 class="msg-title">Messages<\/h2>/, 'the dock never adds a second h1')
+  const config = JSON.parse(/<script type="application\/json" id="msg-config">([^<]+)<\/script>/.exec(home)[1])
+  assert.equal(config.dock, true); assert.equal(config.conversationId, null); assert.equal(config.csrf, h.csrf)
+  assert.doesNotMatch(home, /fixture-embedded-openchat-jwt/)
+  const version = /src="\/public-assets\/messages-client\.js\?v=([0-9a-f]{16})"/.exec(home)[1]
+  const script = await h.request(`/public-assets/messages-client.js?v=${version}`)
+  assert.equal(script.status, 200); assert.equal(script.headers.get('cache-control'), 'public, max-age=31536000, immutable')
+  assert.match(await script.text(), /JSON\.parse\(document\.getElementById\('msg-config'\)\.textContent\)/)
+  assert.equal((await h.request('/public-assets/messages-client.js?v=stale')).headers.get('cache-control'), 'no-cache')
+  const inbox = await (await h.get('/messages')).text()
+  assert.doesNotMatch(inbox, /id="msg-dock"/); assert.match(inbox, /id="msg-config"/)
 })
