@@ -1,7 +1,7 @@
 import { messagesScript } from './messages-view.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
-import { publishedPeopleFor, rowPublicTarget } from './connection-identity.mjs'
+import { groupConnectionRows, publishedPeopleFor, rowProvenanceType, rowPublicTarget, rowSourceLabel } from './connection-identity.mjs'
 import { NETWORK_FILTER_SCRIPT } from './network-filter-script.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
@@ -202,6 +202,48 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       })
     }
   }
+  // One card per person (unlinked-tto.4). Rows join on exact identity only —
+  // the same published profile (merges followed) or the same LinkedIn address,
+  // never a name — through the grouping the agent tools use
+  // (connection-identity.mjs). The card shows the published profile's name,
+  // headline and membership, the LinkedIn address and earliest dates from the
+  // rows, and, when several records describe the person, `sources` for the
+  // quiet "N sources" disclosure. `searchText` holds every record's words.
+  async function personCards(rows, reader = publicReader) {
+    if (!rows.length) return []
+    const indexed = typeof readPublishedSnapshot === 'function'
+    const { groups, published, lookupFailed } = await groupConnectionRows(rows, rows.map(row => ({ id: row.id, provenance: { type: rowProvenanceType(row) } })), {
+      lookupSlug: indexed && selfClaims ? slug => selfClaims.lookupSlug(slug) : null, lookup: indexed ? ids => reader.lookup({ ids }) : null })
+    return groups.map(indexes => {
+      const members = indexes.map(index => ({ row: rows[index], card: contactRow(rows[index]), published: published[index] }))
+      const [primary] = members, profile = members.map(member => member.published).find(Boolean)
+      // Without the index, a row whose source names its profile still links there.
+      const recorded = lookupFailed ? members.map(member => member.row.provenance?.toId !== undefined ? usableTarget(publicTarget(member.row)) : null).find(Boolean) : null
+      const first = key => members.map(member => member.card[key]).find(value => typeof value === 'string' && value.trim())
+      const earliest = key => { const at = members.map(member => validTimestamp(member.row[key])).filter(Boolean); return at.length ? Math.min(...at) : undefined }
+      const headline = profile?.headline || first('headline'), rowCompany = first('company')
+      // The company stays when the headline does not already name it, so two people with one name stay distinguishable.
+      const company = rowCompany && !(headline ?? '').toLowerCase().includes(rowCompany.trim().toLowerCase()) ? rowCompany : undefined
+      const id = profile?.id ?? recorded ?? undefined
+      const names = [...new Set([profile?.name, ...members.map(member => member.card.name)].filter(value => typeof value === 'string' && value.trim()))]
+      const connectedAt = earliest('connectedAt'), importedAt = earliest('importedAt')
+      return {
+        ...(primary.card.sourceRowId ? { sourceRowId: primary.card.sourceRowId, contactHref: primary.card.contactHref } : {}),
+        ...(connectedAt ? { connectedAt } : {}), ...(importedAt ? { importedAt } : {}),
+        name: profile?.name || primary.card.name || names[0] || '',
+        ...(headline ? { headline } : {}), ...(company ? { company } : {}),
+        ...(first('linkedinUrl') ? { linkedinUrl: first('linkedinUrl') } : {}),
+        ...(id ? { id } : {}), ...(profile?.photo ? { photo: profile.photo } : {}),
+        ...(profile?.presence ? { presence: profile.presence, connectionCount: profile.connectionCount } : {}),
+        searchNames: names.join(' '),
+        searchText: [...names, profile?.headline, ...members.flatMap(member => [member.card.headline, member.card.company])].filter(Boolean).join(' '),
+        ...(members.length > 1 ? { sources: members.map(member => ({ label: rowSourceLabel(member.row), ...(member.card.contactHref ? { href: member.card.contactHref } : {}),
+          ...(validTimestamp(member.row.connectedAt) ? { connectedAt: member.row.connectedAt } : validTimestamp(member.row.importedAt) ? { importedAt: member.row.importedAt } : {}) })) } : {}),
+      }
+    })
+  }
+  // The words a card is found by: every name and professional line of every record.
+  const cardTokens = card => ({ name: words(card.searchNames ?? card.name), text: words(card.searchText ?? [card.name, card.company, card.headline].filter(Boolean).join(' ')) })
   // One reader per page view: every read of the index on that page shares one build.
   const pageReader = () => createPublicPeopleReader({ readPublishedSnapshot, reuse: true, photoFor })
   // The published profiles an account is connected to, once each: its own
@@ -1106,8 +1148,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const warming = typeof readPublishedSnapshot === 'function' ? publicReader.lookup({ ids: [] }).catch(() => null) : null
         try {
           const connections = (await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()).assertions.filter(row => row.category === 'connections')
-          connectionCount = connections.length
-          contacts = await contactRows(connections.slice(0, 10))
+          // One card per person, so the count and the preview never repeat someone.
+          const cards = await personCards(connections)
+          connectionCount = cards.length
+          contacts = cards.slice(0, 10)
         } catch { /* The profile stands on its own while the network is still being read. */ }
         await warming
         // The photo published for this member's public profile, when there is one.
@@ -1317,23 +1361,30 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             connectedView: { rows, total: ranked.rows.length, ...(ranked.rows.length > (index + 1) * 100 ? { nextPage: index + 1 } : {}) } })
           journey(response, view, props.importJob); return
         }
-        const linking = contactRows(connections, reader)
-        let everyone, nextCursor, total, state = 'ready', match = 'none'
+        // One card per person; "Everyone on Unlinked" then leaves out anyone
+        // already shown under "People you know", so the sections never repeat
+        // a person and the count is the number of cards (unlinked-tto.4).
+        const ownShown = Boolean(network.imports.length || network.legacyProfileId)
+        const eligibleContacts = (await personCards(connections, reader)).filter(value => !presence || value.presence === presence)
+        const ownMatches = matcher ? rankMatches(eligibleContacts, matcher, cardTokens) : { rows: eligibleContacts, match: 'none' }
+        let match = 'none'
+        if (ownMatches.match === 'all' || ownMatches.match === 'some') match = ownMatches.match
+        const matchingContacts = orderNetwork(ownMatches.rows, sort)
+        const known = ownShown ? matchingContacts.map(value => value.id).filter(Boolean) : []
+        let everyone, nextCursor, total, state = 'ready'
         if (publicProfessionalSearch) {
           everyone = []
-          try { const result = await reader.list({ query: filter, mode, presence, sort, includeTotal: true, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; total = result.total; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
+          try { const result = await reader.list({ query: filter, mode, presence, sort, includeTotal: true, exclude: known, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; total = result.total; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
           catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
         if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
-        // The contact lookup ran alongside the public list and shares its snapshot read.
-        const eligibleContacts = (await linking).filter(value => !presence || value.presence === presence)
-        const ownMatches = matcher ? rankMatches(eligibleContacts, matcher, row => ({ name: words(row.name), text: words([row.name, row.company, row.headline].filter(Boolean).join(' ')) })) : { rows: eligibleContacts, match: 'none' }
-        if (ownMatches.match === 'all' || (ownMatches.match === 'some' && match !== 'all')) match = ownMatches.match
-        const matchingContacts = orderNetwork(ownMatches.rows, sort)
         const contacts = await withConnect(session.owner, matchingContacts.slice(index * 100, (index + 1) * 100), reader)
         everyone = await withConnect(session.owner, everyone, reader)
-        const view = renderPeople({ ...props, scope, own: network.imports.length || network.legacyProfileId ? contacts : undefined, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
+        const own = ownShown ? contacts : undefined
+        // Cards on both sections are counted once each.
+        const counted = Number.isSafeInteger(total) ? total + (own !== undefined ? matchingContacts.length : 0) : total
+        const view = renderPeople({ ...props, scope, own, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total: counted, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
         journey(response, view, props.importJob)
         return
       }
@@ -1473,9 +1524,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             const connections = network.assertions.filter(row => row.category === 'connections')
             // On failure, the account's own people for the same words stand in for the AI picks.
             const ownRows = async () => {
-              const rows = await contactRows(result ? connections.slice(0, 100) : connections, reader)
+              const rows = await personCards(connections, reader)
               const typed = input.get('query').trim()
-              return result || !typed ? rows.slice(0, 100) : rankMatches(rows, createQueryMatcher(typed, 'best'), row => ({ name: words(row.name), text: words([row.name, row.company, row.headline].filter(Boolean).join(' ')) })).rows.slice(0, 100)
+              return result || !typed ? rows.slice(0, 100) : rankMatches(rows, createQueryMatcher(typed, 'best'), cardTokens).rows.slice(0, 100)
             }
             const own = network.imports.length || network.legacyProfileId ? await withConnect(session.owner, await ownRows(), reader) : undefined
             const ai = result
@@ -1491,7 +1542,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const sources = result.matches.length ? new Map((await account.readNetwork()).assertions.map(row => [row.id, row])) : new Map()
           const reader = pageReader()
           const picked = await contactRows(result.matches.map(match => sources.get(match.assertionId) ?? { fields: match.fields }), reader)
-          const searchResults = await withConnect(session.owner, picked.map((value, index) => ({ ...value, reason: result.matches[index].reason })), reader)
+          // Two picked records of one person show once, with the first reason.
+          const seenPeople = new Set()
+          const unique = picked.map((value, index) => ({ ...value, reason: result.matches[index].reason })).filter(value => { const key = value.id ? `profile:${value.id}` : value.linkedinUrl ? `linkedin:${value.linkedinUrl}` : null; if (!key) return true; if (seenPeople.has(key)) return false; seenPeople.add(key); return true })
+          const searchResults = await withConnect(session.owner, unique, reader)
           const view = renderPeople({ ...props, scope: 'own', query: input.get('query'), searchResults, returnTo: searchReturn(input.get('query')) })
           extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return

@@ -56,9 +56,9 @@ const importedSource = row => !['recovered-legacy-public-v1', 'unlinked-invite',
 // is the group's id, so an id stays stable when a later re-import joins.
 export async function groupConnectionRows(rows, entries, { lookupSlug, lookup } = {}) {
   const candidates = await candidateIds(rows, { lookupSlug })
-  let found = null
+  let found = null, lookupFailed = false
   if (typeof lookup === 'function') {
-    try { found = await lookupAll([...new Set(candidates.flat().filter(Boolean))], lookup) } catch { found = null }
+    try { found = await lookupAll([...new Set(candidates.flat().filter(Boolean))], lookup) } catch { found = null; lookupFailed = true }
   }
   const parent = rows.map((_, index) => index)
   const root = index => { while (parent[index] !== index) { parent[index] = parent[parent[index]]; index = parent[index] } return index }
@@ -88,5 +88,16 @@ export async function groupConnectionRows(rows, entries, { lookupSlug, lookup } 
     for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) return left[i] - right[i]
     return entries[a].id < entries[b].id ? -1 : entries[a].id > entries[b].id ? 1 : 0
   }
-  return { groups: [...groups.values()].map(indexes => indexes.sort(order)), published }
+  return { groups: [...groups.values()].map(indexes => indexes.sort(order)), published, lookupFailed }
 }
+
+// The provenance type of one connection row, as the agent tools name it.
+export const rowProvenanceType = row => row?.provenance?.source === 'recovered-legacy-public-v1' ? 'recorded_public_path' : 'owner_import'
+
+// A short, human label for where one connection row came from (the web
+// "N sources" disclosure). Never includes private field values.
+export const rowSourceLabel = row => ({
+  'recovered-legacy-public-v1': 'Recovered LinkedIn connection',
+  'unlinked-invite': 'Accepted Unlinked invite',
+  'unlinked-connection': 'Accepted Unlinked connection',
+})[row?.provenance?.source] ?? 'Imported contact'
