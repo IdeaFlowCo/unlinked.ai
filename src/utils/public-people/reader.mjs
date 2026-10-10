@@ -160,7 +160,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         detail.detailLevel = summary.detailLevel
         summaries.set(input.id, summary); details.set(input.id, detail)
         // Everything searchable is already public on the profile page.
-        tokens.set(input.id, { name: words(summary.name), text: words([summary.name, summary.headline, company, detail.about, ...detail.positions.flatMap(position => [position.title, position.company, position.description]), ...detail.education.flatMap(school => [school.institution, school.degree]), ...detail.skills].filter(Boolean).join(' ')) })
+        tokens.set(input.id, { name: words(summary.name), text: words([summary.name, summary.headline, company, detail.about, ...detail.positions.flatMap(position => [position.title, position.company, position.description]), ...detail.education.flatMap(school => [school.institution, school.degree]), ...detail.skills].filter(Boolean).join(' ')),
+          // Position companies and the headline, tokenized once per compile, so
+          // a company page never re-tokenizes every profile per request.
+          companies: [...detail.positions.map(position => words(position.company)), words(summary.headline ?? '')].filter(list => list.length) })
       }
       const outgoing = new Map([...summaries.keys()].map(id => [id, new Set()]))
       // A connection is mutual, but an edge is stored only from the person whose export listed it.
@@ -331,10 +334,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       const scope = `company:${phrase.join(' ')}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
-      const rows = data.ordered.filter(person => {
-        const detail = data.details.get(person.id)
-        return detail.positions.some(position => contains(words(position.company))) || contains(words(person.headline ?? ''))
-      })
+      const rows = data.ordered.filter(person => data.tokens.get(person.id).companies.some(contains))
       const people = page(rows, decodedCursor, scope, data.revision)
       return { name: name.trim(), total: rows.length, people: people.profiles, ...(people.nextCursor ? { nextCursor: people.nextCursor } : {}) }
     },
