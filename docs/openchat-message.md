@@ -102,6 +102,38 @@ list, Alt+↑/↓ between conversations, Esc to clear a reply or cancel an edit)
 Drafts, preferences and profile links stay in this browser's localStorage.
 Notifications for accepted connection requests open the direct conversation.
 
+## Attachments, search and the dock
+
+- **Attachments.** Images and voice notes in OpenChat messages are public
+  capability URLs in one bucket. The proxy only shows URLs that match the exact
+  `https://storage.googleapis.com/openchat-attachments/attachments/<user>/<id>/<file>`
+  grammar, and only through `/messages/api/file?u=` on this origin (CSP
+  `img-src 'self'` is unchanged). That route requires the session, fetches with
+  `redirect: 'error'`, allows image/audio types only, caps files at 20 MB,
+  passes byte ranges through, and responds with `nosniff` and a sandbox CSP.
+- **Uploads.** Images up to 10 MB, 4 per message, by picker or paste. Each one
+  is posted raw to `/messages/api/attachments` with the CSRF header. OpenChat
+  presigns the upload as the member, the server PUTs the bytes to the bucket
+  host, and returns an opaque key. A message can attach only keys this proxy
+  issued to the same member. Uploads are budgeted at 20 per minute.
+- **Search.** Press Enter in the filter box to search messages in every
+  conversation (OpenChat keyword search). Choosing a result opens its thread
+  and loads up to ten earlier pages to reach and highlight the message.
+- **Dock.** Other signed-in pages at 1024 px and wider show a collapsed
+  **Messaging** bar with the unread count. It opens the same client in a
+  380×560 panel. The event stream runs only while the dock is open. Open/closed
+  state and the current thread persist in localStorage. A profile's **Message**
+  link opens the conversation in the dock instead of leaving the page. The
+  client is one static, content-hashed script
+  (`/public-assets/messages-client.js?v=`) that reads a non-executable
+  `#msg-config` block (CSRF token, thread id, emoji list, dock flag).
+- **Block or report** links to OpenChat from the thread menu: embedded sessions
+  cannot block (OpenChat's `requireDirectSession`), so it needs a direct sign-in there.
+- The legacy Next.js profile pages link **Message** to `https://www.unlinked.ai/messages?profile=…`
+  (`unlinkedMessagesUrl`), or to the inbox for private/historical rows, instead of
+  OpenChat's web compose page. `openChatProfileMessageUrl` remains for OpenChat's
+  own compose contract.
+
 LinkedIn messaging remains plan-only; the coordinated OpenChat repository owns
 `docs/linkedin-messaging-plan.md` (Unipile, Beeper, and existing bridge options).
 

@@ -10,11 +10,19 @@ function messagesClient(config) {
   const $ = id => document.getElementById(id)
   const listEl = $('msg-list'), threadEl = $('msg-thread'), statusEl = $('msg-status'), filterEl = $('msg-filter')
   const FIVE_MINUTES = 5 * 60000, REACTIONS = config.reactions
+  // Dock mode: the same client in a small panel on other pages (no URL changes,
+  // no page title, keyboard shortcuts only inside the panel, stream only while open).
+  const docked = config.dock === true, dock = docked ? document.getElementById('msg-dock') : null
+  const stacked = () => docked || matchMedia('(max-width: 759px)').matches
+  // In the dock, nothing streams or marks read unless the panel is open and visible.
+  // (The dock is position:fixed, so offsetParent cannot tell visibility; the CSS hides it below 1024 px.)
+  const dockWide = () => matchMedia('(min-width: 1024px)').matches
+  const dormant = () => docked && (dock.dataset.expanded !== 'true' || !dockWide())
   const counted = new Set()
   const state = {
     me: null, conversations: new Map(), threads: new Map(), open: null, loadedAt: new Date().toISOString(), readMaps: new Map(),
     stream: null, streamState: 'connecting', filter: '', unreadFirst: false, retryMs: 2000, retryTimer: null, paused: false,
-    replyTo: null, editing: null, editText: '', picker: null, rerender: false, typing: new Map(), markedUnread: new Set(), newBelow: false, people: null,
+    replyTo: null, editing: null, editText: '', picker: null, rerender: false, uploads: [], searchResults: null, typing: new Map(), markedUnread: new Set(), newBelow: false, people: null,
   }
 
   // ── Local preferences (this browser only) ──────────────────────────────────
@@ -114,12 +122,41 @@ function messagesClient(config) {
     }
   }
 
+  // Search across every conversation (OpenChat keyword search), from the filter box.
+  async function searchMessages(query) {
+    state.searchResults = { query, loading: true, messages: [] }; renderList()
+    try { const value = await api(`/search?${new URLSearchParams({ q: query })}`); if (state.searchResults?.query === query) state.searchResults = { query, messages: value.messages } }
+    catch { if (state.searchResults?.query === query) state.searchResults = { query, error: true, messages: [] } }
+    renderList()
+  }
+  async function openResult(message) {
+    await openConversation(message.conversationId)
+    // Load older pages until the message is present (bounded), then flash it.
+    for (let page = 0; page < 10 && !$(`m-${message.id}`) && state.threads.get(message.conversationId)?.hasMore; page++) await loadOlder()
+    jumpTo(message.id)
+  }
+  function searchNodes() {
+    const q = filterEl?.value.trim() || ''
+    const nodes = []
+    if (q.length >= 2 && state.searchResults?.query !== q) nodes.push(h('li', { class: 'msg-search-more' }, h('button', { type: 'button', class: 'link-button', onclick: () => searchMessages(q) }, `Search messages for “${q}”`)))
+    const result = state.searchResults
+    if (result && result.query === q) {
+      nodes.push(h('li', { class: 'msg-list-heading', role: 'presentation' }, result.loading ? 'Searching messages…' : result.error ? 'Search is unavailable right now.' : `${result.messages.length ? result.messages.length : 'No'} message${result.messages.length === 1 ? '' : 's'} found`))
+      for (const message of result.messages) {
+        const conversation = state.conversations.get(message.conversationId)
+        nodes.push(h('li', {}, h('button', { type: 'button', class: 'msg-item msg-result', onclick: () => openResult(message) },
+          h('span', { class: 'msg-item-body' }, h('span', { class: 'msg-item-top' }, h('b', { class: 'msg-item-name' }, conversation ? titleOf(conversation) : 'Conversation'), h('span', { class: 'msg-item-time' }, ago(message.createdAt))), h('span', { class: 'msg-item-preview' }, `${message.senderId === state.me ? 'You: ' : message.sender?.name ? `${message.sender.name}: ` : ''}${message.content}`)))))
+      }
+    }
+    return nodes
+  }
+
   function renderList() {
     const items = sorted().filter(conversation => !state.filter || `${titleOf(conversation)} ${conversation.lastMessage?.content || ''}`.toLowerCase().includes(state.filter))
     const toggle = $('msg-unread-first')
     if (toggle) toggle.setAttribute('aria-pressed', String(state.unreadFirst))
     if (!state.conversations.size) { listEl.replaceChildren(h('li', { class: 'msg-list-empty' }, 'No conversations yet. ', h('a', { href: '/network' }, 'Message someone from People →'))); return }
-    if (!items.length) { listEl.replaceChildren(h('li', { class: 'msg-list-empty' }, 'No results')); return }
+    if (!items.length) { listEl.replaceChildren(h('li', { class: 'msg-list-empty' }, 'No conversations match'), ...searchNodes()); return }
     listEl.replaceChildren(...items.map(conversation => {
       const peer = peerOf(conversation), title = titleOf(conversation), last = conversation.lastMessage
       const typingNames = typingIn(conversation.id)
@@ -132,12 +169,16 @@ function messagesClient(config) {
             h('span', { class: 'msg-item-top' }, h('b', { class: 'msg-item-name' }, title), peer?.isBot || conversation.containsBot ? h('span', { class: 'msg-tag' }, 'Bot') : null, muted(conversation) ? h('span', { class: 'msg-muted', title: 'Muted', 'aria-label': 'Muted' }, '🔕') : null, h('span', { class: 'msg-item-time' }, ago(conversation.lastMessageAt))),
             h('span', { class: `msg-item-preview${typingNames.length ? ' typing' : ''}` }, preview)),
           unread ? h('span', { class: 'msg-pill', 'aria-label': `${unread} unread` }, unread > 99 ? '99+' : unread) : null))
-    }))
+    }), ...searchNodes())
   }
 
   function updateUnread() {
+    // Before the dock has loaded anything, the server-rendered counts stay as they are.
+    if (docked && !state.me) return
     const total = [...state.conversations.values()].reduce((sum, conversation) => sum + (conversation.id === state.open && document.visibilityState === 'visible' ? 0 : unreadOf(conversation)), 0)
-    document.title = `${total ? `(${total > 99 ? '99+' : total}) ` : ''}Messages · Unlinked`
+    if (!docked) document.title = `${total ? `(${total > 99 ? '99+' : total}) ` : ''}Messages · Unlinked`
+    const bar = $('msg-dock-count')
+    if (bar) { bar.textContent = total ? (total > 99 ? '99+' : String(total)) : ''; bar.hidden = !total }
     const nav = document.querySelector('[data-nav-messages]')
     if (nav) {
       nav.querySelector('.nav-count')?.remove()
@@ -172,10 +213,11 @@ function messagesClient(config) {
   }
   async function openConversation(id, { push = true } = {}) {
     if (state.open && state.open !== id) { stopTyping(); saveDraft(state.open, $('msg-input')?.value.trim() || '') }
-    state.open = id; state.replyTo = null; state.editing = null; state.newBelow = false
+    state.open = id; state.replyTo = null; state.editing = null; state.newBelow = false; state.uploads = []
     state.markedUnread.delete(id)
     root.dataset.open = id
-    if (push && location.pathname !== `/messages/c/${id}`) history.pushState({ id }, '', `/messages/c/${encodeURIComponent(id)}`)
+    if (docked) saveDock()
+    else if (push && location.pathname !== `/messages/c/${id}`) history.pushState({ id }, '', `/messages/c/${encodeURIComponent(id)}`)
     renderList()
     const conversation = state.conversations.get(id)
     threadShell()
@@ -199,7 +241,8 @@ function messagesClient(config) {
     const previous = state.open
     state.open = null
     delete root.dataset.open
-    if (push) history.pushState({}, '', '/messages')
+    if (docked) saveDock()
+    else if (push) history.pushState({}, '', '/messages')
     threadEl.replaceChildren(h('div', { class: 'msg-empty' }, h('p', {}, 'Select a conversation'), h('p', { class: 'small' }, 'Or start a ', h('button', { class: 'link-button', type: 'button', onclick: openPicker }, 'new message'), '.')))
     renderList(); updateUnread()
     ;(listEl.querySelector(`[data-id="${CSS.escape(previous || '')}"]`) || listEl.querySelector('a'))?.focus()
@@ -220,7 +263,9 @@ function messagesClient(config) {
         muted(conversation) ? item('Unmute', () => setMute(null)) : [item('Mute for 1 hour', () => setMute(new Date(Date.now() + 3600000).toISOString())), item('Mute for 8 hours', () => setMute(new Date(Date.now() + 8 * 3600000).toISOString())), item('Mute until I unmute', () => setMute('always'))],
         item('Mark as unread', markUnread),
         h('label', { class: 'msg-menu-check' }, h('input', { type: 'checkbox', checked: prefs.enterSends ? true : null, onchange: event => { prefs.enterSends = event.target.checked; store.set('unlinked.messages.prefs', prefs); updateComposerHint() } }), 'Enter sends (Shift+Enter for a new line)'),
-        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'))) : null
+        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'),
+        // Blocking and reporting need a direct OpenChat sign-in (embedded sessions cannot block).
+        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Block or report in OpenChat ↗'))) : null
     head.replaceChildren(...[
       h('button', { class: 'msg-back', type: 'button', 'aria-label': 'Back to conversations', onclick: () => closeConversation() }, '←'),
       avatar(title, peer?.id || state.open, peer?.presence),
@@ -262,7 +307,7 @@ function messagesClient(config) {
     const bubble = editing ? editBox(message) : h('div', { class: `msg-bubble${message.deletedAt ? ' deleted' : ''}`, title: time(message.createdAt) },
       message.replyTo && !message.deletedAt ? h('button', { type: 'button', class: 'msg-quote', onclick: () => jumpTo(message.replyTo.id) }, h('b', {}, message.replyTo.senderId === state.me ? 'You' : message.replyTo.senderName || 'Message'), ' ', message.replyTo.content) : null,
       message.deletedAt ? 'Message deleted' : linkify(message.content),
-      message.attachments?.length && !message.deletedAt ? h('span', { class: 'msg-attachment' }, `📎 ${message.attachments.length === 1 ? (message.attachments[0].name || 'Attachment') : `${message.attachments.length} attachments`} · open in OpenChat`) : null,
+      message.attachments?.length && !message.deletedAt ? attachmentsNode(message.attachments) : null,
       message.editedAt && !message.deletedAt ? h('span', { class: 'msg-edited' }, ' (edited)') : null)
     return h('div', { class: `msg-row${own ? ' own' : ''}${grouped ? ' grouped' : ''}`, id: `m-${message.id}`, 'data-id': message.id },
       !own && group && !grouped ? h('span', { class: 'msg-sender' }, message.sender?.name || 'Someone') : null,
@@ -270,6 +315,15 @@ function messagesClient(config) {
       ...(message.deletedAt ? [] : message.linkPreviews || []).map(preview => h('a', { class: 'msg-preview', href: preview.url, target: '_blank', rel: 'noopener noreferrer' }, h('b', {}, preview.title || preview.url), preview.description ? h('span', {}, preview.description) : null, h('span', { class: 'small' }, preview.siteName || new URL(preview.url).hostname))),
       message.reactions?.length && !message.deletedAt ? h('div', { class: 'msg-reactions' }, message.reactions.map(reaction => h('button', { type: 'button', class: `msg-reaction${reaction.byMe ? ' mine' : ''}`, 'data-key': `react:${reaction.emoji}`, 'aria-pressed': String(Boolean(reaction.byMe)), 'aria-label': `${reaction.emoji} ${reaction.count}${reaction.byMe ? ', including you' : ''}`, onclick: () => react(message, reaction.emoji, !reaction.byMe) }, reaction.emoji, ' ', reaction.count))) : null,
       message.pending === 'failed' ? h('span', { class: 'msg-meta failed' }, 'Not sent · ', h('button', { class: 'link-button', type: 'button', onclick: () => retry(message) }, 'Retry')) : status ? h('span', { class: 'msg-meta' }, status) : null)
+  }
+
+  // Images and voice notes come through the same-origin file route; anything else stays in OpenChat.
+  function attachmentsNode(attachments) {
+    return h('span', { class: 'msg-attachments' }, attachments.map(item => {
+      if (item.src && item.mimeType.startsWith('image/')) return h('a', { class: 'msg-image', href: item.src, target: '_blank', rel: 'noopener' }, h('img', { src: item.src, alt: item.name || 'Image', loading: 'lazy', decoding: 'async' }))
+      if (item.src && item.mimeType.startsWith('audio/')) return h('audio', { class: 'msg-audio', controls: true, preload: 'none', src: item.src, 'aria-label': item.name || 'Voice note' })
+      return h('span', { class: 'msg-attachment' }, `📎 ${item.name || 'Attachment'} · open in OpenChat`)
+    }))
   }
 
   function renderMessages({ scroll } = {}) {
@@ -428,16 +482,43 @@ function messagesClient(config) {
         if (last) { event.preventDefault(); startEdit(last) }
       }
     })
+    const file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/gif,image/webp', multiple: true, hidden: true, onchange: () => { for (const item of file.files) upload(item); file.value = '' } })
+    input.addEventListener('paste', event => { const images = [...(event.clipboardData?.files || [])].filter(item => item.type.startsWith('image/')); if (images.length) { event.preventDefault(); images.forEach(upload) } })
     const form = h('form', { class: 'msg-composer', onsubmit: event => {
       event.preventDefault()
-      const content = input.value.trim()
-      if (!content || !state.threads.has(state.open)) return
+      const content = input.value.trim(), ready = state.uploads.filter(item => item.key)
+      if ((!content && !ready.length) || state.uploads.some(item => !item.key && !item.error) || !state.threads.has(state.open)) return
       input.value = ''; grow(); saveDraft(state.open, ''); stopTyping()
       const replyToId = state.replyTo?.id; state.replyTo = null; renderReply()
-      send(state.open, content, uuid(), replyToId)
-    } }, input, h('button', { type: 'submit', class: 'msg-send' }, 'Send'))
+      state.uploads = []; renderUploads()
+      send(state.open, content, uuid(), replyToId, ready)
+    } }, h('button', { type: 'button', class: 'msg-attach msg-act', 'aria-label': 'Attach an image', title: 'Attach an image', onclick: () => file.click() }, '📎'), file, input, h('button', { type: 'submit', class: 'msg-send' }, 'Send'))
     setTimeout(() => { grow(); updateComposerHint() })
-    return h('div', { class: 'msg-compose-wrap' }, h('div', { id: 'msg-reply' }), form, h('p', { class: 'msg-hint', id: 'msg-hint' }))
+    return h('div', { class: 'msg-compose-wrap' }, h('div', { id: 'msg-reply' }), h('div', { id: 'msg-uploads', class: 'msg-uploads' }), form, h('p', { class: 'msg-hint', id: 'msg-hint' }))
+  }
+
+  // ── Image uploads (≤ 10 MB, sent through this origin) ─────────────────────
+  async function upload(item) {
+    const entry = { id: uuid(), name: item.name || 'image', preview: URL.createObjectURL(item), key: null, error: null }
+    if (!/^image\/(jpeg|png|gif|webp)$/.test(item.type) || item.size > 10 * 1024 * 1024) entry.error = item.size > 10 * 1024 * 1024 ? 'Too large (10 MB max)' : 'Images only'
+    if (state.uploads.length >= 4) { announce('Up to 4 images per message'); return }
+    state.uploads.push(entry); renderUploads()
+    if (entry.error) return
+    try {
+      const response = await fetch('/messages/api/attachments', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': item.type, 'X-Unlinked-CSRF': config.csrf, 'X-Filename': entry.name.replace(/[^\x20-\x7e]/g, '_').slice(0, 100) }, body: item })
+      if (!response.ok) throw Error('upload_failed')
+      const value = await response.json()
+      Object.assign(entry, { key: value.attachment.key, src: value.attachment.src, mimeType: value.attachment.mimeType })
+    } catch { entry.error = 'Upload failed' }
+    renderUploads()
+  }
+  function renderUploads() {
+    const slot = $('msg-uploads')
+    if (!slot) return
+    slot.replaceChildren(...state.uploads.map(entry => h('span', { class: `msg-upload${entry.error ? ' failed' : ''}` },
+      h('img', { src: entry.preview, alt: '' }),
+      h('span', { class: 'small' }, entry.error || (entry.key ? entry.name : 'Uploading…')),
+      h('button', { type: 'button', class: 'msg-act', 'aria-label': `Remove ${entry.name}`, onclick: () => { URL.revokeObjectURL(entry.preview); state.uploads = state.uploads.filter(other => other !== entry); renderUploads() } }, '×'))))
   }
 
   function upsert(message) {
@@ -454,14 +535,14 @@ function messagesClient(config) {
     }
   }
 
-  async function send(conversationId, content, clientId = uuid(), replyToId = null) {
+  async function send(conversationId, content, clientId = uuid(), replyToId = null, uploads = []) {
     const thread = state.threads.get(conversationId)
     const reply = replyToId ? thread?.items.find(item => item.id === replyToId) : null
-    const optimistic = { id: `pending-${clientId}`, clientId, conversationId, senderId: state.me, content, createdAt: new Date().toISOString(), reactions: [], pending: 'sending', replyToId, replyTo: reply ? { id: reply.id, senderId: reply.senderId, senderName: reply.sender?.name, content: reply.content.slice(0, 200) } : null }
+    const optimistic = { id: `pending-${clientId}`, clientId, conversationId, senderId: state.me, content, createdAt: new Date().toISOString(), reactions: [], pending: 'sending', uploads, attachments: uploads.map(entry => ({ mimeType: entry.mimeType, name: entry.name, src: entry.src })), replyToId, replyTo: reply ? { id: reply.id, senderId: reply.senderId, senderName: reply.sender?.name, content: reply.content.slice(0, 200) } : null }
     if (thread) { thread.items = thread.items.filter(item => item.clientId !== clientId); thread.items.push(optimistic) }
     renderMessages({ scroll: 'bottom' })
     try {
-      const value = await api(`/conversations/${encodeURIComponent(conversationId)}/messages`, { content, clientId, ...(replyToId ? { replyToId } : {}) })
+      const value = await api(`/conversations/${encodeURIComponent(conversationId)}/messages`, { content, clientId, ...(replyToId ? { replyToId } : {}), ...(uploads.length ? { attachments: uploads.map(entry => entry.key) } : {}) })
       if (value.message) upsert(value.message)
       else if (thread) { const item = thread.items.find(entry => entry.clientId === clientId); if (item) item.pending = undefined }
       const conversation = state.conversations.get(conversationId)
@@ -474,7 +555,7 @@ function messagesClient(config) {
       announce('Message not sent')
     }
   }
-  const retry = message => send(message.conversationId, message.content, message.clientId, message.replyToId)
+  const retry = message => send(message.conversationId, message.content, message.clientId, message.replyToId, message.uploads || [])
   // Failed sends are retried once the browser is back online.
   const retryFailed = () => { for (const thread of state.threads.values()) for (const message of thread.items) if (message.pending === 'failed') retry(message) }
 
@@ -484,7 +565,7 @@ function messagesClient(config) {
     clearTimeout(readTimer)
     readTimer = setTimeout(async () => {
       const id = state.open, log = $('msg-log'), conversation = state.conversations.get(id)
-      if (!id || !log || !conversation || document.visibilityState !== 'visible' || !document.hasFocus()) return
+      if (!id || !log || !conversation || dormant() || document.visibilityState !== 'visible' || !document.hasFocus()) return
       if (log.scrollHeight - log.scrollTop - log.clientHeight > 80) return
       hideJump()
       const latest = state.threads.get(id)?.items.filter(item => !item.pending).at(-1)
@@ -546,6 +627,7 @@ function messagesClient(config) {
   let refreshTimer = null
   const refreshSoon = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(loadConversations, 300) }
   function connect() {
+    if (dormant()) return
     const source = new EventSource(`/messages/api/stream?since=${encodeURIComponent(state.loadedAt)}`)
     state.stream = source
     const on = (name, handler) => source.addEventListener(name, event => { try { handler(JSON.parse(event.data)) } catch { /* Ignore one malformed event. */ } })
@@ -597,12 +679,14 @@ function messagesClient(config) {
       setStream('reconnecting')
       if (state.stream === source) state.stream = null
       clearTimeout(state.retryTimer)
-      state.retryTimer = setTimeout(() => { if (!state.stream && !state.paused) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream && !state.paused) connect() }) } }, state.retryMs)
+      state.retryTimer = setTimeout(() => { if (!state.stream && !state.paused && !dormant()) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream && !state.paused) connect() }) } }, state.retryMs)
       state.retryMs = Math.min(60000, (state.retryMs || 2000) * 2)
     })
   }
   function setStream(value) {
     state.streamState = value
+    // The header refresher (connection-feedback.mjs) leaves the count to a dock that is actually live.
+    if (docked) dock.dataset.stream = value
     const pill = $('msg-live')
     if (pill) { pill.hidden = value === 'live' || value === 'polling'; pill.textContent = value === 'paused' ? 'Paused · open in another tab' : value === 'offline' ? 'Offline' : 'Reconnecting…' }
     if (value === 'live' || value === 'polling') { if (statusEl.dataset.offline) { delete statusEl.dataset.offline; showStatus('') } }
@@ -611,8 +695,8 @@ function messagesClient(config) {
   // ── Wiring ─────────────────────────────────────────────────────────────────
   $('msg-new')?.addEventListener('click', openPicker)
   $('msg-unread-first')?.addEventListener('click', () => { state.unreadFirst = !state.unreadFirst; renderList() })
-  filterEl?.addEventListener('input', () => { state.filter = filterEl.value.trim().toLowerCase(); renderList() })
-  filterEl?.addEventListener('keydown', event => { if (event.key === 'Escape' && filterEl.value) { event.preventDefault(); filterEl.value = ''; state.filter = ''; renderList() } else if (event.key === 'ArrowDown') { event.preventDefault(); listEl.querySelector('a')?.focus() } })
+  filterEl?.addEventListener('input', () => { state.filter = filterEl.value.trim().toLowerCase(); if (state.searchResults && state.searchResults.query !== filterEl.value.trim()) state.searchResults = null; renderList() })
+  filterEl?.addEventListener('keydown', event => { if (event.key === 'Enter' && filterEl.value.trim().length >= 2) { event.preventDefault(); searchMessages(filterEl.value.trim()) } else if (event.key === 'Escape' && filterEl.value) { event.preventDefault(); filterEl.value = ''; state.filter = ''; state.searchResults = null; renderList() } else if (event.key === 'ArrowDown') { event.preventDefault(); listEl.querySelector('a')?.focus() } })
   // Arrow keys move through the conversation list.
   listEl.addEventListener('keydown', event => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
@@ -622,21 +706,22 @@ function messagesClient(config) {
     links[event.key === 'Home' ? 0 : event.key === 'End' ? links.length - 1 : Math.max(0, Math.min(links.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus()
   })
   document.addEventListener('keydown', event => {
+    if (docked && !dock.contains(event.target)) return
     const typingTarget = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable
     // "/" focuses the filter; Alt+↑/↓ switches conversations; Esc closes the thread on small screens.
-    if (event.key === '/' && !typingTarget && !event.metaKey && !event.ctrlKey) { event.preventDefault(); if (state.open && matchMedia('(max-width: 759px)').matches) closeConversation(); filterEl?.focus() }
+    if (event.key === '/' && !typingTarget && !event.metaKey && !event.ctrlKey) { event.preventDefault(); if (state.open && stacked()) closeConversation(); filterEl?.focus() }
     else if (event.altKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       const ids = sorted().map(conversation => conversation.id), index = ids.indexOf(state.open)
       const next = ids[index < 0 ? 0 : Math.max(0, Math.min(ids.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]
       if (next && next !== state.open) { event.preventDefault(); openConversation(next) }
-    } else if (event.key === 'Escape' && !typingTarget && state.open && !document.querySelector('dialog[open]') && matchMedia('(max-width: 759px)').matches) closeConversation()
+    } else if (event.key === 'Escape' && !typingTarget && state.open && !document.querySelector('dialog[open]') && stacked()) closeConversation()
   })
   // The options menu closes on Escape or a click elsewhere, and redraws then.
   document.addEventListener('keydown', event => { const menu = document.querySelector('.msg-menu[open]'); if (event.key === 'Escape' && menu) { event.preventDefault(); menu.open = false; menu.querySelector('summary').focus(); renderThreadHeader() } })
   document.addEventListener('click', event => { const menu = document.querySelector('.msg-menu[open]'); if (menu && !menu.contains(event.target)) { menu.open = false; renderThreadHeader() } })
-  addEventListener('popstate', () => { const match = /^\/messages\/c\/([A-Za-z0-9_-]{1,80})$/.exec(location.pathname); if (match) openConversation(match[1], { push: false }); else closeConversation({ push: false }) })
+  if (!docked) addEventListener('popstate', () => { const match = /^\/messages\/c\/([A-Za-z0-9_-]{1,80})$/.exec(location.pathname); if (match) openConversation(match[1], { push: false }); else closeConversation({ push: false }) })
   addEventListener('focus', maybeMarkRead)
-  const resume = () => { if (!state.paused) return; state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
+  const resume = () => { if (!state.paused || dormant()) return; state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
   addEventListener('focus', resume)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { resume(); maybeMarkRead(); updateUnread() } else stopTyping() })
   threadEl.addEventListener('scroll', event => { if (event.target.id !== 'msg-log') return; if (event.target.scrollTop < 120) loadOlder(); maybeMarkRead() }, true)
@@ -651,16 +736,71 @@ function messagesClient(config) {
   // Pages may be kept in the back/forward cache: close the stream when hidden
   // and catch up (list, open thread, stream) when the page comes back.
   addEventListener('pagehide', () => { stopTyping(); if (state.open) saveDraft(state.open, $('msg-input')?.value.trim() || ''); state.stream?.close(); state.stream = null })
-  addEventListener('pageshow', event => { if (!event.persisted) return; state.threads.clear(); state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) })
+  addEventListener('pageshow', event => { if (!event.persisted || (docked && dock.dataset.expanded !== 'true')) return; state.threads.clear(); state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) })
   addEventListener('offline', () => { statusEl.dataset.offline = '1'; showStatus('You are offline. Messages will send when you reconnect.') })
   addEventListener('online', () => { delete statusEl.dataset.offline; showStatus(''); refreshSoon(); retryFailed() })
 
+  // ── Dock ───────────────────────────────────────────────────────────────────
+  function saveDock() { store.set('unlinked.messages.dock', { expanded: !dock.hidden && dock.dataset.expanded === 'true', open: state.open }) }
+  let started = false
+  function expandDock(expanded, { focus = true } = {}) {
+    dock.dataset.expanded = String(expanded)
+    $('msg-dock-toggle').setAttribute('aria-expanded', String(expanded))
+    $('msg-dock-panel').hidden = !expanded
+    if (expanded) {
+      // Opening the dock is an explicit choice: take the stream back even if another tab had it.
+      state.paused = false
+      if (!started) { started = true; loadConversations().then(() => { if (!state.stream && !state.paused) connect() }) }
+      else if (!state.stream && !state.paused) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
+      if (focus) (state.open ? $('msg-input') : filterEl)?.focus({ preventScroll: true })
+    } else {
+      stopTyping(); state.stream?.close(); state.stream = null; clearTimeout(state.retryTimer); delete dock.dataset.stream
+      if (focus) $('msg-dock-toggle').focus()
+    }
+    saveDock()
+  }
+  // A profile's Message link opens the conversation in the dock instead of leaving the page.
+  async function openProfileInDock(href) {
+    const profile = new URL(href, location.origin).searchParams.get('profile')
+    try {
+      const value = await api('/conversations', { profile })
+      if (value.status !== 'ready') { location.href = href; return }
+      const id = /^https:\/\/www\.unlinked\.ai\/people\/([A-Za-z0-9._~%-]+)$/.exec(profile)?.[1]
+      if (id) { try { profiles[value.conversationId] = decodeURIComponent(id); store.set('unlinked.messages.profiles', profiles) } catch { /* Keep going without View on Unlinked. */ } }
+      expandDock(true, { focus: false })
+      if (!state.conversations.has(value.conversationId)) await loadConversations()
+      openConversation(value.conversationId)
+    } catch { location.href = href }
+  }
+
+  if (docked) {
+    const saved = store.get('unlinked.messages.dock', {})
+    if (saved.open && /^[A-Za-z0-9_-]{1,80}$/.test(saved.open)) { state.open = saved.open; root.dataset.open = saved.open; threadShell() }
+    $('msg-dock-toggle').addEventListener('click', () => expandDock(dock.dataset.expanded !== 'true'))
+    dock.addEventListener('keydown', event => { if (event.key === 'Escape' && dock.dataset.expanded === 'true' && !state.open && !document.querySelector('dialog[open]') && !event.defaultPrevented) expandDock(false) })
+    document.addEventListener('click', event => {
+      const link = event.target.closest?.('a[href^="/messages?profile="]')
+      if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !matchMedia('(min-width: 1024px)').matches) return
+      event.preventDefault(); openProfileInDock(link.getAttribute('href'))
+    })
+    // Until the dock opens, its bar shows the header's server-filled unread count.
+    const navCount = document.querySelector('[data-nav-messages] .nav-count')?.textContent
+    if (navCount) { $('msg-dock-count').textContent = navCount; $('msg-dock-count').hidden = false }
+    dock.hidden = false
+    if (saved.expanded && dockWide()) expandDock(true, { focus: false })
+    // The dock is hidden below 1024 px: drop its stream there and resume when it shows again.
+    matchMedia('(min-width: 1024px)').addEventListener('change', event => { if (!event.matches) { stopTyping(); state.stream?.close(); state.stream = null; delete dock.dataset.stream } else if (dock.dataset.expanded === 'true' && !state.stream) { state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) } })
+    return
+  }
   if (config.conversationId) { state.open = config.conversationId; root.dataset.open = config.conversationId; threadShell() }
   loadConversations().then(() => connect())
 }
 
-/** The page script: the client plus its per-page configuration (CSRF token, open conversation). */
-export function messagesScript({ csrf, conversationId = null, reactions }) {
-  const config = JSON.stringify({ csrf, conversationId, reactions }).replace(/</g, '\\u003c')
-  return `(${messagesClient.toString()})(${config});`
+/** The client as a static, cacheable script; it reads its configuration from #msg-config. */
+export const MESSAGES_CLIENT_SOURCE = `(${messagesClient.toString()})(JSON.parse(document.getElementById('msg-config').textContent));`
+
+/** The per-page configuration: CSRF token, open conversation, emoji allowlist, dock mode. Not executable. */
+export function messagesConfig({ csrf, conversationId = null, reactions, dock = false }) {
+  const config = JSON.stringify({ csrf, conversationId, reactions, ...(dock ? { dock: true } : {}) }).replace(/</g, '\\u003c')
+  return `<script type="application/json" id="msg-config">${config}</script>`
 }

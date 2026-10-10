@@ -21,6 +21,12 @@ test('profile context rejects private, contact-token, foreign and ambiguous URLs
     'https://www.unlinked.ai/people/%73eed']) assert.equal(parseUnlinkedProfileContext(url), null)
 })
 
+test('Message links open Unlinked Messages with only the canonical public profile', async () => {
+  const { unlinkedMessagesUrl } = await import('../src/utils/openchat-profile-context.mjs')
+  assert.equal(unlinkedMessagesUrl(unlinkedProfileContext('seed-person')), 'https://www.unlinked.ai/messages?profile=https%3A%2F%2Fwww.unlinked.ai%2Fpeople%2Fseed-person')
+  for (const privateContext of [undefined, null, 'https://www.unlinked.ai/profile', 'https://www.unlinked.ai/people/seed?email=private', { email: 'private@example.invalid' }]) assert.equal(unlinkedMessagesUrl(privateContext), 'https://www.unlinked.ai/messages')
+})
+
 test('compose links contain only explicit public context; private or unrelated fields cannot select a recipient', async () => {
   const { openChatProfileMessageUrl } = await import('../src/utils/openchat-profile-context.mjs')
   const href = new URL(openChatProfileMessageUrl(unlinkedProfileContext('seed-person')))

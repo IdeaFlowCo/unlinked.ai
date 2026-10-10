@@ -28,7 +28,8 @@ export function installConnectionFeedback() {
     { key: 'network', href: '/invitations', label: 'My Network', suffix: 'pending' },
     { key: 'notifications', href: '/notifications', label: 'Notifications', suffix: 'new' },
   ].map(value => ({ ...value, node: document.querySelector('a.nav-ico[href="' + value.href + '"]') }))
-  if (!links.some(value => value.node)) return
+  const messagesLink = document.querySelector('a[data-nav-messages]')
+  if (!links.some(value => value.node) && !messagesLink) return
   let busy = false, stopped = false, last = 0
   async function refresh() {
     if (document.hidden || busy || stopped || Date.now() - last < 2000) return
@@ -48,6 +49,16 @@ export function installConnectionFeedback() {
           if (!badge) { badge = document.createElement('span'); badge.className = 'badge'; badge.setAttribute('aria-hidden', 'true'); node.append(badge) }
           badge.textContent = text
         } else badge?.remove()
+      }
+      // The Messages count, unless the Messages page or an open dock already keeps it live.
+      const dock = document.getElementById('msg-dock')
+      const live = (document.getElementById('msg-app') && !dock) || (dock?.dataset.expanded === 'true' && matchMedia('(min-width: 1024px)').matches && ['live', 'polling'].includes(dock.dataset.stream))
+      if (messagesLink && !live && Number.isSafeInteger(counts.messages) && counts.messages >= 0) {
+        const text = counts.messages > 99 ? '99+' : String(counts.messages)
+        messagesLink.querySelector('.nav-count')?.remove()
+        if (counts.messages) { const count = document.createElement('span'); count.className = 'nav-count'; count.setAttribute('aria-label', text + ' unread'); count.textContent = text; messagesLink.append(count) }
+        const bar = document.getElementById('msg-dock-count')
+        if (bar) { bar.textContent = counts.messages ? text : ''; bar.hidden = !counts.messages }
       }
     } catch { /* Keep the last confirmed counts until the next successful read. */ }
     finally { clearTimeout(timeout); busy = false }

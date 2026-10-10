@@ -19,6 +19,16 @@ export function parseUnlinkedProfileContext(value) {
   return canonical === value ? canonical : null
 }
 
+/**
+ * Unlinked's own Messages (docs/openchat-message.md): the server resolves the
+ * public profile to its member's OpenChat conversation; nothing is sent on open.
+ * Without valid public context it opens the inbox.
+ */
+export function unlinkedMessagesUrl(profileUrl) {
+  const context = parseUnlinkedProfileContext(profileUrl)
+  return context ? `${UNLINKED_PROFILE_ORIGIN}/messages?profile=${encodeURIComponent(context)}` : `${UNLINKED_PROFILE_ORIGIN}/messages`
+}
+
 /** The OpenChat-owned compose receiver leaves recipient choice to the sender. */
 export function openChatProfileMessageUrl(profileUrl) {
   const entry = new URL('https://chat.ideaflow.app/app/')

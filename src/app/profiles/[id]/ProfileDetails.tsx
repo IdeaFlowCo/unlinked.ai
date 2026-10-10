@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import EditProfileForm from "./EditProfileForm";
 import { createClient } from "@/utils/supabase/client";
-import { openChatProfileMessageUrl } from "../../../utils/openchat-profile-context.mjs";
+import { unlinkedMessagesUrl } from "../../../utils/openchat-profile-context.mjs";
 import { Pencil2Icon, LockClosedIcon } from "@radix-ui/react-icons";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"] & {
@@ -170,9 +170,9 @@ export default function ProfileDetails({ profile }: { profile: Profile }) {
             </Flex>
             <Box mt="3">
               <Button asChild variant="soft">
-                <a href={openChatProfileMessageUrl()} target="_blank" rel="noopener noreferrer">Message with OpenChat ↗</a>
+                <a href={unlinkedMessagesUrl()}>Open Messages</a>
               </Button>
-              <Text as="p" size="2" color="gray" mt="2">Choose a recipient in OpenChat. Private profile details stay in Unlinked.</Text>
+              <Text as="p" size="2" color="gray" mt="2">Your Unlinked Messages inbox on the OpenChat network. Private profile details stay in Unlinked.</Text>
             </Box>
           </Box>
         </Flex>
