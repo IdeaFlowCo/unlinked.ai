@@ -61,14 +61,14 @@ test('signed-in profile to People navigation reuses public chunks with live auth
   const session = callback.response.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
   const profile = await request(`/people/${id}`, session)
   assert.equal(profile.response.status, 200)
-  assert.equal(profile.response.headers.get('cache-control'), 'no-store')
+  assert.equal(profile.response.headers.get('cache-control'), 'private, no-cache')
   assert.match(profile.body, /Ada Lovelace/)
   assert.match(profile.body, /href="\/network"/)
   const heldReads = chunkReads, heldPointers = pointerReads, heldOwner = ownerReads
   const people = await request('/network', session)
   assert.equal(people.response.status, 200)
   assert.match(people.body, /Ada Lovelace/)
-  assert.equal(people.response.headers.get('cache-control'), 'no-store')
+  assert.equal(people.response.headers.get('cache-control'), 'private, no-cache')
   assert.equal(chunkReads, heldReads)
   assert.ok(pointerReads > heldPointers)
   assert.ok(ownerReads > heldOwner)
@@ -104,4 +104,67 @@ test('signed-in profile to People navigation reuses public chunks with live auth
       photoRefresh: JSON.parse(refreshed.body), ownerRevoked: JSON.parse(denied.body), publicationRevoked: JSON.parse(revoked.body),
     }, null, 2))
   }
+})
+
+test('signed-in pages reuse one account network read per owner; a finished POST drops it and sign-out clears site data', async t => {
+  const owner = { ownerId: 'cache-owner', userId: 'cache-user' }
+  const person = (id, name) => ({ id, name, positions: [], education: [], skills: [] })
+  const legacy = { state: 'published', complete: true, revision: 'legacy-public-v1:' + 'b'.repeat(64), profiles: [person('12345678-1234-1234-1234-123456789abc', 'Ada Lovelace')], connections: [] }
+  let importLists = 0
+  const backend = { adapter: {}, listImportIds: async () => { importLists++; return [] }, listImportJobIds: async () => [], readResource: async () => null }
+  const readPublishedSnapshot = createMemberPublicIndex({ readLegacy: async () => legacy, discover: async () => [], getBackend: async () => backend, publicPeople: { read: async () => null } })
+  let handler
+  const server = createServer((req, res) => void handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`
+  const make = options => createPrivateBrowserHandler({ baseUrl: endpoint.replace('http:', 'https:'), dataMode: 'private_live',
+    login: { begin: async () => ({ location: 'https://identity.invalid/login', transaction: { state: 'state' } }),
+      finish: async () => ({ issuer: 'https://identity.invalid', subject: 'cache', displayName: 'Cache Member' }) },
+    resolveOwner: async () => owner, signup: async () => owner, getBackend: async () => backend,
+    issueAccountGrant: async () => ({ accessToken: 'synthetic-test-grant' }), revokeAccountGrant: async () => {},
+    readPublishedSnapshot, ...options })
+  handler = make({})
+  const signIn = async () => {
+    const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+    const loginCookie = start.headers.getSetCookie()[0].split(';')[0]
+    const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=test&state=state', { redirect: 'manual', headers: { Cookie: loginCookie } })
+    assert.equal(callback.status, 303)
+    return callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  }
+  const session = await signIn()
+  importLists = 0
+  const first = await fetch(endpoint + '/network', { headers: { Cookie: session } })
+  assert.equal(first.status, 200)
+  assert.equal(first.headers.get('cache-control'), 'private, no-cache')
+  assert.equal(first.headers.get('vary'), 'Cookie')
+  const second = await fetch(endpoint + '/network?q=ada', { headers: { Cookie: session } })
+  assert.equal(second.status, 200)
+  assert.equal(importLists, 1, 'the second page view reuses the owner network read')
+  // APIs keep no-store and no browser cache eligibility.
+  const api = await fetch(endpoint + '/api/people', { headers: { Cookie: session } })
+  assert.equal(api.headers.get('cache-control'), 'no-store')
+  // Any finished POST by the owner (even a rejected one) drops the kept read.
+  const post = await fetch(endpoint + '/anything', { method: 'POST', headers: { Cookie: session } })
+  assert.notEqual(post.status, 200)
+  await new Promise(resolve => setTimeout(resolve, 20))
+  await fetch(endpoint + '/network', { headers: { Cookie: session } })
+  assert.equal(importLists, 2, 'a mutating POST invalidates the owner network read')
+  // networkFreshMs 0 keeps next-request reads.
+  handler = make({ networkFreshMs: 0 })
+  const fresh = await signIn()
+  importLists = 0
+  await fetch(endpoint + '/network', { headers: { Cookie: fresh } })
+  await fetch(endpoint + '/network', { headers: { Cookie: fresh } })
+  assert.equal(importLists, 2)
+  assert.throws(() => make({ networkFreshMs: -1 }), /explicit_private_browser_configuration_required/)
+  // Sign-out evicts this origin's cached and back/forward pages.
+  handler = make({})
+  const leaving = await signIn()
+  const body = await (await fetch(endpoint + '/network', { headers: { Cookie: leaving } })).text()
+  const csrf = body.match(/name="csrf" value="([^"]+)"/)[1]
+  const out = await fetch(endpoint + '/logout', { method: 'POST', redirect: 'manual',
+    headers: { Cookie: leaving, Origin: endpoint.replace('http:', 'https:').replace(/\/$/, ''), 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(csrf)}` })
+  assert.equal(out.status, 303)
+  assert.equal(out.headers.get('clear-site-data'), '"cache"')
 })
