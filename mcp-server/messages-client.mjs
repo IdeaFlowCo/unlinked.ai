@@ -254,7 +254,7 @@ function messagesClient(config) {
     // An open options menu is not redrawn under the pointer.
     if (!head || head.querySelector('details[open]')) return
     const peer = conversation && peerOf(conversation), title = conversation ? titleOf(conversation) : 'Conversation'
-    const presence = peer ? (peer.isBot ? 'Bot' : peer.presence === 'available' ? 'Active now' : peer.presence === 'away' ? 'Away' : peer.lastSeenAt ? `Seen ${ago(peer.lastSeenAt)} ago` : '') : conversation ? `${conversation.participants.length} people` : ''
+    const presence = peer ? (peer.isBot ? 'Bot' : peer.presence === 'available' ? 'Active now' : peer.presence === 'away' ? 'Away' : peer.lastSeenAt ? `Seen ${ago(peer.lastSeenAt)} ago` : '') : conversation ? `${conversation.participants.length} ${conversation.participants.length === 1 ? 'person' : 'people'}` : ''
     // The server links partners who claimed a published profile; a profile Message link is the fallback.
     const profile = peer?.profileId || profiles[state.open]
     const item = (label, onclick, extra = {}) => h('button', { type: 'button', onclick: event => { const details = event.currentTarget.closest('details'); details.open = false; details.querySelector('summary').focus(); onclick() }, ...extra }, label)

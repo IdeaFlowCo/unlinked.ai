@@ -191,7 +191,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     // One lookup in flight per member; after a failure, wait 30 s before asking OpenChat again.
     const key = session.owner.ownerId
     if (participantLookups.has(key)) return participantLookups.get(key)
-    if (Date.now() - (participantBackoff.get(key) ?? 0) < 30000) return new Map()
+    if (Date.now() - (participantBackoff.get(key) ?? 0) < 30000) {
+      // During the backoff, links already known stay; nothing new is asked.
+      const known = new Map(), cache = participantProfiles.get(key)
+      for (const id of userIds) { const hit = cache?.get(id); if (hit?.profileId && Date.now() - hit.at < 10 * 60000) known.set(id, hit.profileId) }
+      return known
+    }
     const pending = lookupParticipantProfiles(session, userIds).catch(error => { participantBackoff.set(key, Date.now()); while (participantBackoff.size > 500) participantBackoff.delete(participantBackoff.keys().next().value); throw error }).finally(() => participantLookups.delete(key))
     participantLookups.set(key, pending)
     return pending

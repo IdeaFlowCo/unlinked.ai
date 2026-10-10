@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler, notificationTargetFor } from '../mcp-server/private-browser.mjs'
 import { projectConversation, projectMessage, REACTION_EMOJI } from '../mcp-server/messaging-proxy.mjs'
+import { ONBOARDING_STYLE } from '../mcp-server/private-onboarding-style.mjs'
+import { MESSAGES_CLIENT_SOURCE } from '../mcp-server/messages-client.mjs'
 import { connectOpenChatSocket, encodeEvent, parseEventPacket } from '../mcp-server/openchat-socket.mjs'
 
 const TOKEN = 'fixture-embedded-openchat-jwt'
@@ -426,4 +428,11 @@ test('a failing partner lookup backs off and never blocks the inbox', async t =>
     assert.equal(listed.status, 200); assert.equal((await listed.json()).conversations.length, 1)
   }
   assert.equal(calls, 1, 'one failed lookup, then a 30 s backoff')
+})
+
+test('tiny images get a visible tile, the dock clears the feedback button, and group sizes read naturally', () => {
+  assert.match(ONBOARDING_STYLE, /\.msg-image img\{[^}]*min-width:96px;min-height:96px;[^}]*object-fit:contain/)
+  const right = Number(/\.msg-dock\{position:fixed;right:(\d+)px/.exec(ONBOARDING_STYLE)[1])
+  assert.ok(right >= 196, 'the floating feedback button and its label reach about 180 px from the right edge')
+  assert.match(MESSAGES_CLIENT_SOURCE, /=== 1 \? 'person' : 'people'/)
 })
