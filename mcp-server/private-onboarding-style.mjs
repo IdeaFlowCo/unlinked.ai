@@ -170,8 +170,14 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .omni-name{font-size:14px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
 .unlinked-onboarding .omni-name mark{color:var(--brand-d);background:transparent;font-weight:700}
 .unlinked-onboarding .omni-known{margin-left:6px;padding:0 6px;border-radius:99px;background:var(--tint);color:var(--brand-d);font-size:11px;font-weight:600;vertical-align:1px;white-space:nowrap}
+.unlinked-onboarding .omni-membership{margin-left:6px;padding:0 6px;font-size:11px;vertical-align:1px;white-space:nowrap}
+.unlinked-onboarding .omni-shadow{display:inline-flex;border-radius:99px;background:var(--page);color:var(--muted);font-weight:400}
 .unlinked-onboarding .omni-subtitle{font-size:12px;line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unlinked-onboarding .omni-status{padding:10px 16px;border-top:1px solid var(--line);background:var(--page);font-size:11px;color:var(--muted)}
+.unlinked-onboarding .omni-status.omni-searching{display:flex;align-items:center;gap:8px;color:var(--brand-d);font-weight:600}
+.unlinked-onboarding .omni-searching::before{content:"";width:12px;height:12px;flex:0 0 12px;border:2px solid var(--line2);border-top-color:var(--brand-d);border-radius:50%;animation:omni-search-spin .8s linear infinite}
+@keyframes omni-search-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.unlinked-onboarding .omni-searching::before{animation:none}}
 .unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 84px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
 /* iOS Safari and WKWebView zoom into fields under 16px on focus. */
 @media(max-width:900px),(pointer:coarse){.unlinked-onboarding .header-search input[type=search]{font-size:16px}}
