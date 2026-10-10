@@ -140,7 +140,8 @@ export { publishedPeopleFor }
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000 }) {
+  if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -293,13 +294,34 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     const entry = knownCache.get(owner.ownerId)
     if ((!entry || Date.now() - entry.at >= KNOWN_FRESH_MS) && !entry?.pending) {
       const held = entry ?? { ids: null, at: 0 }
-      held.pending = (async () => new Set((await connectedProfiles(owner, await createAccountNetwork({ owner, getBackend }).readNetwork(), publicReader)).map(person => person.id)))()
+      held.pending = (async () => new Set((await connectedProfiles(owner, await accountNetwork(owner), publicReader)).map(person => person.id)))()
         .then(ids => { knownCache.delete(owner.ownerId); knownCache.set(owner.ownerId, { ids, at: Date.now(), pending: null }); while (knownCache.size > KNOWN_CAPACITY) knownCache.delete(knownCache.keys().next().value) },
           () => { held.pending = null })
       if (!entry) knownCache.set(owner.ownerId, held)
     }
     return entry?.ids ?? null
   }
+  // A member's own network read (every published import, the legacy link,
+  // invites and accepted requests) costs many backend round trips, so signed-in
+  // page views reuse one read per owner while younger than `networkFreshMs`.
+  // Any finished POST by that owner (except /search) drops the entry, so
+  // accepting, adding or revoking shows on the next page; background import
+  // completion is visible within the window. /export and owner AI search keep
+  // their own live reads.
+  const networkCache = new Map(), NETWORK_CACHE_CAPACITY = 64
+  const accountNetwork = async owner => {
+    const key = `${owner.ownerId}\u0000${owner.userId}`
+    const held = networkCache.get(key)
+    if (held && (held.pending || Date.now() - held.at < networkFreshMs)) return held.pending ?? held.value
+    const entry = { pending: null, value: null, at: 0 }
+    entry.pending = createAccountNetwork({ owner, getBackend }).readNetwork().then(
+      value => { Object.assign(entry, { value, at: Date.now(), pending: null }); return value },
+      error => { if (networkCache.get(key) === entry) networkCache.delete(key); throw error })
+    networkCache.delete(key); networkCache.set(key, entry)
+    while (networkCache.size > NETWORK_CACHE_CAPACITY) networkCache.delete(networkCache.keys().next().value)
+    return entry.pending
+  }
+  const dropAccountNetwork = owner => { if (owner?.ownerId) networkCache.delete(`${owner.ownerId}\u0000${owner.userId}`) }
   const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || (pathname !== '/people/add' && /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname)) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
   let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
@@ -546,7 +568,17 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const inviteEmailProps = async owner => memberEmail?.sending ? { emailInvites: true, replyAddress: (await bounded(() => memberEmail.settings(owner), null))?.address ?? null } : { emailInvites: false }
   let lastPrune = Date.now()
   return async (request, response) => {
-    response.setHeader('Cache-Control', 'no-store')
+    // GET page navigations allow the browser's back/forward cache, so Back
+    // from a profile restores the search results instantly without a request.
+    // `private, no-cache` still forces revalidation on normal navigations, and
+    // sign-out sends Clear-Site-Data so restored pages die with the session.
+    // APIs, auth, export, assets and every POST stay no-store.
+    // Not back/forward-cache eligible: photo bytes (content-versioned header of
+    // their own) and capability-URL contact cards, which stay no-store.
+    const navigationPath = new URL(request.url, base).pathname
+    const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/')
+    response.setHeader('Cache-Control', navigation ? 'private, no-cache' : 'no-store')
+    if (navigation) response.setHeader('Vary', 'Cookie')
     response.setHeader('Referrer-Policy', 'strict-origin')
     response.setHeader('X-Content-Type-Options', 'nosniff')
     response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
@@ -555,6 +587,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     // RFC 8058 one-click unsubscribe is posted by mail providers, without this
     // origin; its signed token is the whole authority and it only turns email off.
     const oneClick = request.method === 'POST' && memberEmail && new URL(request.url, base).pathname === '/email/unsubscribe'
+    // After the mutation finished, never mid-request; /search reads only.
+    if (request.method === 'POST' && new URL(request.url, base).pathname !== '/search') {
+      const posted = sessionFor(request)?.owner
+      if (posted) response.once('finish', () => dropAccountNetwork(posted))
+    }
     if (request.method === 'POST' && !oneClick && request.headers.origin !== base.origin) { if (connectionPost(request)) connectionFailure(response, 'This page could not be verified. Refresh Unlinked and try again.', 403); else response.writeHead(403).end(); return }
     try {
       const url = new URL(request.url, base)
@@ -1190,7 +1227,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // Start reading the public index now; the contact lookup below joins it.
         const warming = typeof readPublishedSnapshot === 'function' ? publicReader.lookup({ ids: [] }).catch(() => null) : null
         try {
-          const connections = (await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()).assertions.filter(row => row.category === 'connections')
+          const connections = (await accountNetwork(session.owner)).assertions.filter(row => row.category === 'connections')
           // One card per person, so the count and the preview never repeat someone.
           const cards = await personCards(connections)
           connectionCount = cards.length
@@ -1365,7 +1402,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         journey(response, view); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/network') {
-        const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
+        const network = await accountNetwork(session.owner)
         const connections = network.assertions.filter(row => row.category === 'connections')
         const typed = (url.searchParams.get('q') ?? '').trim(), filter = typed.toLowerCase()
         if (filter.length > 256) throw new Error('network_filter_limit')
@@ -1436,7 +1473,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (signup && request.method === 'GET' && contactDetail) {
         let id
         try { id = decodeURIComponent(contactDetail[1]) } catch { response.writeHead(404).end(); return }
-        const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
+        const network = await accountNetwork(session.owner)
         const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
         if (!row) { response.writeHead(404).end(); return }
         const [contact] = await contactRows([row], pageReader())
@@ -1562,7 +1599,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             let result = null
             try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) }) }
             catch { /* The page still shows the people this account knows, with a notice. */ }
-            const props = jobProps(await jobResources()), network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
+            const props = jobProps(await jobResources()), network = await accountNetwork(session.owner)
             const reader = pageReader()
             const connections = network.assertions.filter(row => row.category === 'connections')
             // On failure, the account's own people for the same words stand in for the AI picks.
@@ -1640,6 +1677,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           }
           // The next sign-in in this browser shows the Ideaflow account chooser.
           response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS), browserSessionCookie(AUTO_SIGNIN_COOKIE, '1')])
+          response.setHeader('Clear-Site-Data', '"cache"')
           if (url.pathname === '/logout') { redirect(response, '/'); return }
           // Switch account starts that sign-in now. The return page is only ever
           // one of returnPath's local pages, never a request-chosen URL.
