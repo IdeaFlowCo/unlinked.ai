@@ -26,7 +26,7 @@ function omniSearch() {
     ] : []),
     { name: 'Scan a card', subtitle: 'Meet someone new', href: '/scan' },
   ]
-  let options = [], active = -1, timer, controller, generation = 0, composing = false, tapping = false, warmedAt = 0
+  let options = [], active = -1, timer, loadingTimer, controller, generation = 0, composing = false, tapping = false, warmedAt = 0
   // Answers seen on this page, so retyping or backspacing redraws at once.
   // Memory only: cleared with the page, never stored as history.
   const seen = new Map()
@@ -41,7 +41,8 @@ function omniSearch() {
   // Focus asks the server to have the directory ready before the first keystroke.
   const warm = () => { if (Date.now() - warmedAt < 10000) return; warmedAt = Date.now(); fetch('/search-suggestions?q=', { credentials: 'same-origin', cache: 'no-store' }).catch(() => {}) }
   const query = () => input.value.trim()
-  const cancel = () => { clearTimeout(timer); controller?.abort(); generation++; list.setAttribute('aria-busy', 'false') }
+  const stopLoading = () => { clearTimeout(loadingTimer); status.classList.remove('omni-searching'); list.setAttribute('aria-busy', 'false') }
+  const cancel = () => { clearTimeout(timer); stopLoading(); controller?.abort(); generation++ }
   const activate = index => {
     active = index
     options.forEach((option, i) => option.setAttribute('aria-selected', String(i === index)))
@@ -81,10 +82,13 @@ function omniSearch() {
       highlight(name, row.name, term)
       // Marked for the signed-in member's own connections, as on /network.
       if (row.known) name.append(element('span', 'omni-known', 'You know'))
+      if (kind === 'People' && (row.presence === 'member' || row.presence === 'shadow')) {
+        name.append(element('span', 'omni-membership ' + (row.presence === 'member' ? 'membership-member' : 'omni-shadow'), row.presence === 'member' ? 'On Unlinked' : 'Not on Unlinked'))
+      }
       copy.append(name, element('span', 'omni-subtitle', row.subtitle || kind))
       option.append(icon, copy)
       // Keep DOM focus on the combobox so pointer selection and keyboard agree.
-      option.addEventListener('pointerdown', event => { if (event.button === 0 && event.pointerType !== 'touch') event.preventDefault() })
+      option.addEventListener('pointerdown', event => { if (event.button === 0 && event.pointerType !== 'touch' && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) event.preventDefault() })
       const index = options.length
       option.addEventListener('pointermove', () => { if (active !== index) activate(index) })
       options.push(option); group.append(option)
@@ -101,7 +105,7 @@ function omniSearch() {
     options = []; active = -1; input.removeAttribute('aria-activedescendant'); list.replaceChildren()
     const people = Array.isArray(result.people) ? result.people.slice(0, 5) : []
     const companies = Array.isArray(result.companies) ? result.companies.slice(0, 3) : []
-    addGroup('People', people.map(row => ({ name: row.name, subtitle: row.headline || row.location || 'View profile', photo: row.photo, known: row.known === true, href: '/people/' + encodeURIComponent(row.id) })), 'People', term)
+    addGroup('People', people.map(row => ({ name: row.name, subtitle: row.headline || row.location || 'View profile', photo: row.photo, known: row.known === true, presence: row.presence, href: '/people/' + encodeURIComponent(row.id) })), 'People', term)
     addGroup('Companies', companies.map(row => ({ name: row.name, subtitle: 'Company · View people and details', href: '/companies/' + encodeURIComponent(row.name) })), 'Companies', term)
     const shortcuts = destinations.filter(row => !term || row.name.toLowerCase().includes(term.toLowerCase()))
     addGroup('Go to', shortcuts, 'Go to', term)
@@ -117,6 +121,8 @@ function omniSearch() {
     if (seen.has(term)) { shown = seen.get(term); draw(term, shown); return }
     draw(term, narrow(term, shown), 'Finding people and companies…')
     list.setAttribute('aria-busy', 'true')
+    // Fast answers need no flash; a slower lookup gets a visible status cue.
+    loadingTimer = setTimeout(() => { if (current === generation) status.classList.add('omni-searching') }, 200)
     timer = setTimeout(async () => {
       const requestController = new AbortController()
       controller = requestController
@@ -131,7 +137,7 @@ function omniSearch() {
         if (current === generation && document.activeElement === input) draw(term, {}, 'Suggestions unavailable. Press Enter to search all results.')
       } finally {
         clearTimeout(timeout)
-        if (current === generation) list.setAttribute('aria-busy', 'false')
+        if (current === generation) stopLoading()
       }
     }, 100)
   }
@@ -147,7 +153,10 @@ function omniSearch() {
       event.preventDefault()
       if (panel.hidden) { update(); return }
       if (options.length) activate(event.key === 'ArrowDown' ? (active + 1) % options.length : (active <= 0 ? options.length : active) - 1)
-    } else if (event.key === 'Enter' && !panel.hidden && options[active]) { event.preventDefault(); options[active].click() }
+    } else if (event.key === 'Enter' && !panel.hidden && options[active]) {
+      event.preventDefault()
+      options[active].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, metaKey: event.metaKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey }))
+    }
   })
   form.addEventListener('submit', close)
   // A tap on a suggestion may blur the field (iOS) before its click arrives;
