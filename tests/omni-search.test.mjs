@@ -52,7 +52,7 @@ test('browser suggestions are public-only, uncached and reject malformed paramet
   const request = path => fetch(endpoint + path, { redirect: 'manual' })
   const response = await request('/search-suggestions?q=ali')
   assert.equal(response.status, 200)
-  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.match(response.headers.get('cache-control'), /^no-store/)
   assert.equal((await response.json()).people[0].name, 'Ali')
   assert.equal(snapshots, 1)
   for (const query of ['', '?q=ali&q=acme', '?q=ali&ownerId=other', '?q=' + 'x'.repeat(201)]) {
@@ -85,7 +85,8 @@ test('every header keeps native search and QR navigation with progressively enha
   assert.match(TOP_BAR_SCRIPT, /search-suggestions/)
   // Snappy and mobile-safe: short debounce, page-memory answers, focus warm-up,
   // no iOS autocorrect, and native filters carried into "See all results".
-  assert.match(TOP_BAR_SCRIPT, /\}, 120\)/)
+  assert.match(TOP_BAR_SCRIPT, /\}, 100\)/)
+  assert.match(TOP_BAR_SCRIPT, /omni-known/)
   assert.match(TOP_BAR_SCRIPT, /search-suggestions\?q='/)
   assert.match(TOP_BAR_SCRIPT, /autocorrect', 'off'/)
   assert.match(TOP_BAR_SCRIPT, /new FormData\(form\)/)
@@ -150,19 +151,106 @@ test('warm starts one background read and returns nothing', async () => {
   assert.equal(reads, 1)
 })
 
-test('the name-only shortcut returns exactly what the full ranking would', async () => {
-  const first = ['Ali', 'Alice', 'Allison', 'Alan', 'Jacob', 'Maya', 'Priya'], last = ['Smith', 'Cole', 'Chen', 'Shah', 'Alder']
+test('the prefix index finds exactly the people a full scan would, without scanning', async () => {
+  const first = ['Ali', 'Alice', 'Allison', 'Alan', 'Jacob', 'Maya', 'Priya', 'Andrew'], last = ['Smith', 'Cole', 'Chen', 'Shah', 'Alder']
   const profiles = []
-  for (let i = 0; i < 700; i++) profiles.push({ id: 'p' + i, name: first[i % first.length] + ' ' + last[Math.floor(i / 7) % last.length], headline: ['Investor at Alder Capital', 'Engineer at Acme', 'Alice fan club'][i % 3], positions: [{ title: 'Engineer', company: ['Acme Labs', 'Alder Capital', 'Smithy'][i % 3] }], education: [], skills: ['Alchemy'] })
-  const snapshot = { state: 'published', complete: true, revision: 'shortcut-v1', profiles, connections: [] }
-  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => snapshot })
-  const normalized = value => value.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim()
-  const ordered = [...profiles].sort((a, b) => normalized(a.name) < normalized(b.name) ? -1 : normalized(a.name) > normalized(b.name) ? 1 : a.id < b.id ? -1 : 1)
-  const text = p => ({ name: words(p.name), text: words([p.name, p.headline, ...p.positions.flatMap(x => [x.title, x.company]), ...p.skills].join(' ')) })
-  for (const query of ['al', 'ali', 'alice', 'alice sm', 'smith', 'alder', 'jacob cole', 'acme', 'engineer', 'al ch', 'priya zz']) {
-    const search = normalized(query), matcher = createQueryMatcher(search)
-    const priority = name => normalized(name) === search ? 2 : normalized(name).startsWith(search) ? 1 : 0
-    const expected = rankMatches(ordered, matcher, text).rows.sort((a, b) => priority(b.name) - priority(a.name)).slice(0, 5).map(p => p.id)
-    assert.deepEqual((await reader.suggest({ query })).people.map(p => p.id), expected, query)
+  for (let i = 0; i < 700; i++) profiles.push({ id: 'p' + i, name: first[i % first.length] + ' ' + last[Math.floor(i / 8) % last.length], headline: ['Investor at Alder Capital', 'Engineer at Acme', 'Alice fan club'][i % 3], about: 'Loves zebras', positions: [{ title: 'Engineer', company: ['Acme Labs', 'Alder Capital', 'Smithy'][i % 3], description: 'quokka' }], education: [], skills: ['Alchemy'] })
+  const snapshot = { state: 'published', complete: true, revision: 'prefix-v1', profiles, connections: [] }
+  const { buildSuggestIndex, suggestPeople, suggestTerms } = await import('../src/utils/public-people/suggest-index.mjs')
+  const { wordForms } = await import('../src/utils/public-people/text-match.mjs')
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => snapshot, reuse: true })
+  await reader.suggest({ query: 'al' })
+  // Reference: every profile tested word by word with the documented rules.
+  const reference = query => {
+    const terms = suggestTerms(query)
+    return profiles.filter(p => {
+      const name = words(p.name), text = [...name, ...words([p.headline, ...p.positions.flatMap(x => [x.title, x.company]), ...p.skills].join(' '))]
+      return terms.every((term, i) => wordForms(term).some(form => name.some(w => w === form || (form.length >= 2 && w.startsWith(form))) || text.some(w => w === form || (form.length >= 4 && w.startsWith(form))))
+        || (i === terms.length - 1 && (name.some(w => w.startsWith(term)) || (term.length >= 2 && text.some(w => w.startsWith(term))))))
+    }).map(p => p.id).sort()
   }
+  const data = { ordered: [...profiles].map(p => ({ id: p.id, name: p.name, headline: p.headline })), details: new Map(profiles.map(p => [p.id, p])), companyList: [] }
+  const index = buildSuggestIndex(data)
+  for (const query of ['al', 'ali', 'alice', 'alice sm', 'smith', 'alder', 'jacob cole', 'jacob c', 'acme', 'engineer', 'engineers', 'al ch', 'priya zz', 'zebras', 'quokka', 'andrew an', 'investor alder', 'engineer ac', 'alder cap']) {
+    assert.deepEqual(suggestPeople(index, data, query, { limit: 10000 }).map(p => p.id).sort(), reference(query), query)
+  }
+  // Free text outside the professional fields is left to the full search.
+  assert.deepEqual((await reader.suggest({ query: 'zebras' })).people, [])
+  // The last word completes from one letter: “jacob c” finds Jacob Cole/Chen.
+  assert.ok((await reader.suggest({ query: 'jacob c' })).people.every(p => /^Jacob C/.test(p.name)))
+  // Names with every word come first; leading name matches next.
+  const top = (await reader.suggest({ query: 'alice' })).people
+  assert.ok(top.every(p => p.name.startsWith('Alice')))
+})
+
+test('suggestions are one per person and mark people the member knows first', async () => {
+  const profiles = [
+    { id: 'shadow-roger', name: 'Roger Cole', headline: 'Founder', linkedinUrl: 'https://www.linkedin.com/in/roger-cole', positions: [], education: [], skills: [] },
+    { id: 'member-roger', name: 'Roger Cole', headline: 'Founder at Sleep Intelligence', linkedinUrl: 'https://www.linkedin.com/in/roger-cole', positions: [], education: [], skills: [] },
+    { id: 'other-roger', name: 'Roger Cole', headline: 'Chef', positions: [], education: [], skills: [] },
+    { id: 'roger-colefax', name: 'Roger Colefax', headline: 'Pilot', positions: [], education: [], skills: [] },
+  ]
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'known-v1', profiles, connections: [], members: ['member-roger'] }) })
+  const anonymous = (await reader.suggest({ query: 'roger cole' })).people
+  // Same LinkedIn address: one suggestion, the member. A namesake stays separate.
+  assert.deepEqual(anonymous.map(p => p.id).slice(0, 2), ['member-roger', 'other-roger'])
+  assert.equal(anonymous.filter(p => p.name === 'Roger Cole').length, 2)
+  assert.ok(anonymous.every(p => p.known === undefined))
+  const signedIn = (await reader.suggest({ query: 'roger col', known: new Set(['other-roger']) })).people
+  assert.equal(signedIn[0].id, 'other-roger'); assert.equal(signedIn[0].known, true)
+  assert.ok(signedIn.slice(1).every(p => !p.known))
+  await assert.rejects(reader.suggest({ query: 'roger', known: ['other-roger'] }), { status: 400 })
+})
+
+test('a live-size index answers a keystroke in a few milliseconds', async () => {
+  const first = ['Ali', 'Alice', 'Jacob', 'Maya', 'Priya', 'Roger', 'Sam', 'Lee', 'Noor', 'Omar'], last = ['Smith', 'Cole', 'Chen', 'Shah', 'Alder', 'Kim', 'Park', 'Garcia']
+  const profiles = Array.from({ length: 25000 }, (_, i) => ({ id: 'p' + i, name: `${first[i % 10]} ${last[(i >> 3) % 8]}${i}`, headline: ['Investor at Alder Capital', 'Engineer at Acme', 'Founder'][i % 3], positions: [{ title: 'Engineer', company: 'Company ' + (i % 900) }], education: [], skills: ['React'] }))
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'size-v1', profiles, connections: [] }), reuse: true })
+  await reader.suggest({ query: 'al' })
+  const timings = []
+  for (const query of ['al', 'ali', 'alice', 'alice sm', 'jacob cole', 'roger c', 'acme', 'company 12', 'engineer', 'founder', 'investor alder', 'react', 'zz']) {
+    const started = performance.now(); await reader.suggest({ query }); timings.push(performance.now() - started)
+  }
+  timings.sort((a, b) => a - b)
+  assert.ok(timings[Math.floor(timings.length / 2)] < 30, `median ${timings[Math.floor(timings.length / 2)]} ms`)
+})
+
+test('signed-in suggestions mark people the member knows, read off the keystroke path and kept per member', async t => {
+  const { COMBINED_UPLOAD_CONSENT } = await import('../src/utils/private-import/consent.mjs')
+  const owner = { ownerId: 'suggest-owner', userId: 'suggest-user' }
+  const importId = 'e'.repeat(64), rowId = 'f'.repeat(64)
+  const resources = new Map([
+    [importId, { sourceOwnerId: owner.ownerId, sourceRevision: 1, deleted: false, payload: { id: importId, createdAt: Date.UTC(2026, 0, 1), status: 'indexed', assertionIds: [rowId], counts: { accepted: 1, indexed: 1, rejected: 0, skippedFiles: 0, failedFiles: 0 }, consent: COMBINED_UPLOAD_CONSENT } }],
+    [rowId, { sourceOwnerId: owner.ownerId, deleted: false, payload: { id: rowId, ownerId: owner.ownerId, importId, category: 'connections', fields: { 'first name': 'Roger', 'last name': 'Cole', url: 'https://www.linkedin.com/in/roger-cole' } } }],
+  ])
+  const profiles = [
+    { id: 'roger', name: 'Roger Cole', headline: 'Founder at Sleep Intelligence', linkedinUrl: 'https://www.linkedin.com/in/roger-cole', positions: [], education: [], skills: [] },
+    { id: 'roger-namesake', name: 'Roger Cole', headline: 'Chef', positions: [], education: [], skills: [] },
+  ]
+  let networkReads = 0, handler
+  const server = createServer((req, res) => void handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = 'http://127.0.0.1:' + server.address().port
+  handler = createPrivateBrowserHandler({ baseUrl: endpoint.replace('http:', 'https:'), login: { begin: async () => ({ location: 'https://identity.invalid/', transaction: { state: 'test' } }), finish: async () => ({ issuer: 'https://identity.invalid', subject: 'test' }) }, resolveOwner: async () => owner, signup: async () => owner, issueAccountGrant: async () => ({}), revokeAccountGrant: async () => {},
+    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'suggest-known', profiles, connections: [], members: ['roger', 'roger-namesake'] }),
+    selfClaims: { lookupSlug: async slug => slug === 'roger-cole' ? 'roger' : null, lookupName: async () => null, claimable: async () => null, claim: async () => null },
+    getBackend: async () => ({ adapter: {}, listImportIds: async () => { networkReads++; return [importId] }, listImportJobIds: async () => [], readResource: async (_, id) => structuredClone(resources.get(id) ?? null) }) })
+  const go = (path, cookie) => fetch(endpoint + path, { redirect: 'manual', headers: cookie ? { Cookie: cookie } : {} })
+  // Anonymous: no marks, no private reads.
+  assert.ok((await (await go('/search-suggestions?q=roger')).json()).people.every(p => !p.known))
+  assert.equal(networkReads, 0)
+  const start = await go('/login'), loginCookie = start.headers.getSetCookie()[0].split(';')[0]
+  const callback = await go('/auth/callback/ideaflow?state=test&code=test', loginCookie)
+  const cookie = callback.headers.getSetCookie().find(c => c.startsWith('__Host-ul-session=')).split(';')[0]
+  networkReads = 0
+  // The field's focus warm-up starts reading who the member knows; it answers nothing.
+  const warm = await go('/search-suggestions?q=', cookie)
+  assert.deepEqual(await warm.json(), { people: [], companies: [] })
+  assert.equal(warm.headers.get('vary'), 'Cookie'); assert.match(warm.headers.get('cache-control'), /no-store/)
+  for (let i = 0; i < 20 && networkReads === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  await new Promise(resolve => setTimeout(resolve, 30))
+  const people = (await (await go('/search-suggestions?q=roger+cole', cookie)).json()).people
+  assert.deepEqual(people.map(p => [p.id, p.known === true]), [['roger', true], ['roger-namesake', false]])
+  await go('/search-suggestions?q=roger+c', cookie)
+  assert.equal(networkReads, 1, 'the known set is kept, not reread per keystroke')
 })

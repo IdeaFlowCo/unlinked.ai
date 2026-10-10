@@ -55,6 +55,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .omni-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
 .unlinked-onboarding .omni-name{font-size:14px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
 .unlinked-onboarding .omni-name mark{color:var(--brand-d);background:transparent;font-weight:700}
+.unlinked-onboarding .omni-known{margin-left:6px;padding:0 6px;border-radius:99px;background:var(--tint);color:var(--brand-d);font-size:11px;font-weight:600;vertical-align:1px;white-space:nowrap}
 .unlinked-onboarding .omni-subtitle{font-size:12px;line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unlinked-onboarding .omni-status{padding:10px 16px;border-top:1px solid var(--line);background:var(--page);font-size:11px;color:var(--muted)}
 .unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 84px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}

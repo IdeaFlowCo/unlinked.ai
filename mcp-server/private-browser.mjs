@@ -241,6 +241,23 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // browser/crawler burst share it while retaining the site-wide minute bound.
   const PUBLIC_IN_FLIGHT = 8
   let suggestRequests = 0, suggestWindow = Date.now(), suggestBusy = 0
+  // The published people each signed-in member is connected to, for "You
+  // know" in header suggestions: the same one-person identity as /network
+  // (connectedProfiles). Read off the request path, kept 5 minutes, at most
+  // 500 members; the first keystrokes after sign-in may come back unmarked.
+  const knownCache = new Map(), KNOWN_FRESH_MS = 5 * 60 * 1000, KNOWN_CAPACITY = 500
+  const knownPeople = owner => {
+    if (typeof readPublishedSnapshot !== 'function' || !owner?.ownerId) return null
+    const entry = knownCache.get(owner.ownerId)
+    if ((!entry || Date.now() - entry.at >= KNOWN_FRESH_MS) && !entry?.pending) {
+      const held = entry ?? { ids: null, at: 0 }
+      held.pending = (async () => new Set((await connectedProfiles(owner, await createAccountNetwork({ owner, getBackend }).readNetwork(), publicReader)).map(person => person.id)))()
+        .then(ids => { knownCache.delete(owner.ownerId); knownCache.set(owner.ownerId, { ids, at: Date.now(), pending: null }); while (knownCache.size > KNOWN_CAPACITY) knownCache.delete(knownCache.keys().next().value) },
+          () => { held.pending = null })
+      if (!entry) knownCache.set(owner.ownerId, held)
+    }
+    return entry?.ids ?? null
+  }
   const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || (pathname !== '/people/add' && /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname)) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
   let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
@@ -509,10 +526,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         try {
           if (url.searchParams.getAll('q').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'q')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
           const query = url.searchParams.get('q')
+          // A signed-in member's suggestions mark the people they know. The
+          // set is read in the background and kept briefly; a keystroke never waits for it.
+          const viewer = sessionFor(request), known = viewer ? knownPeople(viewer.owner) : null
           // An empty query is the field gaining focus: start loading, answer nothing.
           if (query === '') publicReader.warm()
-          const result = query === '' ? { people: [], companies: [] } : await publicReader.suggest({ query })
-          response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
+          const result = query === '' ? { people: [], companies: [] } : await publicReader.suggest({ query, ...(known ? { known } : {}) })
+          response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify(result))
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
           response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' }))

@@ -79,6 +79,8 @@ function omniSearch() {
       }
       const copy = element('span', 'omni-copy'), name = element('span', 'omni-name')
       highlight(name, row.name, term)
+      // People the signed-in member already knows, as on /network.
+      if (row.known) name.append(element('span', 'omni-known', 'You know'))
       copy.append(name, element('span', 'omni-subtitle', row.subtitle || kind))
       option.append(icon, copy)
       // Keep DOM focus on the combobox so pointer selection and keyboard agree.
@@ -99,7 +101,7 @@ function omniSearch() {
     options = []; active = -1; input.removeAttribute('aria-activedescendant'); list.replaceChildren()
     const people = Array.isArray(result.people) ? result.people.slice(0, 5) : []
     const companies = Array.isArray(result.companies) ? result.companies.slice(0, 3) : []
-    addGroup('People', people.map(row => ({ name: row.name, subtitle: row.headline || row.location || 'View profile', photo: row.photo, href: '/people/' + encodeURIComponent(row.id) })), 'People', term)
+    addGroup('People', people.map(row => ({ name: row.name, subtitle: row.headline || row.location || 'View profile', photo: row.photo, known: row.known === true, href: '/people/' + encodeURIComponent(row.id) })), 'People', term)
     addGroup('Companies', companies.map(row => ({ name: row.name, subtitle: 'Company · View people and details', href: '/companies/' + encodeURIComponent(row.name) })), 'Companies', term)
     const shortcuts = destinations.filter(row => !term || row.name.toLowerCase().includes(term.toLowerCase()))
     addGroup('Go to', shortcuts, 'Go to', term)
@@ -131,7 +133,7 @@ function omniSearch() {
         clearTimeout(timeout)
         if (current === generation) list.setAttribute('aria-busy', 'false')
       }
-    }, 120)
+    }, 100)
   }
   input.addEventListener('focus', () => { warm(); update() })
   input.addEventListener('input', update)
