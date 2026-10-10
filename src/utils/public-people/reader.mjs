@@ -247,19 +247,28 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
     },
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false } = requestValue(request)
+      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [] } = requestValue(request)
       if (!PUBLIC_LIST_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
+      // `exclude`: published ids the caller already shows elsewhere on the page
+      // (a signed-in owner's own people), left out before paging and totals.
+      if (!Array.isArray(exclude) || exclude.length > maxProfiles || !exclude.every(idValid)) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
-      // The presence filter is part of the cursor scope, so a page never mixes filters.
+      // The presence filter and exclusions are part of the cursor scope, so a page never mixes filters.
       const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}`
-      const scope = matcher ? `list:${filter}${mode}:${normalizedQuery}` : `list:${filter}`
-      const decodedCursor = cursorValue(cursor, scope), data = await snapshot(signal)
+      const data0 = exclude.length ? await snapshot(signal) : null
+      const excluded = data0 ? new Set(exclude.map(id => data0.aliases.get(id) ?? id)) : null
+      const without = excluded?.size ? `x=${hash([...excluded].sort().join('\n'))}:` : ''
+      const scope = matcher ? `list:${filter}${without}${mode}:${normalizedQuery}` : `list:${filter}${without}`
+      const decodedCursor = cursorValue(cursor, scope), data = data0 ?? await snapshot(signal)
       // A snapshot that does not name its members has no presence, so it matches no filter.
       const people = presence ? data.ordered.filter(person => person.presence === presence) : data.ordered
-      if (!matcher) return { ...page(orderNetwork(people, sort), decodedCursor, scope, data.revision), ...(presence || includeTotal ? { total: people.length } : {}) }
+      // Exclusions apply after ranking, so leaving out the full matches the
+      // page already shows never promotes people who match only some words.
+      const kept = rows => excluded?.size ? rows.filter(person => !excluded.has(person.id)) : rows
+      if (!matcher) { const rows = kept(people); return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), ...(presence || includeTotal ? { total: rows.length } : {}) } }
       // `match` says whether the rows have every word ('all') or only some of them.
-      const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id))
-      return { ...page(orderNetwork(ranked.rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: ranked.rows.length }
+      const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id)), rows = kept(ranked.rows)
+      return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: rows.length }
     },
     async profile(request = {}) {
       const { id, cursor, signal, query = '', sort = 'name' } = requestValue(request)
