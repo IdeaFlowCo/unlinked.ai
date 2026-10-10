@@ -41,14 +41,18 @@ test('the headline slot is filled per request, escaped, and empty when unknown',
   assert.ok(!fillMeHeadline(content, 'x').includes(ME_HEADLINE_SLOT))
 })
 
-test('the scan sheet defaults to Scan, honours ?tab=card, and asks for the camera', () => {
-  const scan = renderScan({ ...account }), card = renderScan({ ...account, tab: 'card' })
-  assert.equal(scan.camera, true)
+test('the scan sheet opens My card for members, Scan for visitors, honours ?tab=, and asks for the camera', () => {
+  const member = renderScan({ ...account }), scan = renderScan({ ...account, tab: 'scan' }), card = renderScan({ ...account, tab: 'card' })
+  assert.equal(member.camera, true)
+  for (const page of [member, card]) { assert.match(page.content, /id="panel-scan" aria-labelledby="tab-scan" hidden>/); assert.match(page.content, /id="panel-card" aria-labelledby="tab-card">/) }
+  assert.match(member.content, /id="tab-card"[^>]*>My card<\/a><a role="tab" id="tab-scan"/)
   assert.match(scan.content, /id="panel-scan" aria-labelledby="tab-scan">/); assert.match(scan.content, /id="panel-card" aria-labelledby="tab-card" hidden>/)
-  assert.match(card.content, /id="panel-scan" aria-labelledby="tab-scan" hidden>/); assert.match(card.content, /id="panel-card" aria-labelledby="tab-card">/)
-  assert.match(scan.content, /class="sheet-close" href="\/network" aria-label="Close"/)
-  assert.match(renderScan({}).content, /class="sheet-close" href="\/" aria-label="Close"/)
+  assert.match(member.content, /class="sheet-close" href="\/network" aria-label="Close"/)
+  const visitor = renderScan({})
+  assert.match(visitor.content, /class="sheet-close" href="\/" aria-label="Close"/)
+  assert.match(visitor.content, /aria-selected="true">Scan</); assert.match(visitor.content, /id="tab-scan"[^>]*>Scan<\/a><a role="tab" id="tab-card"/)
   assert.match(renderScan({ tab: '<x>' }).content, /aria-selected="true">Scan</)
+  assert.match(renderScan({ ...account, tab: '<x>' }).content, /aria-selected="true">My card</)
 })
 
 test('the menu and tab scripts are syntactically valid and carry no markup', () => {
