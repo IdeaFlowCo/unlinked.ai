@@ -186,27 +186,39 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // OpenChat names which of the member's own partners have a shared Ideaflow
   // identity; that identity's owner links only if they claimed a published
   // profile that shows as a member. Read-only; cached 10 minutes per member.
-  const participantProfiles = new Map()
+  const participantProfiles = new Map(), participantLookups = new Map(), participantBackoff = new Map()
   async function profilesForParticipants(session, userIds) {
+    // One lookup in flight per member; after a failure, wait 30 s before asking OpenChat again.
+    const key = session.owner.ownerId
+    if (participantLookups.has(key)) return participantLookups.get(key)
+    if (Date.now() - (participantBackoff.get(key) ?? 0) < 30000) return new Map()
+    const pending = lookupParticipantProfiles(session, userIds).catch(error => { participantBackoff.set(key, Date.now()); while (participantBackoff.size > 500) participantBackoff.delete(participantBackoff.keys().next().value); throw error }).finally(() => participantLookups.delete(key))
+    participantLookups.set(key, pending)
+    return pending
+  }
+  async function lookupParticipantProfiles(session, userIds) {
     const key = session.owner.ownerId, now = Date.now(), found = new Map(), missing = []
     let cache = participantProfiles.get(key)
     if (!cache) { cache = new Map(); participantProfiles.set(key, cache); while (participantProfiles.size > 500) participantProfiles.delete(participantProfiles.keys().next().value) }
     for (const id of userIds) { const hit = cache.get(id); if (hit && now - hit.at < 10 * 60000) { if (hit.profileId) found.set(id, hit.profileId) } else missing.push(id) }
     if (!missing.length) return found
     const identities = await messagingIdentities(session, missing)
-    const owned = new Map()
+    const owned = new Map(), uncertain = new Set()
     for (let index = 0; index < identities.length; index += 8) {
       await Promise.all(identities.slice(index, index + 8).map(async identity => {
-        const owner = await resolveOwner({ issuer: identity.issuer, subject: identity.subject }).catch(() => null)
-        const profileId = owner && typeof ownProfileId === 'function' ? await ownProfileId(owner).catch(() => null) : null
-        if (typeof profileId === 'string' && profileId) owned.set(identity.userId, profileId)
+        try {
+          // resolveOwner may answer synchronously (null for another issuer) or with a promise.
+          const owner = await Promise.resolve().then(() => resolveOwner({ issuer: identity.issuer, subject: identity.subject }))
+          const profileId = owner && typeof ownProfileId === 'function' ? await ownProfileId(owner) : null
+          if (typeof profileId === 'string' && profileId) owned.set(identity.userId, profileId)
+        } catch { uncertain.add(identity.userId) /* A transient error is not cached as "no profile". */ }
       }))
     }
     const summaries = owned.size && typeof readPublishedSnapshot === 'function' ? await publicReader.lookup({ ids: [...new Set(owned.values())] }) : new Map()
     for (const id of missing) {
       const summary = owned.has(id) ? summaries.get(owned.get(id)) : null
       const profileId = summary?.presence === 'member' && typeof summary.id === 'string' ? summary.id : null
-      cache.set(id, { profileId, at: now }); while (cache.size > 2000) cache.delete(cache.keys().next().value)
+      if (!uncertain.has(id)) { cache.set(id, { profileId, at: now }); while (cache.size > 2000) cache.delete(cache.keys().next().value) }
       if (profileId) found.set(id, profileId)
     }
     return found

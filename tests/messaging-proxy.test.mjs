@@ -413,3 +413,17 @@ test('mark unread is relayed to OpenChat for the caller only', async t => {
   assert.equal((await h.post(`/messages/api/conversations/${CONV}/unread`, { userId: 'someone-else' })).status, 400)
   assert.equal((await h.post(`/messages/api/conversations/${CONV}/unread`, {}, { 'X-Unlinked-CSRF': 'x' })).status, 403)
 })
+
+test('a failing partner lookup backs off and never blocks the inbox', async t => {
+  let calls = 0
+  const h = await harness(t, { upstream: { 'GET /api/chat/conversations': () => [200, conversations], 'GET /api/chat/unread-total': () => [200, { unreadTotal: 0 }] }, extra: {
+    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'r', profiles: [], connections: [], members: [] }),
+    ownProfileId: async () => null,
+    messagingIdentities: async () => { calls++; throw Error('openchat_without_identities_route') },
+  } })
+  for (let i = 0; i < 3; i++) {
+    const listed = await h.get('/messages/api/conversations')
+    assert.equal(listed.status, 200); assert.equal((await listed.json()).conversations.length, 1)
+  }
+  assert.equal(calls, 1, 'one failed lookup, then a 30 s backoff')
+})

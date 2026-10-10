@@ -578,7 +578,8 @@ function messagesClient(config) {
       if (log.scrollHeight - log.scrollTop - log.clientHeight > 80) return
       hideJump()
       const latest = state.threads.get(id)?.items.filter(item => !item.pending).at(-1)
-      if (!conversation.unreadCount && conversation.lastReadAt && latest && conversation.lastReadAt >= latest.createdAt) return
+      // A conversation marked unread is always read again on open, which clears the mark in OpenChat.
+      if (!conversation.unreadCount && !conversation.markedUnread && conversation.lastReadAt && latest && conversation.lastReadAt >= latest.createdAt) return
       try {
         const value = await api(`/conversations/${encodeURIComponent(id)}/read`, {})
         conversation.unreadCount = 0; conversation.markedUnread = false; conversation.lastReadAt = value.lastReadAt
@@ -669,7 +670,7 @@ function messagesClient(config) {
       api(`/conversations/${encodeURIComponent(value.conversationId)}/messages`).then(page => { const thread = state.threads.get(value.conversationId); if (!thread) return; for (const fresh of page.messages) { const item = thread.items.find(entry => entry.id === fresh.id); if (item) item.linkPreviews = fresh.linkPreviews } if (state.open === value.conversationId) renderMessages() }).catch(() => {})
     })
     on('reactions', value => { const item = state.threads.get(value.conversationId)?.items.find(entry => entry.id === value.messageId); if (!item) return; const mine = new Map(item.reactions.map(reaction => [reaction.emoji, reaction.byMe])); item.reactions = value.reactions.map(reaction => ({ ...reaction, byMe: Boolean(mine.get(reaction.emoji)) })); if (state.open === value.conversationId) renderMessages() })
-    on('read', value => { state.readMaps.set(value.conversationId, { ...(state.readMaps.get(value.conversationId) || {}), ...value.readMap }); if (value.userId === state.me) { const conversation = state.conversations.get(value.conversationId); if (conversation) { conversation.unreadCount = 0; conversation.lastReadAt = value.lastReadAt || conversation.lastReadAt; renderList(); updateUnread() } } if (state.open === value.conversationId) renderMessages() })
+    on('read', value => { state.readMaps.set(value.conversationId, { ...(state.readMaps.get(value.conversationId) || {}), ...value.readMap }); if (value.userId === state.me) { const conversation = state.conversations.get(value.conversationId); if (conversation) { conversation.unreadCount = 0; conversation.markedUnread = false; state.markedUnread.delete(conversation.id); conversation.lastReadAt = value.lastReadAt || conversation.lastReadAt; renderList(); updateUnread() } } if (state.open === value.conversationId) renderMessages() })
     on('typing', value => {
       if (value.userId === state.me) return
       let entries = state.typing.get(value.conversationId)
