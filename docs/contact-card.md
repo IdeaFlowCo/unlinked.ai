@@ -2,7 +2,7 @@
 
 A member's card comes in two versions, both at `/card`, directly accessible as **My card** in the main navigation:
 
-- **Public** (`/card?share=public`) — name, headline, location and a QR code that opens the member's public profile (`/people/<id>`). Unchanged: no contact details.
+- **Public** (`/card?share=public`) — name, headline, location, the member's LinkedIn address (when their profile has one) and a QR code that opens the member's public profile (`/people/<id>`). Unchanged: no contact details.
 - **With contact details** (default) — the business-card version. It carries the phone number, WhatsApp, email address and link the member switches on, and has its own QR code and link.
 
 Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard), routes in `mcp-server/private-browser.mjs`, pages in `mcp-server/private-onboarding-views.mjs` (`renderCard`, `renderContactCard`). Tests: `tests/contact-card.test.mjs` and `tests/card-signup.test.mjs`.
@@ -37,7 +37,7 @@ The contact card is reached only through `/c/<token>`. The token is 24 random al
 | `email` | `showEmail` | A plain address, up to 254 characters. |
 | `link` | `showLink` | `https` only, no credentials, up to 200 characters. |
 
-The card also keeps the member's `name`, `headline`, `location` and public `profilePath`, refreshed whenever they open `/card`, so the link can be rendered without their session.
+The card also keeps the member's `name`, `headline`, `location`, public `linkedinUrl` and public `profilePath`, refreshed whenever they open `/card`, so the link can be rendered without their session. The LinkedIn address is part of the already-public identity (it appears on the public profile), not a switched contact detail; both card versions and the vCard show it.
 
 Storage: one `UnlinkedContactCard` node per account in the pilot graph (`ownerKey` and `token` unique). `projectContactCard` is the single consent projection; the page, the owner's preview and the vCard all render from it.
 

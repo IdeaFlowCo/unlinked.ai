@@ -1104,7 +1104,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           }
         }
         session.headline = profile.headline
-        return { profile, hasStoredProfile, cardUrl, publicProfileUrl: cardUrl ? unlinkedProfileContext(decodeURIComponent(new URL(cardUrl).pathname.slice('/people/'.length))) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
+        return { profile, hasStoredProfile, cardUrl, publicProfileUrl: cardUrl ? unlinkedProfileContext(decodeURIComponent(new URL(cardUrl).pathname.slice('/people/'.length))) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(profile.linkedinUrl ? { linkedinUrl: profile.linkedinUrl } : {}), ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
       }
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
         const jobs = await jobResources(), props = jobProps(jobs)
