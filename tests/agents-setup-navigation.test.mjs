@@ -25,7 +25,7 @@ test('For agents uses live/restored sessions, keeps anonymous return navigation 
   const page = async (cookie, method = 'GET') => {
     const response = await fetch(endpoint + '/agents', { method, headers: cookie ? { Cookie: cookie } : {} })
     assert.equal(response.status, 200)
-    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.equal(response.headers.get('cache-control'), 'private, no-cache')
     return response.text()
   }
   const anonymous = await page()

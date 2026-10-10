@@ -345,7 +345,8 @@ def verify_canonical_readiness(manifest):
     require(manifest['origin'] == CANONICAL_ORIGIN, 'canonical_readiness_origin_required')
     owned_services(running=True)
     status, headers = curl_headers('/')
-    require(status == 200 and headers.get('cache-control') == 'no-store', 'canonical_anonymous_probe_required')
+    # GET page navigations are back/forward-cache eligible; APIs and auth stay no-store.
+    require(status == 200 and headers.get('cache-control') == 'private, no-cache', 'canonical_anonymous_probe_required')
     status, headers = curl_headers('/auth/callback/ideaflow')
     require(status == 400 and headers.get('cache-control') == 'no-store', 'canonical_transactionless_callback_required')
     status, headers = curl_headers('/login')

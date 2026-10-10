@@ -206,14 +206,14 @@ def headers(values):
     return message
 
 sequence = [
-    (200, headers([('Cache-Control', 'no-store')])),
+    (200, headers([('Cache-Control', 'private, no-cache')])),
     (400, headers([('Cache-Control', 'no-store')])),
     (303, headers([('Location', 'https://id.ideaflow.app/authorize'), ('Set-Cookie', '__Host-ul-login=abc; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=300')]))
 ]
 with patch.object(pilot, 'owned_services', lambda running=False: None), patch.object(pilot, 'curl_headers', lambda path: sequence.pop(0)):
     pilot.verify_canonical_readiness(canonical_manifest)
 bad_sequence = [
-    (200, headers([('Cache-Control', 'no-store')])),
+    (200, headers([('Cache-Control', 'private, no-cache')])),
     (400, headers([('Cache-Control', 'no-store')])),
     (303, headers([('Location', 'https://id.ideaflow.app/authorize'), ('Set-Cookie', '__Host-ul-login=abc; Path=/; SameSite=Lax; Max-Age=300')]))
 ]

@@ -325,6 +325,10 @@ function messagesClient(config) {
   addEventListener('focus', maybeMarkRead)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { maybeMarkRead(); updateUnread() } })
   threadEl.addEventListener('scroll', event => { if (event.target.id !== 'msg-log') return; if (event.target.scrollTop < 120) loadOlder(); maybeMarkRead() }, true)
+  // Pages may be kept in the back/forward cache: close the stream when hidden
+  // and catch up (list, open thread, stream) when the page comes back.
+  addEventListener('pagehide', () => { state.stream?.close(); state.stream = null })
+  addEventListener('pageshow', event => { if (!event.persisted) return; state.threads.clear(); state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) })
   addEventListener('offline', () => { statusEl.dataset.offline = '1'; showStatus('You are offline. Messages will send when you reconnect.') })
   addEventListener('online', () => { delete statusEl.dataset.offline; showStatus(''); refreshSoon() })
 

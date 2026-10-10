@@ -27,9 +27,12 @@ member uploads and never fetched by the runtime.
   `/api/people/<id>` and `/api/companies/<name>` include it too. Views accept
   `photo` only in that exact grammar (`PHOTO_URL`); anything else renders
   initials. The `<img>` alt text is the person's name; no inline styles.
-- Ingress: both nginx variants keep `Cache-Control: no-store` on every response
-  except `^/people/[^/]+/photo$`, where the runtime's header passes through (a
-  `map` gives `add_header` an empty value there, which nginx omits).
+- Ingress: the rollback-host `nginx.conf` keeps `Cache-Control: no-store` on
+  every response except `^/people/[^/]+/photo$`. The canonical variant adds no
+  cache header at all (its `map` default is empty, which nginx omits): the
+  runtime owns the policy — `no-store` everywhere except GET page navigations
+  (`private, no-cache`) and photos, so a second header cannot disable the
+  browser's back/forward cache.
 
 ## Storage
 

@@ -59,12 +59,15 @@ test('private pilot ingress emits strict-origin referrer policy on proxied respo
   assert.deepEqual(configuredHeaders.filter(([name]) => name.toLowerCase() === 'referrer-policy'), [['Referrer-Policy', 'strict-origin']])
 })
 
-test('ingress keeps no-store everywhere except published profile photos, which keep the runtime cache header', async () => {
+test('rollback-host ingress keeps no-store; canonical ingress adds no cache header so the runtime owns back/forward-cache eligibility', async () => {
   for (const file of ['nginx.conf', 'nginx.canonical.conf']) {
     const config = await readFile(new URL(`../deploy/private-pilot/${file}`, import.meta.url), 'utf8')
     const cache = uri => parseServerHeaders(config, uri).filter(([name]) => name.toLowerCase() === 'cache-control').map(([, value]) => value)
+    // A second no-store from nginx would disable the browser's back/forward
+    // cache on the canonical host even after the runtime allows it.
+    const expected = file === 'nginx.canonical.conf' ? [] : ['no-store']
     for (const uri of ['/', '/people', '/people/aaaaaaaa-1111-4111-8111-111111111111', '/api/people/aaaaaaaa-1111-4111-8111-111111111111', '/people/a/photo/x', '/people/photo', `/invite/${'a'.repeat(43)}`]) {
-      assert.deepEqual(cache(uri), ['no-store'], `${file} ${uri}`)
+      assert.deepEqual(cache(uri), expected, `${file} ${uri}`)
     }
     assert.deepEqual(cache('/people/aaaaaaaa-1111-4111-8111-111111111111/photo'), [], file)
     // Every other security header still applies to photos.
