@@ -152,7 +152,7 @@ test('writes require JSON, CSRF and same origin; ids, cursors, bodies and emoji 
   assert.equal((await h.post('/messages/api/messages/m1/reactions', { emoji: '💩', active: true })).status, 400)
   assert.equal((await h.post(`/messages/api/conversations/${CONV}/mute`, { mutedUntil: '1999-01-01T00:00:00Z' })).status, 400)
   assert.equal((await h.post('/messages/api/conversations', { profile: 'https://evil.example/people/x' })).status, 400)
-  assert.equal((await h.post(`/messages/api/conversations/${CONV}/messages`, 'x'.repeat(20000))).status, 413)
+  assert.equal((await h.post(`/messages/api/conversations/${CONV}/messages`, 'x'.repeat(70000))).status, 413)
   assert.equal((await h.get(`/messages/api/conversations/${CONV}/messages?before=yesterday`)).status, 400)
   assert.equal((await h.get('/messages/api/conversations', { 'Sec-Fetch-Site': 'cross-site' })).status, 403)
   assert.equal(h.calls.length, before, 'nothing reached OpenChat')
@@ -256,4 +256,26 @@ test('typing is relayed only into a room OpenChat confirmed joining', async t =>
   assert.deepEqual(await (await h.post(`/messages/api/conversations/${CONV}/typing`, { active: true })).json(), { relayed: true })
   assert.deepEqual(sent(), [`conversation:join ${CONV}`, `typing:start ${CONV}`])
   await events
+})
+
+test('a fourth stream retires the oldest with superseded; long multi-byte messages fit; socket edits carry no actor byMe', async t => {
+  const sockets = []
+  const h = await harness(t, { sockets, upstream: {
+    'GET /api/chat/messages/since': () => [200, { messages: [] }],
+    [`POST /api/chat/conversations/${CONV}/messages`]: ({ body }) => [201, message(body.id, body.content, '2026-10-10T10:05:00Z', ME)],
+  } })
+  const first = await h.get('/messages/api/stream')
+  const firstEvents = readEvents(first, list => list.some(event => event.event === 'superseded'), 3000)
+  for (let i = 0; i < 50 && !sockets.length; i++) await new Promise(resolve => setTimeout(resolve, 20))
+  const others = [await h.get('/messages/api/stream'), await h.get('/messages/api/stream'), await h.get('/messages/api/stream')]
+  assert.ok((await firstEvents).some(event => event.event === 'superseded'))
+  assert.equal(sockets.length, 1, 'streams share one upstream socket')
+  const live = readEvents(others[2], list => list.some(event => event.event === 'message-updated'), 2000)
+  sockets[0].options.onEvent('message:updated', { ...message('m1', 'edited', '2026-10-10T10:00:00Z'), reactions: [{ emoji: '👍', count: 1, byMe: true }] })
+  const updated = (await live).find(event => event.event === 'message-updated')
+  assert.deepEqual(updated.data.reactions, [{ emoji: '👍', count: 1 }])
+  for (const response of others.slice(0, 2)) await response.body.cancel()
+  const long = '漢'.repeat(8000)
+  const sent = await h.post(`/messages/api/conversations/${CONV}/messages`, { content: long, clientId: '0b5c2c51-6f7e-4b8a-9d3c-1f2e3d4c5b6b' })
+  assert.equal(sent.status, 201)
 })

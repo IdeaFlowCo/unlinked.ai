@@ -9,7 +9,8 @@ function messagesClient(config) {
   if (!root) return
   const $ = id => document.getElementById(id)
   const listEl = $('msg-list'), threadEl = $('msg-thread'), statusEl = $('msg-status'), filterEl = $('msg-filter')
-  const state = { me: null, conversations: new Map(), threads: new Map(), open: null, loadedAt: new Date().toISOString(), readMaps: new Map(), stream: null, streamState: 'connecting', filter: '' }
+  const counted = new Set()
+  const state = { me: null, conversations: new Map(), threads: new Map(), open: null, loadedAt: new Date().toISOString(), readMaps: new Map(), stream: null, streamState: 'connecting', filter: '', retryMs: 2000, retryTimer: null, paused: false }
   const FIVE_MINUTES = 5 * 60000
 
   // ── DOM helpers ──────────────────────────────────────────────────────────
@@ -226,7 +227,7 @@ function messagesClient(config) {
     const grow = () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 8 * 24 + 20)}px` }
     input.addEventListener('input', grow)
     input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); form.requestSubmit() } })
-    const form = h('form', { class: 'msg-composer', onsubmit: event => { event.preventDefault(); const content = input.value.trim(); if (!content) return; input.value = ''; grow(); send(state.open, content) } },
+    const form = h('form', { class: 'msg-composer', onsubmit: event => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.threads.has(state.open)) return; input.value = ''; grow(); send(state.open, content) } },
       input, h('button', { type: 'submit', class: 'msg-send' }, 'Send'))
     return form
   }
@@ -274,10 +275,10 @@ function messagesClient(config) {
       if (!id || !log || !conversation || document.visibilityState !== 'visible' || !document.hasFocus()) return
       if (log.scrollHeight - log.scrollTop - log.clientHeight > 80) return
       const latest = state.threads.get(id)?.items.at(-1)
-      if (!conversation.unreadCount && conversation.readAt && latest && conversation.readAt >= latest.createdAt) return
+      if (!conversation.unreadCount && conversation.lastReadAt && latest && conversation.lastReadAt >= latest.createdAt) return
       try {
         const value = await api(`/conversations/${encodeURIComponent(id)}/read`, {})
-        conversation.unreadCount = 0; conversation.readAt = value.lastReadAt
+        conversation.unreadCount = 0; conversation.lastReadAt = value.lastReadAt
         state.readMaps.set(id, { ...(state.readMaps.get(id) || {}), ...value.readMap })
         renderList(); updateUnread(); if (state.open === id) renderMessages()
       } catch { /* Read state catches up on the next visit. */ }
@@ -297,12 +298,15 @@ function messagesClient(config) {
       const conversation = state.conversations.get(message.conversationId)
       if (!conversation) { refreshSoon(); return }
       const known = state.threads.get(message.conversationId)?.items.some(item => item.id === message.id || (message.clientId && item.clientId === message.clientId))
+      // Count each message once, and only if it is newer than this member's last read.
+      const fresh = !known && !counted.has(message.id) && (!conversation.lastReadAt || message.createdAt > conversation.lastReadAt) && (!conversation.lastMessageAt || message.createdAt >= conversation.lastMessageAt)
+      counted.add(message.id); if (counted.size > 2000) counted.delete(counted.values().next().value)
+      if (fresh && message.senderId !== state.me && !(message.conversationId === state.open && document.visibilityState === 'visible')) conversation.unreadCount = (conversation.unreadCount || 0) + 1
       upsert(message)
-      if (!known && message.senderId !== state.me && !(message.conversationId === state.open && document.visibilityState === 'visible')) conversation.unreadCount = (conversation.unreadCount || 0) + 1
       renderList(); updateUnread()
       if (message.conversationId === state.open) { renderMessages(); maybeMarkRead() }
     })
-    on('message-updated', message => { const thread = state.threads.get(message.conversationId); const item = thread?.items.find(entry => entry.id === message.id); if (item) { const byMe = new Map(item.reactions.map(reaction => [reaction.emoji, reaction.byMe])); Object.assign(item, message, { reactions: message.reactions.length ? message.reactions : item.reactions.map(reaction => ({ ...reaction, byMe: byMe.get(reaction.emoji) })) }); if (state.open === message.conversationId) renderMessages() } })
+    on('message-updated', message => { const thread = state.threads.get(message.conversationId); const item = thread?.items.find(entry => entry.id === message.id); if (item) { const byMe = new Map(item.reactions.map(reaction => [reaction.emoji, reaction.byMe])); Object.assign(item, message, { reactions: (message.reactions.length ? message.reactions : item.reactions).map(reaction => ({ ...reaction, byMe: Boolean(byMe.get(reaction.emoji)) })) }); if (state.open === message.conversationId) renderMessages() } })
     on('message-changed', () => {})
     on('reactions', value => { const item = state.threads.get(value.conversationId)?.items.find(entry => entry.id === value.messageId); if (!item) return; const mine = new Map(item.reactions.map(reaction => [reaction.emoji, reaction.byMe])); item.reactions = value.reactions.map(reaction => ({ ...reaction, byMe: Boolean(mine.get(reaction.emoji)) })); if (state.open === value.conversationId) renderMessages() })
     on('read', value => { state.readMaps.set(value.conversationId, { ...(state.readMaps.get(value.conversationId) || {}), ...value.readMap }); if (value.userId === state.me) { const conversation = state.conversations.get(value.conversationId); if (conversation) { conversation.unreadCount = 0; renderList(); updateUnread() } } if (state.open === value.conversationId) renderMessages() })
@@ -310,12 +314,22 @@ function messagesClient(config) {
     on('conversation', refreshSoon)
     on('resync', () => { state.threads.clear(); loadConversations() })
     on('expired', () => { source.close(); showStatus('Your session ended.', { href: `/login?next=${encodeURIComponent(location.pathname)}`, label: 'Sign in again' }) })
-    source.addEventListener('error', () => setStream(source.readyState === EventSource.CLOSED ? 'offline' : 'reconnecting'))
+    on('superseded', () => { source.close(); state.stream = null; state.paused = true; setStream('paused') })
+    source.addEventListener('open', () => { state.retryMs = 2000 })
+    source.addEventListener('error', () => {
+      if (source.readyState !== EventSource.CLOSED) { setStream('reconnecting'); return }
+      // A non-200 answer (deploy, busy, rate limit) closes an EventSource for good: reopen it with backoff.
+      setStream('reconnecting')
+      if (state.stream === source) state.stream = null
+      clearTimeout(state.retryTimer)
+      state.retryTimer = setTimeout(() => { if (!state.stream && !state.paused) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream && !state.paused) connect() }) } }, state.retryMs)
+      state.retryMs = Math.min(60000, (state.retryMs || 2000) * 2)
+    })
   }
   function setStream(value) {
     state.streamState = value
     const pill = $('msg-live')
-    if (pill) { pill.hidden = value === 'live' || value === 'polling'; pill.textContent = value === 'offline' ? 'Offline' : 'Reconnecting…' }
+    if (pill) { pill.hidden = value === 'live' || value === 'polling'; pill.textContent = value === 'paused' ? 'Paused · open in another tab' : value === 'offline' ? 'Offline' : 'Reconnecting…' }
     if (value === 'live' || value === 'polling') { if (statusEl.dataset.offline) { delete statusEl.dataset.offline; showStatus('') } }
   }
 
@@ -323,7 +337,9 @@ function messagesClient(config) {
   filterEl?.addEventListener('input', () => { state.filter = filterEl.value.trim().toLowerCase(); renderList() })
   addEventListener('popstate', () => { const match = /^\/messages\/c\/([A-Za-z0-9_-]{1,80})$/.exec(location.pathname); if (match) openConversation(match[1], { push: false }); else closeConversation({ push: false }) })
   addEventListener('focus', maybeMarkRead)
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { maybeMarkRead(); updateUnread() } })
+  const resume = () => { if (!state.paused) return; state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
+  addEventListener('focus', resume)
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { resume(); maybeMarkRead(); updateUnread() } })
   threadEl.addEventListener('scroll', event => { if (event.target.id !== 'msg-log') return; if (event.target.scrollTop < 120) loadOlder(); maybeMarkRead() }, true)
   // Pages may be kept in the back/forward cache: close the stream when hidden
   // and catch up (list, open thread, stream) when the page comes back.

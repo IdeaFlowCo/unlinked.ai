@@ -20,7 +20,7 @@ const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const PRESENCE = new Set(['available', 'away', 'busy', 'offline'])
 const CREDENTIAL_FRESH_MS = 8 * 60000, CREDENTIAL_FAILURE_MS = 5000
 const BADGE_FRESH_MS = 15000, BADGE_FAILURE_MS = 60000
-const UPSTREAM_TIMEOUT_MS = 8000, UPSTREAM_MAX_BYTES = 4 * 1024 * 1024, BODY_MAX_BYTES = 16 * 1024
+const UPSTREAM_TIMEOUT_MS = 8000, UPSTREAM_MAX_BYTES = 4 * 1024 * 1024, BODY_MAX_BYTES = 64 * 1024
 
 export const validId = value => typeof value === 'string' && ID.test(value)
 const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : ''
@@ -314,7 +314,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
   function onUpstreamEvent(link, event, payload) {
     if (event === 'message:new') return deliver(link, payload)
-    if (event === 'message:updated') { const message = projectMessage(payload); if (message) broadcast(link, 'message-updated', message); return }
+    if (event === 'message:updated') { const message = projectMessage(payload); if (message) broadcast(link, 'message-updated', { ...message, reactions: message.reactions.map(({ emoji, count }) => ({ emoji, count })) }); return }
     if (event === 'message:reactions-updated') {
       // `byMe` in this event is computed for whoever reacted, so it is dropped (DECISIONS.md 5).
       if (validId(payload?.messageId) && validId(payload?.conversationId)) broadcast(link, 'reactions', { messageId: payload.messageId, conversationId: payload.conversationId, reactions: projectReactions(payload.reactions, { withMine: false }) })
@@ -402,7 +402,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   function openStream(request, response, session, url) {
     const link = linkFor(session)
     // At most 3 open streams per member; a new tab or reload retires the oldest.
-    if (link.streams.size >= 3) [...link.streams][0].end()
+    if (link.streams.size >= 3) { const oldest = [...link.streams][0]; oldest.write('superseded', {}); oldest.end() }
     const since = iso(request.headers['last-event-id']) ?? iso(url.searchParams.get('since'))
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store, private', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' })
     let ended = false
