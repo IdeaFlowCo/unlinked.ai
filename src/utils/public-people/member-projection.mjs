@@ -51,8 +51,14 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // decision becomes visible to everyone within `freshMs` plus one build, not on
 // the very next request. 0 (the default) keeps next-request visibility. A
 // failed or empty build is never kept, and an empty build drops what was kept.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, freshMs = 0, now = Date.now }) {
+// `staleMs` extends `freshMs` with serve-stale-while-revalidate: past the fresh
+// window but inside `staleMs`, the kept build answers immediately while one
+// refresh runs behind it, so no page view pays the rebuild in-band. A failed
+// refresh drops the kept build (fail closed, like the suggest reader). 0
+// disables it; past `staleMs` a read waits for the rebuild.
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
+  if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
   let work = null, kept = null
   const detailCache = new Map()
   // Operator merges and renames apply last, over the complete union.
@@ -182,8 +188,10 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   }
   const read = async ({signal} = {}) => {
     signal?.throwIfAborted()
-    if (kept && now() - kept.at < freshMs) return kept.value
-    if (!work) work=build().then(value=>{kept=value?{value,at:now()}:null;return value}).finally(()=>{work=null})
+    const age = kept ? now() - kept.at : Infinity
+    if (age < freshMs) return kept.value
+    if (!work) work=build().then(value=>{kept=value?{value,at:now()}:null;return value},error=>{kept=null;throw error}).finally(()=>{work=null})
+    if (age < staleMs) { work.catch(() => {}); return kept.value }
     const value=await work;signal?.throwIfAborted();return value
   }
   // The revision hashes every input above (legacy, enrichment, each import,

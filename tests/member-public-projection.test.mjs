@@ -152,3 +152,39 @@ test('a fresh index serves page views without re-reading sources; expiry, revoca
   assert.equal(one, two); assert.equal(discovers, 8)
   for (const freshMs of [-1, 0.5, 300001]) assert.throws(() => createMemberPublicIndex({ freshMs, readLegacy: async () => legacy, discover: async () => [], publicPeople: { read: async () => null } }), /public_member_index_freshness_invalid/)
 })
+
+test('inside the stale window the kept index answers while one refresh runs behind it; a failed refresh fails closed', async () => {
+  let clock = 0, discovers = 0, failRefresh = false
+  let items = [{ id, owner: { ownerId: 'bound-owner', userId: 'bound-user' }, revision: 4 }]
+  const cached = projectPublicMemberImport({ job, assertions })
+  const read = createMemberPublicIndex({ freshMs: 1000, staleMs: 10000, now: () => clock,
+    readLegacy: async () => legacy, discover: async () => { if (failRefresh) throw Error('refresh_failed'); discovers++; return items },
+    getBackend: async () => ({ readResource: async () => ({ sourceId: id, sourceOwnerId: 'bound-owner', sourceRevision: 4, payload: job }) }),
+    publicPeople: { read: async dataset => dataset === ENRICHMENT_DATASET ? null : cached } })
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20))
+  const first = await read()
+  assert.equal(first.profiles.length, 3); assert.equal(discovers, 2)
+  // Stale: answered from the kept build, one refresh behind it.
+  clock = 5000
+  items = []
+  const stale = await read()
+  assert.equal(stale, first)
+  await settle()
+  assert.equal(discovers, 4)
+  // The refresh result serves the next read without another build.
+  const refreshed = await read()
+  assert.deepEqual(refreshed.profiles, legacy.profiles); assert.equal(discovers, 4)
+  // Past the stale window a read waits for the rebuild.
+  clock = 20000
+  const blocked = await read()
+  assert.deepEqual(blocked.profiles, legacy.profiles); assert.equal(discovers, 6)
+  // A failed refresh serves the kept build once, then fails closed.
+  clock = 26000
+  failRefresh = true
+  assert.equal(await read(), blocked)
+  await settle()
+  failRefresh = false
+  const rebuilt = await read()
+  assert.notEqual(rebuilt, blocked); assert.equal(discovers, 8)
+  for (const staleMs of [-1, 0.5, 600001, 500]) assert.throws(() => createMemberPublicIndex({ freshMs: 1000, staleMs, readLegacy: async () => legacy, discover: async () => [], publicPeople: { read: async () => null } }), /public_member_index_freshness_invalid/)
+})

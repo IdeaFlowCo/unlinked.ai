@@ -420,8 +420,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     let legacyDetails = null
     const publicIndexFreshMs = publicIndexEnv.UNLINKED_PUBLIC_INDEX_FRESH_MS === undefined ? 20000 : Number(publicIndexEnv.UNLINKED_PUBLIC_INDEX_FRESH_MS)
     if (!Number.isSafeInteger(publicIndexFreshMs) || publicIndexFreshMs < 0 || publicIndexFreshMs > 300000) throw new Error('private_composition_configuration_required')
+    // Past the fresh window, the kept index answers while one refresh runs
+    // behind it (UNLINKED_PUBLIC_INDEX_STALE_MS, default 90 s; fresh 0 keeps
+    // next-request rebuilds unless stale is set explicitly).
+    const publicIndexStaleMs = publicIndexEnv.UNLINKED_PUBLIC_INDEX_STALE_MS === undefined ? (publicIndexFreshMs === 0 ? 0 : 90000) : Number(publicIndexEnv.UNLINKED_PUBLIC_INDEX_STALE_MS)
+    if (!Number.isSafeInteger(publicIndexStaleMs) || publicIndexStaleMs < 0 || publicIndexStaleMs > 600000 || (publicIndexStaleMs > 0 && publicIndexStaleMs < publicIndexFreshMs)) throw new Error('private_composition_configuration_required')
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLookup?.list,
-      includeDetails: true, freshMs: publicIndexFreshMs,
+      includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')
         const digest = snapshot?.revision?.match(/^legacy-public-v1:([a-f0-9]{64})$/)?.[1]
