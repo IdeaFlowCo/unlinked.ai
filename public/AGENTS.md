@@ -96,3 +96,5 @@ Browser-only card joining is not an agent capability. The repository guide `docs
 ## Troubleshooting request failures
 
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures.
+
+Public People presence distinguishes member (confirmed current account), legacy (verified recovered account awaiting claim), and shadow (imported contact). Confirmed membership wins. Legacy display grants no ownership or member messaging; reclaiming requires verified sign-in and explicit confirmation at /legacy-account.

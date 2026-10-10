@@ -894,5 +894,13 @@
     "idTrust": "server-generated; incoming trace IDs ignored",
     "privacy": "No credentials, queries, result bodies or sensitive URL parameters. Opaque account correlation only after successful authentication.",
     "gatewayLimitation": "Shared gateway does not currently forward the downstream Unlinked request ID."
+  },
+  "publicPeoplePresence": {
+    "values": [
+      "member",
+      "legacy",
+      "shadow"
+    ],
+    "description": "Public People presence distinguishes member (confirmed current account), legacy (verified recovered account awaiting claim), and shadow (imported contact). Confirmed membership wins. Legacy display grants no ownership or member messaging; reclaiming requires verified sign-in and explicit confirmation at /legacy-account."
   }
 }

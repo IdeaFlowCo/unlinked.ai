@@ -173,3 +173,5 @@ Settings manual-key setup, lifecycle, compatibility and release/rollback constra
 ## Request diagnostics
 
 Default-off standalone REST/MCP diagnostics, trust/redaction boundaries, private retention and the operator reader are documented in [docs/request-diagnostics.md](docs/request-diagnostics.md). Never enable broad access logging or log request bodies/credentials to diagnose an agent. Enabling collection requires the normal scoped runtime release gate.
+
+Public People presence distinguishes member (confirmed current account), legacy (verified recovered account awaiting claim), and shadow (imported contact). Confirmed membership wins. Legacy display grants no ownership or member messaging; reclaiming requires verified sign-in and explicit confirmation at /legacy-account.
