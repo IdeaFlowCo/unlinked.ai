@@ -374,7 +374,7 @@ export function renderCard({ accountLabel, displayName, csrf, importJob, profile
   const tab = (href, label, selected) => `<a href="${href}"${selected ? ' aria-current="page"' : ''}>${label}</a>`
   const tabs = contact ? `<nav class="tabs" aria-label="Card version">${tab('/card?share=public', 'Public', !onContact)}${tab('/card?share=contact', 'With contact details', onContact)}</nav>` : ''
   const details = `${profile.about ? `<div class="card sec"><h3>About</h3><p>${html(profile.about)}</p></div>` : ''}${experience(profile.positions, '')}${education(profile.education)}${skills(profile.skills)}`
-  const scan = '<a class="button sec sm" href="/scan">Scan someone’s card</a>'
+  const scan = '<a class="button sec sm" href="/scan?tab=scan">Scan someone’s card</a>'
   // Shown by TOP_BAR_SCRIPT on phones only, when the page is not already running
   // as the installed app and the member has not dismissed it.
   const pwaHint = `<div id="pwa-hint" class="notice pwa-hint" hidden><span><b>Keep your card one tap away.</b> In your browser’s Share or menu, choose Add to Home Screen.</span><button id="pwa-hint-dismiss" type="button" class="quiet sm" aria-label="Dismiss">Not now</button></div>`
@@ -646,20 +646,22 @@ export function renderMeet({ accountLabel, displayName, csrf, importJob } = {}) 
   return base('Meet someone', `<section class="narrow wide"><h1 class="hq">Meet someone</h1><p class="lead">Scan an Unlinked profile card or an OpenChat card, or paste its link. You confirm what was scanned before anything opens; scanning never adds a contact or grants access by itself.</p><div class="card"><div class="actions"><button id="start" type="button">Scan a card</button><button id="stop" type="button" class="quiet">Stop camera</button></div><div id="camera"></div><div id="confirm" class="notice" hidden><p>Scanned: <b id="confirm-label"></b></p><p class="small">Open it to continue. Opening a profile only shows its public page.</p><div class="actions"><a id="confirm-open" class="button sm" href="/meet">Open</a><button id="confirm-cancel" type="button" class="quiet sm">Cancel</button></div></div><form id="paste"><label for="card-url">Card or profile link</label><input id="card-url" type="text" inputmode="url" required><div class="actions"><button class="quiet">Check link</button></div></form><p id="status" class="small" role="status"></p></div><p class="small">If the camera is unavailable or permission is declined, paste the link printed with the card instead.</p></section>`, { accountLabel, displayName, csrf, importJob })
 }
 
-// The scan sheet behind the search bar's QR button: Scan (the /meet camera
-// flow, same element ids and the same explicit confirm) and My card (the
-// member's own QR). Tabs are links, so either tab works without script; the
+// The scan sheet behind the search bar's QR button: My card (the member's own
+// business card and QR, the default for members) and Scan (the /meet camera
+// flow, same element ids and the same explicit confirm). Tabs are links, so either tab works without script; the
 // page script switches them in place, stops the camera when it is hidden and
 // starts it when Scan is shown. Signed-out visitors can scan; their My card
 // tab offers sign-in instead.
-export function renderScan({ accountLabel, displayName, csrf, importJob, tab = 'scan', profile, cardUrl, qr } = {}) {
-  const onCard = tab === 'card'
+export function renderScan({ accountLabel, displayName, csrf, importJob, tab, profile, cardUrl, qr } = {}) {
+  // Members meet people in person, so the QR button opens their own card (and its
+  // QR) first; ?tab=scan opens the camera. Visitors have no card yet: Scan first.
+  const onCard = tab === 'card' || (tab !== 'scan' && Boolean(csrf))
   const tabLink = (id, href, label, selected) => `<a role="tab" id="tab-${id}" href="${href}" aria-controls="panel-${id}" aria-selected="${selected}"${selected ? '' : ' tabindex="-1"'}>${label}</a>`
   const scanPanel = `<div class="scan-cam"><div id="camera"></div><div class="scan-frame" aria-hidden="true"></div><p class="scan-hint">Point your camera at an Unlinked or OpenChat QR code</p></div><p id="status" class="small" role="status"></p><div id="confirm" class="notice" hidden><p>Scanned: <b id="confirm-label"></b></p><p class="small">Open it to continue. Opening a profile only shows its public page.</p><div class="actions"><a id="confirm-open" class="button sm" href="/meet">Open</a><button id="confirm-cancel" type="button" class="quiet sm">Cancel</button></div></div><div class="actions"><button id="start" type="button" class="sm">Start camera</button><button id="stop" type="button" class="quiet sm">Stop camera</button></div><details class="scan-paste"><summary>Paste a link instead</summary><form id="paste"><label for="card-url">Card or profile link</label><input id="card-url" type="text" inputmode="url" required><div class="actions"><button class="quiet sm">Check link</button></div></form></details><p class="small">Nothing opens until you confirm, and scanning never adds a contact or grants access by itself.</p>`
   const cardPanel = csrf
     ? cardFace({ profile, cardUrl, qr, heading: 'h2', actions: `<a class="button sm" href="/card">Open full card</a><a class="button sec sm" href="/profile">View profile</a>` })
     : `<div class="card"><h2>Your card</h2><p>Members get a QR code that opens their public Unlinked profile, ready to show when you meet someone.</p><div class="actions"><a class="button sm" href="/login?next=%2Fcard">Sign in to show your card</a><a class="button sec sm" href="/join">Join Unlinked</a></div></div>`
-  return { camera: true, ...base('Scan', `<section class="narrow scan-sheet"><div class="sheet-top"><h1 class="hq">Scan or share</h1><a class="sheet-close" href="${csrf ? '/network' : '/'}" aria-label="Close">×</a></div><div class="tabs" role="tablist" aria-label="Scan a code or show your card">${tabLink('scan', '/scan', 'Scan', !onCard)}${tabLink('card', '/scan?tab=card', 'My card', onCard)}</div><div class="tabpanel" role="tabpanel" id="panel-scan" aria-labelledby="tab-scan"${onCard ? ' hidden' : ''}>${scanPanel}</div><div class="tabpanel" role="tabpanel" id="panel-card" aria-labelledby="tab-card"${onCard ? '' : ' hidden'}>${cardPanel}</div></section>`, { accountLabel, displayName, csrf, importJob }) }
+  return { camera: true, ...base('Scan', `<section class="narrow scan-sheet"><div class="sheet-top"><h1 class="hq">Scan or share</h1><a class="sheet-close" href="${csrf ? '/network' : '/'}" aria-label="Close">×</a></div><div class="tabs" role="tablist" aria-label="Scan a code or show your card">${csrf ? tabLink('card', '/scan?tab=card', 'My card', onCard) + tabLink('scan', '/scan?tab=scan', 'Scan', !onCard) : tabLink('scan', '/scan?tab=scan', 'Scan', !onCard) + tabLink('card', '/scan?tab=card', 'My card', onCard)}</div><div class="tabpanel" role="tabpanel" id="panel-scan" aria-labelledby="tab-scan"${onCard ? ' hidden' : ''}>${scanPanel}</div><div class="tabpanel" role="tabpanel" id="panel-card" aria-labelledby="tab-card"${onCard ? '' : ' hidden'}>${cardPanel}</div></section>`, { accountLabel, displayName, csrf, importJob }) }
 }
 
 // Runs after MEET_SCRIPT in the same module: tab switching for renderScan.

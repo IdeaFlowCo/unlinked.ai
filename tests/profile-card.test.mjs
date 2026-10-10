@@ -135,7 +135,7 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   assert.match(signIn, /href="\/login\?next=%2Fcard"/)
 })
 
-test('the search bar QR button opens a scan sheet: Scan for anyone, My card for the signed-in member', async t => {
+test('the search bar QR button opens a scan sheet: Scan for visitors, My card first for the signed-in member', async t => {
   const fixture = harness(t)
   const signed = await fixture.start()
 
@@ -147,7 +147,7 @@ test('the search bar QR button opens a scan sheet: Scan for anyone, My card for 
   assert.match(csp, /script-src 'self' 'nonce-[^']+'/); assert.match(csp, /img-src 'self' blob:; media-src 'self' blob:/); assert.match(csp, /default-src 'none'/)
   assert.equal(page.headers.get('permissions-policy'), 'camera=(self), microphone=(self)')
   assert.match(html, /role="tablist"/)
-  assert.match(html, /<a role="tab" id="tab-scan" href="\/scan" aria-controls="panel-scan" aria-selected="true">Scan<\/a>/)
+  assert.match(html, /<a role="tab" id="tab-scan" href="\/scan\?tab=scan" aria-controls="panel-scan" aria-selected="true">Scan<\/a>/)
   assert.match(html, /<a role="tab" id="tab-card" href="\/scan\?tab=card" aria-controls="panel-card" aria-selected="false" tabindex="-1">My card<\/a>/)
   for (const id of ['camera', 'start', 'stop', 'confirm', 'confirm-label', 'confirm-open', 'confirm-cancel', 'paste', 'card-url', 'status']) assert.match(html, new RegExp(`id="${id}"`), id)
   assert.match(html, /src="\/public-assets\/jsqr\.js"/); assert.match(html, /classifyMeetCode/)
@@ -163,7 +163,8 @@ test('the search bar QR button opens a scan sheet: Scan for anyone, My card for 
   job.payload.consent = { ...PUBLIC_UPLOAD_CONSENT }
   const publicId = `member-import-${job.sourceId}`
   fixture.snapshot.current = { state: 'published', complete: true, revision: 'scan-test-v1', profiles: [{ id: publicId, name: 'Card Owner', positions: [], education: [], skills: [] }], connections: [] }
-  page = await fetch(`${signed.endpoint}/scan?tab=card`, { headers: { Cookie: signed.cookie } })
+  // The bare QR-button URL lands members on their own card; ?tab=scan opens the camera.
+  page = await fetch(`${signed.endpoint}/scan`, { headers: { Cookie: signed.cookie } })
   assert.equal(page.status, 200)
   html = await page.text()
   assert.match(html, /aria-controls="panel-card" aria-selected="true">My card/)
@@ -173,6 +174,7 @@ test('the search bar QR button opens a scan sheet: Scan for anyone, My card for 
   assert.match(html, /href="\/card">Open full card<\/a><a class="button sec sm" href="\/profile">View profile/)
   assert.match(html, /<details class="me">/)
   assert.doesNotMatch(html, /Sign in to show your card/)
+  assert.match(await (await fetch(`${signed.endpoint}/scan?tab=scan`, { headers: { Cookie: signed.cookie } })).text(), /id="panel-card" aria-labelledby="tab-card" hidden>/)
   // Every page, including the static discovery pages, runs the Me-menu script under its nonce.
   for (const path of ['/network', '/agents', '/import-linkedin', '/meet']) {
     const response = await fetch(`${signed.endpoint}${path}`, { headers: { Cookie: signed.cookie } })
@@ -183,7 +185,7 @@ test('the search bar QR button opens a scan sheet: Scan for anyone, My card for 
     assert.ok(!body.includes('<!--me-headline-->'), path)
   }
   // The card page's own scan link now leads to the scan sheet.
-  assert.match(await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text(), /href="\/scan">Scan someone’s card/)
+  assert.match(await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text(), /href="\/scan\?tab=scan">Scan someone’s card/)
 })
 
 
