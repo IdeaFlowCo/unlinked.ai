@@ -8,7 +8,7 @@ import { withLegacyProfileDetails } from '../src/utils/public-people/profile-lin
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
-import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
+import { createIndexWarmKeeper, createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
 import { normalizeLinkedinSlug, urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
@@ -123,10 +123,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, connectionSync, closed = false
+  let server, worker, memberEmail, diagnosticsStore, connectionSync, indexWarmKeeper, closed = false
   const close = async () => {
     if (closed) return
     closed = true
+    indexWarmKeeper?.stop()
     await diagnosticsStore?.close()
     await connectionSync?.stop()
     await worker?.stop()
@@ -488,6 +489,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         } finally { await session.close() }
       },
     }) : undefined
+    // Pre-build the shared index and keep it young, so neither the first
+    // request after a restart nor the first after an idle gap pays the
+    // rebuild in-band. The interval stays well inside the stale window.
+    if (readPublishedSnapshot && publicIndexFreshMs > 0 && publicIndexStaleMs > 0) {
+      indexWarmKeeper = createIndexWarmKeeper({ read: readPublishedSnapshot, intervalMs: Math.max(publicIndexFreshMs, Math.min(45000, Math.floor(publicIndexStaleMs / 2))) })
+      indexWarmKeeper.start()
+      Promise.resolve().then(readPublishedSnapshot).catch(() => {})
+    }
     const identityForOwner = async owner => {
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
         try {
