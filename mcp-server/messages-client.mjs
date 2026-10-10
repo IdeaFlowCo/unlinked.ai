@@ -14,6 +14,8 @@ function messagesClient(config) {
   // no page title, keyboard shortcuts only inside the panel, stream only while open).
   const docked = config.dock === true, dock = docked ? document.getElementById('msg-dock') : null
   const stacked = () => docked || matchMedia('(max-width: 759px)').matches
+  // In the dock, nothing streams or marks read unless the panel is open and visible.
+  const dormant = () => docked && (dock.dataset.expanded !== 'true' || dock.offsetParent === null)
   const counted = new Set()
   const state = {
     me: null, conversations: new Map(), threads: new Map(), open: null, loadedAt: new Date().toISOString(), readMaps: new Map(),
@@ -557,7 +559,7 @@ function messagesClient(config) {
     clearTimeout(readTimer)
     readTimer = setTimeout(async () => {
       const id = state.open, log = $('msg-log'), conversation = state.conversations.get(id)
-      if (!id || !log || !conversation || document.visibilityState !== 'visible' || !document.hasFocus()) return
+      if (!id || !log || !conversation || dormant() || document.visibilityState !== 'visible' || !document.hasFocus()) return
       if (log.scrollHeight - log.scrollTop - log.clientHeight > 80) return
       hideJump()
       const latest = state.threads.get(id)?.items.filter(item => !item.pending).at(-1)
@@ -619,6 +621,7 @@ function messagesClient(config) {
   let refreshTimer = null
   const refreshSoon = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(loadConversations, 300) }
   function connect() {
+    if (dormant()) return
     const source = new EventSource(`/messages/api/stream?since=${encodeURIComponent(state.loadedAt)}`)
     state.stream = source
     const on = (name, handler) => source.addEventListener(name, event => { try { handler(JSON.parse(event.data)) } catch { /* Ignore one malformed event. */ } })
@@ -670,7 +673,7 @@ function messagesClient(config) {
       setStream('reconnecting')
       if (state.stream === source) state.stream = null
       clearTimeout(state.retryTimer)
-      state.retryTimer = setTimeout(() => { if (!state.stream && !state.paused) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream && !state.paused) connect() }) } }, state.retryMs)
+      state.retryTimer = setTimeout(() => { if (!state.stream && !state.paused && !dormant()) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream && !state.paused) connect() }) } }, state.retryMs)
       state.retryMs = Math.min(60000, (state.retryMs || 2000) * 2)
     })
   }
@@ -710,7 +713,7 @@ function messagesClient(config) {
   document.addEventListener('click', event => { const menu = document.querySelector('.msg-menu[open]'); if (menu && !menu.contains(event.target)) { menu.open = false; renderThreadHeader() } })
   if (!docked) addEventListener('popstate', () => { const match = /^\/messages\/c\/([A-Za-z0-9_-]{1,80})$/.exec(location.pathname); if (match) openConversation(match[1], { push: false }); else closeConversation({ push: false }) })
   addEventListener('focus', maybeMarkRead)
-  const resume = () => { if (!state.paused) return; state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
+  const resume = () => { if (!state.paused || dormant()) return; state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
   addEventListener('focus', resume)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { resume(); maybeMarkRead(); updateUnread() } else stopTyping() })
   threadEl.addEventListener('scroll', event => { if (event.target.id !== 'msg-log') return; if (event.target.scrollTop < 120) loadOlder(); maybeMarkRead() }, true)
@@ -737,11 +740,13 @@ function messagesClient(config) {
     $('msg-dock-toggle').setAttribute('aria-expanded', String(expanded))
     $('msg-dock-panel').hidden = !expanded
     if (expanded) {
+      // Opening the dock is an explicit choice: take the stream back even if another tab had it.
+      state.paused = false
       if (!started) { started = true; loadConversations().then(() => { if (!state.stream && !state.paused) connect() }) }
       else if (!state.stream && !state.paused) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
       if (focus) (state.open ? $('msg-input') : filterEl)?.focus({ preventScroll: true })
     } else {
-      stopTyping(); state.stream?.close(); state.stream = null
+      stopTyping(); state.stream?.close(); state.stream = null; clearTimeout(state.retryTimer)
       if (focus) $('msg-dock-toggle').focus()
     }
     saveDock()
@@ -774,7 +779,9 @@ function messagesClient(config) {
     const navCount = document.querySelector('[data-nav-messages] .nav-count')?.textContent
     if (navCount) { $('msg-dock-count').textContent = navCount; $('msg-dock-count').hidden = false }
     dock.hidden = false
-    if (saved.expanded) expandDock(true, { focus: false })
+    if (saved.expanded && matchMedia('(min-width: 1024px)').matches) expandDock(true, { focus: false })
+    // The dock is hidden below 1024 px: drop its stream there and resume when it shows again.
+    matchMedia('(min-width: 1024px)').addEventListener('change', event => { if (!event.matches) { stopTyping(); state.stream?.close(); state.stream = null } else if (dock.dataset.expanded === 'true' && !state.stream) { state.paused = false; connect() } })
     return
   }
   if (config.conversationId) { state.open = config.conversationId; root.dataset.open = config.conversationId; threadShell() }

@@ -259,7 +259,17 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
 
   // An image from the browser: OpenChat presigns as the member, this server PUTs
   // the bytes to the bucket, and only the returned key can be attached later.
+  let uploadsInFlight = 0
+  const ownerUploads = new Map()
   async function uploadAttachment(request, session) {
+    // At most 2 uploads in flight per member and 8 for the whole runtime (each buffers up to 10 MB).
+    const key = ownerKey(session), mineInFlight = ownerUploads.get(key) ?? 0
+    if (mineInFlight >= 2 || uploadsInFlight >= 8) throw new MessagingError(429, 'rate_limited')
+    ownerUploads.set(key, mineInFlight + 1); uploadsInFlight++
+    try { return await storeUpload(request, session) }
+    finally { uploadsInFlight--; const left = (ownerUploads.get(key) ?? 1) - 1; if (left > 0) ownerUploads.set(key, left); else ownerUploads.delete(key) }
+  }
+  async function storeUpload(request, session) {
     const mimeType = String(request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
     const declared = Number(request.headers['content-length'])
     if (!UPLOAD_TYPES.has(mimeType) || !Number.isSafeInteger(declared) || declared <= 0 || declared > UPLOAD_MAX_BYTES) throw invalid()
@@ -276,11 +286,11 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     try { stored = await fetchImpl(put.href, { method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(20000), headers: { 'Content-Type': mimeType, 'Content-Length': String(bytes.length) }, body: bytes }) } catch { throw unavailable() }
     await stored.body?.cancel().catch(() => {})
     if (!stored.ok) throw unavailable()
-    const key = randomBytes(18).toString('base64url')
+    const uploadKey = randomBytes(18).toString('base64url')
     let mine = uploads.get(ownerKey(session))
     if (!mine) { mine = new Map(); uploads.set(ownerKey(session), mine); trim(uploads, 5000) }
-    mine.set(key, { url: value.getUrl, mimeType, name: filename, size: bytes.length }); trim(mine, 50)
-    return { attachment: { key, name: filename, mimeType, size: bytes.length, src: fileSrc(value.getUrl) } }
+    mine.set(uploadKey, { url: value.getUrl, mimeType, name: filename, size: bytes.length }); trim(mine, 50)
+    return { attachment: { key: uploadKey, name: filename, mimeType, size: bytes.length, src: fileSrc(value.getUrl) } }
   }
 
   // Attachment bytes, same origin (CSP img-src 'self' stays). Only the exact
@@ -293,7 +303,9 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     let upstreamResponse
     try { upstreamResponse = await fetchImpl(target, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(15000), headers: range ? { Range: range } : {} }) } catch { throw unavailable() }
     const type = String(upstreamResponse.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
-    const size = Number(upstreamResponse.headers.get('content-length'))
+    // A missing length (chunked) or a decoded encoding means the length is unknown here.
+    const rawLength = upstreamResponse.headers.get('content-length'), encoded = Boolean(upstreamResponse.headers.get('content-encoding'))
+    const size = rawLength === null || encoded ? NaN : Number(rawLength)
     if (![200, 206].includes(upstreamResponse.status)) { await upstreamResponse.body?.cancel().catch(() => {}); throw new MessagingError(upstreamResponse.status === 404 ? 404 : 503, upstreamResponse.status === 404 ? 'not_found' : 'messaging_unavailable') }
     if (!FILE_TYPES.has(type) || (Number.isFinite(size) && size > FILE_MAX_BYTES) || !upstreamResponse.body) { await upstreamResponse.body?.cancel().catch(() => {}); throw new MessagingError(415, 'unsupported_file') }
     const headers = { 'Content-Type': type, 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox", 'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Disposition': 'inline', 'Accept-Ranges': 'bytes' }
@@ -303,7 +315,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     response.writeHead(upstreamResponse.status === 206 && headers['Content-Range'] ? 206 : 200, headers)
     let sent = 0
     const body = Readable.fromWeb(upstreamResponse.body)
-    body.on('data', chunk => { sent += chunk.length; if (sent > FILE_MAX_BYTES) body.destroy() })
+    body.on('data', chunk => { sent += chunk.length; if (sent > FILE_MAX_BYTES) body.destroy(new Error('file_too_large')) })
     body.on('error', () => response.destroy())
     response.on('close', () => body.destroy())
     body.pipe(response)

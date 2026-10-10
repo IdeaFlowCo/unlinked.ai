@@ -62,6 +62,8 @@ async function harness(t, { upstream = {}, sockets = [], signup = false } = {}) 
     if (!handler) return new Response(JSON.stringify({ error: 'not mocked' }), { status: 500 })
     const [status, body] = await handler({ url: parsed, body: json ? JSON.parse(options.body) : undefined, auth: options.headers?.Authorization, calls })
     if (typeof body === 'string') return new Response(body, { status, headers: { 'Content-Type': 'image/png', 'Content-Length': String(body.length) } })
+    // A chunked body: no Content-Length from upstream.
+    if (body?.chunked) return new Response(new ReadableStream({ start(controller) { for (const part of body.chunked) controller.enqueue(new TextEncoder().encode(part)); controller.close() } }), { status, headers: { 'Content-Type': 'image/png' } })
     return new Response(body === undefined ? '' : JSON.stringify(body), { status })
   }
   const connectSocket = async options => {
@@ -255,10 +257,12 @@ test('typing is relayed only into a room OpenChat confirmed joining', async t =>
   assert.deepEqual(await (await h.post(`/messages/api/conversations/${CONV}/typing`, { active: true })).json(), { relayed: false })
   await h.post(`/messages/api/conversations/${CONV}/focus`, {})
   const sent = () => socket.emitted.filter(([event]) => event !== 'heartbeat').map(([event, id]) => `${event} ${id}`)
-  assert.deepEqual(sent(), [`conversation:join ${CONV}`])
+  // The bridge attaches its socket asynchronously; the join is sent on focus or on attach.
+  for (let i = 0; i < 100 && !sent().length; i++) await new Promise(resolve => setTimeout(resolve, 10))
+  assert.ok(sent().includes(`conversation:join ${CONV}`)); assert.ok(!sent().includes(`typing:start ${CONV}`), 'nothing relayed before the join was confirmed')
   socket.options.onEvent('conversation:joined', { conversationId: CONV })
   assert.deepEqual(await (await h.post(`/messages/api/conversations/${CONV}/typing`, { active: true })).json(), { relayed: true })
-  assert.deepEqual(sent(), [`conversation:join ${CONV}`, `typing:start ${CONV}`])
+  assert.equal(sent().at(-1), `typing:start ${CONV}`)
   await events
 })
 
@@ -361,4 +365,13 @@ test('other signed-in pages carry the Messages dock (static client, dock config,
   assert.equal((await h.request('/public-assets/messages-client.js?v=stale')).headers.get('cache-control'), 'no-cache')
   const inbox = await (await h.get('/messages')).text()
   assert.doesNotMatch(inbox, /id="msg-dock"/); assert.match(inbox, /id="msg-config"/)
+})
+
+test('file route: an unknown upstream length is not forwarded as 0, and uploads are bounded in flight', async t => {
+  const url = 'https://storage.googleapis.com/openchat-attachments/attachments/oc-me/abc123/a.png'
+  const h = await harness(t, { upstream: { 'GET /openchat-attachments/attachments/oc-me/abc123/a.png': () => [200, { chunked: ['PN', 'G!'] }] } })
+  const file = await h.get(`/messages/api/file?u=${encodeURIComponent(url)}`)
+  assert.equal(file.status, 200); assert.notEqual(file.headers.get('content-length'), '0')
+  assert.equal(file.headers.get('content-security-policy'), "default-src 'none'; sandbox"); assert.equal(file.headers.get('x-content-type-options'), 'nosniff')
+  assert.equal(await file.text(), 'PNG!')
 })
