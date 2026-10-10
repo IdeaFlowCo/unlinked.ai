@@ -79,7 +79,7 @@ function omniSearch() {
       }
       const copy = element('span', 'omni-copy'), name = element('span', 'omni-name')
       highlight(name, row.name, term)
-      // People the signed-in member already knows, as on /network.
+      // Marked for the signed-in member's own connections, as on /network.
       if (row.known) name.append(element('span', 'omni-known', 'You know'))
       copy.append(name, element('span', 'omni-subtitle', row.subtitle || kind))
       option.append(icon, copy)
