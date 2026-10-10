@@ -1,4 +1,5 @@
-import { messagesScript } from './messages-view.mjs'
+import { messagesScript } from './messages-client.mjs'
+import { createMessagingProxy, validId as validMessagingId } from './messaging-proxy.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { groupConnectionRows, publishedPeopleFor, rowProvenanceType, rowPublicTarget, rowSourceLabel } from './connection-identity.mjs'
@@ -140,7 +141,7 @@ export { publishedPeopleFor }
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, messagingOptions = {} }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
@@ -165,13 +166,16 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map()
+  // Native Messages: OpenChat stays the only message store; this proxy keeps each
+  // member's embedded OpenChat credential on the server (docs/openchat-message.md).
+  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...messagingOptions }) : null
   let invitationWindow = 0, invitationRequests = 0, contactWindow = 0, contactRequests = 0, unsubscribeWindow = 0, unsubscribeRequests = 0
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
   // Pages a sign-in may return to. Everything else lands on the home route.
   // An OAuth connector authorization request returns to its own validated
   // consent page (the query is re-validated there, never trusted).
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -326,17 +330,21 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const responseAlerts = new WeakMap()
   // Both counts in parallel, each bounded: a slow graph costs a badge, never the page.
   const bounded = (work, fallback) => Promise.race([Promise.resolve().then(work).catch(() => fallback), new Promise(resolve => setTimeout(resolve, 800, fallback).unref?.())])
-  const readAlerts = async (owner, fallback = 0) => {
-    if (!memberConnections && !notifications) return null
-    const [network, unseen] = await Promise.all([memberConnections ? bounded(() => memberConnections.pendingCount(owner), fallback) : undefined, notifications ? bounded(() => notifications.counts(owner).then(value => value.unseen), fallback) : undefined])
-    return { ...(memberConnections ? { network } : {}), ...(notifications ? { notifications: unseen } : {}) }
+  // Header counts for a signed-in session. Messages is OpenChat's unread total,
+  // read through the member's own messaging credential (messaging-proxy.mjs).
+  const readAlerts = async (viewer, fallback = 0) => {
+    if (!memberConnections && !notifications && !messaging) return null
+    const owner = viewer.owner
+    const [network, unseen, messages] = await Promise.all([memberConnections ? bounded(() => memberConnections.pendingCount(owner), fallback) : undefined, notifications ? bounded(() => notifications.counts(owner).then(value => value.unseen), fallback) : undefined, messaging ? bounded(() => messaging.unreadTotal(viewer).then(value => value ?? fallback), fallback) : undefined])
+    return { ...(memberConnections ? { network } : {}), ...(notifications ? { notifications: unseen } : {}), ...(messaging ? { messages } : {}) }
   }
-  const pageView = pathname => !pathname.startsWith('/api/') && !pathname.startsWith('/public-assets/') && !pathname.startsWith('/legacy-files/') && !/^\/notifications\/[^/]+$/.test(pathname) &&
+  const pageView = pathname => !pathname.startsWith('/api/') && !pathname.startsWith('/messages/api/') && !pathname.startsWith('/public-assets/') && !pathname.startsWith('/legacy-files/') && !/^\/notifications\/[^/]+$/.test(pathname) &&
     !/^\/imports\/[a-f0-9]{64}\/status$/.test(pathname) && !/\.[a-z]+$/i.test(pathname) && !['/login', '/logout', '/export', '/auth/callback/ideaflow'].includes(pathname)
   const journey = (response, view, job = null, script = '', status = 200) => {
     const alerts = responseAlerts.get(response) ?? (readers.has(response) ? {
       ...(memberConnections ? { network: 0 } : {}),
       ...(notifications ? { notifications: 0 } : {}),
+      ...(messaging ? { messages: 0 } : {}),
     } : undefined)
     view = { ...view, content: fillNavAlerts(view.content, alerts) }
     const nonce = token()
@@ -353,8 +361,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     // whose redirect chain ends at the configured Ideaflow ID origin.
     const signInFormAction = authorizationOrigin ? ` ${authorizationOrigin}` : ''
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
-    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'${view.messaging ? '; frame-src https://chat.ideaflow.app' : ''}`)
-    if (view.messaging) response.setHeader('Permissions-Policy', 'camera=(self \"https://chat.ideaflow.app\"), microphone=(self \"https://chat.ideaflow.app\")')
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
     script = `${TOP_BAR_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
@@ -662,10 +669,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           }
         }
       }
-      if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer.owner); if (alerts) responseAlerts.set(response, alerts) }
+      if (viewer && request.method === 'GET' && pageView(url.pathname)) { const alerts = await readAlerts(viewer); if (alerts) responseAlerts.set(response, alerts) }
       if (request.method === 'GET' && url.pathname === '/api/nav-alerts') {
         response.writeHead(viewer ? 200 : 401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-        response.end(JSON.stringify(viewer ? await readAlerts(viewer.owner, null) ?? {} : { error: 'Sign in to see notifications.' })); return
+        response.end(JSON.stringify(viewer ? await readAlerts(viewer, null) ?? {} : { error: 'Sign in to see notifications.' })); return
       }
       // The signed-in owner's own private context from the Ideaflow people
       // overlay (docs/private-context.md). Owner-only JSON, never cached, never
@@ -942,32 +949,40 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         await establishSession(response, identity, null, transaction.next, null, transaction.cardToken); return
       }
       if (oauth && url.pathname === '/oauth/authorize') { await authorizeConnector(request, response, url, viewer, chrome); return }
+      // The Messages JSON API and event stream answer JSON, never a sign-in page.
+      if (url.pathname.startsWith('/messages/api/')) {
+        if (messaging) await messaging.handle(request, response, url, sessionFor(request))
+        else { response.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify({ error: 'messaging_unavailable' })) }
+        return
+      }
       const session = sessionFor(request)
       if (!session) {
         if (request.method === 'GET' && url.pathname === '/') journey(response, renderLanding({ inApp: inAppBrowser(request.headers['user-agent']) }))
         else if (request.method === 'GET' && url.pathname === '/join') journey(response, renderJoin())
         else if (request.method === 'GET' && url.pathname === '/scan') journey(response, renderScan({ tab: url.searchParams.get('tab') }))
-        else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(url.pathname === '/messages' ? url.pathname + url.search : url.pathname) }), null, '', 401)
+        else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(url.pathname === '/messages' && url.search ? url.pathname + url.search : url.pathname) }), null, '', 401)
         else if (connectionPost(request)) connectionFailure(response, 'Your session has expired. Sign in, then send your connection request again.', 401)
         else render(response, 'Sign in required', '<a class="action" href="/login">Sign in with Ideaflow</a>', 401)
         return
       }
-      if (request.method === 'GET' && url.pathname === '/messages') {
-        const profile = parseUnlinkedProfileContext(url.searchParams.get('profile'))
-        journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, profile }), null, messagesScript(session.csrf)); return
-      }
-      if (request.method === 'POST' && url.pathname === '/messages/session') {
-        const input = new URLSearchParams((await body(request, 2048)).toString())
-        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => key !== 'csrf')) { response.writeHead(403).end(); return }
-        // Bound refreshes per browser session; failed lookups are not membership.
-        if (session.messagingAt && Date.now() - session.messagingAt < 3000) { response.writeHead(429).end(); return }
-        session.messagingAt = Date.now()
-        try {
-          if (!createMessagingSession) throw Error('messaging_unavailable')
-          const result = await createMessagingSession(session)
-          response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
-        } catch { response.writeHead(503, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'messaging_unavailable' })) }
-        return
+      // A profile's Message link resolves on the server (OpenChat's confidential
+      // recipient path) and opens the direct conversation; it never sends anything.
+      if (request.method === 'GET' && (url.pathname === '/messages' || url.pathname.startsWith('/messages/c/'))) {
+        const conversationId = url.pathname === '/messages' ? null : url.pathname.slice('/messages/c/'.length)
+        if (conversationId !== null && !validMessagingId(conversationId)) { redirect(response, '/messages'); return }
+        let entry = null
+        if (conversationId === null && url.searchParams.has('profile')) {
+          const profile = parseUnlinkedProfileContext(url.searchParams.get('profile'))
+          entry = { status: 'unavailable', profile }
+          if (profile && messaging) {
+            try {
+              const result = await messaging.openProfile(session, profile)
+              if (result.status === 'ready') { redirect(response, `/messages/c/${encodeURIComponent(result.conversationId)}`); return }
+              entry = { ...result, profile }
+            } catch { /* Shown as unavailable with Try again. */ }
+          }
+        }
+        journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, conversationId, entry, available: Boolean(messaging) }), null, messaging ? messagesScript({ csrf: session.csrf, conversationId }) : ''); return
       }
       if (request.method === 'GET' && url.pathname === '/join') { redirect(response, '/'); return }
       if (request.method === 'GET' && url.pathname === '/legacy-account') {

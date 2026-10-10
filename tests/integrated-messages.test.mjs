@@ -12,7 +12,7 @@ test('membership is visible and unclaimed profiles invite instead of pretending 
   const member = renderPerson({ profile: { ...base, presence: 'member' } }).content
   assert.match(member, />On Unlinked</); assert.match(member, /href="\/messages\?profile=/)
   const inbox = renderMessages({ csrf: 'fixture' })
-  assert.equal(inbox.messaging, true); assert.match(inbox.content, /title="Your messages"/)
+  assert.match(inbox.content, /id="msg-app"/); assert.doesNotMatch(inbox.content, /<iframe/)
   assert.doesNotMatch(inbox.content, /token=|subject=|issuer=/)
 })
 
@@ -25,7 +25,7 @@ test('session exchange reads the live owner binding and fails closed without it'
   await assert.rejects(createMessagingSession({ secret: 's'.repeat(40), identityForOwner: async () => null, fetchImpl: async () => { throw Error('must not call') } })({ owner }))
 })
 
-test('embedded session requires browser login, same origin, CSRF, and cannot select another owner', async t => {
+test('the inbox requires browser login; the shell carries no OpenChat credential and no frame permissions', async t => {
   let handler, calls = 0
   const owner = { ownerId: 'owner', userId: 'user' }
   const server = createServer((req, res) => handler(req, res)); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -35,35 +35,34 @@ test('embedded session requires browser login, same origin, CSRF, and cannot sel
     login: { begin: async () => ({ location: 'https://id.example.invalid/auth', transaction: { state: 'fixture-state' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: 'verified', displayName: 'Avery' }) },
     resolveOwner: async () => owner, getBackend: async () => ({ adapter: {} }),
     createMessagingSession: async session => { calls++; assert.deepEqual(session.owner, owner); return { token: 'fixture-private-token', user: { userId: 'inbox' } } },
+    messagingOptions: { fetchImpl: async () => new Response(JSON.stringify({ unreadTotal: 2 })) },
   })
   const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
   assert.equal((await request('/messages')).status, 401)
-  const start = await request('/login?next=%2Fmessages'), transaction = start.headers.getSetCookie().find(value => value.startsWith('__Host-ul-login=')).split(';')[0]
+  assert.equal((await request('/messages/c/conv_1')).status, 401)
+  const start = await request('/login?next=%2Fmessages%2Fc%2Fconv_1'), transaction = start.headers.getSetCookie().find(value => value.startsWith('__Host-ul-login=')).split(';')[0]
   const finish = await request('/auth/callback/ideaflow?state=fixture-state&code=fixture', { headers: { Cookie: transaction } })
   const cookie = finish.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
-  assert.equal(finish.headers.get('location'), '/messages')
-  const page = await request('/messages', { headers: { Cookie: cookie } }); const markup = await page.text()
-  assert.equal(page.status, 200); assert.match(page.headers.get('content-security-policy'), /frame-src https:\/\/chat.ideaflow.app/)
-  assert.doesNotMatch(markup, /fixture-private-token/)
+  assert.equal(finish.headers.get('location'), '/messages/c/conv_1')
+  const page = await request('/messages/c/conv_1', { headers: { Cookie: cookie } }); const markup = await page.text()
+  assert.equal(page.status, 200); assert.doesNotMatch(page.headers.get('content-security-policy'), /frame-src/)
+  assert.equal(page.headers.get('permissions-policy'), null)
+  assert.doesNotMatch(markup, /fixture-private-token|<iframe/)
+  assert.match(markup, /data-nav-messages>Messages<span class="nav-count" aria-label="2 unread">2<\/span>/)
+  assert.equal(calls, 1)
+  // The old exchange that returned the OpenChat token to the browser no longer exists.
   const csrf = /name="csrf" value="([^"]+)"/.exec(markup)[1]
-  const post = (body, extra = {}) => request('/messages/session', { method: 'POST', headers: { Cookie: cookie, Origin: origin, ...extra }, body })
-  assert.equal((await post(`csrf=${csrf}`, { Origin: 'https://evil.invalid' })).status, 403)
-  assert.equal((await post('csrf=bad')).status, 403)
-  assert.equal((await post(`csrf=${csrf}&subject=victim`)).status, 403)
-  assert.equal(calls, 0)
-  const good = await post(`csrf=${csrf}`); assert.equal(good.status, 200); assert.equal(good.headers.get('cache-control'), 'no-store'); assert.equal((await good.json()).user.userId, 'inbox'); assert.equal(calls, 1)
+  const old = await request('/messages/session', { method: 'POST', headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${csrf}` })
+  assert.doesNotMatch(await old.text(), /fixture-private-token/)
 })
 
-
-test('profile compose context survives embedding and opening standalone OpenChat', () => {
+test('an unclaimed or unavailable profile entry renders an invite or a retry, never an iframe', () => {
   const profile = 'https://www.unlinked.ai/people/faisal-fixture'
-  const markup = renderMessages({ profile, csrf: 'fixture' }).content
-  const src = new URL(/id="messages-frame"[^>]*src="([^"]+)"/.exec(markup)[1].replaceAll('&amp;', '&'))
-  assert.deepEqual(Object.fromEntries(src.searchParams), { embed: 'unlinked', intent: 'compose', source: 'unlinked', profile })
-  const link = new URL(/href="([^"]+)"[^>]*>OpenChat ↗/.exec(markup)[1].replaceAll('&amp;', '&'))
-  assert.equal(link.searchParams.get('profile'), profile)
-  assert.equal(link.searchParams.get('intent'), 'compose')
-  assert.equal(link.searchParams.has('embed'), false)
+  const unclaimed = renderMessages({ csrf: 'fixture', entry: { status: 'unclaimed', name: 'Faisal <b>', profile } }).content
+  assert.match(unclaimed, /Faisal &lt;b&gt; is not on Unlinked yet/); assert.match(unclaimed, /href="\/invites"/)
+  const unavailable = renderMessages({ csrf: 'fixture', entry: { status: 'unavailable', profile } }).content
+  assert.match(unavailable, /href="\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2Ffaisal-fixture">Try again/)
+  assert.doesNotMatch(unclaimed + unavailable, /<iframe/)
 })
 
 test('people search offers an addressed Message for members and one invite for nonmembers', () => {

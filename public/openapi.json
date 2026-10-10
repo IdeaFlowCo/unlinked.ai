@@ -1462,19 +1462,19 @@
         }
       }
     },
-    "/messages/session": {
-      "post": {
-        "summary": "Embedded inbox browser session",
-        "description": "Same-origin browser session and CSRF only. Exchanges the authenticated live owner for a short-lived OpenChat iframe session. Not an account-grant or MCP endpoint. Never accepts recipient, subject or owner input.",
+    "/messages/api/conversations": {
+      "get": {
+        "summary": "Native web inbox (browser session only)",
+        "description": "Same-origin browser session only; writes under /messages/api also require the X-Unlinked-CSRF header. Lists the signed-in member's OpenChat conversations through Unlinked's server, which holds the member's short-lived OpenChat credential and never returns it. Responses are projected: no email fields. Not an account-grant or MCP endpoint; agent grants cannot read or send messages.",
         "responses": {
           "200": {
-            "description": "No-store embedded inbox session"
+            "description": "No-store projected conversation list"
           },
           "401": {
             "description": "Sign in required"
           },
           "403": {
-            "description": "Origin or CSRF rejected"
+            "description": "Cross-site request rejected"
           },
           "503": {
             "description": "Messages unavailable"
@@ -1484,26 +1484,7 @@
           {
             "browserSession": []
           }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/x-www-form-urlencoded": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "csrf"
-                ],
-                "properties": {
-                  "csrf": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
+        ]
       }
     },
     "/c/{token}/add": {
