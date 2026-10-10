@@ -47,10 +47,16 @@ export function decode(value, neo4j) {
 }
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const METADATA_LABELS = ['UnlinkedGraphMigration', 'UnlinkedGraphMigrationRecord']
-const privateLabel = label => label.startsWith('Unlinked') || label.startsWith('Operational')
+// Labels in the shared graph that share the Unlinked prefix but are owned by
+// another application. OpenChat's accepted-connection receipt ledger
+// (docs/openchat-accepted-connections.md) keeps the standalone
+// UnlinkedConnectionSync label and its requestId constraint. Unlinked never
+// exports, restores or drops it; shared snapshots stay limited to LABELS.
+export const EXTERNAL_LABELS = Object.freeze(['UnlinkedConnectionSync'])
+const privateLabel = label => (label.startsWith('Unlinked') || label.startsWith('Operational')) && !EXTERNAL_LABELS.includes(label)
 const unknownPrivateLabel = label => privateLabel(label) && !LABELS.includes(label) && !METADATA_LABELS.includes(label)
 async function requireBoundedDomain(session, neo4j) {
-  const result = await session.run("MATCH (n) WHERE any(label IN labels(n) WHERE (label STARTS WITH 'Unlinked' OR label STARTS WITH 'Operational') AND NOT label IN $allowed) RETURN count(n) AS count", { allowed: [...LABELS, ...METADATA_LABELS] })
+  const result = await session.run("MATCH (n) WHERE any(label IN labels(n) WHERE (label STARTS WITH 'Unlinked' OR label STARTS WITH 'Operational') AND NOT label IN $allowed) RETURN count(n) AS count", { allowed: [...LABELS, ...METADATA_LABELS, ...EXTERNAL_LABELS] })
   if (!result.records[0].get('count').equals(neo4j.int(0))) throw new Error('unexpected_private_domain_label')
 }
 const quote = name => '`' + name.replaceAll('`', '``') + '`'
