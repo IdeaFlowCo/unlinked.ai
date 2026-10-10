@@ -120,3 +120,7 @@ MCP package has its own release version; keep its package/lockfile metadata and
 legacy stdio server version aligned when releasing that package.
 
 Person profiles offer **Message with OpenChat**; see [recipient selection and profile privacy](docs/openchat-message.md).
+
+### Messages
+
+`/messages` is Unlinked's native inbox on the OpenChat network: OpenChat stores every conversation and Unlinked's server relays it with the member's server-held credential. Transport, security boundaries and the event stream are described in [docs/openchat-message.md](docs/openchat-message.md#native-inbox-transport).

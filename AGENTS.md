@@ -150,7 +150,7 @@ Profile **Message with OpenChat** shared identity resolution, explicit Send and 
 
 Unlinked is the network and OpenChat its messenger. The confidential `/api/messaging/v1/recipient` service resolves published-profile ownership to a shared Ideaflow identity; it is not a browser/agent-grant endpoint. See docs/openchat-message.md.
 
-Unlinked web Messages (`/messages`) uses the same OpenChat inbox. `/messages/session` is browser-session + same-origin CSRF only; it is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
+Unlinked web Messages (`/messages`) uses the same OpenChat inbox. Its `/messages/api` JSON and event stream are browser-session only (same origin, CSRF on writes); Unlinked's server holds the member's OpenChat credential and never returns it. It is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
 Professional profile links and the in-memory enrichment of immutable published rows are documented in `docs/profile-details.md`; never copy raw assertion or contact-card fields into public profiles.
 

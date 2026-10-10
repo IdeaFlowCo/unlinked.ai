@@ -868,8 +868,8 @@
     "agentSending": false,
     "confidentialRecipientResolver": "/api/messaging/v1/recipient",
     "webInbox": "/messages",
-    "browserSessionExchange": {
-      "path": "/messages/session",
+    "browserMessagesApi": {
+      "path": "/messages/api",
       "authorization": "browser-session-and-csrf",
       "agentAccess": false
     },
