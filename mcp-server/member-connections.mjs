@@ -58,7 +58,7 @@ export function connectionNote(value) {
   return note
 }
 
-export function createConnectionRequests({ store, notifications = null, now = Date.now, perDay = CONNECTION_REQUESTS_PER_DAY, cooldownMs = RESEND_COOLDOWN_MS } = {}) {
+export function createConnectionRequests({ store, notifications = null, onAccepted = null, now = Date.now, perDay = CONNECTION_REQUESTS_PER_DAY, cooldownMs = RESEND_COOLDOWN_MS } = {}) {
   if (!store || ['insert', 'get', 'listPair', 'listByRecipient', 'listBySender', 'listAccepted', 'transition', 'countSentSince', 'countReceivedPending', 'deleteOwner'].some(name => typeof store[name] !== 'function')) throw new Error('connection_store_required')
   if (!Number.isSafeInteger(perDay) || perDay < 1 || !Number.isSafeInteger(cooldownMs) || cooldownMs < 0) throw new Error('connection_limits_invalid')
   // Notifications never decide whether a request works.
@@ -123,6 +123,7 @@ export function createConnectionRequests({ store, notifications = null, now = Da
         if (action === 'accept') await quietly(() => notifications.notify({ recipient: senderOf(record), kind: 'connection_request_accepted', actor: recipient, actorName: record.recipientName,
           ...(record.recipientProfileId ? { actorProfileId: record.recipientProfileId } : {}), subjectId: id, dedupeKey: `connection-accepted:${id}` }))
       }
+      if (action === 'accept' && onAccepted) await quietly(() => onAccepted())
       return view(settled, recipient)
     },
     // Only the sender withdraws, while the request is still open. The

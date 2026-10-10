@@ -137,3 +137,6 @@ Polling does not mark notifications seen or read. Without JavaScript, badges
 refresh on page navigation. Notification emails already use the Resend mailer
 and preferences described in [email.md](email.md); the feed reflects whether
 that runtime has email enabled.
+
+For OpenChat synchronization, rollout requirements, durable retry and removal
+semantics, see [Accepted connections in OpenChat](openchat-accepted-connections.md).

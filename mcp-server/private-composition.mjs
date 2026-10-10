@@ -1,5 +1,6 @@
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
+import { createOpenChatConnectionSync, createNeo4jOpenChatSyncStore } from './openchat-connections.mjs'
 import { validTimestamp } from '../src/utils/network-order.mjs'
 import { createMessagingResolver, createMessagingSession } from './messaging.mjs'
 
@@ -122,11 +123,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, closed = false
+  let server, worker, memberEmail, diagnosticsStore, connectionSync, closed = false
   const close = async () => {
     if (closed) return
     closed = true
     await diagnosticsStore?.close()
+    await connectionSync?.stop()
     await worker?.stop()
     await memberEmail?.stop()
     if (server?.listening) {
@@ -220,7 +222,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await sessionStore?.initialize()
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
     await connectionStore?.initialize()
-    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null }) : undefined
+    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, onAccepted: () => connectionSync?.wake() }) : undefined
     const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
       // The inviter hears that their invite was accepted (and so that the invitee joined).
       onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,
@@ -491,6 +493,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
             RETURN i.issuer AS issuer,i.subject AS subject LIMIT 2`, owner))
           return result.records.length === 1 ? { issuer:result.records[0].get('issuer'), subject:result.records[0].get('subject') } : null
         } finally { await session.close() }
+    }
+    if (connectionStore) {
+      connectionSync = createOpenChatConnectionSync({ store: createNeo4jOpenChatSyncStore(driver), identityForOwner, secret: process.env.UNLINKED_MESSAGING_SECRET })
+      connectionSync.start()
     }
     return { login, getBackend, close, audit, requestDiagnostics, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
