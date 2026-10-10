@@ -173,7 +173,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .omni-membership{margin-left:6px;padding:0 6px;font-size:11px;vertical-align:1px;white-space:nowrap}
 .unlinked-onboarding .omni-shadow{display:inline-flex;border-radius:99px;background:var(--page);color:var(--muted);font-weight:400}
 .unlinked-onboarding .omni-subtitle{font-size:12px;line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.unlinked-onboarding .omni-status{padding:10px 16px;border-top:1px solid var(--line);background:var(--page);font-size:11px;color:var(--muted)}
+.unlinked-onboarding .omni-status{min-height:38px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--page);font-size:12px;color:var(--muted)}
 .unlinked-onboarding .omni-status.omni-searching{display:flex;align-items:center;gap:8px;color:var(--brand-d);font-weight:600}
 .unlinked-onboarding .omni-searching::before{content:"";width:12px;height:12px;flex:0 0 12px;border:2px solid var(--line2);border-top-color:var(--brand-d);border-radius:50%;animation:omni-search-spin .8s linear infinite}
 @keyframes omni-search-spin{to{transform:rotate(360deg)}}
