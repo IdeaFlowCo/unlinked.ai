@@ -168,3 +168,42 @@ test('signed-in pages reuse one account network read per owner; a finished POST 
   assert.equal(out.status, 303)
   assert.equal(out.headers.get('clear-site-data'), '"cache"')
 })
+
+test('badge counts overlap route work and never hold a page; fast counts still land on the same view', async t => {
+  const owner = { ownerId: 'alerts-owner', userId: 'alerts-user' }
+  const person = (id, name) => ({ id, name, positions: [], education: [], skills: [] })
+  const legacy = { state: 'published', complete: true, revision: 'legacy-public-v1:' + 'b'.repeat(64), profiles: [person('12345678-1234-1234-1234-123456789abc', 'Ada Lovelace')], connections: [] }
+  const backend = { adapter: {}, listImportIds: async () => [], listImportJobIds: async () => [], readResource: async () => null }
+  const readPublishedSnapshot = createMemberPublicIndex({ readLegacy: async () => legacy, discover: async () => [], getBackend: async () => backend, publicPeople: { read: async () => null } })
+  let countsDelayMs = 600
+  const notifications = { counts: async () => { await delay(countsDelayMs); return { unseen: 3 } },
+    list: async () => [], markSeen: async () => {}, open: async () => null, markAllRead: async () => {}, removeOwner: async () => {}, notify: async () => true }
+  let handler
+  const server = createServer((req, res) => void handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`
+  handler = createPrivateBrowserHandler({ baseUrl: endpoint.replace('http:', 'https:'), dataMode: 'private_live',
+    login: { begin: async () => ({ location: 'https://identity.invalid/login', transaction: { state: 'state' } }),
+      finish: async () => ({ issuer: 'https://identity.invalid', subject: 'alerts', displayName: 'Alerts Member' }) },
+    resolveOwner: async () => owner, signup: async () => owner, getBackend: async () => backend,
+    issueAccountGrant: async () => ({ accessToken: 'synthetic-test-grant' }), revokeAccountGrant: async () => {},
+    readPublishedSnapshot, notifications })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const loginCookie = start.headers.getSetCookie()[0].split(';')[0]
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=test&state=state', { redirect: 'manual', headers: { Cookie: loginCookie } })
+  const session = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  // A slow counts read is left behind: the page ships without the badge.
+  const begun = performance.now()
+  const slow = await fetch(endpoint + '/network', { headers: { Cookie: session } })
+  const slowMs = performance.now() - begun
+  assert.equal(slow.status, 200)
+  assert.ok(slowMs < 500, `page waited ${slowMs}ms for a 600ms counts read`)
+  assert.doesNotMatch(await slow.text(), /Notifications, 3 new/)
+  // Fast counts land on the same view, read live, with a timing stage.
+  countsDelayMs = 0
+  const fast = await fetch(endpoint + '/network', { headers: { Cookie: session } })
+  assert.equal(fast.status, 200)
+  assert.match(fast.headers.get('server-timing') ?? '', /alerts;dur=\d+/)
+  assert.match(await fast.text(), /Notifications, 3 new/)
+})
