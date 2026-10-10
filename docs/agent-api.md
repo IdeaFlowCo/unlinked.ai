@@ -286,7 +286,7 @@ read `importCount: 0` while `unlinked_list_connections` listed them.
 ### `GET /api/agent/v1/people?q&mode&presence&sort&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
 `q` ≤ 200 chars; `mode` `best` (default) or `exact`; `presence` `member` (people
-who joined: confirmed claims and members' own imports) or `shadow` (imported,
+who joined: confirmed claims and members' own imports) or `legacy` (recovered historical account awaiting claim), or `shadow` (imported,
 not on Unlinked yet), omitted for everyone. `sort` `best` (default: relevance
 with `q`, else the stored name order), `name`, `name-desc` or `raw` (see
 [Name ordering](#name-ordering)). The filter and sort are bound into the cursor.

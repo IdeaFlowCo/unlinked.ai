@@ -1,3 +1,4 @@
+import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
 import { createOpenChatConnectionSync, createNeo4jOpenChatSyncStore } from './openchat-connections.mjs'
@@ -461,6 +462,17 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           let automatic = []
           try { automatic = urlIdentityMerges({ rows: await readImportRows(session), slugIndex: await slugIndex(), explicit }) } catch { automatic = [] }
           return [...explicit, ...automatic]
+        } finally { await session.close() }
+      },
+      // Historical membership is display evidence, never an owner/login binding.
+      readLegacyMembers: async () => {
+        const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+        try {
+          const result = await session.executeRead(tx => tx.run(`MATCH (m:UnlinkedLegacyManifest {id:'recovered-legacy-accounts-v1', manifestSha256:$manifest})
+            MATCH (a:UnlinkedLegacyAccount {manifestSha256:$manifest, sourceSha256:$source, revoked:false})
+            WHERE coalesce(a.selfAsserted,false)=false AND coalesce(a.testProfile,false)=false
+            RETURN a.profileId AS id ORDER BY id LIMIT 82`, { manifest: LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256, source: LEGACY_ACCOUNT_SOURCE_SHA256 }))
+          return result.records.map(record => record.get('id'))
         } finally { await session.close() }
       },
       // A legacy profile is a member's once its account claim is confirmed and the owner is active.
