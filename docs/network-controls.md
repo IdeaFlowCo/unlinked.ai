@@ -7,7 +7,7 @@ Typing filters on the server after a 300 ms pause. It searches the full eligible
 Browser `sort` values:
 
 - `best`: existing default order, or relevance during a query.
-- `name` / `name-desc`: name ascending / descending, with deterministic ID ties.
+- `name` / `name-desc`: name ascending / descending from the first letter or number (leading emoji and punctuation are ignored; accent- and case-insensitive; names display as written), with deterministic ID ties. The agent tools share this key and add `raw` code-point order ([agent API](agent-api.md#name-ordering)).
 - `connected`: My connections only, newest original LinkedIn connection or accepted Unlinked connection first.
 - `imported`: My connections only, descending date of first known import into the owner's network.
 

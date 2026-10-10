@@ -155,6 +155,7 @@ Professional profile links and the in-memory enrichment of immutable published r
 ## People directory controls
 
 The standalone browser's progressive filtering, URL state, ordering and private date provenance are described in `docs/network-controls.md`. Browser ordering is not an agent API contract change; preserve existing agent defaults and keep owner relationship dates out of public profile projections.
+Same-person evidence for an owner's connection rows (published profile id with merges followed, or LinkedIn address — never a name) lives in `mcp-server/connection-identity.mjs`, shared by `/network`, `unlinked_lookup_contact` and the grouped `unlinked_list_connections` (`sources[]`, `grouping: none` for per-source rows); legacy index slugs are compared percent-decoded (`normalizeLinkedinSlug`). Sort keys: `src/utils/network-order.mjs`.
 
 Public setup links to the shared OpenChat + Unlinked agent hub at
 `https://chat.globalbr.ai/agents`. Identity/inbox are shared; **direct service credentials**
