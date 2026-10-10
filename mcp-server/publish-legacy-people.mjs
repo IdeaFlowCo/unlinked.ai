@@ -6,6 +6,7 @@ import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createLegacyPlan } from '../src/utils/legacy-import/legacy-plan.mjs'
 import { createLegacyPublicProjection } from '../src/utils/public-people/legacy-projection.mjs'
+import { operatorBoltUrl } from './operator-bolt-url.mjs'
 
 const sourceContainerSha256 = '6f1e8c2c86881191ebb3fdea92348e7abb2ef87207b65eba01789e9f6969cca2'
 const sourceSha256 = '21bf382c5bdd28a96193d2873c257e1acc6571a54f69b2a2286ddb6e09b78cd0'
@@ -35,7 +36,7 @@ export async function publishRecoveredPublicSeed({ sourcePath, root, execute = f
   if (!process.env.NOOS_PRIVATE_PASSWORD) throw new Error('private_graph_configuration_required')
   const require = createRequire(join(root,'runtime/noos/package.json')), neo4j = require('neo4j-driver')
   const { UnlinkedPublicPeopleStore } = require(join(root,'runtime/noos/dist/operational/public-people.js'))
-  const driver = neo4j.driver('bolt://graph:7687',neo4j.auth.basic('neo4j',process.env.NOOS_PRIVATE_PASSWORD),{connectionTimeout:5000,connectionAcquisitionTimeout:5000,maxTransactionRetryTime:10000})
+  const driver = neo4j.driver(operatorBoltUrl(),neo4j.auth.basic('neo4j',process.env.NOOS_PRIVATE_PASSWORD),{connectionTimeout:5000,connectionAcquisitionTimeout:5000,maxTransactionRetryTime:10000})
   try {
     const store = new UnlinkedPublicPeopleStore(driver,'neo4j');await store.initialize()
     const manifestPath = join(root,'audit','legacy-public-source-manifest-' + value.snapshot.revision.split(':').at(-1) + '.json')
