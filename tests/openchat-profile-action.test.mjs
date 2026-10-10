@@ -14,10 +14,11 @@ const evidence = async (name, markup) => {
   if (process.env.OPENCHAT_PROFILE_EVIDENCE) await writeFile(`${process.env.OPENCHAT_PROFILE_EVIDENCE}/${name}.html`, markup)
 }
 const action = markup => {
-  const link = /<a\b[^>]*href="([^"]+)"[^>]*>(?:Message|Message with OpenChat ↗)<\/a>/.exec(markup)
+  const link = /<a\b[^>]*href="([^"]+)"[^>]*>(?:Message|Message with OpenChat ↗|Open Messages)<\/a>/.exec(markup)
   const href = link?.[1]
-  assert.ok(href, 'visible Message with OpenChat action')
-  if (href.startsWith('https:')) { assert.match(link[0], /target="_blank"/); assert.match(link[0], /rel="noopener noreferrer"/) }
+  assert.ok(href, 'visible Message action')
+  // Unlinked's own Messages opens in place; anything else off-site opens in a new tab.
+  if (href.startsWith('https:') && !href.startsWith('https://www.unlinked.ai/messages')) { assert.match(link[0], /target="_blank"/); assert.match(link[0], /rel="noopener noreferrer"/) }
   return new URL(href.replaceAll('&amp;', '&'), 'https://www.unlinked.ai')
 }
 
@@ -116,15 +117,18 @@ test('rendered public action escapes RFC3986 profile ids and never exports profi
 test('Next public person body executes the same public context action', async () => {
   const component = await loadComponent('../src/components/public-directory/People.tsx', { './Directory.module.css': new Proxy({}, { get: (_, key) => String(key) }) })
   const markup = renderToStaticMarkup(React.createElement(component.ProfileBody, { profile: { id: 'seed-person', name: 'Seed Person', positions: [], education: [], skills: [], connections: [] } }))
-  assert.equal(action(markup).searchParams.get('profile'), publicUrl)
+  const href = action(markup)
+  assert.equal(href.origin + href.pathname, 'https://www.unlinked.ai/messages')
+  assert.deepEqual([...href.searchParams], [['profile', publicUrl]])
 })
 
-test('historical private profile body offers compose without publishing its row or treating its user_id as a recipient', async () => {
+test('historical private profile body opens the inbox without publishing its row or treating its user_id as a recipient', async () => {
   const component = await loadComponent('../src/app/profiles/[id]/ProfileDetails.tsx', {
     '@/utils/supabase/client': { createClient: () => ({ auth: {} }) },
     'next/navigation': { useRouter: () => ({ refresh() {} }) },
     './EditProfileForm': { __esModule: true, default: () => null },
   })
   const markup = renderToStaticMarkup(React.createElement(component.default, { profile: { id: 'private-row', user_id: 'not-an-openchat-recipient', full_name: 'Private Name', positions: [], education: [], skills: [] } }))
-  assert.deepEqual([...action(markup).searchParams], [['intent', 'compose'], ['source', 'unlinked']])
+  const href = action(markup)
+  assert.equal(href.href, 'https://www.unlinked.ai/messages'); assert.ok(!markup.includes('private-row') || !href.href.includes('private-row'))
 })

@@ -127,6 +127,12 @@ Notifications for accepted connection requests open the direct conversation.
   client is one static, content-hashed script
   (`/public-assets/messages-client.js?v=`) that reads a non-executable
   `#msg-config` block (CSRF token, thread id, emoji list, dock flag).
+- **Block or report** links to OpenChat from the thread menu: embedded sessions
+  cannot block (OpenChat's `requireDirectSession`), so it needs a direct sign-in there.
+- The legacy Next.js profile pages link **Message** to `https://www.unlinked.ai/messages?profile=…`
+  (`unlinkedMessagesUrl`), or to the inbox for private/historical rows, instead of
+  OpenChat's web compose page. `openChatProfileMessageUrl` remains for OpenChat's
+  own compose contract.
 
 LinkedIn messaging remains plan-only; the coordinated OpenChat repository owns
 `docs/linkedin-messaging-plan.md` (Unipile, Beeper, and existing bridge options).

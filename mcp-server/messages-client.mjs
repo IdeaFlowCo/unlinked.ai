@@ -15,7 +15,9 @@ function messagesClient(config) {
   const docked = config.dock === true, dock = docked ? document.getElementById('msg-dock') : null
   const stacked = () => docked || matchMedia('(max-width: 759px)').matches
   // In the dock, nothing streams or marks read unless the panel is open and visible.
-  const dormant = () => docked && (dock.dataset.expanded !== 'true' || dock.offsetParent === null)
+  // (The dock is position:fixed, so offsetParent cannot tell visibility; the CSS hides it below 1024 px.)
+  const dockWide = () => matchMedia('(min-width: 1024px)').matches
+  const dormant = () => docked && (dock.dataset.expanded !== 'true' || !dockWide())
   const counted = new Set()
   const state = {
     me: null, conversations: new Map(), threads: new Map(), open: null, loadedAt: new Date().toISOString(), readMaps: new Map(),
@@ -259,7 +261,9 @@ function messagesClient(config) {
         muted(conversation) ? item('Unmute', () => setMute(null)) : [item('Mute for 1 hour', () => setMute(new Date(Date.now() + 3600000).toISOString())), item('Mute for 8 hours', () => setMute(new Date(Date.now() + 8 * 3600000).toISOString())), item('Mute until I unmute', () => setMute('always'))],
         item('Mark as unread', markUnread),
         h('label', { class: 'msg-menu-check' }, h('input', { type: 'checkbox', checked: prefs.enterSends ? true : null, onchange: event => { prefs.enterSends = event.target.checked; store.set('unlinked.messages.prefs', prefs); updateComposerHint() } }), 'Enter sends (Shift+Enter for a new line)'),
-        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'))) : null
+        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'),
+        // Blocking and reporting need a direct OpenChat sign-in (embedded sessions cannot block).
+        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Block or report in OpenChat ↗'))) : null
     head.replaceChildren(...[
       h('button', { class: 'msg-back', type: 'button', 'aria-label': 'Back to conversations', onclick: () => closeConversation() }, '←'),
       avatar(title, peer?.id || state.open, peer?.presence),
@@ -779,9 +783,9 @@ function messagesClient(config) {
     const navCount = document.querySelector('[data-nav-messages] .nav-count')?.textContent
     if (navCount) { $('msg-dock-count').textContent = navCount; $('msg-dock-count').hidden = false }
     dock.hidden = false
-    if (saved.expanded && matchMedia('(min-width: 1024px)').matches) expandDock(true, { focus: false })
+    if (saved.expanded && dockWide()) expandDock(true, { focus: false })
     // The dock is hidden below 1024 px: drop its stream there and resume when it shows again.
-    matchMedia('(min-width: 1024px)').addEventListener('change', event => { if (!event.matches) { stopTyping(); state.stream?.close(); state.stream = null } else if (dock.dataset.expanded === 'true' && !state.stream) { state.paused = false; connect() } })
+    matchMedia('(min-width: 1024px)').addEventListener('change', event => { if (!event.matches) { stopTyping(); state.stream?.close(); state.stream = null } else if (dock.dataset.expanded === 'true' && !state.stream) { state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) } })
     return
   }
   if (config.conversationId) { state.open = config.conversationId; root.dataset.open = config.conversationId; threadShell() }
