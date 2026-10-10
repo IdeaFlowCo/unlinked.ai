@@ -12,7 +12,8 @@ built (`src/utils/public-people/profile-decisions.mjs`, wired through
   `/api/people/<merged>` answer 301 to the survivor, `reader.lookup` resolves the
   merged id, and the agent's `unlinked_get_profile` returns the survivor with
   `movedFrom`. A claimed (member) profile is never merged away, and survivors are
-  never themselves merged (no chains).
+  never themselves merged (no chains). Historical membership follows the survivor
+  separately from current membership; see the [presence contract](public-people-reader.md#historical-membership).
 - **rename** `{profileId, name}`: changes only the published display name, for
   example to mark test accounts.
 - Inputs are never changed. A decision is **revoked**, not deleted, and the next

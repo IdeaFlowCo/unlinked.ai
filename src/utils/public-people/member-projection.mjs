@@ -56,7 +56,7 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // refresh runs behind it, so no page view pays the rebuild in-band. A failed
 // refresh drops the kept build (fail closed, like the suggest reader). 0
 // disables it; past `staleMs` a read waits for the rebuild.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, freshMs = 0, staleMs = 0, now = Date.now }) {
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
   if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
   let work = null, kept = null
@@ -177,14 +177,18 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       return result
     }
     if (typeof readMembers !== 'function') return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections})
-    // Claimed profiles are members; everyone else in the index is a shadow.
+    // Historical membership is separate display evidence, never a current owner binding.
     const claimed = await readMembers()
     if (!Array.isArray(claimed) || claimed.length > PUBLIC_INDEX_MAX_PROFILES) throw Error('public_member_presence_invalid')
     const known = new Set(profiles.map(value => value.id))
     for (const id of claimed) if (known.has(id)) members.add(id)
+    const recovered = typeof readLegacyMembers === 'function' ? await readLegacyMembers() : []
+    if (!Array.isArray(recovered) || recovered.length > 81 || recovered.some(id => !known.has(id))) throw Error('public_legacy_presence_invalid')
+    const legacyMembers = [...new Set(recovered)].sort()
+    revisions.push('legacy-members:' + hash(JSON.stringify(legacyMembers)))
     const memberIds = [...members].sort()
     revisions.push('members:' + hash(JSON.stringify(memberIds)))
-    return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds})
+    return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds,legacyMembers})
   }
   const read = async ({signal} = {}) => {
     signal?.throwIfAborted()

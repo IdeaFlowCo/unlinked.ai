@@ -42,8 +42,8 @@ const immutableIdentity = (value, ancestors = new Set()) => {
   ancestors.delete(value)
   return valid
 }
-// member: a confirmed account owns the profile; shadow: imported, not on Unlinked yet.
-export const PRESENCE = Object.freeze(['member', 'shadow'])
+// member: confirmed current account; legacy: recovered account awaiting claim; shadow: imported contact.
+export const PRESENCE = Object.freeze(['member', 'legacy', 'shadow'])
 const requestValue = value => {
   if (!plain(value) || Reflect.ownKeys(value).some(key => !Object.hasOwn(Object.getOwnPropertyDescriptor(value, key), 'value'))) invalid()
   if (value.signal !== undefined && !(value.signal instanceof AbortSignal)) invalid()
@@ -173,12 +173,13 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         outgoing.get(edge.fromId).add(edge.toId)
         connected.get(edge.fromId).add(edge.toId); connected.get(edge.toId).add(edge.fromId)
       }
-      // A snapshot that names its members marks everyone else as a shadow
-      // (imported, not on Unlinked yet) and says how far each person reaches.
+      // Presence is display evidence; only confirmed membership takes precedence
+      // over recovered historical membership. Neither implies owner authorization.
       if (value.members !== undefined) {
         const members = new Set(array(value.members, maxProfiles).map(id => { if (!summaries.has(id)) unavailable(); return id }))
+        const legacy = new Set(array(value.legacyMembers ?? [], maxProfiles).map(id => { if (!summaries.has(id)) unavailable(); return id }))
         for (const [id, summary] of summaries) {
-          const marks = { presence: members.has(id) ? 'member' : 'shadow', connectionCount: connected.get(id).size }
+          const marks = { presence: members.has(id) ? 'member' : legacy.has(id) ? 'legacy' : 'shadow', connectionCount: connected.get(id).size }
           Object.assign(summary, marks); Object.assign(details.get(id), marks)
         }
       }

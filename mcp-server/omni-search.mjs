@@ -82,8 +82,8 @@ function omniSearch() {
       highlight(name, row.name, term)
       // Marked for the signed-in member's own connections, as on /network.
       if (row.known) name.append(element('span', 'omni-known', 'You know'))
-      if (kind === 'People' && (row.presence === 'member' || row.presence === 'shadow')) {
-        name.append(element('span', 'omni-membership ' + (row.presence === 'member' ? 'membership-member' : 'omni-shadow'), row.presence === 'member' ? 'On Unlinked' : 'Not on Unlinked'))
+      if (kind === 'People' && (row.presence === 'member' || row.presence === 'legacy' || row.presence === 'shadow')) {
+        name.append(element('span', 'omni-membership ' + (row.presence === 'member' ? 'membership-member' : 'omni-shadow'), row.presence === 'member' ? 'On Unlinked' : row.presence === 'legacy' ? 'Legacy member · awaiting claim' : 'Not on Unlinked'))
       }
       copy.append(name, element('span', 'omni-subtitle', row.subtitle || kind))
       option.append(icon, copy)
