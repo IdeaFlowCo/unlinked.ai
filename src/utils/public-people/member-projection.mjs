@@ -177,7 +177,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       return result
     }
     if (typeof readMembers !== 'function') return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections})
-    // Claimed profiles are members; everyone else in the index is a shadow.
+    // Historical membership is separate display evidence, never a current owner binding.
     const claimed = await readMembers()
     if (!Array.isArray(claimed) || claimed.length > PUBLIC_INDEX_MAX_PROFILES) throw Error('public_member_presence_invalid')
     const known = new Set(profiles.map(value => value.id))
