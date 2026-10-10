@@ -50,7 +50,7 @@ test('socket framing: Engine.IO open, namespace auth, ping/pong, events, connect
 })
 
 // A signed-in browser session against a mocked OpenChat (fetch + socket).
-async function harness(t, { upstream = {}, sockets = [], signup = false } = {}) {
+async function harness(t, { upstream = {}, sockets = [], signup = false, extra = {} } = {}) {
   const calls = [], minted = []
   const owner = { ownerId: 'owner', userId: 'user' }
   const fetchImpl = async (url, options) => {
@@ -82,6 +82,7 @@ async function harness(t, { upstream = {}, sockets = [], signup = false } = {}) 
     ...(signup ? { signup: async () => { throw Error('unexpected_signup') }, issueAccountGrant: async () => { throw Error('unexpected_issue') }, revokeAccountGrant: async () => { throw Error('unexpected_revoke') } } : {}),
     createMessagingSession: async session => { minted.push(session.owner); return { token: `${TOKEN}-${minted.length}`, user: { userId: ME, name: 'Me', email: 'shared-inbox@ideaflow.invalid' } } },
     messagingOptions: { apiOrigin: 'https://chat.test', fetchImpl, connectSocket, heartbeatMs: 50, lingerMs: 10 },
+    ...extra,
   })
   const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
   const start = await request('/login?next=%2Fmessages'), transaction = start.headers.getSetCookie().find(value => value.startsWith('__Host-ul-login=')).split(';')[0]
@@ -374,4 +375,41 @@ test('file route: an unknown upstream length is not forwarded as 0, and uploads 
   assert.equal(file.status, 200); assert.notEqual(file.headers.get('content-length'), '0')
   assert.equal(file.headers.get('content-security-policy'), "default-src 'none'; sandbox"); assert.equal(file.headers.get('x-content-type-options'), 'nosniff')
   assert.equal(await file.text(), 'PNG!')
+})
+
+test('View on Unlinked: partners link only to a claimed, published member profile; lookups are cached and never block the inbox', async t => {
+  const snapshot = { state: 'published', complete: true, revision: 'msg-identities-v1', profiles: [
+    { id: 'avery-public', name: 'Avery', positions: [], education: [], skills: [] },
+    { id: 'shadow-public', name: 'Imported', positions: [], education: [], skills: [] },
+  ], connections: [], members: ['avery-public'] }
+  const owners = { 'avery-subject': { ownerId: 'avery-owner', userId: 'avery-user' }, 'shadow-subject': { ownerId: 'shadow-owner', userId: 'shadow-user' } }
+  const ownProfiles = { 'avery-owner': 'avery-public', 'shadow-owner': 'shadow-public' }
+  let identityCalls = 0
+  const three = [{ id: CONV, type: 'direct', participants: [{ user: person(ME, 'Me') }, { user: person(OTHER, 'Avery') }], unreadCount: 0 },
+    { id: 'conv_2', type: 'direct', participants: [{ user: person(ME, 'Me') }, { user: person('oc-shadow', 'Imported') }], unreadCount: 0 },
+    { id: 'conv_3', type: 'direct', participants: [{ user: person(ME, 'Me') }, { user: person('oc-nobody', 'Nobody') }], unreadCount: 0, markedUnread: true }]
+  const h = await harness(t, { upstream: { 'GET /api/chat/conversations': () => [200, three], 'GET /api/chat/unread-total': () => [200, { unreadTotal: 0 }] }, extra: {
+    readPublishedSnapshot: async () => snapshot,
+    resolveOwner: async identity => identity.subject ? owners[identity.subject] ?? { ownerId: 'owner', userId: 'user' } : null,
+    ownProfileId: async owner => ownProfiles[owner.ownerId] ?? null,
+    messagingIdentities: async (session, userIds) => { identityCalls++; assert.deepEqual(session.owner, { ownerId: 'owner', userId: 'user' }); assert.deepEqual([...userIds].sort(), [OTHER, 'oc-nobody', 'oc-shadow'].sort())
+      return [{ userId: OTHER, issuer: 'https://id.ideaflow.app/api/auth', subject: 'avery-subject' }, { userId: 'oc-shadow', issuer: 'https://id.ideaflow.app/api/auth', subject: 'shadow-subject' }] },
+  } })
+  const listed = await (await h.get('/messages/api/conversations')).json()
+  const partner = id => listed.conversations.find(conversation => conversation.id === id).participants.find(person => person.id !== ME)
+  assert.equal(partner(CONV).profileId, 'avery-public')
+  assert.equal(partner('conv_2').profileId, undefined, 'an unclaimed shadow profile is not linked')
+  assert.equal(partner('conv_3').profileId, undefined)
+  assert.equal(listed.conversations.find(conversation => conversation.id === 'conv_3').markedUnread, true)
+  assert.doesNotMatch(JSON.stringify(listed), /subject|owner|@/)
+  await h.get('/messages/api/conversations')
+  assert.equal(identityCalls, 1, 'cached per member')
+})
+
+test('mark unread is relayed to OpenChat for the caller only', async t => {
+  const h = await harness(t, { upstream: { [`PATCH /api/chat/conversations/${CONV}/unread`]: () => [200, { ok: true, conversationId: CONV, markedUnread: true }] } })
+  const reply = await h.post(`/messages/api/conversations/${CONV}/unread`, {})
+  assert.equal(reply.status, 200); assert.deepEqual(await reply.json(), { conversationId: CONV, markedUnread: true })
+  assert.equal((await h.post(`/messages/api/conversations/${CONV}/unread`, { userId: 'someone-else' })).status, 400)
+  assert.equal((await h.post(`/messages/api/conversations/${CONV}/unread`, {}, { 'X-Unlinked-CSRF': 'x' })).status, 403)
 })

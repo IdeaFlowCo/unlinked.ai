@@ -127,6 +127,18 @@ Notifications for accepted connection requests open the direct conversation.
   client is one static, content-hashed script
   (`/public-assets/messages-client.js?v=`) that reads a non-executable
   `#msg-config` block (CSRF token, thread id, emoji list, dock flag).
+- **View on Unlinked** for any partner who claimed a published Unlinked
+  profile. OpenChat's confidential `POST /api/unlinked/identities` (service
+  secret) names which of the member's own conversation partners have a shared
+  Ideaflow identity. Unlinked maps each identity to its owner (read-only),
+  then to that owner's own profile, and links it only if the published index
+  shows that profile as a member. Results are cached 10 minutes per member,
+  and the lookup is bounded (2.5 s) so it never delays the inbox. Names,
+  emails and imported rows are never used, and nothing private is returned.
+- **Mark as unread** is durable in OpenChat (`PATCH .../unread`). The
+  conversation counts as unread in every OpenChat app until it is read again,
+  and read receipts are unchanged. If OpenChat is unavailable, it falls back
+  to this tab only.
 - **Block or report** links to OpenChat from the thread menu: embedded sessions
   cannot block (OpenChat's `requireDirectSession`), so it needs a direct sign-in there.
 - The legacy Next.js profile pages link **Message** to `https://www.unlinked.ai/messages?profile=…`

@@ -62,7 +62,10 @@ function fakeOverlay() {
 const service = createAccountToolService({ getBackend: async who => backendFor(who), readPublishedSnapshot: snapshot, lookupSlug: slug => slugs.get(slug) ?? null })
 const lookupContact = async (who, input) => (await service.call({ grant: { ...who, scope: 'owner', tools: ['unlinked_lookup_contact'] }, name: 'unlinked_lookup_contact', input })).result
 
-test('the overlay assertion carries exactly the claims Noos verifies', async () => {
+test('the overlay assertion carries exactly the claims Noos verifies', async t => {
+  // jose reads the clock separately for iat and exp; a frozen clock keeps a
+  // second boundary between the two reads from making exp - iat 61 (unlinked-um9).
+  t.mock.timers.enable({ apis: ['Date'], now: Math.floor(Date.now() / 1000) * 1000 + 999 })
   const token = await signOverlayAssertion('unlinked', SECRET, { issuer: ISSUER, subject: 'owner-subject' })
   const { payload, protectedHeader } = await jwtVerify(token, new TextEncoder().encode(SECRET), { issuer: 'unlinked', audience: OVERLAY_AUDIENCE, algorithms: ['HS256'] })
   assert.equal(protectedHeader.alg, 'HS256')
