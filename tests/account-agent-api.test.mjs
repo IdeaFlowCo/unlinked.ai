@@ -147,6 +147,16 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   assert.equal((await crossed.json()).error.code, 'cursor_invalid')
   const filtered = await (await call(app.endpoint, accessToken, 'connections?q=navy')).json()
   assert.deepEqual(filtered.connections.map(x => x.name), ['Grace Hopper'])
+  // sort and grouping are query parameters (unlinked-tto); grouping=none keeps one row per source.
+  assert.equal(page1.grouping, 'person')
+  assert.equal(page1.connections[0].sources.length, 1)
+  const perSource = await (await call(app.endpoint, accessToken, 'connections?sort=name-desc&grouping=none')).json()
+  assert.equal(perSource.sort, 'name-desc')
+  assert.deepEqual(perSource.connections.map(x => x.name), ['Grace Hopper', 'Edsger Dijkstra', 'Ada Lovelace'])
+  assert.equal(perSource.connections[0].sources, undefined)
+  const sideways = await call(app.endpoint, accessToken, 'connections?sort=sideways')
+  assert.equal(sideways.status, 400)
+  assert.equal((await sideways.json()).error.code, 'invalid_input')
   // One contact without paging, by address or by the listed id (unlinked-9kk.3).
   const byUrl = await call(app.endpoint, accessToken, 'contacts/lookup', { method: 'POST', body: JSON.stringify({ linkedinUrl: 'linkedin.com/in/Synthetic-Grace/' }) })
   assert.equal(byUrl.status, 200)

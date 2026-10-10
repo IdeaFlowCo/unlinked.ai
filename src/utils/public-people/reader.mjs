@@ -1,7 +1,7 @@
 import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
-import { PUBLIC_NETWORK_SORTS, orderNetwork } from '../network-order.mjs'
+import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 
@@ -205,7 +205,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   return {
     async list(request = {}) {
       const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false } = requestValue(request)
-      if (!PUBLIC_NETWORK_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
+      if (!PUBLIC_LIST_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
       // The presence filter is part of the cursor scope, so a page never mixes filters.
       const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}`

@@ -9,7 +9,7 @@ import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLo
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
-import { urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
+import { normalizeLinkedinSlug, urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
 import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
@@ -386,7 +386,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         const index = new Map()
         for (const name of names) {
           const manifest = JSON.parse(await readFile(join(directory, name), 'utf8'))
-          for (const row of manifest.profiles ?? []) if (row.linkedinSlug && row.legacyId) index.set(String(row.linkedinSlug).toLowerCase(), row.legacyId)
+          for (const row of manifest.profiles ?? []) {
+            // Keys are canonical (decoded, lowercased) like linkedinSlug(): unlinked-ade.
+            const slug = row.linkedinSlug && row.legacyId ? normalizeLinkedinSlug(String(row.linkedinSlug)) : null
+            if (slug) index.set(slug, row.legacyId)
+          }
         }
         return index
       })().catch(error => { slugs = null; throw error })

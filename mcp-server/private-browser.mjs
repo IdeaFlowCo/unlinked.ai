@@ -1,6 +1,7 @@
 import { messagesScript } from './messages-view.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
-import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
+import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
+import { publishedPeopleFor, rowPublicTarget } from './connection-identity.mjs'
 import { NETWORK_FILTER_SCRIPT } from './network-filter-script.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
@@ -8,7 +9,6 @@ import { createKnownConnectionsReader } from '../src/utils/public-people/known-c
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from '../src/utils/public-people/text-match.mjs'
-import { linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
 import { isPublicDiscoveryPath, servePublicDiscovery } from './public-discovery.mjs'
 import { COMBINED_UPLOAD_CONSENT, PUBLIC_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { createHash, randomBytes } from 'node:crypto'
@@ -134,27 +134,12 @@ function page(response, title, content, status = 200) {
   response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><style>body{font:17px/1.55 system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:0 1.5rem 3rem;color:#16181d;background:#f5f6fc}main>a:first-child{display:block;padding:24px 0;margin-bottom:2rem;border-bottom:1px solid #e6e8ec;font-weight:700;font-size:21px;letter-spacing:-.04em;text-decoration:none;text-transform:lowercase}h1{font-size:2rem;letter-spacing:-.03em;line-height:1.1}form,article{padding:1.25rem 1.4rem;margin:1rem 0;background:white;border:1px solid #e6e8ec;border-radius:8px}label{display:block;margin:1rem 0}input[type=text],textarea{display:block;width:95%;padding:.75rem;font:inherit}button,a.action{display:inline-block;padding:.7rem 1.2rem;margin:.2rem .3rem .2rem 0;background:#4349c4;color:white;border:0;border-radius:8px;font:600 16px system-ui;cursor:pointer;text-decoration:none}a{color:#32379c}small{display:block;margin:.75rem 0;color:#667085}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><main><a href="/">Unlinked</a><h1>${html(title)}</h1>${content}</main></html>`)
 }
 
+// publishedPeopleFor moved to connection-identity.mjs (shared with the agent tools).
+export { publishedPeopleFor }
+
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-// The published person each own connection row should link to, or null.
-// A row tries its own published person first, then an existing public profile
-// with the same LinkedIn address (old shadow profiles, rows of private-consent
-// imports). Only people the reader finds are linked, so links never 404.
-export async function publishedPeopleFor(rows, { publicTarget, lookupSlug, lookup }) {
-  const usable = id => typeof id === 'string' && id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
-  const bySlug = async row => {
-    const slug = lookupSlug && row.fields?.url ? linkedinSlug(row.fields.url) : null
-    return slug ? usable(await Promise.resolve(lookupSlug(slug)).catch(() => null)) : null
-  }
-  const candidates = await Promise.all(rows.map(async row => [usable(publicTarget(row)), await bySlug(row)]))
-  const targets = [...new Set(candidates.flat().filter(Boolean))], found = new Map()
-  for (let start = 0; start < targets.length; start += 1000) {
-    for (const [id, summary] of await lookup(targets.slice(start, start + 1000))) found.set(id, summary)
-  }
-  return candidates.map(ids => ids.map(id => id && found.get(id)).find(Boolean) ?? null)
-}
-
 export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null }) {
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -197,7 +182,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
   const contactRow = row => ({ ...(typeof row.id === 'string' ? { sourceRowId: row.id, contactHref: `/network/contacts/${encodeURIComponent(row.id)}` } : {}), ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
-  const publicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite', 'unlinked-connection'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
+  const publicTarget = rowPublicTarget
   const usableTarget = id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
   async function contactRows(rows, reader = publicReader) {
     const plainRows = rows.map(contactRow)
@@ -246,7 +231,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       }
       found.set(id, { ...profile, ...dates })
     }
-    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    return [...found.values()].sort((a, b) => compareNames(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
   let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
   // Overlapping requests share the public reader's snapshot build. Let a small
