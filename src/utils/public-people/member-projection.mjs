@@ -199,3 +199,21 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   read.revisionIdentifiesContent = true
   return read
 }
+
+// Keeps a freshness-window index warm: one read per interval triggers the
+// background refresh the stale window already allows, so an after-idle
+// visitor is answered from a young kept build instead of paying the rebuild
+// in-band. The worst-served staleness bound stays the stale window; a failed
+// refresh still fails closed through the read itself. `start` is idempotent.
+export function createIndexWarmKeeper({ read, intervalMs, schedule = (fn, ms) => setInterval(fn, ms), cancel = timer => clearInterval(timer) }) {
+  if (typeof read !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 1000 || intervalMs > 600000 || typeof schedule !== 'function' || typeof cancel !== 'function') throw new TypeError('public_member_index_warm_keeper_invalid')
+  let timer = null
+  return {
+    start() {
+      if (timer) return
+      timer = schedule(() => { Promise.resolve().then(read).catch(() => {}) }, intervalMs)
+      timer?.unref?.()
+    },
+    stop() { if (timer) { cancel(timer); timer = null } },
+  }
+}

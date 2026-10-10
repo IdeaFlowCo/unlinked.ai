@@ -188,3 +188,23 @@ test('inside the stale window the kept index answers while one refresh runs behi
   assert.notEqual(rebuilt, blocked); assert.equal(discovers, 8)
   for (const staleMs of [-1, 0.5, 600001, 500]) assert.throws(() => createMemberPublicIndex({ freshMs: 1000, staleMs, readLegacy: async () => legacy, discover: async () => [], publicPeople: { read: async () => null } }), /public_member_index_freshness_invalid/)
 })
+
+test('the warm keeper reads on its interval, starts once, stops cleanly and validates its inputs', async () => {
+  const { createIndexWarmKeeper } = await import('../src/utils/public-people/member-projection.mjs')
+  let reads = 0, scheduled = null, cancelled = 0
+  const keeper = createIndexWarmKeeper({ read: async () => { reads++ }, intervalMs: 45000,
+    schedule: (fn, ms) => { assert.equal(ms, 45000); scheduled = fn; return 'timer' },
+    cancel: timer => { assert.equal(timer, 'timer'); cancelled++ } })
+  keeper.start(); keeper.start()
+  assert.equal(typeof scheduled, 'function')
+  scheduled(); scheduled()
+  await new Promise(resolve => setTimeout(resolve, 5))
+  assert.equal(reads, 2)
+  // A rejecting read never escapes the timer.
+  const failing = createIndexWarmKeeper({ read: async () => { throw Error('refresh_failed') }, intervalMs: 45000, schedule: fn => { scheduled = fn; return 't2' }, cancel: () => {} })
+  failing.start(); scheduled()
+  await new Promise(resolve => setTimeout(resolve, 5))
+  keeper.stop(); keeper.stop()
+  assert.equal(cancelled, 1)
+  for (const options of [{ read: null, intervalMs: 45000 }, { read: async () => {}, intervalMs: 999 }, { read: async () => {}, intervalMs: 600001 }]) assert.throws(() => createIndexWarmKeeper(options), /public_member_index_warm_keeper_invalid/)
+})
