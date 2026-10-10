@@ -18,6 +18,7 @@ const bounded = (value, max) => Number.isSafeInteger(value) && value > 0 && valu
 const plain = value => value !== null && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 const hash = value => createHash('sha256').update(value).digest('hex')
 // Same grammar as PHOTO_URL in mcp-server/profile-photos.mjs: only a same-origin photo path.
+const SUGGESTED_PEOPLE = 5
 const PHOTO_URL = /^\/people\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/photo\?v=[a-f0-9]{16}$/
 
 const dense = value => {
@@ -66,19 +67,32 @@ const deepFreeze = value => {
 
 // `photoFor(id)` optionally names a same-origin profile photo URL
 // (mcp-server/profile-photos.mjs); summaries and details then carry `photo`.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean') throw new TypeError('public_people_configuration_invalid')
+// `suggestFreshMs` / `suggestStaleMs` (default 0: every suggestion checks the
+// source) let `suggest` reuse the last verified index: as-is while younger than
+// the fresh window, and while younger than the stale bound with one background
+// refresh. A failed refresh drops it, so a revoked publication fails closed.
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor, suggestFreshMs = 0, suggestStaleMs = 0, now = Date.now } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean' || !Number.isSafeInteger(suggestFreshMs) || suggestFreshMs < 0 || !Number.isSafeInteger(suggestStaleMs) || suggestStaleMs < suggestFreshMs || suggestStaleMs > 300000 || typeof now !== 'function') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
   // once, and building it is slow. With the default `reuse: false`, each new
   // read checks the source before reusing any compiled public index. A
   // caller's own signal reads alone unless a reusable snapshot is already kept.
-  let inflight = null, kept = null
+  let inflight = null, kept = null, latest = null
   async function snapshot(signal) {
     if (kept) return kept
-    if (signal) return build(signal)
-    if (!inflight) inflight = build().then(value => { if (reuse) kept = value; return value }).finally(() => { inflight = null })
+    if (signal) return build(signal).then(value => { latest = { data: value, at: now() }; return value })
+    if (!inflight) inflight = build().then(value => { if (reuse) kept = value; latest = { data: value, at: now() }; return value }, error => { latest = null; throw error }).finally(() => { inflight = null })
     return inflight
+  }
+  const age = () => latest ? now() - latest.at : Infinity
+  const refresh = () => { if (!inflight) snapshot().catch(() => {}) }
+  // Suggestions: the last verified index while recent, else a fresh read.
+  async function recent(signal) {
+    const held = latest, elapsed = age()
+    if (held && elapsed < suggestFreshMs) return held.data
+    if (held && elapsed < suggestStaleMs) { refresh(); return held.data }
+    return snapshot(signal)
   }
   async function build(signal) {
     if (!readPublishedSnapshot) unavailable()
@@ -168,7 +182,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         const name = position.company.trim(), key = normalized(name), tokens = words(name)
         if (name.length <= 200 && tokens.length > 0 && tokens.length <= 12 && !companies.has(key)) companies.set(key, { name, tokens })
       }
-      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, companies }
+      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(readPublishedSnapshot, { key: cacheKey, data }) }
       return data
@@ -209,17 +223,23 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     return { profiles, ...(nextCursor ? { nextCursor } : {}) }
   }
   return {
+    // Start loading the index (e.g. when the search field gains focus) so the
+    // first keystroke finds it ready. Never waits and never returns data.
+    warm() { if (age() >= suggestFreshMs) refresh() },
     async suggest(request = {}) {
       const { query = '', signal } = requestValue(request)
       const search = queryValue(query), matcher = createQueryMatcher(search)
       if (search.length < 2 || !matcher) return { people: [], companies: [] }
-      const data = await snapshot(signal)
+      const data = await recent(signal)
       const priority = name => normalized(name) === search ? 2 : normalized(name).startsWith(search) ? 1 : 0
-      const people = rankMatches(data.ordered, matcher, person => data.tokens.get(person.id)).rows
+      // Rows with every word in the name rank first among full matches, so when
+      // there are enough of them the full professional text need not be scanned.
+      const named = rankMatches(data.ordered, matcher, person => { const { name } = data.tokens.get(person.id); return { name, text: name } })
+      const people = named.match === 'all' && named.rows.length >= SUGGESTED_PEOPLE ? named.rows : rankMatches(data.ordered, matcher, person => data.tokens.get(person.id)).rows
       people.sort((a, b) => priority(b.name) - priority(a.name))
-      const companies = [...data.companies.values()].filter(company => matcher.test({ name: company.tokens }).all)
+      const companies = data.companyList.filter(company => matcher.test({ name: company.tokens }).all)
         .sort((a, b) => priority(b.name) - priority(a.name) || compare(normalized(a.name), normalized(b.name)))
-      return { people: people.slice(0, 5).map(withPhoto), companies: companies.slice(0, 3).map(({ name }) => ({ name })) }
+      return { people: people.slice(0, SUGGESTED_PEOPLE).map(withPhoto), companies: companies.slice(0, 3).map(({ name }) => ({ name })) }
     },
     async list(request = {}) {
       const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false } = requestValue(request)

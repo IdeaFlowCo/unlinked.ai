@@ -58,6 +58,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .omni-subtitle{font-size:12px;line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unlinked-onboarding .omni-status{padding:10px 16px;border-top:1px solid var(--line);background:var(--page);font-size:11px;color:var(--muted)}
 .unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 84px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
+/* iOS Safari and WKWebView zoom into fields under 16px on focus. */
+@media(max-width:900px),(pointer:coarse){.unlinked-onboarding .header-search input[type=search]{font-size:16px}}
 /* The icon is an element, not a data: background, so the page's default-src 'none' policy allows it. */
 .unlinked-onboarding .header-search .search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
 .unlinked-onboarding .header-search input[type=search]:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--tint)}

@@ -192,7 +192,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
   // same-origin photo URL when one is published; views fall back to initials.
   const photoFor = profilePhotos ? id => profilePhotos.urlFor(id) : undefined
-  const publicReader = createPublicPeopleReader({ readPublishedSnapshot, photoFor })
+  // Header suggestions reuse the last verified index for 10 s, and up to 60 s
+  // while one background read refreshes it, so a keystroke never waits on the
+  // graph (docs/omni-search.md). Every other public read checks the source.
+  const publicReader = createPublicPeopleReader({ readPublishedSnapshot, photoFor, suggestFreshMs: 10000, suggestStaleMs: 60000 })
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
@@ -520,7 +523,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         suggestBusy++
         try {
           if (url.searchParams.getAll('q').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'q')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
-          const result = await publicReader.suggest({ query: url.searchParams.get('q') })
+          const query = url.searchParams.get('q')
+          // An empty query is the field gaining focus: start loading, answer nothing.
+          if (query === '') publicReader.warm()
+          const result = query === '' ? { people: [], companies: [] } : await publicReader.suggest({ query })
           response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503

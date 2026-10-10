@@ -12,6 +12,10 @@ function omniSearch() {
   input.setAttribute('aria-controls', list.id)
   input.setAttribute('aria-expanded', 'false')
   input.setAttribute('autocomplete', 'off')
+  // Names are not dictionary words: no iOS autocorrect or capitalization.
+  input.setAttribute('autocorrect', 'off')
+  input.setAttribute('autocapitalize', 'off')
+  input.spellcheck = false
   const signedIn = Boolean(document.querySelector('details.me'))
   const destinations = [
     { name: 'People', subtitle: 'Explore everyone on Unlinked', href: '/network' },
@@ -22,7 +26,20 @@ function omniSearch() {
     ] : []),
     { name: 'Scan a card', subtitle: 'Meet someone new', href: '/scan' },
   ]
-  let options = [], active = -1, timer, controller, generation = 0, composing = false
+  let options = [], active = -1, timer, controller, generation = 0, composing = false, tapping = false, warmedAt = 0
+  // Answers seen on this page, so retyping or backspacing redraws at once.
+  // Memory only: cleared with the page, never stored as history.
+  const seen = new Map()
+  let shown = {}
+  const remember = (term, result) => { seen.delete(term); seen.set(term, result); if (seen.size > 40) seen.delete(seen.keys().next().value) }
+  const words = value => value.toLocaleLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter(Boolean)
+  // While the server answers, keep the earlier rows that still fit every typed word.
+  const narrow = (term, result) => {
+    const typed = words(term), fits = text => { const have = words(text); return typed.every(word => have.some(found => found.startsWith(word))) }
+    return { people: (result.people || []).filter(row => fits(row.name + ' ' + (row.headline || ''))), companies: (result.companies || []).filter(row => fits(row.name)) }
+  }
+  // Focus asks the server to have the directory ready before the first keystroke.
+  const warm = () => { if (Date.now() - warmedAt < 10000) return; warmedAt = Date.now(); fetch('/search-suggestions?q=', { credentials: 'same-origin', cache: 'no-store' }).catch(() => {}) }
   const query = () => input.value.trim()
   const cancel = () => { clearTimeout(timer); controller?.abort(); generation++; list.setAttribute('aria-busy', 'false') }
   const activate = index => {
@@ -72,9 +89,10 @@ function omniSearch() {
     }
     list.append(group)
   }
+  // Same URL the native form submits, including its hidden filters.
   const fullSearch = term => {
-    const params = new URLSearchParams({ q: term })
-    if (form.querySelector('input[name=mode]')?.value === 'exact') params.set('mode', 'exact')
+    const params = new URLSearchParams(new FormData(form))
+    params.set('q', term)
     return '/network?' + params
   }
   const draw = (term, result = {}, message = '') => {
@@ -93,8 +111,9 @@ function omniSearch() {
     cancel()
     if (composing || document.activeElement !== input) return
     const term = query(), current = generation
-    draw(term, {}, term.length >= 2 ? 'Finding people and companies…' : '')
-    if (term.length < 2) return
+    if (term.length < 2) { draw(term); return }
+    if (seen.has(term)) { shown = seen.get(term); draw(term, shown); return }
+    draw(term, narrow(term, shown), 'Finding people and companies…')
     list.setAttribute('aria-busy', 'true')
     timer = setTimeout(async () => {
       const requestController = new AbortController()
@@ -104,16 +123,17 @@ function omniSearch() {
         const response = await fetch('/search-suggestions?' + new URLSearchParams({ q: term }), { signal: requestController.signal, credentials: 'same-origin', cache: 'no-store' })
         if (!response.ok) throw new Error('suggestions_unavailable')
         const result = await response.json()
-        if (current === generation && document.activeElement === input) draw(term, result)
+        remember(term, result)
+        if (current === generation && document.activeElement === input) { shown = result; draw(term, result) }
       } catch {
         if (current === generation && document.activeElement === input) draw(term, {}, 'Suggestions unavailable. Press Enter to search all results.')
       } finally {
         clearTimeout(timeout)
         if (current === generation) list.setAttribute('aria-busy', 'false')
       }
-    }, 220)
+    }, 120)
   }
-  input.addEventListener('focus', update)
+  input.addEventListener('focus', () => { warm(); update() })
   input.addEventListener('input', update)
   input.addEventListener('compositionstart', () => { composing = true; close() })
   input.addEventListener('compositionend', () => { composing = false; update() })
@@ -128,7 +148,11 @@ function omniSearch() {
     } else if (event.key === 'Enter' && !panel.hidden && options[active]) { event.preventDefault(); options[active].click() }
   })
   form.addEventListener('submit', close)
-  form.addEventListener('focusout', event => { if (!form.contains(event.relatedTarget)) close() })
+  // A tap on a suggestion may blur the field (iOS) before its click arrives;
+  // keep the panel until that click navigates.
+  panel.addEventListener('pointerdown', () => { tapping = true; setTimeout(() => { tapping = false }, 800) })
+  panel.addEventListener('pointercancel', () => { tapping = false })
+  form.addEventListener('focusout', event => { if (!tapping && !form.contains(event.relatedTarget)) close() })
   document.addEventListener('pointerdown', event => { if (!form.contains(event.target)) close() })
   document.addEventListener('keydown', event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && !event.altKey) { event.preventDefault(); input.focus(); input.select(); if (panel.hidden) update() }
