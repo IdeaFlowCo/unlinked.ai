@@ -234,6 +234,11 @@ test('views: escaped names, inline answers, header badges only for configured fe
   assert.match(feed, /Mark all as read/); assert.match(feed, /1 pending invitation</); assert.doesNotMatch(feed, /mystery|n3/)
   assert.match(feed, /<li class="note"><a class="note-open" href="\/notifications\/n2">/)
   assert.doesNotMatch(renderNotifications({ csrf: 'tok', items: [] }).content, /Mark all as read|pending invitation/)
+  // An answered request that became a connection says so instead of still asking.
+  const answered = renderNotifications({ csrf: 'tok', now, items: [{ id: 'n4', kind: 'connection_request_received', actorName: 'Lin', subjectId: 'r9', createdAt: now - 1000, read: true }], connected: new Set(['r9']) }).content
+  assert.match(answered, /<b>Lin<\/b> is now connected with you/); assert.match(answered, /class="note-state">Connected</)
+  assert.doesNotMatch(answered, /wants to connect|action="\/connections\/respond"/)
+  assert.match(feed, /<b>Old<\/b> wants to connect with you/); assert.doesNotMatch(feed, /class="note-state"/)
   // The header slot is filled per request; an unconfigured feature shows nothing.
   const page = renderInvitations({ csrf: 'tok' }).content
   assert.ok(page.includes(NAV_ALERTS_SLOT))
@@ -341,6 +346,10 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   assert.equal(accepted.headers.get('location'), '/people/jacob-profile?connect=accepted')
   assert.match((await get('/people/jacob-profile?connect=accepted', her)).text, /You are now connected\..*?✓ Connected/s)
   assert.match((await get('/people/ada-profile', me)).text, /✓ Connected/)
+  // Ada's own feed now shows the request as answered, with no buttons left.
+  const herFeed = (await get('/notifications', her)).text
+  assert.match(herFeed, /<b>Jacob Cole<\/b> is now connected with you.*?class="note-state">Connected</)
+  assert.doesNotMatch(herFeed, /action="\/connections\/respond"/)
   const jacobFeed = await get('/notifications', me)
   assert.match(jacobFeed.text, /<b>Ada Lovelace<\/b> accepted your invitation to connect/)
   const acceptedItem = jacobFeed.text.match(/href="\/notifications\/([0-9a-f-]{36})"/)[1]

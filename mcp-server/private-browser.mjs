@@ -1257,12 +1257,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (signup && notifications && request.method === 'GET' && url.pathname === '/notifications') {
         const props = jobProps(await jobResources())
         const items = await notifications.list(session.owner)
-        const received = memberConnections ? await memberConnections.received(session.owner) : []
+        const [received, connections] = memberConnections ? await Promise.all([memberConnections.received(session.owner), memberConnections.connections(session.owner)]) : [[], []]
         // Opening the feed clears the bell; each item stays highlighted until opened.
         await notifications.markSeen(session.owner)
         const alerts = responseAlerts.get(response)
         if (alerts) responseAlerts.set(response, { ...alerts, notifications: 0 })
-        journey(response, renderNotifications({ ...props, items, pending: new Map(received.map(value => [value.id, value])), pendingCount: received.length, notice: url.searchParams.get('notice'), emailEnabled: memberEmail?.sending === true }), props.importJob); return
+        journey(response, renderNotifications({ ...props, items, pending: new Map(received.map(value => [value.id, value])), connected: new Set(connections.map(value => value.requestId)), pendingCount: received.length, notice: url.searchParams.get('notice'), emailEnabled: memberEmail?.sending === true }), props.importJob); return
       }
       const notificationItem = url.pathname.match(/^\/notifications\/([0-9a-f-]{36})$/)
       if (signup && notifications && request.method === 'GET' && notificationItem) {

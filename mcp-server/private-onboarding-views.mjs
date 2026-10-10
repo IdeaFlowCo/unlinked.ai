@@ -684,12 +684,17 @@ const NOTIFICATION_TEXT = {
   profile_claimed: value => `${named(value)}, someone in your connections, joined Unlinked and claimed their profile`,
 }
 // The notification feed. `pending` maps request ids that still await an answer,
-// so a request notification can be answered in place.
-export function renderNotifications({ accountLabel, displayName, csrf, importJob, items = [], pending = new Map(), pendingCount = 0, now = Date.now(), notice, emailEnabled = false } = {}) {
+// so a request notification can be answered in place; `connected` holds request
+// ids that are now connections (accepted, or added through a contact card), so
+// an answered request says so instead of still asking.
+export function renderNotifications({ accountLabel, displayName, csrf, importJob, items = [], pending = new Map(), connected = new Set(), pendingCount = 0, now = Date.now(), notice, emailEnabled = false } = {}) {
   const rows = list(items).filter(value => NOTIFICATION_TEXT[value.kind]).map(value => {
     // The whole row opens the item (and marks it read), so the name is not a separate link.
-    const waiting = value.kind === 'connection_request_received' && pending.has(value.subjectId)
-    return `<li class="note${value.read ? '' : ' unread'}"><a class="note-open" href="/notifications/${html(value.id)}">${avatar(value.actorName, value.actorProfileId ?? value.actorName)}<span class="note-text">${NOTIFICATION_TEXT[value.kind]({ name: value.actorName })}${value.read ? '' : '<span class="vh"> (unread)</span>'}<span class="small note-time">${html(ago(value.createdAt, now))}</span></span></a>${waiting ? respondForm(csrf, value.subjectId, '/notifications') : ''}</li>`
+    const request = value.kind === 'connection_request_received'
+    const waiting = request && pending.has(value.subjectId)
+    const done = request && !waiting && connected.has(value.subjectId)
+    const text = done ? `${named({ name: value.actorName })} is now connected with you` : NOTIFICATION_TEXT[value.kind]({ name: value.actorName })
+    return `<li class="note${value.read ? '' : ' unread'}"><a class="note-open" href="/notifications/${html(value.id)}">${avatar(value.actorName, value.actorProfileId ?? value.actorName)}<span class="note-text">${text}${value.read ? '' : '<span class="vh"> (unread)</span>'}<span class="small note-time">${html(ago(value.createdAt, now))}${done ? ' · <span class="note-state">Connected</span>' : ''}</span></span></a>${waiting ? respondForm(csrf, value.subjectId, '/notifications') : ''}</li>`
   }).join('')
   const unread = list(items).some(value => !value.read)
   const summary = pendingCount > 0 ? `<a class="note-summary" href="/invitations">${NETWORK_NAV_ICON}<span><b>${count(pendingCount)} pending ${pendingCount === 1 ? 'invitation' : 'invitations'}</b><span class="small">Review them in My Network</span></span></a>` : ''
