@@ -1,5 +1,5 @@
 import { messagesScript } from './messages-client.mjs'
-import { createMessagingProxy, validId as validMessagingId } from './messaging-proxy.mjs'
+import { createMessagingProxy, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { groupConnectionRows, publishedPeopleFor, rowProvenanceType, rowPublicTarget, rowSourceLabel } from './connection-identity.mjs'
@@ -138,6 +138,15 @@ function page(response, title, content, status = 200) {
 // publishedPeopleFor moved to connection-identity.mjs (shared with the agent tools).
 export { publishedPeopleFor }
 
+// Where a notification opens. An accepted connection request opens the direct
+// conversation OpenChat created for it (docs/openchat-accepted-connections.md).
+export function notificationTargetFor(item, { messaging = false } = {}) {
+  if (item.kind === 'connection_request_received') return '/invitations'
+  const profile = messaging && item.kind === 'connection_request_accepted' ? unlinkedProfileContext(item.actorProfileId) : null
+  if (profile) return `/messages?profile=${encodeURIComponent(profile)}`
+  return item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : item.kind === 'invite_accepted' ? '/invites' : '/network'
+}
+
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
@@ -166,7 +175,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     const authorization = new URL(authorizationOrigin)
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
-  const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map()
+  const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map(), pickerBudgets = new Map()
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
   const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...messagingOptions }) : null
@@ -523,8 +532,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       : row.presence === 'member' && relations.has(row.id) ? { ...row, connect: relations.get(row.id) }
         : row.presence === 'shadow' && memberInvitations ? { ...row, connect: { state: 'invite' } } : row)
   }
-  const notificationTarget = item => item.kind === 'connection_request_received' ? '/invitations'
-    : item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : item.kind === 'invite_accepted' ? '/invites' : '/network'
+  const notificationTarget = item => notificationTargetFor(item, { messaging: Boolean(messaging) })
   // OAuth connector consent (mcp-server/oauth-server.mjs). GET validates the
   // request and shows consent (signing in first when needed); POST carries the
   // same parameters plus the session CSRF token and re-validates everything.
@@ -986,6 +994,25 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         await establishSession(response, identity, null, transaction.next, null, transaction.cardToken); return
       }
       if (oauth && url.pathname === '/oauth/authorize') { await authorizeConnector(request, response, url, viewer, chrome); return }
+      // New-message picker: the member's connections who are on Unlinked, as
+      // public profile ids and names only (the same people /network shows).
+      if (url.pathname === '/messages/api/people') {
+        const send = (status, value) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify(value)) }
+        if (request.method !== 'GET') { send(405, { error: 'method_not_allowed' }); return }
+        if (!viewer) { send(401, { error: 'sign_in_required' }); return }
+        if ((request.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(request.headers['sec-fetch-site'])) || [...url.searchParams.keys()].length) { send(403, { error: 'same_origin_required' }); return }
+        if (!messaging || typeof readPublishedSnapshot !== 'function') { send(503, { error: 'messaging_unavailable' }); return }
+        const now = Date.now(), budget = pickerBudgets.get(viewer.owner.ownerId) ?? { window: now, count: 0 }
+        if (now - budget.window >= 60000) { budget.window = now; budget.count = 0 }
+        if (++budget.count > 20) { send(429, { error: 'rate_limited' }); return }
+        if (pickerBudgets.size > 5000) pickerBudgets.clear()
+        pickerBudgets.set(viewer.owner.ownerId, budget)
+        try {
+          const people = await connectedProfiles(viewer.owner, await createAccountNetwork({ owner: viewer.owner, getBackend }).readNetwork(), pageReader())
+          send(200, { people: people.filter(person => person.presence === 'member').map(person => ({ id: person.id, name: person.name, ...(person.headline ? { headline: String(person.headline).slice(0, 200) } : {}), profile: unlinkedProfileContext(person.id) })).filter(person => person.profile).slice(0, 3000) })
+        } catch { send(503, { error: 'people_unavailable' }) }
+        return
+      }
       // The Messages JSON API and event stream answer JSON, never a sign-in page.
       if (url.pathname.startsWith('/messages/api/')) {
         if (messaging) await messaging.handle(request, response, url, sessionFor(request))
@@ -1014,12 +1041,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           if (profile && messaging) {
             try {
               const result = await messaging.openProfile(session, profile)
-              if (result.status === 'ready') { redirect(response, `/messages/c/${encodeURIComponent(result.conversationId)}`); return }
+              // The fragment (never sent to a server) lets the page offer View on Unlinked.
+              if (result.status === 'ready') { redirect(response, `/messages/c/${encodeURIComponent(result.conversationId)}#profile=${encodeURIComponent(decodeURIComponent(profile.slice(profile.lastIndexOf('/') + 1)))}`); return }
               entry = { ...result, profile }
             } catch { /* Shown as unavailable with Try again. */ }
           }
         }
-        journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, conversationId, entry, available: Boolean(messaging) }), null, messaging ? messagesScript({ csrf: session.csrf, conversationId }) : ''); return
+        journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, conversationId, entry, available: Boolean(messaging) }), null, messaging ? messagesScript({ csrf: session.csrf, conversationId, reactions: REACTION_EMOJI }) : ''); return
       }
       if (request.method === 'GET' && url.pathname === '/join') { redirect(response, '/'); return }
       if (request.method === 'GET' && url.pathname === '/legacy-account') {

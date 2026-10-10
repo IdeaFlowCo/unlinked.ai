@@ -36,6 +36,7 @@ body:has(.msg) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
 .unlinked-onboarding .msg-item{display:flex;align-items:center;gap:12px;min-height:64px;padding:10px;border-radius:var(--r);color:var(--fg);text-decoration:none}
 .unlinked-onboarding .msg-item:hover{background:var(--page);text-decoration:none}
 .unlinked-onboarding .msg-item.active{background:var(--tint)}
+.unlinked-onboarding .msg-item.active .msg-item-time,.unlinked-onboarding .msg-item.active .msg-item-preview,.unlinked-onboarding .msg-item:hover .msg-item-time,.unlinked-onboarding .msg-item:hover .msg-item-preview{color:#4a5263}
 .unlinked-onboarding .msg-item:focus-visible,.unlinked-onboarding .msg-log:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 .unlinked-onboarding .msg-avatar{position:relative;flex:0 0 40px;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:14px;font-weight:700}
 .unlinked-onboarding .msg-dot{position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border-radius:50%;border:2px solid #fff;background:#2e8b57}
@@ -86,7 +87,63 @@ body:has(.msg) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
 .unlinked-onboarding .msg-composer textarea{flex:1;min-height:44px;max-height:212px;resize:none;padding:10px 12px;border:1px solid var(--line2);border-radius:var(--r);font:inherit;font-size:15px;line-height:24px;background:#fff}
 .unlinked-onboarding .msg-composer textarea:focus{outline:2px solid var(--brand);outline-offset:-1px;border-color:var(--brand)}
 .unlinked-onboarding .msg-send{min-height:44px;padding:8px 18px}
-@media(max-width:759px){body:has(.msg) .unlinked-onboarding{padding:0 0 0;height:100dvh}body:has(.msg) header{padding:12px 16px}.unlinked-onboarding .msg{padding-top:0}.unlinked-onboarding .msg-app{grid-template-columns:1fr;border:0;border-radius:0;border-top:1px solid var(--line)}.unlinked-onboarding .msg-side{border-right:0}.unlinked-onboarding .msg-app[data-open] .msg-side{display:none}.unlinked-onboarding .msg-app:not([data-open]) .msg-thread{display:none}.unlinked-onboarding .msg-back{display:inline-flex}.unlinked-onboarding .msg-head-link{display:none}.unlinked-onboarding .msg-row{max-width:85%}.unlinked-onboarding .msg-log{padding:12px}}
+.unlinked-onboarding .msg-side-head .button{margin-left:auto}
+.unlinked-onboarding .msg-search{display:flex;gap:8px;align-items:center}
+.unlinked-onboarding .msg-search input{flex:1;min-width:0}
+.unlinked-onboarding .msg-toggle{min-height:38px;padding:6px 10px;font-size:13px;font-weight:600;background:#fff;color:var(--fg);border:1px solid var(--line2);border-radius:var(--r);white-space:nowrap}
+.unlinked-onboarding .msg-toggle[aria-pressed=true]{background:var(--tint);border-color:var(--brand);color:var(--brand-d)}
+.unlinked-onboarding .msg-item-preview.typing{color:var(--brand-d);font-style:italic}
+.unlinked-onboarding .msg-line{position:relative;display:flex;align-items:center;gap:6px;max-width:100%}
+.unlinked-onboarding .msg-row.own .msg-line{flex-direction:row-reverse}
+.unlinked-onboarding .msg-actions{display:flex;gap:2px;opacity:0;pointer-events:none;transition:opacity .12s}
+.unlinked-onboarding .msg-row:hover .msg-actions,.unlinked-onboarding .msg-row:focus-within .msg-actions,.unlinked-onboarding .msg-row.show-actions .msg-actions{opacity:1;pointer-events:auto}
+.unlinked-onboarding .msg-act{display:inline-grid;place-items:center;min-height:32px;min-width:32px;padding:0;background:#fff;color:var(--muted);border:1px solid var(--line);border-radius:8px;font-size:15px;line-height:1}
+.unlinked-onboarding .msg-act:hover{color:var(--fg);border-color:var(--line2)}
+.unlinked-onboarding .msg-act:focus-visible,.unlinked-onboarding .msg-reaction:focus-visible,.unlinked-onboarding .msg-quote:focus-visible,.unlinked-onboarding .msg-toggle:focus-visible,.unlinked-onboarding .msg-menu summary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.unlinked-onboarding .msg-react-picker{position:absolute;bottom:calc(100% + 4px);z-index:20;display:flex;gap:2px;padding:4px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px #25295324}
+.unlinked-onboarding .msg-row.own .msg-react-picker{right:0}
+.unlinked-onboarding .msg-react-picker button{min-height:40px;min-width:40px;padding:0;background:#fff;border:0;border-radius:8px;font-size:20px;color:inherit}
+.unlinked-onboarding .msg-react-picker button:hover,.unlinked-onboarding .msg-react-picker button:focus-visible{background:var(--tint);outline:none}
+.unlinked-onboarding button.msg-reaction{min-height:28px;padding:1px 8px;color:var(--fg);font-weight:400;cursor:pointer}
+.unlinked-onboarding button.msg-reaction.mine{color:var(--brand-d)}
+.unlinked-onboarding button.msg-quote{min-height:0;width:100%;justify-content:flex-start;text-align:left;font-weight:400;cursor:pointer}
+.unlinked-onboarding .msg-row.flash .msg-bubble{animation:msg-flash 1.4s ease-out}
+@keyframes msg-flash{0%{box-shadow:0 0 0 3px var(--brand)}100%{box-shadow:0 0 0 3px transparent}}
+.unlinked-onboarding .msg-edit-wrap{display:flex;flex-direction:column;gap:4px;min-width:min(420px,70vw);font-size:13px}
+.unlinked-onboarding .msg-edit{width:100%;padding:8px 10px;border:1px solid var(--brand);border-radius:10px;font:inherit;font-size:15px;line-height:1.45;resize:vertical}
+.unlinked-onboarding .msg-typing{min-height:20px;padding:0 20px;font-size:13px;color:var(--muted);font-style:italic}
+.unlinked-onboarding .msg-jump{position:absolute;left:50%;transform:translateX(-50%);bottom:132px;z-index:5;min-height:36px;padding:6px 14px;font-size:13px;border-radius:99px;box-shadow:0 6px 18px #25295333}
+.unlinked-onboarding .msg-thread{position:relative}
+.unlinked-onboarding .msg-compose-wrap{border-top:1px solid var(--line)}
+.unlinked-onboarding .msg-compose-wrap .msg-composer{border-top:0;padding-bottom:4px}
+.unlinked-onboarding .msg-hint{margin:0;padding:0 76px max(10px,env(safe-area-inset-bottom)) 18px;font-size:12px;color:var(--muted)}
+.unlinked-onboarding .msg-reply-card{display:flex;align-items:center;gap:8px;margin:10px 76px 0 16px;padding:6px 6px 6px 10px;border-left:3px solid var(--brand);background:var(--page);border-radius:6px;font-size:13px}
+.unlinked-onboarding .msg-reply-card>span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.unlinked-onboarding .msg-menu{position:relative}
+.unlinked-onboarding .msg-menu summary{list-style:none;display:grid;place-items:center;width:44px;height:44px;border-radius:8px;cursor:pointer;font-size:20px;color:var(--muted)}
+.unlinked-onboarding .msg-menu summary::-webkit-details-marker{display:none}
+.unlinked-onboarding .msg-menu summary:hover{background:var(--page);color:var(--fg)}
+.unlinked-onboarding .msg-menu-panel{position:absolute;right:0;top:calc(100% + 4px);z-index:30;display:flex;flex-direction:column;min-width:250px;padding:6px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 16px 40px #25295324}
+.unlinked-onboarding .msg-menu-panel button,.unlinked-onboarding .msg-menu-panel a,.unlinked-onboarding .msg-menu-check{display:flex;align-items:center;gap:8px;min-height:40px;padding:8px 10px;background:none;border:0;border-radius:8px;color:var(--fg);font:inherit;font-size:14px;font-weight:400;text-align:left;text-decoration:none;justify-content:flex-start;cursor:pointer}
+.unlinked-onboarding .msg-menu-panel button:hover,.unlinked-onboarding .msg-menu-panel a:hover,.unlinked-onboarding .msg-menu-check:hover{background:var(--page)}
+.unlinked-onboarding .msg-menu-check input{width:18px;height:18px;accent-color:var(--brand)}
+dialog.msg-picker{width:min(480px,calc(100vw - 32px));max-height:min(620px,calc(100dvh - 48px));padding:0;border:1px solid #e6e8ec;border-radius:14px;box-shadow:0 24px 60px #25295340;font:16px/1.5 "Public Sans",system-ui,sans-serif;color:#16181d}
+dialog.msg-picker::backdrop{background:#16181d55}
+.msg-picker .msg-picker-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 6px}
+.msg-picker h2{font-size:18px;margin:0}
+.msg-picker input[type=search]{display:block;width:calc(100% - 32px);margin:6px 16px;min-height:42px;padding:8px 12px;border:1px solid #c4c9d2;border-radius:8px;font:inherit}
+.msg-picker .small{margin:4px 16px;font-size:13px;color:#667085}
+.msg-picker .msg-act{min-height:36px;min-width:36px;background:#fff;border:1px solid #e6e8ec;border-radius:8px;font-size:18px;cursor:pointer}
+.msg-picker-list{list-style:none;margin:0;padding:4px 8px 12px;overflow-y:auto;max-height:420px}
+.msg-pick{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px;border-radius:8px;cursor:pointer}
+.msg-pick:hover,.msg-pick[aria-selected=true]{background:#eceefc}
+.msg-pick .msg-avatar{position:relative;flex:0 0 40px;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:14px;font-weight:700}
+.msg-pick .msg-item-body{display:flex;flex-direction:column;min-width:0}
+.msg-pick .msg-item-name{font-size:15px}
+.msg-pick .msg-item-preview{font-size:13px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(hover:none){.unlinked-onboarding .msg-act{min-height:40px;min-width:40px}}
+@media(prefers-reduced-motion:reduce){.unlinked-onboarding .msg-row.flash .msg-bubble{animation:none;box-shadow:0 0 0 3px var(--brand)}.unlinked-onboarding .msg-actions{transition:none}}
+@media(max-width:759px){body:has(.msg) .unlinked-onboarding{padding:0 0 0;height:100dvh}body:has(.msg) header{padding:12px 16px}.unlinked-onboarding .msg{padding-top:0}.unlinked-onboarding .msg-app{grid-template-columns:1fr;border:0;border-radius:0;border-top:1px solid var(--line)}.unlinked-onboarding .msg-side{border-right:0}.unlinked-onboarding .msg-app[data-open] .msg-side{display:none}.unlinked-onboarding .msg-app:not([data-open]) .msg-thread{display:none}.unlinked-onboarding .msg-back{display:inline-flex}.unlinked-onboarding .msg-head-link{display:none}.unlinked-onboarding .msg-row{max-width:85%}.unlinked-onboarding .msg-log{padding:12px}.unlinked-onboarding .msg-hint{display:none}.unlinked-onboarding .msg-toggle{padding:6px 8px}}
 
 body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17px/1.55 "Public Sans",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .unlinked-onboarding{--brand:#4349c4;--brand-d:#32379c;--tint:#eceefc;--page:#f5f6fc;--fg:#16181d;--muted:#667085;--line:#e6e8ec;--line2:#c4c9d2;--r:8px;max-width:1180px;margin:0 auto;padding:0 28px 30px;color:var(--fg)}

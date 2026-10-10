@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+import { createPrivateBrowserHandler, notificationTargetFor } from '../mcp-server/private-browser.mjs'
 import { projectConversation, projectMessage, REACTION_EMOJI } from '../mcp-server/messaging-proxy.mjs'
 import { connectOpenChatSocket, encodeEvent, parseEventPacket } from '../mcp-server/openchat-socket.mjs'
 
@@ -180,7 +180,7 @@ test('profile Message resolves server-side to the direct conversation without se
   } })
   const profile = encodeURIComponent('https://www.unlinked.ai/people/avery-fixture')
   const ready = await h.get(`/messages?profile=${profile}`)
-  assert.equal(ready.status, 303); assert.equal(ready.headers.get('location'), `/messages/c/${CONV}`)
+  assert.equal(ready.status, 303); assert.equal(ready.headers.get('location'), `/messages/c/${CONV}#profile=avery-fixture`)
   assert.deepEqual(h.calls.find(call => call.path === '/api/unlinked/recipient').body, { profile: 'https://www.unlinked.ai/people/avery-fixture' })
   assert.equal(h.calls.some(call => call.path.endsWith('/messages') && call.method === 'POST'), false, 'opening never sends')
   status = 'unclaimed'
@@ -278,4 +278,36 @@ test('a fourth stream retires the oldest with superseded; long multi-byte messag
   const long = '漢'.repeat(8000)
   const sent = await h.post(`/messages/api/conversations/${CONV}/messages`, { content: long, clientId: '0b5c2c51-6f7e-4b8a-9d3c-1f2e3d4c5b6b' })
   assert.equal(sent.status, 201)
+})
+
+test('phase 2 shell: New message, unread-first, live announcer; the page script carries only the CSRF token, thread id and emoji allowlist', async t => {
+  const h = await harness(t, { upstream: { 'GET /api/chat/unread-total': () => [200, { unreadTotal: 0 }] } })
+  const thread = await (await h.get(`/messages/c/${CONV}`)).text()
+  assert.match(thread, /id="msg-new"[^>]*>New message</); assert.match(thread, /id="msg-unread-first"[^>]*aria-pressed="false"/); assert.match(thread, /id="msg-announce"/)
+  const config = /\((\{"csrf":"[^"]+","conversationId":"[^"]*","reactions":\[[^\]]*\]\})\);/.exec(thread)?.[1]
+  assert.ok(config, 'page config present')
+  assert.deepEqual(Object.keys(JSON.parse(config)).sort(), ['conversationId', 'csrf', 'reactions'])
+  assert.deepEqual(JSON.parse(config).reactions, ['👍', '❤️', '😂', '😮', '😢', '🙏'])
+  assert.doesNotMatch(thread, /fixture-embedded-openchat-jwt/)
+})
+
+test('the new-message picker route is browser-session, same-origin and GET only', async t => {
+  const h = await harness(t, { upstream: {} })
+  const before = h.calls.length
+  assert.equal((await h.request('/messages/api/people')).status, 401)
+  assert.equal((await h.get('/messages/api/people', { 'Sec-Fetch-Site': 'cross-site' })).status, 403)
+  assert.equal((await h.get('/messages/api/people?q=x')).status, 403)
+  assert.equal((await h.post('/messages/api/people', {})).status, 405)
+  // The harness has no published index, so the picker reports itself unavailable rather than guessing.
+  const unavailable = await h.get('/messages/api/people')
+  assert.equal(unavailable.status, 503); assert.equal(unavailable.headers.get('cache-control'), 'no-store, private')
+  assert.equal(h.calls.length, before, 'no OpenChat call')
+})
+
+test('an accepted connection notification opens the direct conversation when Messages is on', () => {
+  const accepted = { kind: 'connection_request_accepted', actorProfileId: 'ada-owner-profile' }
+  assert.equal(notificationTargetFor(accepted, { messaging: true }), '/messages?profile=https%3A%2F%2Fwww.unlinked.ai%2Fpeople%2Fada-owner-profile')
+  assert.equal(notificationTargetFor(accepted, { messaging: false }), '/people/ada-owner-profile')
+  assert.equal(notificationTargetFor({ kind: 'connection_request_accepted', actorProfileId: '../x' }, { messaging: true }), '/people/..%2Fx')
+  assert.equal(notificationTargetFor({ kind: 'connection_request_received', actorProfileId: 'x' }, { messaging: true }), '/invitations')
 })
