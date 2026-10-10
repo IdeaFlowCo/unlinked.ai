@@ -12,6 +12,8 @@ import { PRIVATE_NOTES_TOOLS, scopeAllowsConnectionActions, scopeAllowsPrivateNo
 import { PRIVATE_NOTES_DESCRIPTIONS, PRIVATE_NOTES_MUTATING, PRIVATE_NOTES_SCHEMAS, createPrivateNotesTools } from './private-notes-tools.mjs'
 import { linkedinRefHash, linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
 import { linkedinUrl as canonicalLinkedinUrl } from '../src/utils/private-import/archive.mjs'
+import { CONNECTION_SORTS, PUBLIC_LIST_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
+import { groupConnectionRows, publishedPeopleFor, rowSlug, usableProfileId } from './connection-identity.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const LINKEDIN_PROFILE = /^https:\/\/www\.linkedin\.com\/in\/[\w%-]+$/
@@ -50,14 +52,21 @@ export class AccountToolError extends Error {
   }
 }
 
+// unlinked_list_connections grouping (unlinked-tto.1): `person` (default) folds
+// rows with exact identity evidence into one entry with sources[]; `none`
+// returns one row per source record, as before.
+export const CONNECTION_GROUPINGS = Object.freeze(['person', 'none'])
+
 export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   unlinked_whoami: {},
   unlinked_list_people: {
     q: z.string().max(200).optional(), mode: z.enum(SEARCH_MODES).optional(), presence: z.enum(PRESENCE).optional(),
+    sort: z.enum(PUBLIC_LIST_SORTS).optional(),
     cursor: z.string().max(2048).optional(), limit: z.number().int().min(1).max(50).optional(),
   },
   unlinked_list_connections: {
     degree: z.union([z.literal(1), z.literal(2)]).optional(), q: z.string().max(256).optional(),
+    sort: z.enum(CONNECTION_SORTS).optional(), grouping: z.enum(CONNECTION_GROUPINGS).optional(),
     cursor: z.string().max(4096).optional(), limit: z.number().int().min(1).max(50).optional(),
   },
   unlinked_get_profile: { id: z.string().min(1).max(160), connectionsCursor: z.string().max(2048).optional() },
@@ -85,8 +94,8 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_whoami: 'Return the authenticated grant owner: the stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy-profile anchor if any. Linkage is the grant itself — never email matching. No contact email/phone is returned.',
-  unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=shadow keeps imported profiles not on Unlinked yet. Paginated with an opaque cursor, at most 50 per page, with total and snapshot revision. Public fields only.',
-  unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Paginated, at most 50 per page, typed provenance per entry.',
+  unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=shadow keeps imported profiles not on Unlinked yet. sort: best (default: relevance with q, else stored name order), name (A–Z by first letter or number, ignoring leading emoji/punctuation, accents and case), name-desc, raw (Unicode code-point order of the name as written). Paginated with an opaque cursor bound to the query and sort, at most 50 per page, with total and snapshot revision. Public fields only.',
+  unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Degree 1 groups one entry per person (grouping "person", default) when records share exact identity evidence — the same published profile (merges followed) or the same LinkedIn address, never a name — with sources[] listing every underlying record (provenance, visibility) and top-level fields from the owner import; total counts people. grouping "none" returns one row per source record. sort: name (default; A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case — names are shown exactly as written), raw (Unicode code-point order), name-desc, connected (most recently connected first), imported (most recently imported first), company. Paginated, at most 50 per page; the cursor is bound to q, sort and grouping.',
   unlinked_get_profile: 'Read one published public profile by id with its public connections page. Returns typed not_found when no published profile has that id.',
   unlinked_list_connection_requests: 'Read-only: list the owner’s open member-to-member connection requests. direction "received" (default) lists requests waiting for the owner’s answer; "sent" lists requests the owner sent that are still pending. Names, public profile ids, optional notes and times only. Grants with the opt-in connections scope can answer and send requests with the connection-request write tools.',
   unlinked_list_notifications: 'Read-only: list the owner’s newest in-app notifications (connection requests received or accepted, invites accepted, people they know joining) with unseen/unread counts. Reading here does not mark anything seen or read.',
@@ -119,14 +128,8 @@ const CONNECTION_FAILURES = Object.freeze({
 })
 const connectionFailure = code => new AccountToolError(...(CONNECTION_FAILURES[code] ?? ['upstream_unavailable', 'The connection request could not be completed; retry.']))
 const iso = value => Number.isSafeInteger(value) ? new Date(value).toISOString() : null
-// The canonical LinkedIn slug of one of the owner's connection rows, or null.
-const rowSlug = row => linkedinSlug(row.subject) ?? (typeof row.fields?.url === 'string' ? linkedinSlug(canonicalLinkedinUrl(row.fields.url)) : null)
-// The published profile a row itself names (same rule as the private browser's
-// contact rows): recorded/invite/connection rows carry it, a public-consent
-// import row is published as public-<row id>.
-const rowPublicTarget = row => ['recovered-legacy-public-v1', 'unlinked-invite', 'unlinked-connection'].includes(row.provenance?.source) && typeof row.provenance.toId === 'string' ? row.provenance.toId
-  : typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id) ? 'public-' + row.id : null
-const usableProfileId = id => typeof id === 'string' && id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
+// rowSlug, rowPublicTarget and usableProfileId live in connection-identity.mjs,
+// shared with the private browser's contact rows.
 // A user-supplied LinkedIn profile address, with or without scheme.
 const suppliedSlug = value => {
   const text = value.normalize('NFKC').trim()
@@ -226,6 +229,30 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     }
   }
 
+  // One person from their grouped source records, primary (owner import) first:
+  // top-level fields come from the primary, then the first source that has
+  // them; dates are the earliest known (a re-import never looks newer).
+  const personEntry = members => {
+    const [primary] = members, first = key => members.map(member => member.entry[key]).find(Boolean)
+    const earliest = key => members.map(member => validTimestamp(member.row[key])).filter(Boolean).reduce((a, b) => Math.min(a, b), Infinity)
+    const connectedAt = earliest('connectedAt'), importedAt = earliest('importedAt')
+    const refHash = members.map(member => linkedinRefHash(rowSlug(member.row))).find(Boolean)
+    const profile = members.map(member => member.published).find(Boolean)
+    const fields = Object.fromEntries(['headline', 'company', 'linkedinUrl'].map(key => [key, first(key)]).filter(([, value]) => value))
+    const sources = members.map(({ entry }) => ({ id: entry.id, name: entry.name, provenance: entry.provenance, visibility: entry.visibility }))
+    return {
+      id: primary.entry.id, connectedAt: Number.isFinite(connectedAt) ? connectedAt : undefined, importedAt: Number.isFinite(importedAt) ? importedAt : undefined, searchable: members.map(member => member.entry),
+      entry: {
+        id: primary.entry.id, name: primary.entry.name || first('name') || '', ...fields,
+        ...(profile?.id ? { publishedProfileId: profile.id } : {}), ...(refHash ? { linkedinRefHash: refHash } : {}),
+        ...(Number.isFinite(connectedAt) ? { connectedAt: iso(connectedAt) } : {}), ...(Number.isFinite(importedAt) ? { importedAt: iso(importedAt) } : {}),
+        provenance: primary.entry.provenance,
+        visibility: sources.some(source => source.visibility === 'owner_private') ? 'owner_private' : 'public',
+        sources,
+      },
+    }
+  }
+
   const owner = grant => ({ ownerId: grant.ownerId, userId: grant.userId })
   const requireConnections = () => { if (!connectionActions) throw new AccountToolError('upstream_unavailable', 'Connection requests are not available on this runtime.') }
   const answer = async (grant, id, work, status) => {
@@ -278,11 +305,11 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         legacyProfile: legacy ? { profileId: legacy.profileId, name: legacy.profile?.name ?? null, revision: legacy.revision } : null,
         publicIndexAvailable: typeof readPublishedSnapshot === 'function' }
     },
-    async unlinked_list_people(grant, { q = '', mode = 'best', presence, cursor, limit = 50 }, signal) {
+    async unlinked_list_people(grant, { q = '', mode = 'best', presence, sort = 'best', cursor, limit = 50 }, signal) {
       const { reader, captured } = publicReader(limit)
       let result
-      try { result = await reader.list({ query: q, mode, presence, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
-      return { kind: 'unlinked_list_people', revision: captured.revision, total: result.total ?? captured.total ?? result.profiles.length,
+      try { result = await reader.list({ query: q, mode, presence, sort, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
+      return { kind: 'unlinked_list_people', revision: captured.revision, ...(sort !== 'best' ? { sort } : {}), total: result.total ?? captured.total ?? result.profiles.length,
         ...(result.match ? { match: result.match } : {}), profiles: result.profiles,
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), visibility: 'public' }
     },
@@ -297,13 +324,14 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       if (!result?.profile) throw new AccountToolError('not_found', 'No published public profile has that id.')
       return { kind: 'unlinked_get_profile', revision: captured.revision, profile: result.profile, ...(result.movedFrom ? { movedFrom: result.movedFrom } : {}), visibility: 'public' }
     },
-    async unlinked_list_connections(grant, { degree = 1, q = '', cursor, limit = 50 }, signal) {
+    async unlinked_list_connections(grant, { degree = 1, q = '', sort = 'name', grouping = 'person', cursor, limit = 50 }, signal) {
       const owner = { ownerId: grant.ownerId, userId: grant.userId }
       if (degree === 2) {
         if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('degree_unproven', 'Second-degree connections require recorded public paths, and no published public index is configured.')
         try {
-          const result = await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ degree: 2, query: q, cursor, signal, pageSize: limit })
-          return { kind: 'unlinked_list_connections', degree: 2, revision: result.revision, anchorId: result.anchorId, total: result.total,
+          // Second-degree entries are already one published profile each.
+          const result = await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ degree: 2, query: q, sort, cursor, signal, pageSize: limit })
+          return { kind: 'unlinked_list_connections', degree: 2, sort, revision: result.revision, anchorId: result.anchorId, total: result.total,
             connections: result.profiles.map((profile, index) => ({ ...profile,
               provenance: { type: 'recorded_public_path', path: result.paths[index], revision: result.revision }, visibility: 'public' })),
             ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) }
@@ -321,15 +349,23 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       try { network = await createAccountNetwork({ owner, getBackend }).readNetwork(undefined, { signal }) }
       catch { throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
       const normalized = q.normalize('NFKC').trim().toLowerCase()
-      const rows = network.assertions.filter(row => row.category === 'connections').map(connectionEntry)
-        .filter(row => !normalized || [row.name, row.headline, row.company].some(value => typeof value === 'string' && value.normalize('NFKC').toLowerCase().includes(normalized)))
-      rows.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
-      const revision = hash(JSON.stringify(rows.map(row => row.id)))
-      const binding = hash(JSON.stringify([grant.ownerId, 1, normalized, revision]))
-      const offset = cursorOffset(cursor, binding, rows.length)
-      const selected = rows.slice(offset, offset + limit)
-      return { kind: 'unlinked_list_connections', degree: 1, revision, total: rows.length, connections: selected,
-        ...(offset + selected.length < rows.length ? { nextCursor: opaqueCursor(binding, offset + selected.length) } : {}) }
+      const rows = network.assertions.filter(row => row.category === 'connections'), entries = rows.map(connectionEntry)
+      let listed
+      if (grouping === 'none') listed = entries.map((entry, index) => ({ id: entry.id, entry, searchable: [entry], connectedAt: validTimestamp(rows[index].connectedAt), importedAt: validTimestamp(rows[index].importedAt) }))
+      else {
+        // The published index resolves merges; without it, recorded ids and LinkedIn addresses still group.
+        const identityReader = typeof readPublishedSnapshot === 'function' ? createPublicPeopleReader({ readPublishedSnapshot }) : null
+        const { groups, published } = await groupConnectionRows(rows, entries, { lookupSlug: typeof lookupSlug === 'function' ? lookupSlug : null, lookup: identityReader ? ids => identityReader.lookup({ ids, signal }) : null })
+        listed = groups.map(indexes => personEntry(indexes.map(index => ({ row: rows[index], entry: entries[index], published: published[index] }))))
+      }
+      const rowsMatching = listed.filter(item => !normalized || item.searchable.some(entry => [entry.name, entry.headline, entry.company].some(value => typeof value === 'string' && value.normalize('NFKC').toLowerCase().includes(normalized))))
+      const ordered = orderNetwork(rowsMatching, sort, item => item.entry.name, item => item.entry.company ?? '')
+      const revision = hash(JSON.stringify(ordered.map(item => grouping === 'none' ? item.id : [item.id, ...item.entry.sources.map(source => source.id)])))
+      const binding = hash(JSON.stringify([grant.ownerId, 1, normalized, revision, sort, grouping]))
+      const offset = cursorOffset(cursor, binding, ordered.length)
+      const selected = ordered.slice(offset, offset + limit).map(item => item.entry)
+      return { kind: 'unlinked_list_connections', degree: 1, grouping, sort, revision, total: ordered.length, connections: selected,
+        ...(offset + selected.length < ordered.length ? { nextCursor: opaqueCursor(binding, offset + selected.length) } : {}) }
     },
     async unlinked_lookup_contact(grant, input, signal) {
       const modes = ['connectionId', 'linkedinUrl', 'profileId', 'refHashes'].filter(key => input[key] !== undefined)
@@ -362,12 +398,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       // Each candidate row's published profile: its own target, else a published profile with the same LinkedIn address.
       const publishedFor = async candidates => {
         if (!reader || !candidates.length) return candidates.map(() => null)
-        const targets = await Promise.all(candidates.map(async ({ row, slug }) => [usableProfileId(rowPublicTarget(row)),
-          slug && typeof lookupSlug === 'function' ? usableProfileId(await Promise.resolve(lookupSlug(slug)).catch(() => null)) : null]))
-        const ids = [...new Set(targets.flat().filter(Boolean))], found = new Map()
-        try { for (let start = 0; start < ids.length; start += 1000) for (const [id, summary] of await reader.lookup({ ids: ids.slice(start, start + 1000), signal })) found.set(id, summary) }
+        try { return await publishedPeopleFor(candidates.map(({ row }) => row), { lookupSlug: typeof lookupSlug === 'function' ? lookupSlug : null, lookup: ids => reader.lookup({ ids, signal }) }) }
         catch { return candidates.map(() => null) }
-        return targets.map(pair => pair.map(id => id && found.get(id)).find(Boolean) ?? null)
       }
       const contactOf = (candidate, summary) => ({
         connectionId: candidate.entry.id, name: candidate.entry.name,

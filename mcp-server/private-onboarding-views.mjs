@@ -328,6 +328,7 @@ const CARD_ICON = {
   whatsapp: '<path d="M3 15l.9-3.1A6.3 6.3 0 1 1 6.2 14z"/><path d="M7 6.6c0 2.2 1.9 4 4 4.3l.8-1.1-1.5-.8-.6.5a3 3 0 0 1-1.4-1.4l.5-.6-.7-1.5z"/>',
   email: '<rect x="2.5" y="4" width="13" height="10" rx="1.5"/><path d="m3 5 6 4.6L15 5"/>',
   link: '<path d="M7.6 10.4a3 3 0 0 0 4.2 0l2.2-2.2a3 3 0 0 0-4.2-4.2l-.8.8M10.4 7.6a3 3 0 0 0-4.2 0L4 9.8A3 3 0 0 0 8.2 14l.8-.8"/>',
+  linkedin: '<rect x="2.5" y="2.5" width="13" height="13" rx="2"/><path d="M6 8.2V12M6 5.7v.1M9.2 12V9.9c0-.9.7-1.6 1.6-1.6.9 0 1.6.7 1.6 1.6V12"/>',
 }
 const cardIcon = name => `<svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${CARD_ICON[name]}</svg>`
 const linkLabel = value => { try { const url = new URL(value); return `${url.hostname.replace(/^www\./, '')}${url.pathname === '/' ? '' : url.pathname}` } catch { return '' } }
@@ -338,12 +339,15 @@ const contactRows = card => [
   card?.whatsapp ? cardRow('whatsapp', whatsappUrl(card.whatsapp), displayPhone(card.whatsapp), 'WhatsApp', true) : '',
   card?.email ? cardRow('email', `mailto:${card.email}`, card.email, 'Email') : '',
   card?.link && isSafeContactLink(card.link) ? cardRow('link', card.link, linkLabel(card.link), 'Link', true) : '',
+  linkedinRow(card?.linkedinUrl),
 ].join('')
+// The person's LinkedIn address, already part of their public identity.
+const linkedinRow = value => { const url = publicLinkedinUrl(value); return url ? cardRow('linkedin', url, linkLabel(url), 'LinkedIn', true) : '' }
 // One business card: who it is, optional detail rows, optional side panel.
 const businessCard = ({ name, headline, location, photo, heading = 'h1', rows = '', side = '', empty = 'Your card' }) => `<div class="bcard${side ? '' : ' solo'}"><div class="bc-main"><div class="bc-id">${photoSrc(photo) ? photoImg('bc-av photo', photo, name, 64) : `<span class="bc-av" aria-hidden="true">${html(initials(name)) || '·'}</span>`}<div><${heading} class="bc-name">${html(name) || empty}</${heading}>${raw(headline) ? `<p class="bc-hl">${html(headline)}</p>` : ''}${raw(location) ? `<p class="small">${html(location)}</p>` : ''}</div></div>${rows ? `<ul class="bc-rows">${rows}</ul>` : ''}</div>${side ? `<div class="bc-side">${side}</div>` : ''}</div>`
 // The public card face, shared by /card and the My card tab of /scan.
 const cardFace = ({ profile = {}, cardUrl, qr, heading = 'h1', actions }) =>
-  `${businessCard({ name: profile.name, headline: profile.headline, location: profile.location, photo: profile.photo, heading, side: cardUrl && qr ? `<div class="qr">${qr}</div><p class="small">Scan to open my public profile</p>` : '' })}${cardUrl && qr ? `<p class="small qr-url"><code>${html(cardUrl)}</code></p>` : '<p class="notice">Your QR code appears once your profile is published on Unlinked. Bring your LinkedIn export to publish it.</p>'}<div class="actions">${actions}</div><p class="small">This card shows only what is already public: no phone number, email address or file contents.</p>`
+  `${businessCard({ name: profile.name, headline: profile.headline, location: profile.location, photo: profile.photo, heading, rows: linkedinRow(profile.linkedinUrl), side: cardUrl && qr ? `<div class="qr">${qr}</div><p class="small">Scan to open my public profile</p>` : '' })}${cardUrl && qr ? `<p class="small qr-url"><code>${html(cardUrl)}</code></p>` : '<p class="notice">Your QR code appears once your profile is published on Unlinked. Bring your LinkedIn export to publish it.</p>'}<div class="actions">${actions}</div><p class="small">This card shows only what is already public: no phone number, email address or file contents.</p>`
 const CONTACT_FIELDS = [
   ['phone', 'showPhone', 'Phone', 'tel', 'tel', '+1 415 555 0123', 'With the country code.'],
   ['whatsapp', 'showWhatsapp', 'WhatsApp', 'tel', 'off', 'Same as phone', 'Leave the number empty to use your phone number.'],
@@ -685,12 +689,17 @@ const NOTIFICATION_TEXT = {
   profile_claimed: value => `${named(value)}, someone in your connections, joined Unlinked and claimed their profile`,
 }
 // The notification feed. `pending` maps request ids that still await an answer,
-// so a request notification can be answered in place.
-export function renderNotifications({ accountLabel, displayName, csrf, importJob, items = [], pending = new Map(), pendingCount = 0, now = Date.now(), notice, emailEnabled = false } = {}) {
+// so a request notification can be answered in place; `connected` holds request
+// ids that are now connections (accepted, or added through a contact card), so
+// an answered request says so instead of still asking.
+export function renderNotifications({ accountLabel, displayName, csrf, importJob, items = [], pending = new Map(), connected = new Set(), pendingCount = 0, now = Date.now(), notice, emailEnabled = false } = {}) {
   const rows = list(items).filter(value => NOTIFICATION_TEXT[value.kind]).map(value => {
     // The whole row opens the item (and marks it read), so the name is not a separate link.
-    const waiting = value.kind === 'connection_request_received' && pending.has(value.subjectId)
-    return `<li class="note${value.read ? '' : ' unread'}"><a class="note-open" href="/notifications/${html(value.id)}">${avatar(value.actorName, value.actorProfileId ?? value.actorName)}<span class="note-text">${NOTIFICATION_TEXT[value.kind]({ name: value.actorName })}${value.read ? '' : '<span class="vh"> (unread)</span>'}<span class="small note-time">${html(ago(value.createdAt, now))}</span></span></a>${waiting ? respondForm(csrf, value.subjectId, '/notifications') : ''}</li>`
+    const request = value.kind === 'connection_request_received'
+    const waiting = request && pending.has(value.subjectId)
+    const done = request && !waiting && connected.has(value.subjectId)
+    const text = done ? `${named({ name: value.actorName })} is now connected with you` : NOTIFICATION_TEXT[value.kind]({ name: value.actorName })
+    return `<li class="note${value.read ? '' : ' unread'}"><a class="note-open" href="/notifications/${html(value.id)}">${avatar(value.actorName, value.actorProfileId ?? value.actorName)}<span class="note-text">${text}${value.read ? '' : '<span class="vh"> (unread)</span>'}<span class="small note-time">${html(ago(value.createdAt, now))}${done ? ' · <span class="note-state">Connected</span>' : ''}</span></span></a>${waiting ? respondForm(csrf, value.subjectId, '/notifications') : ''}</li>`
   }).join('')
   const unread = list(items).some(value => !value.read)
   const summary = pendingCount > 0 ? `<a class="note-summary" href="/invitations">${NETWORK_NAV_ICON}<span><b>${count(pendingCount)} pending ${pendingCount === 1 ? 'invitation' : 'invitations'}</b><span class="small">Review them in My Network</span></span></a>` : ''

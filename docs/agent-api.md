@@ -283,12 +283,14 @@ read `importCount: 0` while `unlinked_list_connections` listed them.
 `grant.toolRefresh` explains same-key tool refresh and explicit permissions; see the
 [permission and tool-refresh policy](#optional-connection-actions).
 
-### `GET /api/agent/v1/people?q&mode&presence&cursor&limit` ⇄ `unlinked_list_people`
+### `GET /api/agent/v1/people?q&mode&presence&sort&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
 `q` ≤ 200 chars; `mode` `best` (default) or `exact`; `presence` `member` (people
 who joined: confirmed claims and members' own imports) or `shadow` (imported,
-not on Unlinked yet), omitted for everyone. The filter is bound into the cursor.
-Response: `{ kind, revision, total, match?, profiles: [{ id, name, headline?,
+not on Unlinked yet), omitted for everyone. `sort` `best` (default: relevance
+with `q`, else the stored name order), `name`, `name-desc` or `raw` (see
+[Name ordering](#name-ordering)). The filter and sort are bound into the cursor.
+Response: `{ kind, revision, sort? (when not best), total, match?, profiles: [{ id, name, headline?,
 location?, presence?, connectionCount? }], nextCursor?, visibility: "public" }`.
 `presence` and `connectionCount` (connections counted from both ends) are present
 whenever the published snapshot names its members.
@@ -301,11 +303,45 @@ fields and bounds are owned by `detailSchema` in
 privacy are owned by [profile details](profile-details.md).
 Unknown id → `not_found`.
 
-### `GET /api/agent/v1/connections?degree&q&cursor&limit` ⇄ `unlinked_list_connections`
+### `GET /api/agent/v1/connections?degree&q&sort&grouping&cursor&limit` ⇄ `unlinked_list_connections`
 Deterministic owner-connections listing; see **Degree semantics**.
-Response: `{ kind, degree, revision, total, anchorId? (degree 2),
-connections: [{ id, name, headline?, company?, linkedinUrl?, provenance,
-visibility }], nextCursor? }`.
+`q`, `sort` and `grouping` are bound into the cursor (reusing a cursor with
+another value is `cursor_invalid`).
+
+- `grouping` (degree 1) — `person` (default) returns **one entry per person**:
+  records join only on exact identity evidence — the same published profile
+  (the row's own published copy, a recorded path/invite/connection target, or
+  the published profile with the same LinkedIn address; merged profiles are
+  followed to their survivor) or the same canonical LinkedIn address
+  (`linkedinRefHash`). A name is never evidence: two contacts called "Sam Lee"
+  with different addresses stay two entries. Top-level fields come from the
+  owner's import (the earliest import is primary, so the `id` stays stable when
+  a re-import joins), filling gaps from the other sources; `connectedAt` /
+  `importedAt` are the earliest known. `sources` lists every underlying record.
+  `total` counts people. `q` matches any source's name, headline or company.
+  `none` returns one row per source record in the pre-grouping shape (no
+  `sources`, no dates), so the same person can appear more than once.
+- `sort` — `name` (default), `raw`, `name-desc`, `connected` (most recently
+  connected first, undated last), `imported` (most recently imported first),
+  `company` (A–Z, no company last); ties fall back to name, then id. See
+  [Name ordering](#name-ordering).
+
+Response: `{ kind, degree, grouping (degree 1), sort, revision, total,
+anchorId? (degree 2), connections: [{ id, name, headline?, company?,
+linkedinUrl?, publishedProfileId?, linkedinRefHash?, connectedAt?, importedAt?,
+provenance, visibility, sources: [{ id, name, provenance, visibility }] }],
+nextCursor? }`. Grouped `provenance` is the primary source's; `visibility` is
+`owner_private` when any source is. Every source `id` (and the entry `id`) is a
+valid `connectionId` for `unlinked_lookup_contact`.
+
+#### Name ordering
+`name` compares a key that starts at the first Unicode letter or number
+(`\p{L}\p{N}`), so leading emoji, symbols, quotes and punctuation do not move a
+person (`🚀 Zoe` sorts under Z, `"Bob"` under B), with accent- and
+case-insensitive, numeric-aware collation (`Émile` sorts as `emile`). Names are
+always returned exactly as written. `raw` is plain Unicode code-point order of
+the name as written (uppercase before lowercase, punctuation and digits first,
+emoji last). Implementation: `src/utils/network-order.mjs`.
 
 ### `GET /api/agent/v1/connection-requests?direction` ⇄ `unlinked_list_connection_requests`
 Read-only; availability follows [grant-scope normalization](#grant-scope-versioning-how-old-grants-keep-working). `direction` `received` (default: requests

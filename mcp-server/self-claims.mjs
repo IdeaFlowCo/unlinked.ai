@@ -1,4 +1,4 @@
-import { linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
+import { normalizeLinkedinSlug, normalizedSlugIndex } from '../src/utils/public-people/url-identity.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { isTestProfileId, testProfile, testProfileBySlug, TEST_PROFILES_SHA256 } from './test-profiles.mjs'
 
@@ -22,12 +22,7 @@ export function createSelfClaims({ driver, publicPeople, slugIndex, database = '
   let normalizedSlugs = null
   const readSlugs = () => {
     if (!normalizedSlugs) normalizedSlugs = (async () => {
-      const index = new Map()
-      for (const [key, id] of await slugIndex()) {
-        const slug = linkedinSlug(`https://www.linkedin.com/in/${key}`)
-        if (slug && !index.has(slug)) index.set(slug, id)
-      }
-      return index
+      return normalizedSlugIndex(await slugIndex())
     })().catch(error => { normalizedSlugs = null; throw error })
     return normalizedSlugs
   }
@@ -36,7 +31,7 @@ export function createSelfClaims({ driver, publicPeople, slugIndex, database = '
       const test = testProfileBySlug(slug)
       if (test) return test.id
       try {
-        const wanted = linkedinSlug(`https://www.linkedin.com/in/${slug}`)
+        const wanted = normalizeLinkedinSlug(slug)
         if (!wanted) return null
         return (await readSlugs()).get(wanted) ?? null
       } catch { return null }

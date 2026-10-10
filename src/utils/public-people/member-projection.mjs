@@ -46,8 +46,14 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // is read again through the existing owner-authorized immutable publication.
 // Old/private/synthetic consent is excluded; tombstones/owner revocation remove
 // a source from every live snapshot even if its public chunks are retained.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false }) {
-  let work = null
+// `freshMs` bounds how stale a served index may be: a build younger than it is
+// returned without touching any source, so a new publication, revocation or
+// decision becomes visible to everyone within `freshMs` plus one build, not on
+// the very next request. 0 (the default) keeps next-request visibility. A
+// failed or empty build is never kept, and an empty build drops what was kept.
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, freshMs = 0, now = Date.now }) {
+  if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
+  let work = null, kept = null
   const detailCache = new Map()
   // Operator merges and renames apply last, over the complete union.
   // Operator and automatic decisions; the index's own merges come first.
@@ -176,7 +182,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   }
   const read = async ({signal} = {}) => {
     signal?.throwIfAborted()
-    if (!work) work=build().finally(()=>{work=null})
+    if (kept && now() - kept.at < freshMs) return kept.value
+    if (!work) work=build().then(value=>{kept=value?{value,at:now()}:null;return value}).finally(()=>{work=null})
     const value=await work;signal?.throwIfAborted();return value
   }
   // The revision hashes every input above (legacy, enrichment, each import,

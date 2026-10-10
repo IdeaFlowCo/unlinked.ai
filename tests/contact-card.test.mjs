@@ -28,14 +28,17 @@ test('the card shows only what is switched on, and does not exist while nothing 
   assert.equal(projectContactCard(record), null)
   assert.equal(projectContactCard({ ...record, showPhone: false, showEmail: false, showLink: false, showWhatsapp: false }), null)
   assert.equal(projectContactCard(null), null)
-  assert.deepEqual(projectContactCard({ ...record, showPhone: true }), { name: 'Ada Example', headline: 'Engineer', location: null, profilePath: '/people/ada', phone: '+14155550123', whatsapp: null, email: null, link: null })
+  assert.deepEqual(projectContactCard({ ...record, showPhone: true }), { name: 'Ada Example', headline: 'Engineer', location: null, linkedinUrl: null, profilePath: '/people/ada', phone: '+14155550123', whatsapp: null, email: null, link: null })
   // WhatsApp without its own number uses the phone number, without revealing "Phone" separately.
-  assert.deepEqual(projectContactCard({ ...record, showWhatsapp: true }), { name: 'Ada Example', headline: 'Engineer', location: null, profilePath: '/people/ada', phone: null, whatsapp: '+14155550123', email: null, link: null })
+  assert.deepEqual(projectContactCard({ ...record, showWhatsapp: true }), { name: 'Ada Example', headline: 'Engineer', location: null, linkedinUrl: null, profilePath: '/people/ada', phone: null, whatsapp: '+14155550123', email: null, link: null })
   assert.equal(projectContactCard({ ...record, whatsapp: '+447700900123', showWhatsapp: true }).whatsapp, '+447700900123')
   // A switch stored as anything but true is off; an unsafe stored link or profile path is dropped.
   assert.equal(projectContactCard({ ...record, showPhone: 'yes', showEmail: 1 }), null)
   assert.equal(projectContactCard({ ...record, link: 'javascript:alert(1)', showLink: true }), null)
   assert.equal(projectContactCard({ ...record, showEmail: true, profilePath: '/settings' }).profilePath, null)
+  // The LinkedIn address is public identity: kept when valid, dropped otherwise.
+  assert.equal(projectContactCard({ ...record, showEmail: true, linkedinUrl: 'https://www.linkedin.com/in/ada' }).linkedinUrl, 'https://www.linkedin.com/in/ada')
+  assert.equal(projectContactCard({ ...record, showEmail: true, linkedinUrl: 'https://evil.test/in/ada' }).linkedinUrl, null)
 })
 
 test('one card per account: saved details, a stable link, reset and removal', async () => {
@@ -52,7 +55,7 @@ test('one card per account: saved details, a stable link, reset and removal', as
   assert.match(saved.token, CONTACT_CARD_TOKEN)
   // A switch for an empty field never stays on.
   assert.deepEqual(saved.settings, { phone: '+14155550123', showPhone: true, whatsapp: null, showWhatsapp: true, email: 'ada@example.test', showEmail: false, link: null, showLink: false })
-  assert.deepEqual(await cards.open(saved.token), { name: 'Ada Example', headline: 'Engineer', location: null, profilePath: '/people/ada', phone: '+14155550123', whatsapp: '+14155550123', email: null, link: null })
+  assert.deepEqual(await cards.open(saved.token), { name: 'Ada Example', headline: 'Engineer', location: null, linkedinUrl: null, profilePath: '/people/ada', phone: '+14155550123', whatsapp: '+14155550123', email: null, link: null })
   for (const token of ['', 'short', saved.token + 'x', saved.token.slice(0, 23) + '-', null, undefined, { token: saved.token }]) assert.equal(await cards.open(token), null)
 
   // Saving again keeps the link; another account gets its own.
@@ -72,6 +75,14 @@ test('one card per account: saved details, a stable link, reset and removal', as
   assert.equal((await cards.open(saved.token)).profilePath, '/people/ada')
   await cards.syncIdentity(member, { name: 'Ada E. Example', headline: 'CTO', profilePath: null })
   assert.equal((await cards.open(saved.token)).profilePath, null)
+  // The LinkedIn address follows the profile the same way: unknown keeps the
+  // stored one, an invalid value is dropped.
+  await cards.syncIdentity(member, { name: 'Ada E. Example', headline: 'CTO', linkedinUrl: 'https://linkedin.com/in/ada-example/' })
+  assert.equal((await cards.open(saved.token)).linkedinUrl, 'https://www.linkedin.com/in/ada-example')
+  await cards.syncIdentity(member, { name: 'Ada E. Example', headline: 'CTO' })
+  assert.equal((await cards.open(saved.token)).linkedinUrl, 'https://www.linkedin.com/in/ada-example')
+  await cards.syncIdentity(member, { name: 'Ada E. Example', headline: 'CTO', linkedinUrl: 'https://evil.test/in/ada' })
+  assert.equal((await cards.open(saved.token)).linkedinUrl, null)
   // A page view that refreshes the name never rewrites the link or the switches:
   // a reset that lands between its read and its write still wins.
   const racing = createMemoryContactCardStore()
@@ -104,7 +115,7 @@ test('one card per account: saved details, a stable link, reset and removal', as
 })
 
 test('the saved contact file holds only the shown details and cannot be extended by a field', () => {
-  const vcard = renderContactVcard({ name: 'Ada; Example\r\nTEL:+1999', headline: 'Engineer, Analytical', phone: '+14155550123', whatsapp: '+447700900123', email: 'ada@example.test', link: 'https://example.test/', profilePath: '/people/ada' }, 'https://www.unlinked.ai')
+  const vcard = renderContactVcard({ name: 'Ada; Example\r\nTEL:+1999', headline: 'Engineer, Analytical', phone: '+14155550123', whatsapp: '+447700900123', email: 'ada@example.test', link: 'https://example.test/', linkedinUrl: 'https://www.linkedin.com/in/ada', profilePath: '/people/ada' }, 'https://www.unlinked.ai')
   const lines = vcard.split('\r\n')
   assert.deepEqual(lines.slice(0, 2), ['BEGIN:VCARD', 'VERSION:3.0'])
   assert.ok(lines.includes('FN:Ada\\; Example\\nTEL:+1999'))
@@ -112,6 +123,7 @@ test('the saved contact file holds only the shown details and cannot be extended
   assert.ok(lines.includes('TITLE:Engineer\\, Analytical'))
   assert.ok(lines.includes('EMAIL;TYPE=INTERNET:ada@example.test'))
   assert.ok(lines.includes('URL:https://wa.me/447700900123'))
+  assert.ok(lines.includes('URL:https://www.linkedin.com/in/ada'))
   assert.ok(lines.includes('URL:https://www.unlinked.ai/people/ada'))
   assert.equal(lines.at(-2), 'END:VCARD')
   const bare = renderContactVcard({ name: null, phone: null, whatsapp: null, email: 'ada@example.test', link: null, profilePath: null }, 'https://www.unlinked.ai')
