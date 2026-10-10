@@ -177,7 +177,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
   // same-origin photo URL when one is published; views fall back to initials.
   const photoFor = profilePhotos ? id => profilePhotos.urlFor(id) : undefined
-  const publicReader = createPublicPeopleReader({ readPublishedSnapshot, photoFor })
+  // Header suggestions reuse the last verified index for 10 s, and up to 60 s
+  // while one background read refreshes it, so a keystroke never waits on the
+  // graph (docs/omni-search.md). Every other public read checks the source.
+  const publicReader = createPublicPeopleReader({ readPublishedSnapshot, photoFor, suggestFreshMs: 10000, suggestStaleMs: 60000 })
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
@@ -279,6 +282,24 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // Overlapping requests share the public reader's snapshot build. Let a small
   // browser/crawler burst share it while retaining the site-wide minute bound.
   const PUBLIC_IN_FLIGHT = 8
+  let suggestRequests = 0, suggestWindow = Date.now(), suggestBusy = 0
+  // The published people each signed-in member is connected to, for "You
+  // know" in header suggestions: the same one-person identity as /network
+  // (connectedProfiles). Read off the request path, kept 5 minutes, at most
+  // 500 members; the first keystrokes after sign-in may come back unmarked.
+  const knownCache = new Map(), KNOWN_FRESH_MS = 5 * 60 * 1000, KNOWN_CAPACITY = 500
+  const knownPeople = owner => {
+    if (typeof readPublishedSnapshot !== 'function' || !owner?.ownerId) return null
+    const entry = knownCache.get(owner.ownerId)
+    if ((!entry || Date.now() - entry.at >= KNOWN_FRESH_MS) && !entry?.pending) {
+      const held = entry ?? { ids: null, at: 0 }
+      held.pending = (async () => new Set((await connectedProfiles(owner, await createAccountNetwork({ owner, getBackend }).readNetwork(), publicReader)).map(person => person.id)))()
+        .then(ids => { knownCache.delete(owner.ownerId); knownCache.set(owner.ownerId, { ids, at: Date.now(), pending: null }); while (knownCache.size > KNOWN_CAPACITY) knownCache.delete(knownCache.keys().next().value) },
+          () => { held.pending = null })
+      if (!entry) knownCache.set(owner.ownerId, held)
+    }
+    return entry?.ids ?? null
+  }
   const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || (pathname !== '/people/add' && /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname)) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
   let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
@@ -538,6 +559,28 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      // Browser autocomplete reads the same published projection for everyone.
+      // Its own burst budget keeps keystrokes out of the full-page read budget.
+      if (request.method === 'GET' && url.pathname === '/search-suggestions') {
+        if (Date.now() - suggestWindow >= 60000) { suggestWindow = Date.now(); suggestRequests = 0 }
+        if (++suggestRequests > 600 || suggestBusy >= 8) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        suggestBusy++
+        try {
+          if (url.searchParams.getAll('q').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'q')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          const query = url.searchParams.get('q')
+          // A signed-in member's suggestions mark the people they know. The
+          // set is read in the background and kept briefly; a keystroke never waits for it.
+          const viewer = sessionFor(request), known = viewer ? knownPeople(viewer.owner) : null
+          // An empty query is the field gaining focus: start loading, answer nothing.
+          if (query === '') publicReader.warm()
+          const result = query === '' ? { people: [], companies: [] } : await publicReader.suggest({ query, ...(known ? { known } : {}) })
+          response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify(result))
+        } catch (error) {
+          const status = error instanceof PublicPeopleReaderError ? error.status : 503
+          response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' }))
+        } finally { suggestBusy-- }
+        return
+      }
       if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/public-assets/connection-feedback.js') {
         response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' })
         response.end(request.method === 'HEAD' ? undefined : CONNECTION_FEEDBACK_SCRIPT); return

@@ -108,6 +108,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
 
 The provenance-backed one/two-hop reader, signed HTTP API and account MCP degree inputs are documented in `docs/private-pilot-release-plan.md`; an explicitly confirmed recovered profile is currently required as the graph anchor.
 
+Header people/company autocomplete, its browser-only public projection boundary and keyboard behavior are documented in [docs/omni-search.md](docs/omni-search.md); enhancement: `mcp-server/omni-search.mjs`.
+
 ## Canonical anonymous discovery
 
 `mcp-server/public-discovery.mjs` mounts exact GET/HEAD discovery/import/Meet routes before session resolution; its fixed asset map never exposes owner data or request-selected files.
