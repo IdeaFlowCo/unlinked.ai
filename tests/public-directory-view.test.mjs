@@ -33,3 +33,13 @@ test('public output escapes supplied content and keeps unavailable distinct from
   assert.ok(missing.includes('could not be found'))
   assert.notEqual(unavailable, empty)
 })
+
+test('retained Next.js profile renders valid professional links and rejects unsafe URLs', () => {
+  const profile = { id: 'synthetic', name: 'Synthetic Person', positions: [], education: [], skills: [], connections: [], company: 'Test Company', industry: 'Research', linkedinUrl: 'https://www.linkedin.com/in/test-person', website: 'https://example.test' }
+  const html = render(ProfileBody, { profile })
+  assert.match(html, /href="https:\/\/www.linkedin.com\/in\/test-person" target="_blank" rel="noopener noreferrer"/)
+  assert.match(html, /href="https:\/\/example.test\/"/)
+  assert.match(html, /href="\/companies\/Test%20Company"/)
+  const unsafe = render(ProfileBody, { profile: { ...profile, linkedinUrl: 'javascript:alert(1)', website: 'https://u:p@example.test' } })
+  assert.doesNotMatch(unsafe, /href="javascript:|href="https:\/\/u:p/)
+})

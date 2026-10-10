@@ -1,7 +1,22 @@
+import { validTimestamp, connectionDate } from '../network-order.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from './consent.mjs'
 import { createPrivateSearch } from './ai-search.mjs'
+import { matchNetworkText } from './network-text-search.mjs'
+
+// unlinked_search_network answers literal queries from text alone; only a
+// query with no literal match pays for AI ranking. One deadline covers the
+// whole call (network read, ranking and the final consistency re-read), so
+// it stays under the shared Ideaflow connector's 25 s downstream timeout and
+// callers get this typed failure, not the gateway's generic abort.
+export const NETWORK_AI_BUDGET_MS = 20000
+// AI ranking stops this long before the deadline and returns what it has
+// ranked (partial: true), leaving time for the final consistency re-read.
+const NETWORK_RANKING_RESERVE_MS = 4000
+// The owner network is one person's whole archive (thousands of rows), so
+// its ranking calls run wider than the shared default.
+const NETWORK_RANK_CONCURRENCY = 8
 
 // One authenticated account, all its currently published imports. Source
 // assertions keep their original IDs and provenance; no email/URL ownership.
@@ -22,7 +37,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit' })
       const publication = await readImport(id, { signal })
       requireCombinedUploadConsent(publication.consent)
-      for (const row of publication.assertions) assertions.push(row)
+      for (const row of publication.assertions) assertions.push({ ...row, ...(publication.importedAt ? { importedAt: publication.importedAt } : {}), ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })
       indexed += publication.indexed ?? 0
       imports.push(id)
     }
@@ -47,7 +62,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       for (const value of await backend.readInviteConnections()) {
         if (assertions.length >= observationLimit) throw Error('account_observation_limit')
         assertions.push({ id: privateId(owner.ownerId, 'invite-connection', value.invitationId), ownerId: owner.ownerId, importId: networkId, sourceId: 'unlinked-invites', rowId: `invite:${value.invitationId}`, category: 'connections',
-          fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-invite', invitationId: value.invitationId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
+          ...(validTimestamp(value.connectedAt) ? { connectedAt: value.connectedAt } : {}), fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-invite', invitationId: value.invitationId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
       }
     }
     // Accepted connection requests ("Connect") connect two accounts the same way.
@@ -55,17 +70,49 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       for (const value of await backend.readMemberConnections()) {
         if (assertions.length >= observationLimit) throw Error('account_observation_limit')
         assertions.push({ id: privateId(owner.ownerId, 'member-connection', value.requestId), ownerId: owner.ownerId, importId: networkId, sourceId: 'unlinked-connections', rowId: `connection:${value.requestId}`, category: 'connections',
-          fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-connection', requestId: value.requestId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
+          ...(validTimestamp(value.connectedAt) ? { connectedAt: value.connectedAt } : {}), fields: { 'first name': value.name, company: '', position: '' }, provenance: { source: 'unlinked-connection', requestId: value.requestId, ...(value.publicProfileId ? { toId: value.publicProfileId } : {}) } })
       }
     }
     if(typeof backend.readLegacyObservations==='function'){
       const recovered=await backend.readLegacyObservations({signal,limit:observationLimit-assertions.length})
-      if(recovered){assertions.push(...recovered.assertions);indexed+=recovered.assertions.length}
+      if(recovered){assertions.push(...recovered.assertions.map(row => ({ ...row, ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })));indexed+=recovered.assertions.length}
     }
     return { legacyProfileId: legacy?.profileId, id: networkId, ownerId: owner.ownerId, imports, indexed, assertions, consent: COMBINED_UPLOAD_CONSENT }
   }
-  return { readNetwork, search: typeof complete === 'function' ? async ({ query, signal }) => {
-    const result = await createPrivateSearch({ readImport: readNetwork, complete })({ importId: networkId, query, signal })
+  const search = typeof complete === 'function' ? async ({ query, signal, stopSignal, readFirst = readNetwork, concurrency }) => {
+    const result = await createPrivateSearch({ readImport: readFirst, complete, ...(concurrency ? { concurrency } : {}) })({ importId: networkId, query, signal, stopSignal })
     return { ...result, scope: 'owner_network' }
-  } : null }
+  } : null
+  // Text first: every literal name/company/title match, no model call. A query
+  // with no literal match falls back to AI ranking, all inside one deadline.
+  const searchWithin = async ({ query, deadline, stopSignal }) => {
+    const network = await readNetwork(networkId, { signal: deadline })
+    const text = matchNetworkText(network.assertions, query)
+    const considered = network.assertions.filter(row => row.category === 'connections').length
+    if (text?.total) return { importId: networkId, mode: 'text_match', indexed: network.indexed, considered, total: text.total, truncated: text.truncated,
+      matches: text.matches.map(({ row, matchedIn }) => ({ assertionId: row.id, sourceId: row.sourceId, rowId: row.rowId, subject: row.subject,
+        fields: Object.fromEntries(['first name', 'last name', 'company', 'position', 'connected on'].filter(key => typeof row.fields?.[key] === 'string').map(key => [key, row.fields[key].slice(0, 256)])),
+        reason: `Text match in ${matchedIn.join(' and ')}` })), scope: 'owner_network' }
+    if (!search) throw new Error('private_search_configuration_required')
+    // The already-read network seeds the ranking; its final consistency re-read stays live.
+    let first = network
+    const readFirst = async (id, options) => { if (first) { const value = first; first = null; return value } return readNetwork(id, options) }
+    return search({ query, signal: deadline, stopSignal, readFirst, concurrency: NETWORK_RANK_CONCURRENCY })
+  }
+  // The deadline is a strongly held timer (an AbortSignal.timeout inside
+  // AbortSignal.any can be collected before it fires), and the call is raced
+  // against it, so awaits that ignore the signal cannot outlive it either.
+  const searchNetwork = async ({ query, signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
+    if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
+    const timer = new AbortController(), soft = new AbortController()
+    const handle = setTimeout(() => timer.abort(new DOMException('search_network deadline elapsed', 'TimeoutError')), aiBudgetMs)
+    const softHandle = setTimeout(() => soft.abort(new DOMException('search_network ranking time elapsed', 'TimeoutError')), Math.max(0, aiBudgetMs - Math.min(NETWORK_RANKING_RESERVE_MS, aiBudgetMs / 5)))
+    const deadline = signal ? AbortSignal.any([signal, timer.signal]) : timer.signal
+    const expired = new Promise((_, reject) => deadline.addEventListener('abort', () => reject(deadline.reason), { once: true }))
+    const work = searchWithin({ query, deadline, stopSignal: soft.signal })
+    work.catch(() => {}); expired.catch(() => {})
+    try { return await Promise.race([work, expired]) }
+    finally { clearTimeout(handle); clearTimeout(softHandle) }
+  }
+  return { readNetwork, search, searchNetwork }
 }

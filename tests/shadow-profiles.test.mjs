@@ -35,12 +35,12 @@ test('claimed legacy profiles become members, unknown claims are ignored, and me
   assert.equal(without.members, undefined)
 })
 
-test('shadow rows link and carry a network or stub mark; members and private rows carry none', () => {
+test('shadow rows link and carry a network or stub mark; members show membership and private rows remain unclassified', () => {
   const own = [{ id: 'second', name: 'Second <Shadow>', presence: 'shadow', connectionCount: 1200 }, { id: 'third', name: 'Third Stub', presence: 'shadow', connectionCount: 1 }, { id: 'first', name: 'First Member', presence: 'member', connectionCount: 2 }, { name: 'Private Only', linkedinUrl: 'https://www.linkedin.com/in/private-only' }]
   const content = renderPeople({ csrf: 'token', own, everyone: [] }).content
-  assert.match(content, /<a href="\/people\/second">Second &lt;Shadow&gt;<\/a><span class="shadow net"[^>]*>.*?Imported · 1,200<\/span>/)
-  assert.match(content, /<a href="\/people\/third">Third Stub<\/a><span class="shadow" title="[^"]*one connection[^"]*">.*?Imported<\/span>/)
-  assert.match(content, /<a href="\/people\/first">First Member<\/a><\/h3>/)
+  assert.match(content, /<a href="\/people\/second">Second &lt;Shadow&gt;<\/a><span class="shadow net"[^>]*>.*?Not on Unlinked · 1,200<\/span>/)
+  assert.match(content, /<a href="\/people\/third">Third Stub<\/a><span class="shadow" title="[^"]*one connection[^"]*">.*?Not on Unlinked<\/span>/)
+  assert.match(content, /<a href="\/people\/first">First Member<\/a><span class="membership-member">On Unlinked<\/span><\/h3>/)
   assert.match(content, /<h3>Private Only<\/h3>/); assert.doesNotMatch(content, /href="\/people\/undefined"/)
   const page = renderPerson({ profile: { id: 'second', name: 'Second Shadow', presence: 'shadow', connectionCount: 2, positions: [], connections: [{ id: 'fourth', name: 'Fourth Uploader', presence: 'shadow', connectionCount: 1 }] } }).content
   assert.match(page, /2 connections/); assert.match(page, /Not on Unlinked yet/); assert.match(page, /href="\/join">Claim it/)
@@ -68,9 +68,10 @@ test('signed-in People and profile rows link to the published profile of a legac
   const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
   const network = await (await request('/network', { headers: { Cookie: cookie } })).text()
   const own = network.slice(network.indexOf('aria-label="People you know"'), network.indexOf('aria-label="Everyone on Unlinked"'))
-  assert.match(own, /<a href="\/people\/second">Second Shadow<\/a><span class="shadow net"[^>]*>.*?Imported · 2<\/span>/)
+  assert.match(own, /<a href="\/people\/second">Second Shadow<\/a><span class="shadow net"[^>]*>.*?Not on Unlinked · 2<\/span>/)
   assert.match(own, /<a href="\/people\/third">Third Stub<\/a><span class="shadow" /)
-  assert.match(own, /<h3>Unpublished Person<\/h3>/)
+  // A row without a published profile opens the owner's own contact page (private context, unlinked-9kk.4).
+  assert.match(own, /<h3><a href="\/network\/contacts\/[a-f0-9]{64}">Unpublished Person<\/a><\/h3>/)
   const profile = await (await request('/profile', { headers: { Cookie: cookie } })).text()
   assert.match(profile, /<a class="crow" href="\/people\/second">/); assert.match(profile, /<a class="crow" href="\/people\/third">/)
 })

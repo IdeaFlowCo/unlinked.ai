@@ -12,8 +12,7 @@ No endpoint, access token, graph mutation or legacy migration is configured by t
 The list receives `{query,cursor?}` and returns `{profiles,nextCursor?}`.
 Each summary has `id`, `name`, optional `headline` and optional `location`.
 The profile receives `{id,cursor?}` and returns `{profile}` or `null` for an unknown or unpublished profile.
-Detail includes optional about text, experience, education, skills, public connection summaries and an optional next-connections cursor.
-See the schema for exact field names and bounds.
+The detail fields and bounds are defined by `detailSchema` in `src/components/public-directory/contract.ts`; professional link sourcing and privacy are owned by [profile details](profile-details.md).
 Unknown fields are stripped and malformed output is unavailable; transport failure is never displayed as an empty network.
 
 The runtime owner agreed this DTO and wires it through the standalone public People projection.

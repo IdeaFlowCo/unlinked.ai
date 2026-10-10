@@ -9,9 +9,13 @@ const TRANSIENT_PROVIDER_FAILURE = /^private_search_provider_http_(?:429|5\d\d)$
 
 // Query-time AI ranking over the live, explicitly granted import. No vector
 // index, shared people database or ownership inferred from archive fields.
-export function createPrivateSearch({ readImport, complete }) {
+// stopSignal (optional) is a soft deadline: when it fires, ranking stops and
+// the best results ranked so far are returned with partial: true (or the
+// failure is thrown if nothing finished). signal still aborts everything.
+export function createPrivateSearch({ readImport, complete, concurrency = CONCURRENT_RANKS }) {
   if (typeof readImport !== 'function' || typeof complete !== 'function') throw new Error('private_search_configuration_required')
-  return async ({ importId, query, signal }) => {
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 16) throw new Error('private_search_configuration_required')
+  return async ({ importId, query, signal, stopSignal }) => {
     if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
     signal?.throwIfAborted()
     const publication = await readImport(importId, { signal })
@@ -51,7 +55,7 @@ export function createPrivateSearch({ readImport, complete }) {
     // Apply role evidence before the top-ten selection, so a domain-only
     // contact cannot crowd a role match out of an early batch. The considered
     // count includes every connection evaluated by this local guard.
-    let round = evidence ? candidates.filter(row => evidence.supports(row.fields)) : candidates, winners
+    let round = evidence ? candidates.filter(row => evidence.supports(row.fields)) : candidates, winners, partial = false, unranked = 0, firstRound = true
     do {
       const groups = []
       for (let start = 0; start < round.length;) {
@@ -73,7 +77,7 @@ export function createPrivateSearch({ readImport, complete }) {
       // one transient provider failure (timeout/429/5xx) per group is retried
       // once, and the first hard failure cancels the round's other calls.
       const failed = new AbortController()
-      const roundSignal = signal ? AbortSignal.any([signal, failed.signal]) : failed.signal
+      const roundSignal = AbortSignal.any([...(signal ? [signal] : []), failed.signal, ...(stopSignal ? [stopSignal] : [])])
       const results = new Array(groups.length)
       let nextGroup = 0
       const worker = async () => {
@@ -90,11 +94,24 @@ export function createPrivateSearch({ readImport, complete }) {
           }
         }
       }
-      try { await Promise.all(Array.from({ length: Math.min(CONCURRENT_RANKS, groups.length) }, worker)) }
-      catch (error) { failed.abort(); throw error }
-      winners = results.flat()
+      try { await Promise.all(Array.from({ length: Math.min(concurrency, groups.length) }, worker)) }
+      catch (error) {
+        failed.abort()
+        if (!stopSignal?.aborted || signal?.aborted) throw error
+        // Soft deadline: keep every group that finished; in a later round,
+        // unfinished groups fall back to their previous-round picks.
+        const finished = groups.flatMap((_, index) => results[index] ?? [])
+        const carried = firstRound ? [] : groups.flatMap((group, index) => results[index] ? [] : group.map(row => ({ id: row.id, reason: row.priorReason })))
+        if (firstRound) unranked = groups.reduce((total, group, index) => total + (results[index] ? 0 : group.length), 0)
+        winners = [...finished, ...carried]
+        if (!winners.length) throw error
+        partial = true
+      }
+      if (!partial) winners = results.flat()
       if (evidence?.sector) winners.sort((a, b) => Number(evidence.sectorSupport(byId.get(b.id).fields)) - Number(evidence.sectorSupport(byId.get(a.id).fields)))
+      if (partial) { winners = winners.slice(0, 10); break }
       if (winners.length <= 10) break
+      firstRound = false
       round = winners.map(match => ({ ...byId.get(match.id), priorReason: match.reason }))
     } while (round.length)
     const matches = winners.map(match => {
@@ -107,7 +124,7 @@ export function createPrivateSearch({ readImport, complete }) {
     // it was running. The reader also performs live owner/publication checks.
     const current = await readImport(importId, { signal })
     if (digest(JSON.stringify(current)) !== digest(JSON.stringify(publication))) throw new Error('private_import_not_found')
-    return { importId, mode: 'query_time_ai', indexed: publication.indexed ?? 0, considered: candidates.length, matches }
+    return { importId, mode: 'query_time_ai', indexed: publication.indexed ?? 0, considered: candidates.length - unranked, matches, ...(partial ? { partial: true } : {}) }
   }
 }
 

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
-import { createAccountGrantService, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE } from '../mcp-server/account-grants.mjs'
+import { createAccountGrantService, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE, accountGrantTools } from '../mcp-server/account-grants.mjs'
 import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
 
@@ -18,18 +18,24 @@ const basic = (id, secret) => 'Basic ' + Buffer.from(`${id}:${secret}`).toString
 
 function fixture() {
   const owners = new Map(), bindings = new Map(), resources = new Map()
+  let beforeWrite, beforeRead
   const register = (identity, owner) => { owners.set(JSON.stringify([owner.ownerId, owner.userId]), owner); bindings.set(`${identity.issuer}:${identity.subject}`, owner) }
   const getBackend = async owner => {
     if (!owners.has(JSON.stringify([owner.ownerId, owner.userId]))) throw new Error('owner_denied')
     return {
-      readResource: async (_type, id) => { const value = resources.get(id); return value?.sourceOwnerId === owner.ownerId ? structuredClone(value) : null },
-      writeResource: async value => { resources.set(value.sourceId, structuredClone(value)) },
+      readResource: async (_type, id) => { const run = beforeRead; beforeRead = null; await run?.(id); const value = resources.get(id); return value?.sourceOwnerId === owner.ownerId ? structuredClone(value) : null },
+      writeResource: async value => {
+        const run = beforeWrite; beforeWrite = null; await run?.(value)
+        const prior = resources.get(value.sourceId)
+        if (prior ? prior.deleted || prior.sourceRevision !== value.expectedRevision : value.expectedRevision !== null) throw new Error('cas_conflict')
+        resources.set(value.sourceId, structuredClone(value))
+      },
       listImportIds: async () => [],
       listAccountGrantIds: async () => [...resources.values()].filter(x => x.sourceOwnerId === owner.ownerId && !x.deleted && x.payload?.kind === 'account_tool_grant').map(x => x.sourceId).sort(),
     }
   }
   const resolveOwner = async identity => identity?.issuer === ISSUER ? bindings.get(`${identity.issuer}:${identity.subject}`) ?? null : null
-  return { register, getBackend, resolveOwner, resources }
+  return { register, getBackend, resolveOwner, resources, beforeWrite: fn => { beforeWrite = fn }, beforeRead: fn => { beforeRead = fn } }
 }
 
 async function launch(t, { clients, perClientPerMinute } = {}) {
@@ -37,17 +43,18 @@ async function launch(t, { clients, perClientPerMinute } = {}) {
   const grants = createAccountGrantService({ issuer: 'https://synthetic-prov.invalid', signingKey: randomBytes(32), getBackend: f.getBackend, publicSearchEnabled: true })
   const service = createAccountToolService({ getBackend: f.getBackend, complete: async () => ({ matches: [] }), readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'prov-v1', profiles: [], connections: [] }) })
   const audits = []
+  let beforeVerification
   const server = createServer(() => {})
   await new Promise(r => server.listen(0, '127.0.0.1', r)); t.after(() => new Promise(r => server.close(r)))
   const origin = `https://127.0.0.1:${server.address().port}`
-  const api = createAccountAgentApiHandler({ authenticateGrantDetailed: grants.authenticateGrantDetailed, authenticateGrant: grants.authenticateGrant, service, origin,
+  const api = createAccountAgentApiHandler({ authenticateGrantDetailed: async request => { const run = beforeVerification; beforeVerification = null; await run?.(); return grants.authenticateGrantDetailed(request) }, authenticateGrant: grants.authenticateGrant, service, origin,
     provisioning: clients === null ? undefined : { clients: clients ?? [{ clientId: CLIENT_ID, secretSha256: createHash('sha256').update(CLIENT_SECRET).digest() }],
       resolveOwner: f.resolveOwner, ensureGrant: grants.ensureGrant, audit: async event => audits.push(event), perClientPerMinute } })
   server.removeAllListeners('request'); server.on('request', (req, res) => void api(req, res))
   const endpoint = `http://127.0.0.1:${server.address().port}`
   const provision = (body, authorization = basic(CLIENT_ID, CLIENT_SECRET)) => fetch(`${endpoint}/api/agent/v1/provision-grant`, {
     method: 'POST', headers: { ...(authorization ? { Authorization: authorization } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  return { f, grants, audits, endpoint, provision }
+  return { f, grants, audits, endpoint, provision, beforeVerification: fn => { beforeVerification = fn } }
 }
 
 test('provisioning maps verified issuer+subject to a reusable read-only grant; never minted twice, never a token in audit', async t => {
@@ -68,7 +75,8 @@ test('provisioning maps verified issuer+subject to a reusable read-only grant; n
   assert.equal(created.ownerId, owner.ownerId)
   assert.equal(created.created, true)
   assert.equal(created.version, CURRENT_ACCOUNT_GRANT_VERSION)
-  assert.equal(created.scope, 'owner_network_and_public')
+  // API keys default to the private-notes permission (catalog v7); never connection actions.
+  assert.equal(created.scope, 'owner_network_and_public_and_private_notes')
   assert.ok(created.tools.includes('unlinked_whoami'))
   // The returned token authenticates and drives a real tool call.
   const who = await fetch(`${app.endpoint}/api/agent/v1/whoami`, { headers: { Authorization: `Bearer ${created.accessToken}` } })
@@ -172,15 +180,15 @@ test('provisioning stays read-only after Settings opts into writes and respects 
   const app = await launch(t)
   const owner = { ownerId: 'scope-owner', userId: 'scope-user' }
   app.f.register({ issuer: ISSUER, subject: 'scope-subject' }, owner)
-  const write = await app.grants.issueGrant(owner, undefined, { scope: ACCOUNT_WRITE_SCOPE })
-  assert.equal((await app.grants.ensureGrant(owner)).scope, ACCOUNT_WRITE_SCOPE)
+  const write = await app.grants.issueGrant(owner, undefined, { scope: `${ACCOUNT_WRITE_SCOPE}_and_private_notes` })
+  assert.equal((await app.grants.ensureGrant(owner)).scope, `${ACCOUNT_WRITE_SCOPE}_and_private_notes`)
   const response = await app.provision({ issuer: ISSUER, subject: 'scope-subject' })
   assert.equal(response.status, 200)
   const read = await response.json()
-  assert.equal(read.scope, 'owner_network_and_public')
+  assert.equal(read.scope, 'owner_network_and_public_and_private_notes')
   assert.notEqual(read.grantId, write.grantId)
   const verified = await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${read.accessToken}` } })
-  assert.equal(verified.scope, 'owner_network_and_public')
+  assert.equal(verified.scope, 'owner_network_and_public_and_private_notes')
   assert.ok(!verified.tools.includes('unlinked_send_connection_request'))
   const denied = await fetch(`${app.endpoint}/api/agent/v1/connection-requests/send`, {
     method: 'POST', headers: { Authorization: `Bearer ${read.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: 'someone' }) })
@@ -192,4 +200,106 @@ test('provisioning stays read-only after Settings opts into writes and respects 
   assert.equal(revoked.status, 401)
   assert.equal((await revoked.json()).error.code, 'grant_revoked')
   assert.equal((await app.grants.ensureGrant(owner)).grantId, write.grantId)
+})
+
+for (const scope of ['owner_network', 'owner_network_and_public']) test(`automatic default toggle preserves bytes and provisions one ${scope} read-only fallback`, async t => {
+  const app = await launch(t)
+  const owner = { ownerId: 'default-owner', userId: 'default-user' }
+  const identity = { issuer: ISSUER, subject: 'default-subject' }
+  app.f.register(identity, owner)
+  const selected = await app.grants.ensureGrant(owner)
+  const record = app.f.resources.get(selected.grantId)
+  record.payload.scope = scope
+  record.payload.tools = [...accountGrantTools(record.payload.version, scope)]
+  await app.grants.setConnectionActions(owner, selected.grantId, true)
+  assert.equal((await app.grants.readKey(owner, selected.grantId)).accessToken, selected.accessToken)
+  assert.equal((await app.grants.ensureGrant(owner)).accessToken, selected.accessToken)
+  assert.equal(app.f.resources.size, 1)
+  const results = await Promise.all(Array.from({ length: 6 }, async () => {
+    const response = await app.provision(identity)
+    assert.equal(response.status, 200)
+    return response.json()
+  }))
+  const read = results[0]
+  assert.equal(new Set(results.map(x => x.accessToken)).size, 1)
+  assert.equal(results.filter(x => x.created).length, 1)
+  assert.equal(read.scope, scope)
+  assert.notEqual(read.grantId, selected.grantId)
+  assert.equal(app.f.resources.size, 2)
+  assert.equal((await app.grants.ensureGrant(owner, { readOnly: true })).accessToken, read.accessToken)
+  assert.equal((await (await app.provision(identity)).json()).accessToken, read.accessToken)
+  assert.equal((await app.grants.readKey(owner, selected.grantId)).accessToken, selected.accessToken)
+  const denied = await fetch(`${app.endpoint}/api/agent/v1/connection-requests/send`, {
+    method: 'POST', headers: { Authorization: `Bearer ${read.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: 'someone' }) })
+  assert.equal(denied.status, 403)
+  if (scope === 'owner_network') assert.equal((await fetch(`${app.endpoint}/api/agent/v1/people`, { headers: { Authorization: `Bearer ${read.accessToken}` } })).status, 403)
+  const replacement = await app.grants.replaceKey(owner, read.grantId)
+  assert.notEqual(replacement.accessToken, read.accessToken)
+  assert.equal((await (await app.provision(identity)).json()).accessToken, replacement.accessToken)
+  assert.equal(await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${read.accessToken}` } }), null)
+  await app.grants.revoke(owner, read.grantId)
+  for (let i = 0; i < 2; i++) {
+    assert.equal(await app.grants.ensureGrant(owner, { readOnly: true }), null)
+    const revoked = await app.provision(identity)
+    assert.equal(revoked.status, 401)
+    assert.equal((await revoked.json()).error.code, 'grant_revoked')
+  }
+  assert.equal(app.f.resources.size, 2)
+  assert.equal((await app.grants.readKey(owner, selected.grantId)).accessToken, selected.accessToken)
+})
+
+for (const competitor of ['revoke', 'replaceKey', 'setConnectionActions']) test(`fallback creation CAS respects concurrent ${competitor}`, async t => {
+  const app = await launch(t)
+  const owner = { ownerId: 'race-owner', userId: 'race-user' }
+  app.f.register({ issuer: ISSUER, subject: 'race-subject' }, owner)
+  const selected = await app.grants.ensureGrant(owner)
+  await app.grants.setConnectionActions(owner, selected.grantId, true)
+  let winner, replacement
+  app.f.beforeWrite(async () => {
+    winner = await app.grants.ensureGrant(owner, { readOnly: true })
+    replacement = await app.grants[competitor](owner, winner.grantId, true)
+  })
+  const result = await app.grants.ensureGrant(owner, { readOnly: true })
+  if (competitor === 'replaceKey') {
+    assert.equal(result.accessToken, replacement.accessToken)
+    assert.notEqual(result.accessToken, winner.accessToken)
+  } else assert.equal(result, null)
+  assert.equal(app.f.resources.size, 2)
+  assert.equal((await app.grants.readKey(owner, selected.grantId)).accessToken, selected.accessToken)
+  assert.equal((await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${selected.accessToken}` } })).scope, `${ACCOUNT_WRITE_SCOPE}_and_private_notes`)
+})
+
+test('automatic tombstone prevents fallback issuance and explicit new keys remain usable', async t => {
+  const app = await launch(t)
+  const owner = { ownerId: 'tombstone-owner', userId: 'tombstone-user' }
+  app.f.register({ issuer: ISSUER, subject: 'tombstone-subject' }, owner)
+  const selected = await app.grants.ensureGrant(owner)
+  await app.grants.setConnectionActions(owner, selected.grantId, true)
+  await app.grants.revoke(owner, selected.grantId)
+  assert.equal(await app.grants.ensureGrant(owner, { readOnly: true }), null)
+  assert.equal(app.f.resources.size, 1)
+  const explicit = await app.grants.issueGrant(owner)
+  assert.equal((await app.grants.ensureGrant(owner, { readOnly: true })).accessToken, explicit.accessToken)
+})
+
+for (const competitor of ['revoke', 'replaceKey', 'setConnectionActions']) test(`endpoint fails closed when provisioned fallback races with ${competitor}`, async t => {
+  const app = await launch(t)
+  const owner = { ownerId: 'endpoint-race-owner', userId: 'endpoint-race-user' }
+  const identity = { issuer: ISSUER, subject: 'endpoint-race-subject' }
+  app.f.register(identity, owner)
+  const selected = await app.grants.ensureGrant(owner)
+  await app.grants.setConnectionActions(owner, selected.grantId, true)
+  const read = await app.grants.ensureGrant(owner, { readOnly: true })
+  let replacement
+  app.beforeVerification(async () => { replacement = await app.grants[competitor](owner, read.grantId, true) })
+  const response = await app.provision(identity)
+  assert.equal(response.status, 401)
+  const denied = await response.json()
+  assert.equal(denied.error.code, 'grant_revoked')
+  assert.equal(denied.accessToken, undefined)
+  const retry = await app.provision(identity)
+  assert.equal(retry.status, competitor === 'replaceKey' ? 200 : 401)
+  if (competitor === 'replaceKey') assert.equal((await retry.json()).accessToken, replacement.accessToken)
+  assert.equal(app.f.resources.size, 2)
+  assert.equal((await app.grants.readKey(owner, selected.grantId)).accessToken, selected.accessToken)
 })

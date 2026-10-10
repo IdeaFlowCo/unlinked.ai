@@ -3,6 +3,35 @@
 export const ONBOARDING_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap'
 export const ONBOARDING_STYLE = `
 html{-webkit-text-size-adjust:100%}
+.unlinked-onboarding #api-keys{scroll-margin-top:24px}
+.unlinked-onboarding .key-permissions{padding:12px 16px;margin:16px 0;border:1px solid var(--line);border-radius:var(--r);background:var(--page)}
+.unlinked-onboarding .key-permissions label{display:flex;align-items:center;gap:10px;min-height:44px;font-weight:600}
+.unlinked-onboarding .key-permissions input{width:20px;height:20px;accent-color:var(--brand);flex-shrink:0}
+.unlinked-onboarding section[aria-label="Connect with sign-in"]{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}
+.unlinked-onboarding .key-list{display:flex;flex-direction:column;align-items:stretch;gap:6px;margin:16px 0}
+.unlinked-onboarding .key-row{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;text-decoration:none;overflow-wrap:anywhere}
+.unlinked-onboarding .key-row[aria-current]{border-color:var(--brand);background:var(--tint)}
+.unlinked-onboarding .key-value{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.unlinked-onboarding .key-value input{min-width:0;flex:1;padding:12px 14px;border:1px solid var(--line2);border-radius:var(--r);font:14px monospace}
+.unlinked-onboarding .selected-key h4{margin:16px 0 8px;font-size:16px}
+@media(max-width:520px){.unlinked-onboarding .key-row{flex-direction:column;gap:4px}}
+.membership-member{display:inline-flex;font-size:12px;font-weight:600;color:#27634a;background:#e8f4ed;border-radius:99px;padding:2px 8px;margin-left:8px;vertical-align:middle}
+.unlinked-onboarding .messages-page{padding:24px 0 0}
+.unlinked-onboarding .messages-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+.unlinked-onboarding .messages-heading h1{font-size:27px;letter-spacing:-.04em;line-height:1.2}
+.unlinked-onboarding .messages-heading p{font-size:14px;color:var(--muted);margin:5px 0 0}
+.unlinked-onboarding .messages-heading>a{white-space:nowrap}
+.unlinked-onboarding .messages-connection{display:flex;gap:12px;font-size:14px;color:var(--muted)}
+.unlinked-onboarding .messages-connection:has([hidden]):not(:has(:not([hidden]))){display:none}
+.unlinked-onboarding #messages-frame{display:block;width:100%;flex:1;min-height:0;height:auto;border:1px solid var(--line);border-radius:14px;background:white;box-shadow:0 8px 28px #22254c08}
+body:has(.messages-page) .unlinked-onboarding{max-width:1480px;height:100dvh;display:flex;flex-direction:column;padding-bottom:16px}
+body:has(.messages-page) .journey{flex:1;min-height:0}
+body:has(.messages-page) header{flex-shrink:0}
+body:has(.messages-page) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
+.unlinked-onboarding .messages-page{height:100%;display:flex;flex-direction:column}
+body:has(.messages-page) footer{display:none}
+@media(max-width:600px){.unlinked-onboarding .messages-page{padding-top:16px}.unlinked-onboarding .messages-heading{margin-bottom:12px}.unlinked-onboarding .messages-heading p{max-width:26ch;font-size:12px}.unlinked-onboarding #messages-frame{border-radius:10px}}
+
 body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17px/1.55 "Public Sans",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .unlinked-onboarding{--brand:#4349c4;--brand-d:#32379c;--tint:#eceefc;--page:#f5f6fc;--fg:#16181d;--muted:#667085;--line:#e6e8ec;--line2:#c4c9d2;--r:8px;max-width:1180px;margin:0 auto;padding:0 28px 30px;color:var(--fg)}
 .unlinked-onboarding *{box-sizing:border-box}
@@ -41,6 +70,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .header-search .scan:hover{background:var(--tint)}
 .unlinked-onboarding nav{display:flex;gap:18px;align-items:center;font-size:15px}
 .unlinked-onboarding nav a{color:var(--fg);text-decoration:none;white-space:nowrap}
+.unlinked-onboarding nav .my-card-link{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(--brand-d);font-weight:600}
 .unlinked-onboarding nav a:hover{text-decoration:underline}
 .unlinked-onboarding nav .chip{display:inline-block;border:1px solid var(--line2);border-radius:99px;padding:6px 13px;background:#fff;max-width:200px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .unlinked-onboarding nav a.button{color:#fff}
@@ -109,6 +139,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .phead h1{font:600 28px/1.15 "Public Sans",system-ui,sans-serif;letter-spacing:-.01em;margin:12px 24px 2px}
 .unlinked-onboarding .phead .hl{margin:0 24px 4px;font-size:17px}
 .unlinked-onboarding .phead>.small{margin:0 24px;display:block}
+.unlinked-onboarding .phead>.profile-links{margin-top:8px}
+.unlinked-onboarding .profile-links a{display:inline-block;padding:5px 0}
 .unlinked-onboarding .phead .actions{margin:16px 24px 0}
 .unlinked-onboarding .phead .notice{margin:16px 24px 0}
 .unlinked-onboarding .qr{margin:18px 24px 0;max-width:260px;background:#fff}
@@ -307,4 +339,48 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .connection-filters{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin:20px 0}
 .unlinked-onboarding .connection-filters label{display:grid;gap:6px;flex:1 1 200px;font-size:14px}
 .unlinked-onboarding .connection-filters select{font:inherit;padding:11px;border:1px solid var(--line);border-radius:var(--r);background:#fff;color:var(--fg);min-height:44px}
+
+/* Directory controls share the product's Public Sans, indigo, and quiet borders. */
+.unlinked-onboarding:has([data-network]) header .header-search{display:none}
+.unlinked-onboarding:has([data-network]) header nav{margin-left:auto}
+.unlinked-onboarding .network-toolbar{background:#fff;border:1px solid var(--line2);border-radius:12px;padding:20px;margin:0 0 16px}
+.unlinked-onboarding .network-scopes{gap:24px;border-bottom:1px solid var(--line);margin:-4px 0 18px;flex-wrap:wrap}
+.unlinked-onboarding .network-scopes a{padding:10px 0;border-bottom:3px solid transparent}
+.unlinked-onboarding .network-scopes a[aria-current]{border-color:var(--brand);font-weight:700;color:var(--brand-d)}
+.unlinked-onboarding .network-scopes span{font-size:12px;border-radius:99px;background:var(--tint);padding:2px 6px}
+.unlinked-onboarding .network-fields{display:flex;align-items:end;gap:14px;flex-wrap:wrap}
+.unlinked-onboarding .network-fields label{margin:0;display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:600}
+.unlinked-onboarding .network-query{flex:1;min-width:220px}
+.unlinked-onboarding .network-fields input,.unlinked-onboarding .network-fields select{margin:0;width:100%;min-height:46px;border:1px solid var(--line2);border-radius:8px;background:#fff;padding:10px 12px;font:400 16px "Public Sans",system-ui,sans-serif;color:var(--fg)}
+.unlinked-onboarding .network-fields select{padding-right:30px}
+.unlinked-onboarding .network-fields input:focus-visible,.unlinked-onboarding .network-fields select:focus-visible,.unlinked-onboarding .network-segments a:focus-visible{outline:3px solid var(--brand);outline-offset:3px}
+.unlinked-onboarding .network-filter-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px}
+.unlinked-onboarding .network-segments{display:flex;gap:4px;flex-wrap:wrap;background:var(--page);border:1px solid var(--line);padding:4px;border-radius:9px;font-size:14px}
+.unlinked-onboarding .network-segments a{padding:9px 12px;border-radius:6px;min-height:40px;text-decoration:none;color:var(--muted)}
+.unlinked-onboarding .network-segments a:hover{background:var(--tint)}
+.unlinked-onboarding .network-segments a[aria-current]{background:var(--brand);color:#fff;font-weight:600}
+.unlinked-onboarding .network-reset{font-size:14px;margin-left:auto}
+.unlinked-onboarding .network-count{min-height:22px;margin:14px 0}
+.unlinked-onboarding [data-network-results][aria-busy=true]{opacity:.55}
+.unlinked-onboarding .network-date{margin:4px 0}
+.unlinked-onboarding [data-network-enhanced] .network-apply{display:none}
+@media(max-width:600px){.unlinked-onboarding .network-toolbar{padding:14px}.unlinked-onboarding .network-query{min-width:100%}.unlinked-onboarding .network-sort{flex:1}.unlinked-onboarding .network-segments{width:100%;font-size:13px}.unlinked-onboarding .network-segments a{flex:1;text-align:center;padding:9px 5px}.unlinked-onboarding .network-reset{margin-left:0}}
+.unlinked-onboarding .private-context{margin-top:16px;border-left:3px solid var(--brand)}
+.unlinked-onboarding .private-context .pc-head{display:flex;align-items:center;gap:10px}
+.unlinked-onboarding .private-context h3{margin:0}
+.unlinked-onboarding .private-context .pc-only{display:inline-flex;font-size:12px;font-weight:600;color:var(--brand);background:var(--tint);border-radius:99px;padding:2px 8px;margin-left:auto;white-space:nowrap}
+.unlinked-onboarding .private-context details{margin:0;padding:0;border:0}
+.unlinked-onboarding .private-context summary{padding:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;cursor:pointer;min-height:32px;font-size:16px}
+.unlinked-onboarding .private-context summary .small{margin:0}
+.unlinked-onboarding .private-context h4{margin:14px 0 4px;font-size:15px}
+.unlinked-onboarding .private-context h5{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.unlinked-onboarding .private-context ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.unlinked-onboarding .private-context li{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--page);overflow-wrap:anywhere}
+.unlinked-onboarding .private-context li p{margin:0;white-space:pre-wrap}
+.unlinked-onboarding .private-context li .small{display:block;margin:4px 0 0;font-size:12px}
+.unlinked-onboarding .private-context .pc-facts{margin:10px 0 0;font-size:14px;font-weight:600}
+.unlinked-onboarding .private-context .pc-facts.due{color:#a3461b}
+.unlinked-onboarding .private-context .pc-explore{margin-top:10px;min-height:36px}
+.unlinked-onboarding .private-context .pc-hint{margin:14px 0 0;font-size:13px}
+@media(max-width:600px){.unlinked-onboarding .private-context{margin-top:12px}}
 `

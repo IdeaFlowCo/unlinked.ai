@@ -72,7 +72,7 @@ test('hosted search failures are typed and sanitized: provider outage is upstrea
     // Provider outage: typed upstream failure naming the internal cause —
     // explicitly NOT a revocation message, and no raw exception text.
     completeError = 'private_search_provider_http_503'
-    const outage = await typed('unlinked_search_network', { query: 'Engineer' })
+    const outage = await typed('unlinked_search_network', { query: 'someone to advise on hiring' })
     assert.equal(outage.code, 'upstream_unavailable')
     assert.equal(outage.cause, 'private_search_provider_http_503')
     assert.doesNotMatch(outage.message, /revoked|sign in/i)
@@ -87,7 +87,7 @@ test('hosted search failures are typed and sanitized: provider outage is upstrea
     // Revocation mid-call stays clearly a revocation, never an upstream error.
     const authenticated = await grants.authenticateGrant({ headers: { authorization: `Bearer ${issued.accessToken}` } })
     revokeDuringModel = () => grants.revoke(owner, authenticated.grantId)
-    const revoked = await typed('unlinked_search_network', { query: 'Engineer' })
+    const revoked = await typed('unlinked_search_network', { query: 'someone to advise on hiring' })
     assert.equal(revoked.code, 'grant_revoked')
     assert.match(revoked.message, /revoked/)
     // After revocation the gate itself denies the whole request.

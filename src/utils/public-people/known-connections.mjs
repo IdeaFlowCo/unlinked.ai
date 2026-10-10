@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
 const summary = profile => ({ id:profile.id,name:profile.name,...Object.fromEntries(['headline','company','location'].filter(key=>typeof profile[key]==='string').map(key=>[key,profile[key]])) })
 
@@ -13,7 +14,7 @@ export function createKnownConnectionsReader({ owner, getBackend, readPublishedS
     const backend=await getBackend(principal), anchor=await backend.readLegacyProfile?.()
     if (!anchor) throw Error('known_connections_anchor_unavailable')
     const snapshot=await readPublishedSnapshot({signal})
-    if (!snapshot || snapshot.state!=='published' || snapshot.complete!==true || typeof snapshot.revision!=='string' || !Array.isArray(snapshot.profiles) || snapshot.profiles.length>20000 || !Array.isArray(snapshot.connections) || snapshot.connections.length>100000) throw Error('known_connections_unavailable')
+    if (!snapshot || snapshot.state!=='published' || snapshot.complete!==true || typeof snapshot.revision!=='string' || !Array.isArray(snapshot.profiles) || snapshot.profiles.length>PUBLIC_INDEX_MAX_PROFILES || !Array.isArray(snapshot.connections) || snapshot.connections.length>PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('known_connections_unavailable')
     const people=new Map(snapshot.profiles.map(profile=>[profile.id,profile]))
     if (people.size!==snapshot.profiles.length || !people.has(anchor.profileId)) throw Error('known_connections_anchor_unavailable')
     const outgoing=new Map()

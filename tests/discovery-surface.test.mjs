@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PRIVATE_NOTES_TOOLS } from '../mcp-server/account-grants.mjs';
 
 const ROOT_DIR = process.cwd();
 
@@ -44,7 +45,7 @@ test('public/.well-known/mcp/server-card.json describes canonical account MCP', 
   assert.ok(!card.transports?.stdio, 'canonical card must not advertise legacy stdio bootstrap');
 
   const toolNames = card.tools.map((t) => t.name);
-  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request']);
+  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request', ...PRIVATE_NOTES_TOOLS]);
   const searchTool = card.tools[0];
   assert.deepEqual(searchTool.inputSchema.required, ['query']);
   assert.equal(searchTool.inputSchema.additionalProperties, false);
@@ -69,7 +70,7 @@ test('public/.well-known/unlinked.json product descriptor is valid', () => {
   assert.equal(descriptor.data.rawArchiveAgentAccess, false);
   assert.equal(descriptor.mcp.url, 'https://www.unlinked.ai/mcp');
   assert.equal(descriptor.mcp.transport, 'streamable-http');
-  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications']);
+  assert.deepEqual(descriptor.mcp.tools, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact']);
 });
 
 test('machine-readable MCP config never advertises legacy local launch bootstrap', () => {
@@ -97,7 +98,9 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.servers[0].url, 'https://www.unlinked.ai');
 
   const paths = Object.keys(spec.paths);
-  const expectedPaths = ['/search-public', '/login', '/mcp', '/api/people', '/api/people/{id}', '/people/{id}/photo', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/connection-requests', '/api/agent/v1/connection-requests/accept', '/api/agent/v1/connection-requests/ignore', '/api/agent/v1/connection-requests/send', '/api/agent/v1/connection-requests/withdraw', '/api/agent/v1/notifications', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone', '/api/agent/v1/provision-grant',
+  const expectedPaths = ['/messages/session', '/api/messaging/v1/recipient', '/search-public', '/c/{token}/add', '/login', '/mcp', '/api/people', '/api/people/{id}', '/people/{id}/photo', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/connection-requests', '/api/agent/v1/connection-requests/accept', '/api/agent/v1/connection-requests/ignore', '/api/agent/v1/connection-requests/send', '/api/agent/v1/connection-requests/withdraw', '/api/agent/v1/notifications', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone', '/api/agent/v1/provision-grant',
+    '/api/agent/v1/contacts/lookup', '/api/agent/v1/private/person', '/api/agent/v1/private/thing', '/api/agent/v1/private/things', '/api/agent/v1/private/search', '/api/agent/v1/private/neighbourhood',
+    '/api/agent/v1/private/things/delete', '/api/agent/v1/private/notes', '/api/agent/v1/private/notes/delete', '/api/agent/v1/private/links', '/api/agent/v1/private/links/update', '/api/agent/v1/private/links/delete',
     '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server', '/oauth/authorize', '/oauth/token', '/oauth/register', '/oauth/revoke'];
 
   for (const p of expectedPaths) {
@@ -116,6 +119,7 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
   assert.equal(spec.paths['/mcp'].post.responses['401'].description, 'Missing, invalid or revoked account grant');
   assert.deepEqual(spec.paths['/api/legacy-files'].get.security, [{ browserSession: [] }]);
   assert.deepEqual(spec.paths['/legacy-files/{objectId}'].get.security, [{ browserSession: [] }]);
+  assert.deepEqual(spec.paths['/api/messaging/v1/recipient'].post.security, [{ messagingService: [] }]);
   assert.equal(spec.components.securitySchemes.accountGrant.type, 'http');
   assert.equal(spec.components.securitySchemes.accountGrant.scheme, 'bearer');
   assert.equal(spec.components.securitySchemes.browserSession.type, 'apiKey');
@@ -196,4 +200,15 @@ test('no secrets or internal credentials in public files', () => {
     assert.ok(!content.includes('eyJh'), `Found potential JWT in ${file.name}`);
     assert.ok(!/ul_[a-zA-Z0-9_-]{20,}/.test(content), `Found real-looking agent key in ${file.name}`);
   }
+});
+
+test('discovery cards advertise private notes & relations as a separate permission (unlinked-9kk.5)', () => {
+  const card = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/mcp/server-card.json'), 'utf8'));
+  const descriptor = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/unlinked.json'), 'utf8'));
+  const privateTools = card.tools.filter(tool => tool.permission === 'private_notes');
+  assert.equal(privateTools.length, 12);
+  for (const tool of privateTools) assert.match(tool.description, /NOT a connection request and NOT messaging/);
+  assert.deepEqual(descriptor.mcp.privateNotesScope.tools, privateTools.map(tool => tool.name));
+  assert.equal(descriptor.mcp.privateNotesScope.defaultForApiKeys, true);
+  assert.ok(!card.tools.some(tool => /message/.test(tool.name)));
 });

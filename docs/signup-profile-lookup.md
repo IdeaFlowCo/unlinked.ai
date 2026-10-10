@@ -20,6 +20,8 @@ candidate tokens, confirms a self-asserted public professional profile. Adapter
 errors and raw adapter output are never logged, audited, sent to the browser or
 saved to the graph. Confirming or skipping returns to `/profile`.
 
+LinkedIn **Share my profile** URLs may include tracking parameters or fragments; signup normalization drops these after validating the exact HTTPS LinkedIn origin, before legacy and provider lookup. Invalid/shortened links get an explicit validation message rather than being fetched or treated as a failed person search. Lookup failures retain the entered URL and distinguish disabled service, no result, timeout, provider refusal and temporary errors. A missing result never claims a profile or proves the person is absent from LinkedIn.
+
 ## Adapter contract
 
 The adapter module's default export (or its named exports) must provide:
@@ -142,15 +144,22 @@ combined snapshot is returned, a final read checks the active source receipts.
 For a confirmed legacy identity, imports instead overlay the existing legacy
 id and canonicalize their edges onto it while the link and import stay live.
 Revoking the link removes that overlay and restores the recovered public
-profile.
+profile. Public upload overlays retain the prior LinkedIn address only when
+the upload omits it; identity merges fill missing professional links without
+overwriting the surviving profile's fields.
 
 The browser `/profile` page and member card show the first available of: the
 uploaded profile, a live confirmed legacy profile, the active signup source, or
-the sign-in display name. An unavailable optional signup source is skipped;
-it must not prevent an existing profile or card from rendering. Public card
-targets still require verification in the published People snapshot; a failed
-source read never supplies an unverified target. The HTTP regression in
-`tests/openchat-profile-action.test.mjs` covers this failure boundary.
+the sign-in display name. On `/profile`, missing LinkedIn and website links
+are filled from the live legacy profile, then the signup source, then the
+owner's published profile. Published company, industry and location fill only
+missing fields; a published company is not added when uploaded positions exist.
+Optional legacy or signup read failures do not block a valid owner-authorized
+upload on `/profile` or `/card`; owner/upload authorization failures still
+reject the request. The HTTP regression is in `tests/profile-card.test.mjs`.
+The card's QR target must resolve in the published People snapshot.
+A failed source read never supplies an unverified public target. The OpenChat
+failure boundary is also covered in `tests/openchat-profile-action.test.mjs`.
 **Download everything** includes the confirmed source and its
 receipt, labeled as a self-asserted public profile. Account deletion erases the
 confirmed source and the stored lookup profile, invalidates unfinished lookups,

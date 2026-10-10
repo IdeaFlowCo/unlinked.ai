@@ -1,5 +1,6 @@
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { privateId } from './job.mjs'
+import { publicLinkedinUrl } from '../public-people/profile-links.mjs'
 
 const own = new Set(['profile', 'positions', 'education', 'skills'])
 const live = (resource, ownerId, id) => resource && !resource.deleted && resource.sourceOwnerId === ownerId && resource.payload?.id === id && resource.payload.ownerId === ownerId && !resource.payload.kind && !resource.payload.receiptOf
@@ -49,7 +50,10 @@ export function profileFromRows(rows) {
   const profileRow = profileIndex >= 0 ? rows[profileIndex] : null
   const profile = profileRow?.fields ?? {}
   const profileRows = typeof profileRow?.importId === 'string' ? rows.filter(row => row.importId === profileRow.importId) : rows.slice(Math.max(profileIndex, 0))
-  return { name: [profile['first name'], profile['last name']].filter(Boolean).join(' '), headline: profile.headline ?? '',
+  const linkedinUrl = publicLinkedinUrl(profile['public profile url']) ?? publicLinkedinUrl(profile.url)
+  return { ...(linkedinUrl ? { linkedinUrl } : {}),
+    ...(profile.location ? { location: profile.location } : {}), ...(profile.industry ? { industry: profile.industry } : {}),
+    name: [profile['first name'], profile['last name']].filter(Boolean).join(' '), headline: profile.headline ?? '',
     positions: profileRows.filter(row => row.category === 'positions').map(({ fields }) => ({ title: fields.title, company: fields['company name'], description: fields.description, startDate: fields['started on'], endDate: fields['finished on'] })),
     education: profileRows.filter(row => row.category === 'education').map(({ fields }) => ({ institution: fields['school name'], degree: fields['degree name'], startDate: fields['start date'], endDate: fields['end date'] })),
     skills: [...new Set(profileRows.filter(row => row.category === 'skills').map(row => row.fields.name))] }

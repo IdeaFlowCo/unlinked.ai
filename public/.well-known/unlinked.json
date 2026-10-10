@@ -20,6 +20,19 @@
         "connections"
       ],
       "note": "Paste https://www.unlinked.ai/mcp into a Claude or ChatGPT custom connector and sign in; each connection is a revocable account grant."
+    },
+    "manualKeys": {
+      "settings": "https://www.unlinked.ai/settings#api-keys",
+      "copyKeyLabel": "Copy API key",
+      "copySetupLabel": "Copy agent setup",
+      "repeatableReveal": true,
+      "namedIndependentKeys": true,
+      "expiry": "until revoked",
+      "instructions": "Manual key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository.",
+      "connectionActionsToggle": "Send and manage connection requests",
+      "savePermissionsLabel": "Save permissions",
+      "permissionChangesKeepToken": true,
+      "newToolsWithinPermissionKeepToken": true
     }
   },
   "data": {
@@ -48,9 +61,10 @@
       "unlinked_get_profile",
       "unlinked_ai_search",
       "unlinked_list_connection_requests",
-      "unlinked_list_notifications"
+      "unlinked_list_notifications",
+      "unlinked_lookup_contact"
     ],
-    "grantVersioning": "old grants keep exactly their issued tool list; new grants receive the current catalog version",
+    "grantVersioning": "Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository).",
     "optionalWriteScope": {
       "scope": "owner_network_and_public_and_write",
       "default": false,
@@ -59,7 +73,32 @@
         "unlinked_accept_connection_request",
         "unlinked_ignore_connection_request",
         "unlinked_withdraw_connection_request"
-      ]
+      ],
+      "ownerOnlyScope": "owner_network_and_write"
+    },
+    "toolListChangePush": false,
+    "privateNotesScope": {
+      "permission": "Private people notes & relations",
+      "scopeSuffix": "_and_private_notes",
+      "oauthScope": "private_notes",
+      "defaultForApiKeys": true,
+      "oauthConsent": "checkbox, starts ticked; connections made before catalog v7 reconnect",
+      "tools": [
+        "unlinked_get_person_private",
+        "unlinked_get_private_thing",
+        "unlinked_list_private_things",
+        "unlinked_search_private",
+        "unlinked_get_neighbourhood",
+        "unlinked_save_private_thing",
+        "unlinked_add_private_note",
+        "unlinked_delete_private_note",
+        "unlinked_add_private_link",
+        "unlinked_update_private_link",
+        "unlinked_delete_private_link",
+        "unlinked_delete_private_thing"
+      ],
+      "visibility": "owner-only; shown in Unlinked and OpenChat; never notifies anyone; not a connection request; not messaging",
+      "messaging": "OpenChat via the shared Ideaflow connector https://id.ideaflow.app/mcp (OpenChat permission); never an Unlinked key permission"
     }
   },
   "agentHttpApi": {
@@ -85,7 +124,7 @@
       "scope_not_granted",
       "upstream_unavailable"
     ],
-    "grantProvisioning": "POST /api/agent/v1/provision-grant \u2014 server-to-server, allow-listed confidential clients only (client_secret_basic), keyed on verified OIDC issuer+subject, never email; disabled unless operator-configured; contract v1.1 in docs/agent-api.md"
+    "grantProvisioning": "POST /api/agent/v1/provision-grant — server-to-server, allow-listed confidential clients only (client_secret_basic), keyed on verified OIDC issuer+subject, never email; disabled unless operator-configured; contract v1.1 in docs/agent-api.md"
   },
   "agentSetupAutomatic": true,
   "meet": "https://www.unlinked.ai/meet",
@@ -121,5 +160,42 @@
       "scope": "same live canonical public page; no credentials forwarded or stored publication",
       "readerVerification": "ordinary ChatGPT access not established"
     }
+  },
+  "messaging": {
+    "provider": "OpenChat",
+    "identity": "shared Ideaflow account",
+    "documentation": "https://www.unlinked.ai/AGENTS.md",
+    "agentSending": false,
+    "confidentialRecipientResolver": "/api/messaging/v1/recipient",
+    "webInbox": "/messages",
+    "browserSessionExchange": {
+      "path": "/messages/session",
+      "authorization": "browser-session-and-csrf",
+      "agentAccess": false
+    },
+    "agentSetup": "https://chat.globalbr.ai/agents",
+    "agentCredential": "Separate OpenChat oc_ key for messages and Context; Unlinked grants cannot send messages."
+  },
+  "publicProfileDetails": {
+    "documentation": "docs/profile-details.md"
+  },
+  "shared_connector": {
+    "url": "https://id.ideaflow.app/mcp",
+    "setup_url": "https://id.ideaflow.app/agents",
+    "scopes": [
+      "unlinked:read",
+      "unlinked:write"
+    ]
+  },
+  "browserCardSharing": {
+    "ownerCard": "https://www.unlinked.ai/card",
+    "contactCardJoin": "Explicit browser-only same-origin POST /c/<token>/add preserves the card through verified signup and adds the connection. Scanning alone does not connect. Not an agent capability."
+  },
+  "requestDiagnostics": {
+    "enabledByDefault": false,
+    "responseHeader": "X-Request-ID",
+    "idTrust": "server-generated; incoming trace IDs ignored",
+    "privacy": "No credentials, queries, result bodies or sensitive URL parameters. Opaque account correlation only after successful authentication.",
+    "gatewayLimitation": "Shared gateway does not currently forward the downstream Unlinked request ID."
   }
 }

@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { startPrivatePilot } from '../mcp-server/private-pilot.mjs'
 import { createOAuthServer, redirectPolicy } from '../mcp-server/oauth-server.mjs'
+import { accountGrantTools } from '../mcp-server/account-grants.mjs'
 import { Client } from '../mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js'
 import { StreamableHTTPClientTransport } from '../mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js'
 import { UnauthorizedError } from '../mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/auth.js'
@@ -79,7 +80,7 @@ test('discovery metadata, CORS and the /mcp challenge point clients at sign-in',
     const response = await p.go(path)
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('access-control-allow-origin'), '*')
-    assert.deepEqual(await response.json(), { resource: `${p.baseUrl}/mcp`, authorization_servers: [p.baseUrl], scopes_supported: ['network', 'people', 'connections'],
+    assert.deepEqual(await response.json(), { resource: `${p.baseUrl}/mcp`, authorization_servers: [p.baseUrl], scopes_supported: ['network', 'people', 'connections', 'private_notes'],
       bearer_methods_supported: ['header'], resource_name: 'Unlinked', resource_documentation: `${p.baseUrl}/agents` })
   }
   const as = await (await p.go('/.well-known/oauth-authorization-server')).json()
@@ -100,7 +101,7 @@ test('discovery metadata, CORS and the /mcp challenge point clients at sign-in',
   assert.equal(preflight.status, 204)
   assert.match(preflight.headers.get('access-control-allow-headers'), /Content-Type/)
 
-  const challenge = `Bearer resource_metadata="${p.baseUrl}/.well-known/oauth-protected-resource/mcp", scope="network people"`
+  const challenge = `Bearer resource_metadata="${p.baseUrl}/.well-known/oauth-protected-resource/mcp", scope="network people private_notes"`
   const bare = await p.go('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
   assert.equal(bare.status, 401)
   assert.equal(bare.headers.get('www-authenticate'), challenge)
@@ -108,7 +109,7 @@ test('discovery metadata, CORS and the /mcp challenge point clients at sign-in',
   assert.equal(asGet.status, 401, 'unauthenticated GET is challenged too')
   const forged = await p.go('/mcp', { method: 'POST', headers: { Authorization: 'Bearer not-a-grant', 'Content-Type': 'application/json' }, body: '{}' })
   assert.equal(forged.status, 401)
-  assert.equal(forged.headers.get('www-authenticate'), `Bearer error="invalid_token", resource_metadata="${p.baseUrl}/.well-known/oauth-protected-resource/mcp", scope="network people"`)
+  assert.equal(forged.headers.get('www-authenticate'), `Bearer error="invalid_token", resource_metadata="${p.baseUrl}/.well-known/oauth-protected-resource/mcp", scope="network people private_notes"`)
 })
 
 test('dynamic registration accepts only connector callbacks and loopback, always as a public client', async t => {
@@ -280,7 +281,7 @@ test('sign-in, consent, PKCE code exchange, scoped tools, Settings listing and r
   assert.match(settings, /Connected apps/)
   assert.equal((settings.match(/<b>Claude<\/b> · connected/g) ?? []).length, 2)
   assert.equal(settings.includes(body.access_token), false)
-  assert.match(settings, /Use a private credential instead/)
+  assert.match(settings, /API keys/)
   assert.equal(p.graph.live().length, 3, 'two connections plus the automatic credential')
 
   // Regenerating the copyable credential leaves connected apps connected.
@@ -294,7 +295,7 @@ test('sign-in, consent, PKCE code exchange, scoped tools, Settings listing and r
   const dead = await p.go('/mcp', { method: 'POST', headers: { Authorization: `Bearer ${body.access_token}`, 'Content-Type': 'application/json' }, body: '{}' })
   assert.equal(dead.status, 401)
   assert.match(dead.headers.get('www-authenticate'), /error="invalid_token"/)
-  assert.equal(p.graph.live().filter(x => !x.payload.connection).length, 1)
+  assert.equal(p.graph.live().filter(x => !x.payload.connection).length, 2)
 
   // RFC 7009 revocation works only for the client the token was issued to.
   const foreign = await p.go('/oauth/revoke', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: narrow.access_token, client_id: otherClient.client_id }) })
@@ -303,7 +304,7 @@ test('sign-in, consent, PKCE code exchange, scoped tools, Settings listing and r
   const own = await p.go('/oauth/revoke', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: narrow.access_token, client_id: client.client_id }) })
   assert.equal(own.status, 200)
   assert.equal((await p.go('/mcp', { method: 'POST', headers: { Authorization: `Bearer ${narrow.access_token}`, 'Content-Type': 'application/json' }, body: '{}' })).status, 401)
-  assert.equal(p.graph.live().length, 1, 'only the copyable credential remains')
+  assert.equal(p.graph.live().length, 2, 'both manual credentials remain')
 })
 
 test('the official MCP SDK client completes discovery, registration, PKCE and the token exchange', async t => {
@@ -436,4 +437,34 @@ test('OAuth writes require explicit unchecked consent and survive token exchange
   const narrow=hiddenParams(consent);narrow.set('scope','network')
   const denied=await p.go('/oauth/authorize',{method:'POST',headers:{Cookie:cookie,Origin:p.baseUrl,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams([['csrf',csrfFrom(consent)],['decision','allow'],...narrow,['access','connections']])})
   assert.equal(denied.status,400)
+})
+
+test('OAuth private notes (unlinked-9kk.5): consent checkbox starts on, unticking leaves it out, old connections need re-consent', async t => {
+  const p = await pilot(t, { readPublishedSnapshot: async () => ({state:'published',complete:true,revision:'empty',profiles:[],connections:[]}) })
+  const client = await (await p.register({redirect_uris:[CLAUDE]})).json()
+  const {cookie}=await p.signIn()
+  const consent=await (await p.go('/oauth/authorize?'+authorizeQuery(client.client_id,{resource:p.baseUrl+'/mcp',scope:'network people private_notes'}),{headers:{Cookie:cookie}})).text()
+  assert.match(consent, /<input type="checkbox" name="private_notes" value="on" checked>/)
+  assert.match(consent, /not a connection request and not messaging/)
+  const approve=async extra=>p.go('/oauth/authorize',{method:'POST',headers:{Cookie:cookie,Origin:p.baseUrl,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams([['csrf',csrfFrom(consent)],['decision','allow'],...hiddenParams(consent),...extra])})
+  const tokens=[]
+  for (const [extra, on] of [[[['private_notes','on']], true], [[], false]]) {
+    const approved=await approve(extra); assert.equal(approved.status,303)
+    const code=new URL(approved.headers.get('location')).searchParams.get('code')
+    const token=await (await p.token({grant_type:'authorization_code',code,client_id:client.client_id,redirect_uri:CLAUDE,code_verifier:'v'.repeat(64)})).json()
+    assert.equal(token.scope, on ? 'network people private_notes' : 'network people')
+    const tools=await mcpTools(p.endpoint,token.access_token)
+    assert.equal(tools.includes('unlinked_add_private_link'), on)
+    assert.equal(tools.includes('unlinked_get_person_private'), on)
+    assert.ok(!tools.includes('unlinked_send_connection_request'))
+    tokens.push(token.access_token)
+  }
+  assert.equal((await approve([['private_notes','yes']])).status,400)
+  assert.equal((await approve([['private_notes','on'],['private_notes','on']])).status,400)
+  // A connection made before catalog v7 keeps exactly its consented tools: no private notes without re-consent.
+  const [record]=p.graph.live().filter(value => value.payload.scope === 'owner_network_and_public')
+  record.payload.version=6; record.payload.tools=[...accountGrantTools(6,'owner_network_and_public')]
+  const old=await mcpTools(p.endpoint,tokens[1])
+  assert.ok(old.includes('unlinked_lookup_contact'))
+  assert.ok(!old.some(name => name.includes('private')))
 })

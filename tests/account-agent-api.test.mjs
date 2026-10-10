@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
-import { createAccountGrantService, accountGrantTools, ACCOUNT_GRANT_TOOL_VERSIONS, CURRENT_ACCOUNT_GRANT_VERSION } from '../mcp-server/account-grants.mjs'
+import { createAccountGrantService, accountGrantTools, PRIVATE_NOTES_TOOLS, ACCOUNT_GRANT_TOOL_VERSIONS, CURRENT_ACCOUNT_GRANT_VERSION } from '../mcp-server/account-grants.mjs'
 import { createAccountHostedHandler } from '../mcp-server/account-hosted.mjs'
 import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountToolService, AccountToolError } from '../mcp-server/account-tools.mjs'
@@ -100,7 +100,7 @@ const call = (endpoint, token, path, options = {}) => fetch(`${endpoint}/api/age
 
 test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, privacy fences and revocation', async t => {
   const f = fixture()
-  const complete = async ({ input, candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
+  const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   const app = await launch(t, { f, readPublishedSnapshot: async () => publishedSnapshot(), complete })
   const signed = await app.signIn()
   await app.upload(signed)
@@ -119,8 +119,9 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   const whoami = await who.json()
   assert.equal(whoami.ownerId, app.owner.ownerId)
   assert.equal(whoami.grant.version, CURRENT_ACCOUNT_GRANT_VERSION)
-  assert.deepEqual(whoami.grant.tools, [...ACCOUNT_GRANT_TOOL_VERSIONS[3].owner_network_and_public])
+  assert.deepEqual(whoami.grant.tools, [...ACCOUNT_GRANT_TOOL_VERSIONS[7].owner_network_and_public_and_private_notes])
   assert.equal(whoami.importCount, 1)
+  assert.deepEqual(whoami.imports, { uploaded: 1, recoveredArchive: false })
   assert.equal(whoami.publicIndexAvailable, true)
 
   // Degree-1 connections include owner-imported contacts without any legacy
@@ -146,6 +147,19 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   assert.equal((await crossed.json()).error.code, 'cursor_invalid')
   const filtered = await (await call(app.endpoint, accessToken, 'connections?q=navy')).json()
   assert.deepEqual(filtered.connections.map(x => x.name), ['Grace Hopper'])
+  // One contact without paging, by address or by the listed id (unlinked-9kk.3).
+  const byUrl = await call(app.endpoint, accessToken, 'contacts/lookup', { method: 'POST', body: JSON.stringify({ linkedinUrl: 'linkedin.com/in/Synthetic-Grace/' }) })
+  assert.equal(byUrl.status, 200)
+  const graceContact = (await byUrl.json()).contact
+  assert.equal(graceContact.name, 'Grace Hopper')
+  assert.equal(graceContact.connectionId, filtered.connections[0].id)
+  assert.match(graceContact.linkedinRefHash, /^[a-f0-9]{64}$/)
+  assert.ok(!JSON.stringify(graceContact).includes('private.invalid'))
+  const byId = await (await call(app.endpoint, accessToken, 'contacts/lookup', { method: 'POST', body: JSON.stringify({ connectionId: graceContact.connectionId }) })).json()
+  assert.equal(byId.contact.linkedinRefHash, graceContact.linkedinRefHash)
+  const neither = await call(app.endpoint, accessToken, 'contacts/lookup', { method: 'POST', body: JSON.stringify({}) })
+  assert.equal(neither.status, 400)
+  assert.equal((await neither.json()).error.code, 'invalid_input')
 
   // Second degree without a confirmed anchor is typed degree_unproven, never inferred.
   const unproven = await call(app.endpoint, accessToken, 'connections?degree=2')
@@ -205,13 +219,13 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   assert.equal((await revoked.json()).error.code, 'grant_revoked')
 })
 
-test('old v1 grant records keep working unchanged: narrow MCP tool list, stateless JSON-RPC tools/call, no new tools over HTTP', async t => {
+test('old v1 token keeps exact bytes and gains current permitted reads across REST and stateless MCP', async t => {
   const f = fixture()
   const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   const app = await launch(t, { f, readPublishedSnapshot: async () => publishedSnapshot(), complete })
   const signed = await app.signIn()
   await app.upload(signed)
-  const { accessToken, grantId } = await app.grants.issueGrant(app.owner)
+  const { accessToken, grantId } = await app.grants.issueGrant(app.owner, undefined, { privateNotes: false })
 
   // Rewrite the stored record to the exact shape the v1 issuer produced; the
   // bearer token is unchanged. This is what production grants look like today.
@@ -220,15 +234,20 @@ test('old v1 grant records keep working unchanged: narrow MCP tool list, statele
   record.payload.tools = [...accountGrantTools(1, record.payload.scope)]
   assert.deepEqual(record.payload.tools, ['unlinked_search_network', 'unlinked_search_everyone'])
   const grant = await app.grants.authenticateGrant({ headers: { authorization: `Bearer ${accessToken}` } })
-  assert.equal(grant.version, 1)
-  assert.deepEqual(grant.tools, ['unlinked_search_network', 'unlinked_search_everyone'])
+  assert.equal(grant.version, CURRENT_ACCOUNT_GRANT_VERSION)
+  // A pre-v7 API key also gains the default-on private-notes permission (unlinked-lf4).
+  assert.equal(grant.scope, `${record.payload.scope}_and_private_notes`)
+  assert.deepEqual(grant.tools, [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, `${record.payload.scope}_and_private_notes`)])
+  assert.equal((await app.grants.readKey(app.owner, grantId)).accessToken, accessToken)
+  assert.equal(record.payload.version, 1)
 
-  // MCP listTools shows exactly the tools the grant was issued with.
+  // MCP exposes current tools within the existing read permission.
   const client = new Client({ name: 'synthetic-v1-compat', version: '1.0' })
   const transport = new StreamableHTTPClientTransport(new URL(`${app.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${accessToken}` } } })
   try {
     await client.connect(transport)
-    assert.deepEqual((await client.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_search_everyone'])
+    assert.deepEqual((await client.listTools()).tools.map(x => x.name), grant.tools)
+    assert.equal(client.getServerCapabilities().tools.listChanged, false)
     const result = await client.callTool({ name: 'unlinked_search_network', arguments: { query: 'Engineer' } })
     assert.ok(!result.isError)
     assert.equal(JSON.parse(result.content[0].text).scope, 'owner_network')
@@ -244,14 +263,14 @@ test('old v1 grant records keep working unchanged: narrow MCP tool list, statele
   assert.ok(!payload.result.isError)
   assert.equal(JSON.parse(payload.result.content[0].text).scope, 'everyone')
 
-  // v1 grants do not gain the new tools on any surface.
+  // Current read tools work without copying or replacing the existing key.
   const who = await call(app.endpoint, accessToken, 'whoami')
-  assert.equal(who.status, 403)
-  assert.equal((await who.json()).error.code, 'scope_not_granted')
+  assert.equal(who.status, 200)
+  assert.deepEqual((await who.json()).grant.tools, grant.tools)
+  assert.ok(!grant.tools.some(name => /unlinked_(send|accept|ignore|withdraw)_/.test(name)))
 })
 
 test('owner_network scope cannot reach public tools; anchored owners get proven second-degree paths; MCP typed errors and shared rate budgets', async t => {
-  const f = fixture()
   const complete = async ({ candidateIds }) => ({ matches: [{ id: candidateIds[0], reason: 'Synthetic ranked reason' }] })
   // The private-scope app issues owner_network grants (no public search).
   const narrowApp = await launch(t, { f: fixture(), readPublishedSnapshot: undefined, complete })
@@ -259,7 +278,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   await narrowApp.upload(narrowSigned)
   const narrow = await narrowApp.grants.issueGrant(narrowApp.owner)
   const narrowWho = await (await call(narrowApp.endpoint, narrow.accessToken, 'whoami')).json()
-  assert.equal(narrowWho.grant.scope, 'owner_network')
+  assert.equal(narrowWho.grant.scope, 'owner_network_and_private_notes')
   assert.equal(narrowWho.publicIndexAvailable, false)
   for (const [path, options] of [
     ['people', {}],
@@ -290,7 +309,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const withAnchor = async owner => ({ ...await base(owner),
     readLegacyProfile: async () => ({ ...anchor, profile: publishedSnapshot().profiles[0], profiles: publishedSnapshot().profiles, connections: publishedSnapshot().connections.filter(e => e.fromId === 'anchor-a') }) })
   const anchoredApp = await launch(t, { f: { ...anchored, getBackend: withAnchor }, readPublishedSnapshot: async () => publishedSnapshot(), complete })
-  const anchoredSigned = await anchoredApp.signIn()
+  await anchoredApp.signIn()
   const anchoredGrant = await anchoredApp.grants.issueGrant(anchoredApp.owner)
   const degree1 = await (await call(anchoredApp.endpoint, anchoredGrant.accessToken, 'connections')).json()
   assert.equal(degree1.total, 1)
@@ -308,7 +327,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const mcpTransport = new StreamableHTTPClientTransport(new URL(`${narrowApp.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${narrow.accessToken}` } } })
   try {
     await mcpClient.connect(mcpTransport)
-    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact', ...PRIVATE_NOTES_TOOLS])
     const who = await mcpClient.callTool({ name: 'unlinked_whoami', arguments: {} })
     assert.ok(!who.isError)
     assert.equal(JSON.parse(who.content[0].text).ownerId, narrowApp.owner.ownerId)
@@ -335,7 +354,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   assert.equal((await limited.call({ grant: otherGrant, name: 'unlinked_whoami' })).result.ownerId, otherOwner.ownerId)
 })
 
-test('republished index invalidates cursors as typed cursor_invalid; transient backend failure is upstream_unavailable, not revocation', async t => {
+test('republished index invalidates cursors as typed cursor_invalid; transient backend failure is upstream_unavailable, not revocation', async () => {
   const f = fixture()
   const owner = { ownerId: 'synthetic-cursor-owner', userId: 'synthetic-cursor-user' }
   f.register(owner)

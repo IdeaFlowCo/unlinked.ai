@@ -167,8 +167,8 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   const signed = await fixture.start()
 
   // The card page offers both versions; the public one still carries no contact channel.
-  let html = await (await signed.get('/card')).text()
-  assert.match(html, /<nav class="tabs" aria-label="Card version"><a href="\/card" aria-current="page">Public<\/a><a href="\/card\?share=contact">With contact details<\/a><\/nav>/)
+  let html = await (await signed.get('/card?share=public')).text()
+  assert.match(html, /<nav class="tabs" aria-label="Card version"><a href="\/card\?share=public" aria-current="page">Public<\/a><a href="\/card\?share=contact">With contact details<\/a><\/nav>/)
   assert.doesNotMatch(html, /mailto:|tel:|wa\.me|name="phone"/)
 
   // The contact version starts empty: a form, and no link or QR yet.
@@ -211,7 +211,7 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   assert.doesNotMatch(face, /ada@example\.test/)
   assert.match(html, /name="email"[^>]*value="ada@example\.test"/)
   // The public version and the scan sheet still show none of it.
-  for (const path of ['/card', '/scan?tab=card', '/profile', '/settings']) assert.doesNotMatch(await (await signed.get(path)).text(), /4155550123|555-0123|ada@example\.test/, path)
+  for (const path of ['/card?share=public', '/scan?tab=card', '/profile', '/settings']) assert.doesNotMatch(await (await signed.get(path)).text(), /4155550123|555-0123|ada@example\.test/, path)
 
   // Anyone with the link, signed in or not, sees the card. It is never indexed, cached or leaked by referrer.
   for (const signedIn of [false, true]) {

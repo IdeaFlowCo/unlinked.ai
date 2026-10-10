@@ -228,6 +228,6 @@ export function createScopedImportReader({ readResource, readAsset, grant, maxAs
     const latest = await readResource('import', id)
     signal?.throwIfAborted()
     if (!isLiveImport(latest, id, ownerId) || latest.sourceRevision !== resource.sourceRevision) throw new Error('private_import_not_found')
-    return { importId: id, status: resource.payload.status, indexGate: resource.payload.indexGate, indexed: resource.payload.counts?.indexed ?? 0, indexVersion: resource.payload.indexVersion, consent: resource.payload.consent, assertions: rows }
+    return { importId: id, ...(Number.isSafeInteger(resource.payload.createdAt) && resource.payload.createdAt > 0 ? { importedAt: resource.payload.createdAt } : {}), status: resource.payload.status, indexGate: resource.payload.indexGate, indexed: resource.payload.counts?.indexed ?? 0, indexVersion: resource.payload.indexVersion, consent: resource.payload.consent, assertions: rows }
   }
 }

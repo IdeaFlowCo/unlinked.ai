@@ -26,7 +26,8 @@ function fixture({ lookupImpl = async () => structuredClone(payload), settings =
 test('strict URL normalizer accepts Unicode and encoded slugs, rejects arbitrary hosts, paths and schemes', async () => {
   for (const address of ['https://linkedin.com/in/ceyda-kıran/', 'linkedin.com/in/ceyda-k%C4%B1ran', 'https://www.linkedin.com/in/CEYDA-KIRAN']) assert.ok(signupProfileSlug(address))
   assert.equal(signupProfileSlug('linkedin.com/in/ceyda-k%C4%B1ran'), 'ceyda-kıran')
-  for (const address of ['ceyda-kiran', 'https://evil.test/linkedin.com/in/ceyda', 'https://linkedin.com.evil.test/in/x', 'http://linkedin.com/in/x', 'https://linkedin.com/in/x?track=1', 'https://linkedin.com/in/x/extra', 'https://linkedin.com/in/%2Fbad', 'https://linkedin.com/in/%ZZ', 'https://name@linkedin.com/in/x', 'https://linkedin.com:123/in/x']) assert.equal(signupProfileSlug(address), null, address)
+  for (const suffix of ['', '?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=ios_app', '#profile']) assert.equal(signupProfileSlug('https://www.linkedin.com/in/felipe-contreras-a353a3189/' + suffix), 'felipe-contreras-a353a3189')
+  for (const address of ['ceyda-kiran', 'https://evil.test/linkedin.com/in/ceyda', 'https://linkedin.com.evil.test/in/x', 'http://linkedin.com/in/x', 'https://linkedin.com/in/x/extra', 'https://linkedin.com/in/%2Fbad', 'https://linkedin.com/in/%ZZ', 'https://name@linkedin.com/in/x', 'https://linkedin.com:123/in/x']) assert.equal(signupProfileSlug(address), null, address)
   const f = fixture(); assert.equal((await f.service.lookup({ owner, address: 'evil.test/linkedin.com/in/x' })).code, 'invalid_url'); assert.equal(f.calls.length, 0)
   const claims = createSelfClaims({ driver: {}, publicPeople: { read: async () => null }, slugIndex: async () => new Map([['ceyda-k%c4%b1ran-9b192227', 'legacy-ceyda']]) })
   assert.equal(await claims.lookupSlug('ceyda-kıran-9b192227'), 'legacy-ceyda')
@@ -151,7 +152,10 @@ test('typed failures hide adapter contents and allow only two retries, with no s
   assert.equal(new ProfileLookupError('other').code, 'unavailable')
 })
 
-test('the lookup deadline holds even when an adapter ignores its abort signal', async () => {
+test('the lookup deadline holds even when an adapter ignores its abort signal', async t => {
+  // The production HTTP server keeps the loop alive; AbortSignal.timeout does not.
+  const serverLifetime = setInterval(() => {}, 1000)
+  t.after(() => clearInterval(serverLifetime))
   let seen
   const f = fixture({ settings: profileLookupSettings({ ...env, UNLINKED_PROFILE_LOOKUP_TIMEOUT_MS: '1000' }), lookupImpl: (slug, { signal }) => { seen = signal; return new Promise(() => {}) } })
   const started = Date.now(), result = await f.lookup()

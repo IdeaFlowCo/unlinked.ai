@@ -1,39 +1,53 @@
 # Message with OpenChat
 
-Every rendered person profile offers **Message with OpenChat** beside its profile
-controls: canonical `/people/:id` for signed-out and signed-in visitors, the
-member's `/profile`, and the retained Next.js public/private profile components.
-It opens OpenChat in a new tab with `noopener noreferrer`; nothing is sent,
-no contact is added, and no account is linked by opening the action.
+Unlinked and OpenChat share an Ideaflow account. OpenChat is the messaging inbox;
+Unlinked is the professional network. The web **Messages** surface at `/messages` embeds the canonical responsive
+OpenChat client and uses the same conversations, history and read state.
+Member profiles open a named composer inside Unlinked; unclaimed profiles show
+**Not on Unlinked** and an invitation.
 
-The OpenChat-owned receiving contract is
-`https://chat.ideaflow.app/app/?intent=compose&source=unlinked`, with an optional
-`profile` query parameter containing the exact canonical public
-`https://www.unlinked.ai/people/:id` URL. OpenChat retains this unsent context
-through its sign-in/onboarding flow, asks the sender to choose a recipient from
-OpenChat, and requires an explicit Send. Unlinked passes no name, email,
-account identifier, card token, conversation identifier or message payload.
-Names, imported email and Unlinked membership never establish an OpenChat
-recipient. Unclaimed people use the same truthful profile-context compose flow.
+The public action passes only the canonical public profile URL. OpenChat resolves
+its recipient server-to-server through `POST /api/messaging/v1/recipient`, sending
+`{profileId}` with the dedicated `UNLINKED_MESSAGING_SECRET` bearer credential.
+`mcp-server/messaging.mjs` checks the current published snapshot, resolves the
+profile's live owner and reads its active Ideaflow issuer/subject binding. Imported
+names/email and caller-provided identity fields are never identity evidence.
+The response is member + identity + public name, unclaimed + public name, or
+unavailable. No private archive fields or email are returned. Only the trusted
+OpenChat server can call it; ordinary browser sessions and agent grants cannot.
+Missing configuration/outages return 503; requests are bounded and rate limited.
 
-The member's own profile reuses the existing card flow's snapshot-verified
-published target. If that target is absent, unavailable or removed, its action
-opens generic recipient selection without exporting any private profile fields
-or IDs. Historical Supabase profiles have no verified public mapping and use
-that same generic compose entry. A missing OpenChat account or recipient never
-becomes an invented direct message; the sender chooses an available contact.
+OpenChat shows **Message [name]** and an empty draft for members; its unique shared
+identity key reuses their existing inbox or creates it lazily. Unclaimed people
+see an invitation path through the sender's OpenChat card. The sender must press
+Send. No contact request or message happens on opening the profile. Inbox creation
+does not publish a public Unlinked profile or claim an imported contact.
 
-`src/utils/openchat-profile-context.mjs` owns the shared context/link validation.
-The canonical host and `/people/:id` grammar exclude private routes, contact
-card tokens, credentials, arbitrary destinations, query strings and fragments.
-Existing `/c/:token` card sharing and `/meet` confirmation remain unchanged.
-The receiving contract is owned by OpenChat's `docs/unlinked-compose-contract.md`.
-Unlinked merge and runtime rollout must wait until the coordinated OpenChat
-receiver has passed its gates, been deployed and been verified. The Unlinked
-release executor checks that dependency; Unlinked does not deploy or modify
-the receiver.
+Both apps accept the same Ideaflow login. Unlinked silently creates a private app
+record for an already-verified Ideaflow session and returns to the original page;
+it does not publish a profile or open onboarding. Recovery of an old profile still
+requires its existing explicit confirmation. See docs/ideaflow-sign-in.md.
 
-Verification executes anonymous and synthetic signed-in HTTP profile flows,
-public-target removal, both Next.js profile renderers, and actual generated
-link parsing. OpenChat verifies sign-in continuation and no-write-until-Send
-with its own capture fixtures. No acceptance check sends personal outreach.
+Configure the same dedicated service secret in the two private server environments.
+Roll out this resolver before the coordinated OpenChat receiver/client. Requests
+carry no service credential or identity in URLs, logs, HTML or discovery. Removing
+the secret disables the resolver. HTTP JSON is no-store, server-to-server only;
+this endpoint is not an MCP or account-grant tool.
+
+The strict link grammar lives in `src/utils/openchat-profile-context.mjs`;
+private-only/historical profiles use generic compose without exporting their IDs.
+OpenChat owns `docs/unlinked-compose-contract.md` and sign-in continuation.
+
+
+The signed-in `/messages/session` POST requires same origin and CSRF. It reads
+the authenticated owner's live binding, then calls OpenChat's confidential
+`/api/unlinked/session` with the dedicated service secret. A short-lived session
+travels to the exact OpenChat iframe via an origin/window/nonce-bound handshake,
+never a URL, persisted browser credential or agent tool. Renewal rechecks the
+Unlinked session. Errors show Retry and an OpenChat fallback; private pages and
+responses stay no-store. CSP permits only the canonical OpenChat frame.
+
+LinkedIn messaging remains plan-only; the coordinated OpenChat repository owns
+`docs/linkedin-messaging-plan.md` (Unipile, Beeper, and existing bridge options).
+
+People results (public search, your contacts, AI picks and connected people) offer **Message** for verified members, linking to their addressed draft. Imported nonmembers offer **Invite to Unlinked**. Unclassified private contacts never imply a recipient. The embedded and standalone fallback URLs both retain the selected profile.

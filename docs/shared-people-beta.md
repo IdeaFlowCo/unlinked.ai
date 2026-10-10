@@ -1,6 +1,6 @@
 # Shared People beta
 
-Everyone browsing uses only the published professional Noos projection, never private owner resources or synthetic fallbacks.
+Everyone browsing exposes only the published professional Noos projection, never raw private owner resources or synthetic fallbacks. The trusted runtime reconstructs professional details from eligible public-consent imports internally; the authorization and cache boundaries are owned by [profile details](profile-details.md).
 Anonymous People reads expose only safe profile DTOs and provenanced directed connection edges; public routes and GET/HEAD support are owned by [the public directory contract](public-directory.md#search-links-for-web-assistants).
 Public reads share a bound of eight concurrent requests and 120 requests per process per 60 seconds, with overlapping reads sharing the public reader’s snapshot build; capacity exhaustion returns 429 with `Retry-After: 10`; invalid input is 400, unavailable/incomplete publication is 503, and a missing profile in a complete publication is 404.
 
@@ -8,7 +8,7 @@ The offline publisher accepts only the checksummed recovered DB backup (16,296 p
 Original auth/storage backup and 81-account email evidence remain separate; the recovered-account operator seeds only a hash-only 81-row manifest after the exact public source is published.
 Signed Ideaflow email evidence can produce a one-time browser confirmation for the matching legacy profile; typed/uploaded email and profile URLs never establish account ownership. Explicit profile self-assertion and legacy upgrades follow the [signup profile source contract](signup-profile-lookup.md).
 
-A member with no imports can POST `/search-account` with query, CSRF and `scope=everyone`; owner-private search remains `scope=own`. The header search on every page is a plain GET to `/network?q=`, for visitors and members alike; the AI-ranked POST is offered as buttons on a member's results. Profile pages at `/people/{id}` use the member layout for visitors and members.
+A member with no imports can POST `/search-account` with query, CSRF and `scope=everyone`; owner-private search remains `scope=own`. Browser search placement and directory controls are owned by [People filtering and ordering](network-controls.md); the AI-ranked POST is offered as buttons on a member's results. Profile pages at `/people/{id}` use the member layout for visitors and members.
 Everyone retrieval evaluates all public profiles lexically and passes at most 200 matching professional candidates to OpenAI for ranking.
 The response reports total considered/candidate counts; it is retrieval plus AI ranking, with no claim that all profiles were sent to the model.
 Model input excludes emails, phones, raw source archives and private notes.

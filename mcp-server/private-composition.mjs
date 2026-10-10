@@ -1,3 +1,9 @@
+import { createRequestDiagnostics } from './request-diagnostics.mjs'
+import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
+import { validTimestamp } from '../src/utils/network-order.mjs'
+import { createMessagingResolver, createMessagingSession } from './messaging.mjs'
+
+import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
@@ -22,12 +28,46 @@ import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
 import { createIdeaflowLogin, autoSignInEnabled } from './private-browser.mjs'
+import { createOverlayClient } from './private-context.mjs'
 import { CLIENT_ID_PATTERN } from './account-api.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
 import { createArchiveWorker } from '../src/utils/private-import/background-job.mjs'
 
+export function earliestConnectionDates(invitations, requests) {
+  const key = value => JSON.stringify([value.other.ownerId, value.other.userId])
+  const dates = new Map()
+  for (const value of [...invitations, ...requests]) {
+    const at = validTimestamp(value.connectedAt)
+    if (at) dates.set(key(value), Math.min(at, dates.get(key(value)) ?? at))
+  }
+  return invitations.map(value => dates.has(key(value)) ? { ...value, connectedAt: dates.get(key(value)) } : value)
+}
+
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+// The overlay client and the owner's Ideaflow identity for it. Only an identity
+// from this runtime's own Ideaflow issuer names an overlay owner; the reverse
+// lookup is the durable OperationalOwner/OperationalIdentity binding made at
+// sign-in, so sessions restored after a restart need no new sign-in.
+export function privateOverlay({ secret, url, networkMode, issuer, identityForOwner, cacheMs = 300000 }) {
+  // A missing or short secret leaves private context off, never the site.
+  if (typeof secret !== 'string' || secret.length < 32) return {}
+  const baseUrl = url || (networkMode === 'shared-noos' ? 'http://noos_api:4000/api/overlay' : null)
+  if (!baseUrl) return {}
+  const overlay = createOverlayClient({ baseUrl, secret })
+  const cache = new Map()
+  const overlayIdentity = async owner => {
+    const key = `${owner.ownerId}\n${owner.userId}`, hit = cache.get(key)
+    if (hit && hit.until > Date.now()) return hit.value
+    const found = await identityForOwner(owner)
+    const value = found && found.issuer === issuer && typeof found.subject === 'string' && found.subject ? Object.freeze({ issuer: found.issuer, subject: found.subject }) : null
+    if (cache.size > 5000) cache.clear()
+    cache.set(key, { value, until: Date.now() + cacheMs })
+    return value
+  }
+  return { overlay, overlayIdentity }
+}
 
 function loadNoos(root) {
   const directory = join(root, 'runtime', 'noos'), require = createRequire(join(directory, 'package.json'))
@@ -47,6 +87,7 @@ function loadNoos(root) {
 // capability, provider token, graph credential or operations bearer reaches a
 // browser/agent. The caller supplies an isolated root and reviewed private env.
 export async function createPrivatePilotDependencies({ root, baseUrl, host, operationalPort, boltUrl, dataMode, networkMode = 'loopback',
+  sharedGraphMigrationId = process.env.PILOT_SHARED_GRAPH_MIGRATION_ID, sharedGraphManifestSha256 = process.env.PILOT_SHARED_GRAPH_MANIFEST_SHA256,
   config = { issuer: process.env.IDEAFLOW_ISSUER, clientId: process.env.IDEAFLOW_CLIENT_ID,
     clientSecret: process.env.IDEAFLOW_CLIENT_SECRET, graphPassword: process.env.NOOS_PRIVATE_PASSWORD,
     apiKey: process.env.OPENAI_API_KEY }, modules, loginFactory = createIdeaflowLogin,
@@ -57,9 +98,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // Optional signup profile lookup (docs/signup-profile-lookup.md): UNLINKED_PROFILE_LOOKUP_*.
   profileLookupEnv = process.env, profileLookupLoader = loadProfileLookupAdapter,
   // Automatic sign-in kill switch: UNLINKED_AUTO_SIGNIN=off.
-  autoSignInEnv = process.env }) {
+  autoSignInEnv = process.env, diagnosticsEnv = process.env,
+  // Private context from the Ideaflow people overlay: NOOS_OVERLAY_APP_UNLINKED_SECRET, NOOS_OVERLAY_URL.
+  overlayEnv = process.env }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
-  const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : networkMode === 'isolated-container' && bolt.hostname === 'graph' && bolt.port === '7687'
+  const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : ((networkMode === 'isolated-container' && bolt.hostname === 'graph') || (networkMode === 'shared-noos' && bolt.hostname === 'noos_neo4j')) && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
       bolt.protocol !== 'bolt:' || !privateBolt || !bolt.port || bolt.pathname || bolt.search || bolt.hash || bolt.username || bolt.password ||
       !Number.isSafeInteger(operationalPort) || operationalPort < 7000 || operationalPort > 9999 || !['synthetic', 'private_live'].includes(dataMode) ||
@@ -67,16 +110,18 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       !Number.isSafeInteger(graphReadyRetryMs) || graphReadyRetryMs < 1 || graphReadyRetryMs > graphReadyDeadlineMs ||
       ['issuer', 'clientId', 'clientSecret', 'graphPassword', 'apiKey'].some(key => typeof config[key] !== 'string' || !config[key])) throw new Error('private_composition_configuration_required')
   if (dataMode === 'private_live' && (root !== '/srv/unlinked-private-guest-pilot-20261001' || !['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) ||
-      config.issuer !== 'https://id.ideaflow.app/api/auth' || bolt.port !== (networkMode === 'isolated-container' ? '7687' : '9289') || operationalPort !== 9022)) throw new Error('private_composition_target_required')
+      config.issuer !== 'https://id.ideaflow.app/api/auth' || bolt.port !== (networkMode === 'loopback' ? '9289' : '7687') || operationalPort !== 9022)) throw new Error('private_composition_target_required')
+  if (networkMode === 'shared-noos' && (typeof sharedGraphMigrationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(sharedGraphMigrationId) || typeof sharedGraphManifestSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sharedGraphManifestSha256))) throw new Error('shared_graph_verified_migration_required')
   const stat = await lstat(root)
   if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_composition_root_required')
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, closed = false
+  let server, worker, memberEmail, diagnosticsStore, closed = false
   const close = async () => {
     if (closed) return
     closed = true
+    await diagnosticsStore?.close()
     await worker?.stop()
     await memberEmail?.stop()
     if (server?.listening) {
@@ -93,6 +138,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         if (Date.now() + graphReadyRetryMs > deadline) throw new Error('private_graph_not_ready')
         await wait(graphReadyRetryMs)
       }
+    }
+    if (networkMode === 'shared-noos') {
+      const session = driver.session({ database: 'neo4j', defaultAccessMode: 'WRITE' })
+      try {
+        // Fence rollback before the first application write, including schema initialization.
+        // A duplicate receipt must not activate either checkpoint.
+        const result = await session.run('MATCH (candidate:UnlinkedGraphMigration {id:$id,manifestHash:$manifestHash}) WITH collect(candidate) AS receipts WHERE size(receipts)=1 WITH receipts[0] AS m SET m._lock=true REMOVE m._lock WITH m WHERE m.status="verified" SET m.activatedAt=coalesce(m.activatedAt,timestamp()) RETURN m.id AS id,m.manifestHash AS manifestHash,m.status AS status', { id: sharedGraphMigrationId, manifestHash: sharedGraphManifestSha256 })
+        if (result.records.length !== 1 || result.records[0].get('id') !== sharedGraphMigrationId || result.records[0].get('manifestHash') !== sharedGraphManifestSha256 || result.records[0].get('status') !== 'verified') throw new Error('shared_graph_verified_migration_required')
+      } finally { await session.close() }
     }
     const store = new dependencies.OperationalStore(driver, 'neo4j')
     const provisioner = new dependencies.InvitedOwnerProvisioner(driver, 'neo4j', {
@@ -259,7 +313,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // People this account is connected to through accepted invites.
       const readInviteConnections = memberInvitations ? async () => {
         const resolve = publicProfileResolver(), rows = []
-        for (const value of await memberInvitations.connections(owner)) rows.push({ ...value, publicProfileId: await resolve(value.other) })
+        const invited = earliestConnectionDates(await memberInvitations.connections(owner), memberConnections ? await memberConnections.connections(owner) : [])
+        for (const value of invited) rows.push({ ...value, publicProfileId: await resolve(value.other) })
         return rows
       } : undefined
       // People this account is connected to through accepted connection
@@ -285,6 +340,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listAccountGrantIds: () => store.listAccountGrantIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
       }
+    }
+    let requestDiagnostics
+    if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {
+      const auditDirectory = join(root, 'audit')
+      await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
+      const auditStat = await lstat(auditDirectory)
+      if (!auditStat.isDirectory() || auditStat.isSymbolicLink() || (auditStat.mode & 0o777) !== 0o700 || auditStat.uid !== process.getuid()) throw new Error('diagnostics_audit_directory_not_private')
+      diagnosticsStore = await createDiagnosticsStore({ directory: join(auditDirectory, 'requests') })
+      requestDiagnostics = createRequestDiagnostics({ emit: diagnosticsStore.emit })
     }
     const audit = async event => {
       const directory = join(root, 'audit')
@@ -342,8 +406,18 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       }
       return rows
     }
+    let legacyDetails = null
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLookup?.list,
-      readLegacy: () => publicPeople.read('recovered-legacy-public-v1'),
+      includeDetails: true,
+      readLegacy: async () => {
+        const snapshot = await publicPeople.read('recovered-legacy-public-v1')
+        const digest = snapshot?.revision?.match(/^legacy-public-v1:([a-f0-9]{64})$/)?.[1]
+        if (!digest) return snapshot
+        try {
+          if (legacyDetails?.sourceSha256 !== digest) legacyDetails = JSON.parse(await readFile(join(root, 'audit', `legacy-public-source-manifest-${digest}.json`), 'utf8'))
+          return withLegacyProfileDetails(snapshot, legacyDetails)
+        } catch { return snapshot }
+      },
       // An accepted invite is a connection both people agreed to: it joins the
       // public graph when both accounts have a public profile.
       // An accepted connection request is the same kind of agreed connection.
@@ -396,11 +470,31 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         } finally { await session.close() }
       },
     }) : undefined
-    return { login, getBackend, close, audit, backgroundImports: true,
+    const identityForOwner = async owner => {
+        const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+        try {
+          const result = await session.executeRead(tx => tx.run(`MATCH (b:OperationalOwner {namespace:'unlinked',sourceOwnerId:$ownerId,userId:$userId})
+            WHERE coalesce(b.active,true)=true
+            MATCH (i:OperationalIdentity {namespace:'unlinked',sourceOwnerId:$ownerId,userId:$userId})
+            WHERE i.issuer=b.identityIssuer AND i.subject=b.identitySubject
+            RETURN i.issuer AS issuer,i.subject AS subject LIMIT 2`, owner))
+          return result.records.length === 1 ? { issuer:result.records[0].get('issuer'), subject:result.records[0].get('subject') } : null
+        } finally { await session.close() }
+    }
+    return { login, getBackend, close, audit, requestDiagnostics, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),
       readPublishedSnapshot,
+      messagingSecret: process.env.UNLINKED_MESSAGING_SECRET || undefined,
+      resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }),
+      createMessagingSession: createMessagingSession({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
+      // Read-only Ideaflow people overlay (docs/private-context.md): the owner's
+      // own notes and relations, fetched from Noos with an app assertion for the
+      // owner's verified Ideaflow identity. Off unless runtime.env sets
+      // NOOS_OVERLAY_APP_UNLINKED_SECRET (the value Noos holds for app
+      // "unlinked"); the shared-noos network reaches noos_api directly.
+      ...privateOverlay({ secret: overlayEnv.NOOS_OVERLAY_APP_UNLINKED_SECRET, url: overlayEnv.NOOS_OVERLAY_URL, networkMode, issuer: config.issuer, identityForOwner }),
       // Operator-published photos (publish-profile-photos.mjs), read-only here.
       // No member hide-photo choice exists yet; when it does, pass it as
       // `hidden` so it outranks the operator set (docs/profile-photos.md).
@@ -462,6 +556,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         if (!state.isDirectory() || state.isSymbolicLink()) throw new Error('private_asset_root_required')
         await rm(target, { recursive: true, force: true })
       },
+      ideaflowConnectorSecret: process.env.IDEAFLOW_CONNECTOR_SECRET,
       resolveOwner: identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null,
       claimInvitation: provisioner.claim.bind(provisioner),
       signup: provisioner.signup.bind(provisioner),

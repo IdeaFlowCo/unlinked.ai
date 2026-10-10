@@ -2,14 +2,17 @@ Unlinked helps people carry their network into useful introductions. The canonic
 
 ## Meet someone
 
-`/meet` accepts only `https://chat.globalbr.ai/c/<24-letter-or-digit-token>` and `https://chat.ideaflow.app/c/<24-letter-or-digit-token>` card URLs. The standalone runtime offers live camera scanning and pasted URLs using the checked-in OpenChat card parser and locked `jsqr` dependency. A valid payload opens the public OpenChat card page on the same host as the scanned or pasted URL, where the visitor can review the card and choose whether to send a friend request. OpenChat owns sign-in return, account checks, friend status, and the actual request. Opening a card does not itself send a request.
+Open **My card** in the main navigation to show your card. See the [contact-card guide](docs/contact-card.md) for card versions, sharing controls and signup from a shared card.
 
-Meet is anonymous and does not resolve an Unlinked owner, read an archive, or import live profiles/cards into Unlinked.
+`/meet` supports camera scanning and pasted Unlinked profile/contact-card or OpenChat card URLs, with an explicit confirmation before opening. The accepted URL grammar is defined by `src/utils/meet-scan.js` and its card parsers. Opening a card never sends a connection request. OpenChat owns its card's sign-in, friend status and requests; Unlinked's joining flow is described in the contact-card guide.
+
+Meet is anonymous and does not read an archive or import profiles/cards into Unlinked.
 
 ## Import LinkedIn archive
 
 The canonical app sign-in is https://www.unlinked.ai/login.
 The home page, People search (`/people`, `/network?q=`) and profile pages (`/people/{id}`) need no sign-in; a member page opened without a session offers sign-in and returns there afterwards.
+See [profile details and outbound links](docs/profile-details.md) for the professional information available on people, company and owner profile pages.
 Anyone can sign in or create an account through Ideaflow ID; no invitation is needed.
 If the signed Ideaflow email matches one of the privately seeded recovered legacy accounts, the standalone runtime may ask once whether to continue with that old Unlinked profile before showing `/profile`.
 After that explicit recovered-account confirmation, Settings may also list preserved original LinkedIn files for browser-only download; those originals are not exposed through agent grants or public People.
@@ -36,7 +39,7 @@ See the [private archive foundation contract](docs/private-archive-import.md) fo
 Signed-in People rows offer state-aware connection controls. Open
 [`/network?connected=1&presence=member`](https://www.unlinked.ai/network?connected=1&presence=member)
 for your connections who have joined Unlinked. See the [member connection guide](docs/member-connections.md)
-for controls, confirmed removal and preservation of imported observations.
+for controls, confirmed removal and preservation of imported observations. For live filtering and ordering in People, see [People filtering and ordering](docs/network-controls.md).
 
 ## Core Features & Technologies
 
@@ -53,8 +56,8 @@ unlinked.ai exposes a canonical account-scoped MCP endpoint from the standalone 
 - **Setup status:** [`/agents`](https://www.unlinked.ai/agents) describes current setup; signed-in users create/revoke grants in Settings.
 - **Machine discovery:** [`/llms.txt`](https://www.unlinked.ai/llms.txt), [`/.well-known/unlinked.json`](https://www.unlinked.ai/.well-known/unlinked.json), [`/.well-known/mcp/server-card.json`](https://www.unlinked.ai/.well-known/mcp/server-card.json), and [`/openapi.json`](https://www.unlinked.ai/openapi.json)
 - **Developer & contributor notes:** [`AGENTS.md`](AGENTS.md) (repo-internal) and [`public/AGENTS.md`](public/AGENTS.md) (HTTP agent brief)
-- **Agent permissions:** Read-only by default; optionally enable connection-request actions in Settings when regenerating a credential, or on OAuth consent for each connected app. Messaging and posting remain unavailable. See the [agent contract](docs/agent-api.md#catalog-v4-optional-connection-actions).
-- **Current MCP:** Streamable HTTP at `https://www.unlinked.ai/mcp`, versioned tools documented in the [agent contract](docs/agent-api.md), authorized by a revocable account-scoped bearer grant. `degree: 1|2` or "my second-degree connections" reads recorded public paths from the explicitly confirmed recovered profile; no confirmed legacy link means no graph anchor is inferred. Sanitized recovered Connections observations can participate in owner-network search for the same confirmed owner. Older single-tool grants remain owner-network only.
+- **Agent permissions:** See [Settings key management](docs/agent-key-settings.md) for manual API keys and [the agent contract](docs/agent-api.md#optional-connection-actions) for optional connection-request permissions and OAuth consent.
+- **Current MCP:** Streamable HTTP at `https://www.unlinked.ai/mcp`, versioned tools documented in the [agent contract](docs/agent-api.md), authorized by a revocable account-scoped bearer grant. `degree: 1|2` or "my second-degree connections" reads recorded public paths from the explicitly confirmed recovered profile; no confirmed legacy link means no graph anchor is inferred. Sanitized recovered Connections observations can participate in owner-network search for the same confirmed owner. Older owner-only grants remain owner-network scoped and receive current read tools without changing their key.
 - **Signed connection API:** Browser sessions can call `GET /api/my-connections?degree=1|2&q=&cursor=` for bounded recorded first- or second-degree public paths with source revision and deterministic pagination.
 - **MCP Server package:** [`@unlinked/mcp-server`](mcp-server/) — historical stdio server implementation supporting the legacy REST API when that backend is available.
 - **Agent Keys:** Historical REST keys start with `ul_`; current Agent setup uses the standalone runtime's account grant.

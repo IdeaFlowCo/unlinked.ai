@@ -169,7 +169,7 @@ test('signed in, the test profile is found by its address, shown as a test, clai
   const csrf = (await (await signed('/find-me')).text()).match(/name="csrf" value="([^"]+)"/)[1]
 
   // A near miss finds nothing; the exact address finds the labelled test card.
-  assert.ok((await (await post('/find-me', { csrf, linkedinUrl: 'https://www.linkedin.com/in/ideaflow-test-profile/' })).text()).includes('Nothing unclaimed matched'))
+  assert.ok((await (await post('/find-me', { csrf, linkedinUrl: 'https://www.linkedin.com/in/ideaflow-test-profile/' })).text()).includes('LinkedIn profile lookup is not available right now'))
   const card = await (await post('/find-me', { csrf, linkedinUrl: `https://www.linkedin.com/in/${TEST.linkedinSlug}/` })).text()
   assert.ok(card.includes('Is this you?')); assert.ok(card.includes('Ideaflow test profile')); assert.ok(card.includes('Test profile.')); assert.ok(card.includes('Not a real person'))
   assert.ok(card.includes("Yes, that's me")); assert.ok(!card.includes('Listed by 0 members'))
