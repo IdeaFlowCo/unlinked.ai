@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { LEGACY_ACCOUNT_SOURCE_SHA256 as SOURCE, assertProductionLegacyAccountManifest, validateLegacyAccountManifest } from './legacy-account-manifest.mjs'
+import { operatorBoltUrl } from './operator-bolt-url.mjs'
 
 // Offline operator capability only: never mounted as a browser/agent endpoint.
 // STDIN receives the private, hash-only manifest made from the verified backup.
@@ -30,7 +31,7 @@ async function main() {
   }
   const root = '/srv/unlinked-private-guest-pilot-20261001', directory = join(root,'runtime','noos'), require = createRequire(join(directory,'package.json'))
   const neo4j = require('neo4j-driver'), { UnlinkedLegacyLinks } = require(join(directory,'dist/operational/legacy-links.js')), { UnlinkedPublicPeopleStore } = require(join(directory,'dist/operational/public-people.js'))
-  const driver = neo4j.driver('bolt://graph:7687', neo4j.auth.basic('neo4j',process.env.NOOS_PRIVATE_PASSWORD),{ connectionTimeout:3000,connectionAcquisitionTimeout:5000,maxTransactionRetryTime:10000 })
+  const driver = neo4j.driver(operatorBoltUrl(), neo4j.auth.basic('neo4j',process.env.NOOS_PRIVATE_PASSWORD),{ connectionTimeout:3000,connectionAcquisitionTimeout:5000,maxTransactionRetryTime:10000 })
   try {
     const links = new UnlinkedLegacyLinks(driver,'neo4j',{role:'operator',actorId:'unlinked-recovered-account-seed',issuer:process.env.IDEAFLOW_ISSUER,clientId:process.env.IDEAFLOW_CLIENT_ID})
     const publicPeople = new UnlinkedPublicPeopleStore(driver,'neo4j')

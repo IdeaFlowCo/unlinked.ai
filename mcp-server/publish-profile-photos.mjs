@@ -6,6 +6,7 @@ import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PHOTO_DIRECTORY, PHOTO_ID, PHOTO_MANIFEST_KIND, PHOTO_POINTER_KIND, MAX_PHOTO_BYTES, MAX_PHOTOS, MAX_HISTORY,
   sha256, sniffImageType, validPhotoManifest, validPhotoPointer, readPrivateFile, createProfilePhotoStore } from './profile-photos.mjs'
+import { operatorBoltUrl } from './operator-bolt-url.mjs'
 
 // Offline reviewed operator publisher for profile photos (docs/profile-photos.md),
 // with the same posture as publish-enrichment-people.mjs: never an HTTP/upload
@@ -149,7 +150,7 @@ async function readLegacyIds(root) {
   if (!process.env.NOOS_PRIVATE_PASSWORD) throw new Error('private_graph_configuration_required')
   const require = createRequire(join(root, 'runtime/noos/package.json')), neo4j = require('neo4j-driver')
   const { UnlinkedPublicPeopleStore } = require(join(root, 'runtime/noos/dist/operational/public-people.js'))
-  const driver = neo4j.driver('bolt://graph:7687', neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 5000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
+  const driver = neo4j.driver(operatorBoltUrl(), neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 5000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
   try {
     const store = new UnlinkedPublicPeopleStore(driver, 'neo4j'); await store.initialize()
     const legacy = await store.read('recovered-legacy-public-v1')
