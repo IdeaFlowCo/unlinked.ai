@@ -144,7 +144,8 @@ dialog.msg-picker::backdrop{background:#16181d55}
 .msg-pick .msg-item-preview{font-size:13px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .unlinked-onboarding .msg-attachments{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
 .unlinked-onboarding .msg-image{display:block;line-height:0;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
-.unlinked-onboarding .msg-image img{display:block;max-width:min(320px,60vw);max-height:320px;object-fit:cover}
+/* A tiny image (e.g. 2x2) still gets a visible, clickable tile. */
+.unlinked-onboarding .msg-image img{display:block;min-width:96px;min-height:96px;max-width:min(320px,60vw);max-height:320px;object-fit:contain;background:var(--page)}
 .unlinked-onboarding .msg-audio{max-width:min(320px,60vw);height:40px}
 .unlinked-onboarding .msg-uploads{display:flex;flex-wrap:wrap;gap:8px;padding:0 76px 0 16px}
 .unlinked-onboarding .msg-uploads:not(:empty){padding-top:10px}
@@ -159,7 +160,8 @@ dialog.msg-picker::backdrop{background:#16181d55}
 .unlinked-onboarding button.msg-result{width:100%;min-height:56px;justify-content:flex-start;text-align:left;background:none;border:0;color:var(--fg);font-weight:400}
 .unlinked-onboarding button.msg-result:hover{background:var(--page)}
 .unlinked-onboarding button.msg-result:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
-.unlinked-onboarding .msg-dock{position:fixed;right:96px;bottom:0;z-index:60;width:380px;display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;box-shadow:0 -6px 28px #25295324}
+/* Clear of the floating feedback button and its label (about 180 px from the right). */
+.unlinked-onboarding .msg-dock{position:fixed;right:196px;bottom:0;z-index:60;width:380px;display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;box-shadow:0 -6px 28px #25295324}
 .unlinked-onboarding .msg-dock[hidden]{display:none}
 .unlinked-onboarding .msg-dock-bar{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;padding:0 14px;background:#fff;color:var(--fg);border:0;border-radius:12px 12px 0 0;font-size:15px;font-weight:700;justify-content:flex-start}
 .unlinked-onboarding .msg-dock-bar:hover{background:var(--page)}

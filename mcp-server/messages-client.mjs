@@ -103,7 +103,7 @@ function messagesClient(config) {
   const titleOf = conversation => conversation.title || others(conversation).map(person => person.name).join(', ') || 'Just you'
   const peerOf = conversation => conversation.type === 'direct' ? others(conversation)[0] : null
   const muted = conversation => conversation.mutedUntil === 'always' || (conversation.mutedUntil && Date.parse(conversation.mutedUntil) > Date.now())
-  const unreadOf = conversation => state.markedUnread.has(conversation.id) ? Math.max(1, conversation.unreadCount || 0) : conversation.unreadCount || 0
+  const unreadOf = conversation => state.markedUnread.has(conversation.id) || conversation.markedUnread ? Math.max(1, conversation.unreadCount || 0) : conversation.unreadCount || 0
   const sorted = () => [...state.conversations.values()].sort((a, b) => (state.unreadFirst ? (unreadOf(b) > 0) - (unreadOf(a) > 0) : 0) || String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || '')))
 
   async function loadConversations() {
@@ -254,8 +254,9 @@ function messagesClient(config) {
     // An open options menu is not redrawn under the pointer.
     if (!head || head.querySelector('details[open]')) return
     const peer = conversation && peerOf(conversation), title = conversation ? titleOf(conversation) : 'Conversation'
-    const presence = peer ? (peer.isBot ? 'Bot' : peer.presence === 'available' ? 'Active now' : peer.presence === 'away' ? 'Away' : peer.lastSeenAt ? `Seen ${ago(peer.lastSeenAt)} ago` : '') : conversation ? `${conversation.participants.length} people` : ''
-    const profile = profiles[state.open]
+    const presence = peer ? (peer.isBot ? 'Bot' : peer.presence === 'available' ? 'Active now' : peer.presence === 'away' ? 'Away' : peer.lastSeenAt ? `Seen ${ago(peer.lastSeenAt)} ago` : '') : conversation ? `${conversation.participants.length} ${conversation.participants.length === 1 ? 'person' : 'people'}` : ''
+    // The server links partners who claimed a published profile; a profile Message link is the fallback.
+    const profile = peer?.profileId || profiles[state.open]
     const item = (label, onclick, extra = {}) => h('button', { type: 'button', onclick: event => { const details = event.currentTarget.closest('details'); details.open = false; details.querySelector('summary').focus(); onclick() }, ...extra }, label)
     const menu = conversation ? h('details', { class: 'msg-menu' },
       h('summary', { 'aria-label': 'Conversation options', title: 'Options' }, '⋯'),
@@ -280,7 +281,15 @@ function messagesClient(config) {
     catch { announce('Could not change mute. Try again.') }
     renderList(); renderThreadHeader()
   }
-  function markUnread() { const id = state.open; if (!id) return; state.markedUnread.add(id); closeConversation(); announce('Marked as unread') }
+  // Durable in OpenChat (every app shows it) when supported; otherwise kept in this tab.
+  async function markUnread() {
+    const id = state.open, conversation = state.conversations.get(id)
+    if (!id || !conversation) return
+    closeConversation()
+    try { await api(`/conversations/${encodeURIComponent(id)}/unread`, {}); conversation.markedUnread = true; conversation.unreadCount = Math.max(1, conversation.unreadCount || 0) }
+    catch { state.markedUnread.add(id) }
+    renderList(); updateUnread(); announce('Marked as unread')
+  }
 
   // Your last message's state: Sending… / Sent / Seen / Not sent.
   function ownStatus(message, conversation) {
@@ -569,10 +578,11 @@ function messagesClient(config) {
       if (log.scrollHeight - log.scrollTop - log.clientHeight > 80) return
       hideJump()
       const latest = state.threads.get(id)?.items.filter(item => !item.pending).at(-1)
-      if (!conversation.unreadCount && conversation.lastReadAt && latest && conversation.lastReadAt >= latest.createdAt) return
+      // A conversation marked unread is always read again on open, which clears the mark in OpenChat.
+      if (!conversation.unreadCount && !conversation.markedUnread && conversation.lastReadAt && latest && conversation.lastReadAt >= latest.createdAt) return
       try {
         const value = await api(`/conversations/${encodeURIComponent(id)}/read`, {})
-        conversation.unreadCount = 0; conversation.lastReadAt = value.lastReadAt
+        conversation.unreadCount = 0; conversation.markedUnread = false; conversation.lastReadAt = value.lastReadAt
         state.readMaps.set(id, { ...(state.readMaps.get(id) || {}), ...value.readMap })
         renderList(); updateUnread(); if (state.open === id) renderMessages()
       } catch { /* Read state catches up on the next visit. */ }
@@ -660,7 +670,7 @@ function messagesClient(config) {
       api(`/conversations/${encodeURIComponent(value.conversationId)}/messages`).then(page => { const thread = state.threads.get(value.conversationId); if (!thread) return; for (const fresh of page.messages) { const item = thread.items.find(entry => entry.id === fresh.id); if (item) item.linkPreviews = fresh.linkPreviews } if (state.open === value.conversationId) renderMessages() }).catch(() => {})
     })
     on('reactions', value => { const item = state.threads.get(value.conversationId)?.items.find(entry => entry.id === value.messageId); if (!item) return; const mine = new Map(item.reactions.map(reaction => [reaction.emoji, reaction.byMe])); item.reactions = value.reactions.map(reaction => ({ ...reaction, byMe: Boolean(mine.get(reaction.emoji)) })); if (state.open === value.conversationId) renderMessages() })
-    on('read', value => { state.readMaps.set(value.conversationId, { ...(state.readMaps.get(value.conversationId) || {}), ...value.readMap }); if (value.userId === state.me) { const conversation = state.conversations.get(value.conversationId); if (conversation) { conversation.unreadCount = 0; conversation.lastReadAt = value.lastReadAt || conversation.lastReadAt; renderList(); updateUnread() } } if (state.open === value.conversationId) renderMessages() })
+    on('read', value => { state.readMaps.set(value.conversationId, { ...(state.readMaps.get(value.conversationId) || {}), ...value.readMap }); if (value.userId === state.me) { const conversation = state.conversations.get(value.conversationId); if (conversation) { conversation.unreadCount = 0; conversation.markedUnread = false; state.markedUnread.delete(conversation.id); conversation.lastReadAt = value.lastReadAt || conversation.lastReadAt; renderList(); updateUnread() } } if (state.open === value.conversationId) renderMessages() })
     on('typing', value => {
       if (value.userId === state.me) return
       let entries = state.typing.get(value.conversationId)

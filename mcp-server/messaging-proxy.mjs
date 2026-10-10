@@ -62,6 +62,7 @@ export function projectConversation(value) {
     lastMessage: last ? { id: last.id, senderId: validId(last.senderId) ? last.senderId : null, content: text(last.content, 280), createdAt: iso(last.createdAt) } : null,
     participants: array(value.participants).map(entry => { const user = projectUser(entry?.user); return user ? { ...user, role: entry.role === 'owner' ? 'owner' : 'member' } : null }).filter(Boolean).slice(0, 200),
     unreadCount: count(value.unreadCount),
+    markedUnread: bool(value.markedUnread),
     lastReadAt: iso(value.lastReadAt),
     mutedUntil: mute(value.mutedUntil),
     containsBot: bool(value.containsBot),
@@ -115,7 +116,7 @@ const invalid = () => new MessagingError(400, 'invalid_input')
  * `createMessagingSession(session)` is the existing confidential exchange in
  * messaging.mjs: it returns `{ token, user: { userId } }` for the session's live owner.
  */
-export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true } = {}) {
+export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null } = {}) {
   const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map()
   const ownerKey = session => session?.owner?.ownerId
   const trim = (map, limit) => { while (map.size > limit) map.delete(map.keys().next().value) }
@@ -188,7 +189,21 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
 
   async function listConversations(session) {
     const { value, credential } = await upstream(session, 'GET', '/api/chat/conversations')
-    return { me: { id: credential.userId }, conversations: array(value).map(projectConversation).filter(Boolean).slice(0, 500) }
+    const conversations = array(value).map(projectConversation).filter(Boolean).slice(0, 500)
+    // "View on Unlinked": public profile ids of partners who claimed a published
+    // Unlinked profile. Bounded; a slow or failed lookup only omits the links.
+    if (typeof profilesForParticipants === 'function') {
+      const others = [...new Set(conversations.flatMap(conversation => conversation.participants.map(person => person.id)).filter(id => id !== credential.userId))]
+      const profiles = others.length ? await Promise.race([profilesForParticipants(session, others).catch(() => null), new Promise(resolve => { const timer = setTimeout(resolve, 2500, null); timer.unref?.() })]) : null
+      if (profiles instanceof Map) for (const conversation of conversations) for (const person of conversation.participants) { const profileId = profiles.get(person.id); if (typeof profileId === 'string' && profileId) person.profileId = profileId }
+    }
+    return { me: { id: credential.userId }, conversations }
+  }
+
+  async function markUnread(session, conversationId) {
+    await upstream(session, 'PATCH', `/api/chat/conversations/${encodeURIComponent(conversationId)}/unread`)
+    invalidateBadge(session)
+    return { conversationId, markedUnread: true }
   }
 
   async function listMessages(session, conversationId, before) {
@@ -544,11 +559,12 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     if (keys.length) throw invalid()
     if (path === '/attachments') { spend(session, 'upload'); return [201, await uploadAttachment(request, session)] }
     const input = await readJson(request)
-    if ((match = /^\/conversations\/([^/]+)\/(messages|read|mute|typing|focus)$/.exec(path)) && validId(match[1])) {
+    if ((match = /^\/conversations\/([^/]+)\/(messages|read|unread|mute|typing|focus)$/.exec(path)) && validId(match[1])) {
       const [, id, action] = match
       if (action === 'typing') { spend(session, 'typing'); only(input, ['active']); if (typeof input.active !== 'boolean') throw invalid(); return [200, typing(session, id, input.active)] }
       if (action === 'focus') { spend(session, 'read'); only(input, []); return [200, focus(session, id)] }
       if (action === 'read') { spend(session, 'read'); only(input, []); return [200, await markRead(session, id)] }
+      if (action === 'unread') { spend(session, 'write'); only(input, []); return [200, await markUnread(session, id)] }
       spend(session, 'write')
       if (action === 'messages') return [201, await send(session, id, only(input, ['content', 'clientId', 'replyToId', 'attachments']))]
       only(input, ['mutedUntil']); if (!Object.hasOwn(input, 'mutedUntil')) throw invalid()

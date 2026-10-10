@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { createMessagingHandler, createMessagingResolver, IDEAFLOW_ISSUER, MESSAGING_PATH } from '../mcp-server/messaging.mjs'
+import { createMessagingHandler, createMessagingIdentities, createMessagingResolver, IDEAFLOW_ISSUER, MESSAGING_PATH } from '../mcp-server/messaging.mjs'
 
 const owner = { ownerId:'private-owner', userId:'private-user' }
 const identity = { issuer:IDEAFLOW_ISSUER, subject:'private-subject' }
@@ -41,4 +41,15 @@ test('missing service configuration and resolver outages return availability err
   handler=createMessagingHandler({origin:endpoint.replace('http:','https:'),secret:'s'.repeat(40),resolveRecipient:async()=>{throw Error('offline')}})
   const response=await fetch(endpoint+MESSAGING_PATH,{method:'POST',headers:{Authorization:`Bearer ${'s'.repeat(40)}`},body:JSON.stringify({profileId:'person'})})
   assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'messaging_unavailable'})
+})
+
+test('partner identity lookup sends only the member identity and valid ids, and keeps only requested, well-formed answers', async () => {
+  let sent
+  const lookup = createMessagingIdentities({ secret: 's'.repeat(40), identityForOwner: async value => { assert.deepEqual(value, owner); return identity }, fetchImpl: async (url, options) => { sent = { url, options }
+    return new Response(JSON.stringify({ identities: [{ userId: 'oc-a', issuer: IDEAFLOW_ISSUER, subject: 'a' }, { userId: 'not-requested', issuer: IDEAFLOW_ISSUER, subject: 'x' }, { userId: 'oc-b', issuer: 'https://evil.invalid', subject: 'b' }] })) } })
+  assert.deepEqual(await lookup({ owner }, ['oc-a', 'oc-a', 'oc-b', '../bad']), [{ userId: 'oc-a', issuer: IDEAFLOW_ISSUER, subject: 'a' }])
+  assert.equal(sent.url, 'https://chat.ideaflow.app/api/unlinked/identities'); assert.equal(sent.options.redirect, 'error')
+  assert.deepEqual(JSON.parse(sent.options.body), { issuer: IDEAFLOW_ISSUER, subject: 'private-subject', userIds: ['oc-a', 'oc-b'] })
+  assert.deepEqual(await createMessagingIdentities({ secret: 's'.repeat(40), identityForOwner: async () => identity, fetchImpl: async () => { throw Error('must not call') } })({ owner }, ['../bad']), [])
+  await assert.rejects(createMessagingIdentities({ identityForOwner: async () => identity })({ owner }, ['oc-a']))
 })

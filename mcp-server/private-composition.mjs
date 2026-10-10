@@ -3,7 +3,7 @@ import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
 import { createOpenChatConnectionSync, createNeo4jOpenChatSyncStore } from './openchat-connections.mjs'
 import { validTimestamp } from '../src/utils/network-order.mjs'
-import { createMessagingResolver, createMessagingSession } from './messaging.mjs'
+import { createMessagingResolver, createMessagingSession, createMessagingIdentities } from './messaging.mjs'
 
 import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
@@ -532,6 +532,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       messagingSecret: process.env.UNLINKED_MESSAGING_SECRET || undefined,
       resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }),
       createMessagingSession: createMessagingSession({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
+      messagingIdentities: createMessagingIdentities({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
       // Read-only Ideaflow people overlay (docs/private-context.md): the owner's
       // own notes and relations, fetched from Noos with an app assertion for the
       // owner's verified Ideaflow identity. Off unless runtime.env sets

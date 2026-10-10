@@ -153,7 +153,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {} }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -181,7 +181,53 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map(), pickerBudgets = new Map()
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
-  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...messagingOptions }) : null
+  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args) } : {}), ...messagingOptions }) : null
+  // "View on Unlinked" for conversation partners (docs/openchat-message.md):
+  // OpenChat names which of the member's own partners have a shared Ideaflow
+  // identity; that identity's owner links only if they claimed a published
+  // profile that shows as a member. Read-only; cached 10 minutes per member.
+  const participantProfiles = new Map(), participantLookups = new Map(), participantBackoff = new Map()
+  async function profilesForParticipants(session, userIds) {
+    // One lookup in flight per member; after a failure, wait 30 s before asking OpenChat again.
+    const key = session.owner.ownerId
+    if (participantLookups.has(key)) return participantLookups.get(key)
+    if (Date.now() - (participantBackoff.get(key) ?? 0) < 30000) {
+      // During the backoff, links already known stay; nothing new is asked.
+      const known = new Map(), cache = participantProfiles.get(key)
+      for (const id of userIds) { const hit = cache?.get(id); if (hit?.profileId && Date.now() - hit.at < 10 * 60000) known.set(id, hit.profileId) }
+      return known
+    }
+    const pending = lookupParticipantProfiles(session, userIds).catch(error => { participantBackoff.set(key, Date.now()); while (participantBackoff.size > 500) participantBackoff.delete(participantBackoff.keys().next().value); throw error }).finally(() => participantLookups.delete(key))
+    participantLookups.set(key, pending)
+    return pending
+  }
+  async function lookupParticipantProfiles(session, userIds) {
+    const key = session.owner.ownerId, now = Date.now(), found = new Map(), missing = []
+    let cache = participantProfiles.get(key)
+    if (!cache) { cache = new Map(); participantProfiles.set(key, cache); while (participantProfiles.size > 500) participantProfiles.delete(participantProfiles.keys().next().value) }
+    for (const id of userIds) { const hit = cache.get(id); if (hit && now - hit.at < 10 * 60000) { if (hit.profileId) found.set(id, hit.profileId) } else missing.push(id) }
+    if (!missing.length) return found
+    const identities = await messagingIdentities(session, missing)
+    const owned = new Map(), uncertain = new Set()
+    for (let index = 0; index < identities.length; index += 8) {
+      await Promise.all(identities.slice(index, index + 8).map(async identity => {
+        try {
+          // resolveOwner may answer synchronously (null for another issuer) or with a promise.
+          const owner = await Promise.resolve().then(() => resolveOwner({ issuer: identity.issuer, subject: identity.subject }))
+          const profileId = owner && typeof ownProfileId === 'function' ? await ownProfileId(owner) : null
+          if (typeof profileId === 'string' && profileId) owned.set(identity.userId, profileId)
+        } catch { uncertain.add(identity.userId) /* A transient error is not cached as "no profile". */ }
+      }))
+    }
+    const summaries = owned.size && typeof readPublishedSnapshot === 'function' ? await publicReader.lookup({ ids: [...new Set(owned.values())] }) : new Map()
+    for (const id of missing) {
+      const summary = owned.has(id) ? summaries.get(owned.get(id)) : null
+      const profileId = summary?.presence === 'member' && typeof summary.id === 'string' ? summary.id : null
+      if (!uncertain.has(id)) { cache.set(id, { profileId, at: now }); while (cache.size > 2000) cache.delete(cache.keys().next().value) }
+      if (profileId) found.set(id, profileId)
+    }
+    return found
+  }
   let invitationWindow = 0, invitationRequests = 0, contactWindow = 0, contactRequests = 0, unsubscribeWindow = 0, unsubscribeRequests = 0
   // A member stays signed in on this browser until they sign out or the runtime restarts.
   const SESSION_SECONDS = 30 * 24 * 60 * 60, SESSION_CAPACITY = 5000
