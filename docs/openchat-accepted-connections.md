@@ -7,6 +7,8 @@ synchronization, the chat appears on the next chat-list load unless the receiver
 suppresses the event as described below. Synchronization does not insert a message,
 send push/email, or create an unread notification; existing Unlinked acceptance
 notifications follow [member-connections.md](member-connections.md#notifications-mcp-servermember-notificationsmjs).
+Opening an acceptance notification goes to that person's direct conversation in
+Unlinked Messages (`/messages?profile=…`, resolved on the server; nothing is sent).
 A person still presses Send to
 message the other person. This is not an OpenChat friendship grant and does not
 expand friends-only Context access or publish private profile/contact data.

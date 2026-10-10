@@ -83,6 +83,25 @@ delegation.
 - The header **Messages** count is OpenChat's unread total, cached 15 s per
   member (failures 60 s) and bounded like the other header counts.
 
+## Inbox and thread features
+
+`mcp-server/messages-client.mjs` (vanilla JS, `textContent` only) provides:
+inbox filter (`/` focuses it) and an unread-first toggle; **New message**, a
+picker over your connections who are on Unlinked (`/messages/api/people`:
+public profile ids, names and headlines only; browser session, same origin,
+20 reads/minute); reactions from OpenChat's allowlist; reply with a quoted
+chip that jumps to the original; edit (also ↑ in an empty composer) and
+delete your own messages; copy; typing indicators (expire after 6 s; sent
+only into a joined room); presence and last seen; Sent/Seen; drafts per
+conversation; a header menu with mute (1 h, 8 h, until unmuted), local
+**Mark as unread**, **Enter sends** and Open in OpenChat; **View on Unlinked**
+when the thread was opened from a profile (the profile id travels in the URL
+fragment, never to a server); a "↓ New messages" chip; offline banner with
+automatic retry of failed sends; and keyboard navigation (arrow keys in the
+list, Alt+↑/↓ between conversations, Esc to clear a reply or cancel an edit).
+Drafts, preferences and profile links stay in this browser's localStorage.
+Notifications for accepted connection requests open the direct conversation.
+
 LinkedIn messaging remains plan-only; the coordinated OpenChat repository owns
 `docs/linkedin-messaging-plan.md` (Unipile, Beeper, and existing bridge options).
 
