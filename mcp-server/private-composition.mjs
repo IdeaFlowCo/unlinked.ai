@@ -100,7 +100,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // Automatic sign-in kill switch: UNLINKED_AUTO_SIGNIN=off.
   autoSignInEnv = process.env, diagnosticsEnv = process.env,
   // Private context from the Ideaflow people overlay: NOOS_OVERLAY_APP_UNLINKED_SECRET, NOOS_OVERLAY_URL.
-  overlayEnv = process.env }) {
+  overlayEnv = process.env,
+  // Shared public index freshness window: a build this young is served as-is,
+  // so page views do not each rebuild the index. Revocations and publications
+  // reach anonymous and member pages within the window plus one build.
+  // UNLINKED_PUBLIC_INDEX_FRESH_MS=0 restores next-request rebuilds.
+  publicIndexEnv = process.env }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : ((networkMode === 'isolated-container' && bolt.hostname === 'graph') || (networkMode === 'shared-noos' && bolt.hostname === 'noos_neo4j')) && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -407,8 +412,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       return rows
     }
     let legacyDetails = null
+    const publicIndexFreshMs = publicIndexEnv.UNLINKED_PUBLIC_INDEX_FRESH_MS === undefined ? 20000 : Number(publicIndexEnv.UNLINKED_PUBLIC_INDEX_FRESH_MS)
+    if (!Number.isSafeInteger(publicIndexFreshMs) || publicIndexFreshMs < 0 || publicIndexFreshMs > 300000) throw new Error('private_composition_configuration_required')
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLookup?.list,
-      includeDetails: true,
+      includeDetails: true, freshMs: publicIndexFreshMs,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')
         const digest = snapshot?.revision?.match(/^legacy-public-v1:([a-f0-9]{64})$/)?.[1]

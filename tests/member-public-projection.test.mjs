@@ -120,3 +120,35 @@ test('an account that published several imports keeps one member profile: the ne
   // The older import's connection now hangs off the account's one profile.
   assert.ok(result.connections.some(edge => edge.fromId === 'member-import-' + newer && edge.toId === 'public-' + 'a'.repeat(64)))
 })
+
+test('a fresh index serves page views without re-reading sources; expiry, revocation and empty builds restore live reads', async () => {
+  let clock = 0, discovers = 0, items = [{ id, owner: { ownerId: 'bound-owner', userId: 'bound-user' }, revision: 4 }]
+  let legacySnapshot = legacy
+  const cached = projectPublicMemberImport({ job, assertions })
+  const read = createMemberPublicIndex({ freshMs: 20000, now: () => clock,
+    readLegacy: async () => legacySnapshot, discover: async () => { discovers++; return items },
+    getBackend: async () => ({ readResource: async () => ({ sourceId: id, sourceOwnerId: 'bound-owner', sourceRevision: 4, payload: job }) }),
+    publicPeople: { read: async dataset => dataset === ENRICHMENT_DATASET ? null : cached } })
+  const first = await read()
+  assert.equal(first.profiles.length, 3); assert.equal(discovers, 2)
+  // Every page view inside the window reuses the kept build and reads nothing.
+  items = []
+  const held = await read()
+  assert.equal(held, first); assert.equal(discovers, 2)
+  // Expiry makes the revocation visible on the next read.
+  clock = 20000
+  const rebuilt = await read()
+  assert.deepEqual(rebuilt.profiles, legacy.profiles); assert.equal(discovers, 4)
+  // An empty build is not kept, and it drops the kept one: a revoked legacy
+  // publication never serves from the window.
+  clock = 40000
+  legacySnapshot = null
+  assert.equal(await read(), null)
+  legacySnapshot = legacy
+  assert.notEqual(await read(), null); assert.equal(discovers, 6)
+  // Reads that overlap a build still share it.
+  clock = 80000
+  const [one, two] = await Promise.all([read(), read()])
+  assert.equal(one, two); assert.equal(discovers, 8)
+  for (const freshMs of [-1, 0.5, 300001]) assert.throws(() => createMemberPublicIndex({ freshMs, readLegacy: async () => legacy, discover: async () => [], publicPeople: { read: async () => null } }), /public_member_index_freshness_invalid/)
+})
