@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 // Progressive enhancement only: forms still POST and redirect without JavaScript.
 // Served as a fixed asset authorized by the existing per-response nonce.
 export function installConnectionFeedback() {
@@ -68,3 +69,6 @@ export function installConnectionFeedback() {
   document.addEventListener('visibilitychange', refresh)
 }
 export const CONNECTION_FEEDBACK_SCRIPT = `;(${installConnectionFeedback.toString()})();`
+// Content-versioned address: cached as immutable, so pages never refetch it.
+export const CONNECTION_FEEDBACK_VERSION = createHash('sha256').update(CONNECTION_FEEDBACK_SCRIPT).digest('hex').slice(0, 16)
+export const CONNECTION_FEEDBACK_SRC = `/public-assets/connection-feedback.js?v=${CONNECTION_FEEDBACK_VERSION}`

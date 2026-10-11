@@ -106,3 +106,18 @@ test('whoami counts a recovered legacy archive as an import (importCount was 0 w
   const other = (await service.call({ grant: grantFor(stranger), name: 'unlinked_whoami', input: {} })).result
   assert.equal(other.importCount, 0)
 })
+
+test('lookups share the published source’s compiled index instead of rebuilding it on every call', async () => {
+  let reads = 0
+  const profile = { id: 'pub-ada', headline: 'Public headline', positions: [], education: [], skills: [] }
+  Object.defineProperty(profile, 'name', { enumerable: true, get: () => { reads++; return 'Published pub-ada' } })
+  const source = async () => ({ state: 'published', complete: true, revision: 'compiled-once-v1', connections: [], profiles: [profile] })
+  source.revisionIdentifiesContent = true
+  const shared = createAccountToolService({ getBackend: async who => backendFor(who), readPublishedSnapshot: source })
+  const call = () => shared.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { profileId: 'pub-ada' } })
+  await call()
+  const afterFirst = reads
+  assert.ok(afterFirst > 0)
+  await call(); await call()
+  assert.equal(reads, afterFirst)
+})

@@ -192,12 +192,17 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   const publicReader = pageSize => {
     if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
     const captured = { revision: null, total: null }
-    const reader = createPublicPeopleReader({ pageSize, readPublishedSnapshot: async options => {
+    const observe = async options => {
       const value = await readPublishedSnapshot(options)
       captured.revision = typeof value?.revision === 'string' ? value.revision : null
       captured.total = Array.isArray(value?.profiles) ? value.profiles.length : null
       return value
-    } })
+    }
+    // Share the source's compiled index: building it blocks the event loop for
+    // seconds on the full public index, and this runs on every profile view
+    // (private context) and agent call.
+    observe.compiledSource = readPublishedSnapshot
+    const reader = createPublicPeopleReader({ pageSize, readPublishedSnapshot: observe })
     return { reader, captured }
   }
   // With q/mode already schema-validated, a reader 400 under a supplied cursor

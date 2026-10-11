@@ -118,9 +118,12 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       })
       const value = await Promise.race([Promise.resolve().then(() => readPublishedSnapshot({ maxProfiles, maxConnections, maxTextBytes, signal: combined, viewer })), interruption])
       if (!plain(value) || value.state !== 'published' || value.complete !== true || !revisionValid(value.revision) || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !dense(value.profiles) || !Array.isArray(value.connections) || value.connections.length > maxConnections || !dense(value.connections)) unavailable()
-      const cacheable = viewer === null && readPublishedSnapshot.revisionIdentifiesContent === true && plain(value) && revisionValid(value.revision)
+      // A wrapper that only observes the source names it (`compiledSource`), so
+      // its readers share the source's compiled index instead of rebuilding it.
+      const source = typeof readPublishedSnapshot.compiledSource === 'function' ? readPublishedSnapshot.compiledSource : readPublishedSnapshot
+      const cacheable = viewer === null && source.revisionIdentifiesContent === true && plain(value) && revisionValid(value.revision)
       const cacheKey = cacheable ? [value.revision, maxProfiles, maxConnections, maxTextBytes].join('\u0000') : null
-      if (cacheable && compiled.get(readPublishedSnapshot)?.key === cacheKey) return compiled.get(readPublishedSnapshot).data
+      if (cacheable && compiled.get(source)?.key === cacheKey) return compiled.get(source).data
       let textBytes = 0
       const text = (input, required = false, nonempty = false) => {
         if (input === undefined && !required) return undefined
@@ -198,7 +201,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
-      if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(readPublishedSnapshot, { key: cacheKey, data }) }
+      if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
     } catch {
       unavailable()
