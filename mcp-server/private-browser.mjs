@@ -1604,8 +1604,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       }
       const notificationItem = url.pathname.match(/^\/notifications\/([0-9a-f-]{36})$/)
       if (signup && notifications && request.method === 'GET' && notificationItem) {
+        // `?to=profile` (the name and photo on the feed) opens the person's profile instead.
+        const toProfile = url.search === '?to=profile'
         const item = await notifications.open(session.owner, notificationItem[1])
-        redirect(response, item ? notificationTarget(item) : '/notifications'); return
+        redirect(response, !item ? '/notifications' : toProfile && item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : notificationTarget(item)); return
       }
       if (signup && notifications && request.method === 'POST' && url.pathname === '/notifications/read-all') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))

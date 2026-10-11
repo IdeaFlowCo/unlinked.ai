@@ -229,10 +229,15 @@ test('views: escaped names, inline answers, header badges only for configured fe
   assert.match(sentTab, /Sent 1m · Pending/); assert.match(sentTab, /action="\/connections\/withdraw".*?name="id" value="s1"/)
   const items = [{ id: 'n1', kind: 'connection_request_received', actorName: 'Ada <L>', subjectId: 'r1', createdAt: now - 1000, read: false }, { id: 'n2', kind: 'connection_request_received', actorName: 'Old', subjectId: 'gone', createdAt: now - 9 * 86400000, read: true }, { id: 'n3', kind: 'mystery', actorName: 'x', createdAt: now }]
   const feed = renderNotifications({ csrf: 'tok', now, items, pending: new Map([['r1', {}]]), pendingCount: 1 }).content
-  assert.match(feed, /<li class="note unread"><a class="note-open" href="\/notifications\/n1">.*?<b>Ada &lt;L&gt;<\/b> wants to connect with you<span class="vh"> \(unread\)<\/span>/)
+  assert.match(feed, /<li class="note unread"><div class="note-row">.*?<b>Ada &lt;L&gt;<\/b> wants to connect with you<span class="vh"> \(unread\)<\/span>.*?<a class="note-open" href="\/notifications\/n1">/)
+  // With a profile, the name and photo open it (through the item, which marks it read).
+  const linked = renderNotifications({ csrf: 'tok', now, items: [{ id: 'n5', kind: 'connection_request_accepted', actorName: 'Felipe', actorProfileId: 'felipe-profile', createdAt: now - 1000, read: false }] }).content
+  assert.match(linked, /<a class="note-face" href="\/notifications\/n5\?to=profile" tabindex="-1" aria-hidden="true">/)
+  assert.match(linked, /<a class="note-person" href="\/notifications\/n5\?to=profile"><b>Felipe<\/b><\/a> accepted your invitation/)
+  assert.doesNotMatch(feed, /class="note-person"/)
   assert.equal((feed.match(/action="\/connections\/respond"/g) ?? []).length, 1)
   assert.match(feed, /Mark all as read/); assert.match(feed, /1 pending invitation</); assert.doesNotMatch(feed, /mystery|n3/)
-  assert.match(feed, /<li class="note"><a class="note-open" href="\/notifications\/n2">/)
+  assert.match(feed, /<li class="note"><div class="note-row">.*?<a class="note-open" href="\/notifications\/n2">/)
   assert.doesNotMatch(renderNotifications({ csrf: 'tok', items: [] }).content, /Mark all as read|pending invitation/)
   // An answered request that became a connection says so instead of still asking.
   const answered = renderNotifications({ csrf: 'tok', now, items: [{ id: 'n4', kind: 'connection_request_received', actorName: 'Lin', subjectId: 'r9', createdAt: now - 1000, read: true }], connected: new Set(['r9']) }).content
@@ -328,7 +333,7 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   assert.match(home.text, /<a href="\/people\/jacob-profile"><b>Jacob Cole<\/b><\/a> wants to connect/); assert.match(home.text, /<q>Loved your talk<\/q>/)
   assert.doesNotMatch(home.text, /jacob@example/)
   const feed = await get('/notifications', her)
-  assert.match(feed.text, /<li class="note unread">.*?<b>Jacob Cole<\/b> wants to connect with you/)
+  assert.match(feed.text, /<li class="note unread">.*?<a class="note-person" href="\/notifications\/[0-9a-f-]{36}\?to=profile"><b>Jacob Cole<\/b><\/a> wants to connect with you/)
   const requestId = feed.text.match(/action="\/connections\/respond"><input type="hidden" name="csrf" value="[^"]+"><input type="hidden" name="id" value="([^"]+)"/)[1]
   assert.match(feed.text, /aria-label="Notifications"/) // opening the feed clears the bell for this view
   assert.match((await get('/notifications', her)).text, /aria-label="Notifications">/)
@@ -348,12 +353,13 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   assert.match((await get('/people/ada-profile', me)).text, /✓ Connected/)
   // Ada's own feed now shows the request as answered, with no buttons left.
   const herFeed = (await get('/notifications', her)).text
-  assert.match(herFeed, /<b>Jacob Cole<\/b> is now connected with you.*?class="note-state">Connected</)
+  assert.match(herFeed, /<b>Jacob Cole<\/b><\/a> is now connected with you.*?class="note-state">Connected</)
   assert.doesNotMatch(herFeed, /action="\/connections\/respond"/)
   const jacobFeed = await get('/notifications', me)
-  assert.match(jacobFeed.text, /<b>Ada Lovelace<\/b> accepted your invitation to connect/)
+  assert.match(jacobFeed.text, /<b>Ada Lovelace<\/b><\/a> accepted your invitation to connect/)
   const acceptedItem = jacobFeed.text.match(/href="\/notifications\/([0-9a-f-]{36})"/)[1]
   assert.equal((await get(`/notifications/${acceptedItem}`, me)).location, '/people/ada-profile')
+  assert.equal((await get(`/notifications/${acceptedItem}?to=profile`, me)).location, '/people/ada-profile')
   assert.equal((await post('/notifications/read-all', me, {})).headers.get('location'), '/notifications')
   assert.doesNotMatch((await get('/notifications', me)).text, /Mark all as read/)
 })
