@@ -41,6 +41,12 @@ export function projectPublicMemberImport({ job, assertions, includeDetails = fa
 // Keyed by existing legacy profile id; never adds people or edges, and a linked
 // member's own upload still wins over it.
 export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
+// Bulk enrichment is split across shard datasets because the Noos public store
+// caps each published snapshot at 8 MiB. Shards apply first and the primary
+// dataset (fresher per-person reads) last, so on the same id the primary wins.
+export const ENRICHMENT_SHARD_DATASETS = Object.freeze(['curated-enrichment-exa-1', 'curated-enrichment-exa-2', 'curated-enrichment-exa-3', 'curated-enrichment-exa-4'])
+export const ENRICHMENT_DATASETS = Object.freeze([...ENRICHMENT_SHARD_DATASETS, ENRICHMENT_DATASET])
+const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.length > 0 && datasets.every((value, index) => ENRICHMENT_DATASETS.includes(value) && datasets.indexOf(value) === index) && datasets.at(-1) === ENRICHMENT_DATASET
 
 // Private-process-only bridge. Discovery returns bound IDs, then each source
 // is read again through the existing owner-authorized immutable publication.
@@ -56,7 +62,8 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // refresh runs behind it, so no page view pays the rebuild in-band. A failed
 // refresh drops the kept build (fail closed, like the suggest reader). 0
 // disables it; past `staleMs` a read waits for the rebuild.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, freshMs = 0, staleMs = 0, now = Date.now }) {
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], freshMs = 0, staleMs = 0, now = Date.now }) {
+  if (!validEnrichmentDatasets(enrichmentDatasets)) throw Error('public_enrichment_datasets_invalid')
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
   if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
   let work = null, kept = null
@@ -71,10 +78,11 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
     if (!Array.isArray(items) || items.length > 1000) throw Error('public_member_import_limit')
     const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision, ...(includeDetails ? ['profile-details-v1', hash(JSON.stringify(legacy.profiles))] : [])], linkedChecks = [], overlays = new Map(), members = new Set(), ownerImports = new Map()
-    const enrichment = await publicPeople.read(ENRICHMENT_DATASET)
-    if (enrichment) {
-      if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(ENRICHMENT_DATASET + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length) throw Error('public_enrichment_invalid')
-      const positions = new Map(profiles.map((value, index) => [value.id, index]))
+    const positions = new Map(profiles.map((value, index) => [value.id, index]))
+    for (const dataset of enrichmentDatasets) {
+      const enrichment = await publicPeople.read(dataset)
+      if (!enrichment) continue
+      if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(dataset + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length) throw Error('public_enrichment_invalid')
       for (const row of enrichment.profiles) {
         const index = positions.get(row.id)
         if (index !== undefined) {

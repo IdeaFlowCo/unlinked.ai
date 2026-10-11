@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ENRICHMENT_DATASET } from '../src/utils/public-people/member-projection.mjs'
+import { ENRICHMENT_DATASET, ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 import { operatorBoltUrl } from './operator-bolt-url.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -13,7 +13,8 @@ const allow = (value, allowed, required) => value !== null && typeof value === '
 // Rows come from a reviewed offline operator source;
 // this validates the same shape the public store and reader enforce, so a bad
 // rows file fails here in plan mode instead of at the graph.
-export function prepareEnrichmentSnapshot(bytes) {
+export function prepareEnrichmentSnapshot(bytes, dataset = ENRICHMENT_DATASET) {
+  if (!ENRICHMENT_DATASETS.includes(dataset)) throw new Error('enrichment_dataset_unknown')
   if (!Buffer.isBuffer(bytes) || bytes.length > 8 * 1024 * 1024) throw new Error('enrichment_rows_file_required')
   const rows = JSON.parse(bytes.toString('utf8'))
   if (!Array.isArray(rows) || !rows.length || rows.length > 5000) throw new Error('enrichment_rows_invalid')
@@ -28,22 +29,22 @@ export function prepareEnrichmentSnapshot(bytes) {
     if (!Array.isArray(row.skills) || row.skills.length > 500 || !row.skills.every(value => text(value, true))) throw new Error('enrichment_rows_invalid')
   }
   const profiles = JSON.parse(JSON.stringify(rows))
-  return { snapshot: { state: 'published', complete: true, revision: ENRICHMENT_DATASET + ':' + hash(JSON.stringify(profiles)), profiles, connections: [] }, sourceSha256: hash(bytes) }
+  return { snapshot: { state: 'published', complete: true, revision: dataset + ':' + hash(JSON.stringify(profiles)), profiles, connections: [] }, sourceSha256: hash(bytes) }
 }
 
 // Offline reviewed operator publisher only, like publish-legacy-people.mjs:
 // never an HTTP/upload handler and never infers a login/owner. Every row id
 // must already exist in the published legacy dataset — enrichment refreshes
 // people, it never adds them.
-export async function publishEnrichmentPeople({ rowsPath, root, execute = false }) {
+export async function publishEnrichmentPeople({ rowsPath, root, execute = false, dataset = ENRICHMENT_DATASET }) {
   if (root !== '/srv/unlinked-private-guest-pilot-20261001' || resolve(rowsPath) !== rowsPath || !rowsPath.startsWith(root + '/')) throw new Error('explicit_private_enrichment_target_required')
   for (const [path, directory] of [[root, true], [rowsPath, false]]) {
     const state = await lstat(path)
     if (state.isSymbolicLink() || (directory ? !state.isDirectory() : !state.isFile()) || state.uid !== process.getuid() || (state.mode & 0o077)) throw new Error('private_enrichment_source_required')
   }
   const bytes = await readFile(rowsPath)
-  const { snapshot, sourceSha256 } = prepareEnrichmentSnapshot(bytes)
-  const receipt = { kind: 'curated-enrichment-publication', dataset: ENRICHMENT_DATASET, rowsPath, sourceSha256, revision: snapshot.revision, profiles: snapshot.profiles.length, snapshotSha256: hash(JSON.stringify(snapshot)) }
+  const { snapshot, sourceSha256 } = prepareEnrichmentSnapshot(bytes, dataset)
+  const receipt = { kind: 'curated-enrichment-publication', dataset, rowsPath, sourceSha256, revision: snapshot.revision, profiles: snapshot.profiles.length, snapshotSha256: hash(JSON.stringify(snapshot)) }
   if (!execute) return { ...receipt, status: 'PLANNED_NO_WRITES' }
   if (!process.env.NOOS_PRIVATE_PASSWORD) throw new Error('private_graph_configuration_required')
   const require = createRequire(join(root, 'runtime/noos/package.json')), neo4j = require('neo4j-driver')
@@ -56,20 +57,22 @@ export async function publishEnrichmentPeople({ rowsPath, root, execute = false 
     const known = new Set(legacy.profiles.map(value => value.id))
     const unknown = snapshot.profiles.filter(value => !known.has(value.id)).map(value => value.id)
     if (unknown.length) throw new Error('enrichment_unknown_profile_ids:' + unknown.slice(0, 5).join(','))
-    const current = await store.read(ENRICHMENT_DATASET)
-    const result = await store.publish(ENRICHMENT_DATASET, snapshot, sourceSha256, current?.revision ?? null)
-    const stored = await store.read(ENRICHMENT_DATASET)
+    const current = await store.read(dataset)
+    const result = await store.publish(dataset, snapshot, sourceSha256, current?.revision ?? null)
+    const stored = await store.read(dataset)
     if (!stored || hash(JSON.stringify(stored)) !== receipt.snapshotSha256 || stored.profiles.length !== snapshot.profiles.length) throw new Error('enrichment_readback_failed')
     // Revoking the live revision deletes the dataset pointer, so rollback
     // removes the whole overlay and the legacy rows show again.
-    const report = { ...receipt, at: new Date().toISOString(), status: 'PUBLISHED_COMPLETE', replayed: result.replayed, previousRevision: current?.revision ?? null, rollback: { operation: 'UnlinkedPublicPeopleStore.revoke', dataset: ENRICHMENT_DATASET, revision: snapshot.revision } }
+    const report = { ...receipt, at: new Date().toISOString(), status: 'PUBLISHED_COMPLETE', replayed: result.replayed, previousRevision: current?.revision ?? null, rollback: { operation: 'UnlinkedPublicPeopleStore.revoke', dataset, revision: snapshot.revision } }
     await writeFile(join(root, 'audit', 'curated-enrichment-' + Date.now() + '.json'), JSON.stringify(report, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
     return report
   } finally { await driver.close() }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2)
-  if (args.length < 2 || args.length > 3 || (args[2] !== undefined && args[2] !== '--execute')) throw new Error('usage_rowsPath_root_execute')
-  console.log(JSON.stringify(await publishEnrichmentPeople({ rowsPath: args[0], root: args[1], execute: args[2] === '--execute' })))
+  // usage: rowsPath root [--dataset=<one of ENRICHMENT_DATASETS>] [--execute]
+  const [rowsPath, root, ...flags] = process.argv.slice(2)
+  const dataset = flags.find(flag => flag.startsWith('--dataset='))?.slice('--dataset='.length) ?? ENRICHMENT_DATASET
+  if (!rowsPath || !root || flags.some(flag => flag !== '--execute' && !flag.startsWith('--dataset=')) || new Set(flags.map(flag => flag.split('=')[0])).size !== flags.length) throw new Error('usage_rowsPath_root_dataset_execute')
+  console.log(JSON.stringify(await publishEnrichmentPeople({ rowsPath, root, dataset, execute: flags.includes('--execute') })))
 }

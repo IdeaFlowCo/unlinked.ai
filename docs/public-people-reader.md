@@ -67,3 +67,13 @@ The shared projection keeps current `members` separate from `legacyMembers`. The
 Presence resolves in order: `member` (**On Unlinked**, current membership from the [member identity sources](signup-profile-lookup.md#public-projection-and-export-precedence)), then `legacy` (**Legacy member · awaiting claim**, verified recovered account), otherwise `shadow` (**Not on Unlinked**, imported contact). Historical display records create no owners, sessions, login permissions or member messaging. A legacy profile offers **Sign in to reclaim it** at `/legacy-account`, which still requires verified sign-in and explicit confirmation; its existing profile and connections remain available.
 
 Historical IDs follow [profile merge decisions](profile-decisions.md), including aliases, without becoming current members. Both membership sets contribute to the snapshot revision, so claim or revocation changes invalidate filtered cursors after the existing freshness windows above. Regression coverage: `tests/legacy-membership.test.mjs`; published filter parity: `tests/public-presence-contract.test.mjs`.
+
+## Enrichment shards
+
+Operator enrichment comes from `curated-enrichment-v1` plus the bulk shard datasets
+`curated-enrichment-exa-1` through `-exa-4`. The Noos public store caps each published snapshot at 8 MiB,
+so bulk data is split across shards. The runtime index reads all five datasets (`ENRICHMENT_DATASETS`).
+It applies the shards first and `curated-enrichment-v1` last, so for the same legacy id the
+per-person reads in `curated-enrichment-v1` win.
+Publish a shard with `publish-enrichment-people.mjs <rows> <root> --dataset=curated-enrichment-exa-N [--execute]`.
+Roll it back with `UnlinkedPublicPeopleStore.revoke(<dataset>, <revision>)`.
