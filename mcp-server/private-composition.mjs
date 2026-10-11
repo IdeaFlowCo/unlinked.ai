@@ -9,7 +9,7 @@ import { withLegacyProfileDetails } from '../src/utils/public-people/profile-lin
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
-import { createIndexWarmKeeper, createMemberPublicIndex } from '../src/utils/public-people/member-projection.mjs'
+import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
 import { normalizeLinkedinSlug, urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
@@ -431,7 +431,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // next-request rebuilds unless stale is set explicitly).
     const publicIndexStaleMs = publicIndexEnv.UNLINKED_PUBLIC_INDEX_STALE_MS === undefined ? (publicIndexFreshMs === 0 ? 0 : 90000) : Number(publicIndexEnv.UNLINKED_PUBLIC_INDEX_STALE_MS)
     if (!Number.isSafeInteger(publicIndexStaleMs) || publicIndexStaleMs < 0 || publicIndexStaleMs > 600000 || (publicIndexStaleMs > 0 && publicIndexStaleMs < publicIndexFreshMs)) throw new Error('private_composition_configuration_required')
-    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, getBackend, readSignupProfiles: signupLookup?.list,
+    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, getBackend, readSignupProfiles: signupLookup?.list,
       includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')
