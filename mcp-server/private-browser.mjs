@@ -4,6 +4,7 @@ import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/util
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { groupConnectionRows, publishedPeopleFor, rowProvenanceType, rowPublicTarget, rowSourceLabel } from './connection-identity.mjs'
 import { NETWORK_FILTER_SCRIPT, PROFILE_CONNECTIONS_SCRIPT } from './network-filter-script.mjs'
+import { HOVER_CARD_SCRIPT } from './hover-card.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
@@ -349,6 +350,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // browser/crawler burst share it while retaining the site-wide minute bound.
   const PUBLIC_IN_FLIGHT = 8
   let suggestRequests = 0, suggestWindow = Date.now(), suggestBusy = 0
+  let cardRequests = 0, cardWindow = Date.now(), cardBusy = 0
   // The published people each signed-in member is connected to, for "You
   // know" in header suggestions: the same one-person identity as /network
   // (connectedProfiles). Read off the request path, kept 5 minutes, at most
@@ -484,7 +486,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
     response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
-    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${script}`
+    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -721,6 +723,33 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
           response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' }))
         } finally { suggestBusy-- }
+        return
+      }
+      // Hover card: a person's public summary, plus for a signed-in viewer the
+      // mutual count, their connection state and a Message address. Its own
+      // budget, so hovering never spends the page budget.
+      const hoverCard = request.method === 'GET' ? url.pathname.match(/^\/api\/people\/([^/]+)\/card$/) : null
+      if (hoverCard) {
+        if (Date.now() - cardWindow >= 60000) { cardWindow = Date.now(); cardRequests = 0 }
+        if (++cardRequests > 600 || cardBusy >= 8) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        cardBusy++
+        try {
+          if ([...url.searchParams.keys()].length) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          let id
+          try { id = decodeURIComponent(hoverCard[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
+          const viewer = sessionFor(request), known = viewer ? knownPeople(viewer.owner) : null
+          const result = await publicReader.card({ id, ...(known ? { known } : {}) })
+          if (!result) { response.writeHead(404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'not_found' })); return }
+          const card = { ...result.card }
+          if (viewer && card.presence === 'member') {
+            if (memberConnections && signup) { const relation = await bounded(() => connectionActions.relationTo(viewer.owner, card.id), undefined); if (relation?.state) card.relation = relation.state }
+            if (messaging && card.relation !== 'self') { const context = unlinkedProfileContext(card.id); if (context) card.message = `/messages?profile=${encodeURIComponent(context)}` }
+          }
+          response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify({ card }))
+        } catch (error) {
+          const status = error instanceof PublicPeopleReaderError ? error.status : 503
+          response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' }))
+        } finally { cardBusy-- }
         return
       }
       if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/public-assets/messages-client.js') {

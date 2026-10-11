@@ -115,3 +115,30 @@ test('removing a connection sits behind the “…” menu, never beside Connect
   assert.match(view.content, /<div class="more-panel">.*action="\/connections\/remove".*>Remove connection<\/button><\/form><\/div><\/details>/s)
   assert.doesNotMatch(view.content, /Remove connection…|Confirm removal/)
 })
+
+test('a hover card is the public summary; only a signed-in viewer’s known set adds a mutual count', async () => {
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => snapshot() })
+  const plain = await reader.card({ id: 'owner' })
+  assert.equal(plain.card.name, 'Owner'); assert.equal(plain.card.presence, 'member'); assert.equal(plain.card.connectionCount, 2)
+  assert.equal('mutual' in plain.card, false)
+  assert.equal((await reader.card({ id: 'owner', known: new Set(['rich', 'other']) })).card.mutual, 1)
+  assert.equal(await reader.card({ id: 'missing' }), null)
+  await assert.rejects(reader.card({ id: 'owner', known: ['rich'] }), { status: 400 })
+})
+
+test('the hover card endpoint answers signed-out visitors with public facts only, and has a strict input', async t => {
+  let handler
+  const server = createServer((request, response) => void handler(request, response))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`
+  handler = createPrivateBrowserHandler({ baseUrl: endpoint.replace('http:', 'https:'), login: { begin: async () => ({}), finish: async () => ({}) }, resolveOwner: async () => null, getBackend: async () => ({}), readPublishedSnapshot: async () => snapshot() })
+  const response = await fetch(`${endpoint}/api/people/owner/card`)
+  assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store, private')
+  const { card } = await response.json()
+  assert.equal(card.name, 'Owner')
+  for (const key of ['mutual', 'relation', 'message']) assert.equal(key in card, false)
+  assert.equal((await fetch(`${endpoint}/api/people/missing/card`)).status, 404)
+  assert.equal((await fetch(`${endpoint}/api/people/owner/card?x=1`)).status, 400)
+  const page = await (await fetch(`${endpoint}/people/owner`)).text()
+  assert.match(page, /\/api\/people\/'\+encodeURIComponent\(id\)\+'\/card'/)
+})

@@ -562,6 +562,19 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding details.sources ul{margin:4px 0 0;padding-left:18px}
 .unlinked-onboarding details.sources a{color:inherit}
 .unlinked-onboarding [data-network-enhanced] .network-apply{display:none}
+.unlinked-onboarding .hovercard{position:fixed;z-index:80;width:320px;max-width:calc(100vw - 16px);padding:14px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px #2529532e;font-size:14px;line-height:1.35}
+.unlinked-onboarding .hc-top{display:flex;gap:12px;align-items:flex-start}
+.unlinked-onboarding .hc-photo{flex:0 0 56px;width:56px;height:56px;border-radius:50%;object-fit:cover}
+.unlinked-onboarding .hc-initials{display:grid;place-items:center;background:var(--brand);color:#fff;font-weight:700;font-size:18px}
+.unlinked-onboarding .hc-who{min-width:0}
+.unlinked-onboarding .hc-name{font-weight:700;font-size:16px;color:var(--fg);text-decoration:none}
+.unlinked-onboarding .hc-name:hover{text-decoration:underline}
+.unlinked-onboarding .hc-who p{margin:2px 0 0}
+.unlinked-onboarding .hc-headline{color:var(--fg)}
+.unlinked-onboarding .hc-facts,.unlinked-onboarding .hc-mutual{color:var(--muted);font-size:13px}
+.unlinked-onboarding .hc-member{color:#1f6f43;font-size:12px;font-weight:600}
+.unlinked-onboarding .hc-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+.unlinked-onboarding .hc-connect{margin:0}
 .unlinked-onboarding .pconn-filter{margin:10px 0 8px}
 .unlinked-onboarding .pconn-filter input[type=search]{display:block;width:100%;margin:0;min-height:40px;padding:8px 12px;border:1px solid var(--line2);border-radius:8px;background:#fff;font:400 15px "Public Sans",system-ui,sans-serif;color:var(--fg)}
 .unlinked-onboarding .pconn-filter input[type=search]:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--tint)}
