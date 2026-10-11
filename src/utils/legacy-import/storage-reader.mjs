@@ -1,6 +1,12 @@
 import {legacyStorageOwnerKey} from './storage-plan.mjs'
 import {privateId} from '../private-import/job.mjs'
 const same=(a,b)=>a&&b&&a.manifestSha256===b.manifestSha256&&a.receiptId===b.receiptId&&a.profileId===b.profileId&&a.legacyUserId===b.legacyUserId
+// Legacy storage timestamps are Postgres text, e.g. "2025-01-04 20:40:29.755127+00".
+export function legacyTimestamp(value){
+  if(typeof value!=='string'||!value)return null
+  const ms=Date.parse(value.trim().replace(' ','T').replace(/([+-]\d{2})$/,'$1:00'))
+  return Number.isFinite(ms)&&ms>0?ms:null
+}
 const connectionFields=['first name','last name','url','company','position','connected on']
 export function createLegacyStorageReader({owner,readOwner,assets,readLegacyProfile}) {
   if(!owner?.ownerId||!owner.userId||typeof readOwner!=='function'||typeof readLegacyProfile!=='function')throw Error('legacy_storage_identity_required')
@@ -12,7 +18,7 @@ export function createLegacyStorageReader({owner,readOwner,assets,readLegacyProf
     if(!profile||profile.receiptId!==value.receiptId||profile.profileId!==value.profileId||profile.sourceSha256!==value.sourceSha256)throw Error('legacy_storage_binding_changed')
     return value
   }
-  const list=async()=>{const value=await current();if(!value)return null;return {...value,objects:value.objects.map(row=>({objectId:row.objectId,filename:row.sourceFields.name.split('/').at(-1),bytes:row.rawBytes,category:row.category,accepted:row.parsed.accepted,rejected:row.parsed.rejected,error:row.parsed.error}))}}
+  const list=async()=>{const value=await current();if(!value)return null;return {...value,objects:value.objects.map(row=>({objectId:row.objectId,filename:row.sourceFields.name.split('/').at(-1),bytes:row.rawBytes,category:row.category,accepted:row.parsed.accepted,rejected:row.parsed.rejected,error:row.parsed.error,uploadedAt:legacyTimestamp(row.sourceFields.created_at)}))}}
   const readOriginal=async objectId=>{
     const value=await current(),row=value?.objects.find(row=>row.objectId===objectId)
     if(!row)throw Error('legacy_storage_not_found')
