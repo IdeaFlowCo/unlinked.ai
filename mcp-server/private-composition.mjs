@@ -19,6 +19,7 @@ import { createContactCards, createNeo4jContactCardStore } from './contact-card.
 import { createNeo4jCompanyFactsStore } from './company-facts-store.mjs'
 import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
+import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
 import { createProfilePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
 import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
@@ -82,7 +83,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -188,6 +189,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const contactCardStore = typeof dependencies.createContactCardStore === 'function' ? dependencies.createContactCardStore(driver, 'neo4j') : null
     await contactCardStore?.initialize()
     const contactCards = contactCardStore ? createContactCards({ store: contactCardStore }) : undefined
+    // The signed-in home's display choices (docs/member-home.md); UI preferences only.
+    const homePreferences = typeof dependencies.createHomePreferenceStore === 'function' ? dependencies.createHomePreferenceStore(driver, 'neo4j') : undefined
+    await homePreferences?.initialize()
     // Operator-published company facts (docs/company-facts.md), merged over the
     // static list with a 60 s cache; a failed read serves the static list.
     const companyFactsStore = typeof dependencies.createCompanyFactsStore === 'function' ? dependencies.createCompanyFactsStore(driver, 'neo4j') : null
@@ -547,6 +551,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       memberConnections,
       notifications,
       contactCards,
+      homePreferences,
       lookupCompanyFacts,
       sessionStore,
       memberEmail,

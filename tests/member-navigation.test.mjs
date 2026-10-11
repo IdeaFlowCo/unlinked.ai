@@ -104,11 +104,16 @@ test('a signed-in member stays signed in, reaches profile and people from every 
   assert.equal((await request('/profile', { headers: { Cookie: session } })).status, 401)
 })
 
-test('a returning member with a file lands on People; the file form stays reachable at /import', async t => {
+test('a returning member with a file lands on Home with its import status; a newer export stays reachable at /import', async t => {
   const { request, signIn } = await site(t, { imports: true })
   const { session } = await signIn()
   const home = await request('/', { headers: { Cookie: session } })
-  assert.equal(home.status, 303); assert.equal(home.headers.get('location'), '/network')
+  assert.equal(home.status, 200)
+  const homeHTML = await home.text()
+  assert.match(homeHTML, /<h1 class="hq">Welcome back, Verified<\/h1>/); assert.match(homeHTML, /home-pill ok">Complete</)
+  assert.match(homeHTML, /href="\/network">Explore people →|href="\/network\?sort=connected"/)
+  assert.doesNotMatch(homeHTML, /<h1 class="hq">Bring your LinkedIn export/)
   const form = await request('/import', { headers: { Cookie: session } }); assert.equal(form.status, 200)
-  assert.match(await form.text(), /<form id="onboarding-upload" method="post" action="\/upload"/)
+  const formHTML = await form.text()
+  assert.match(formHTML, /<form id="onboarding-upload" method="post" action="\/upload"/); assert.match(formHTML, /Upload a newer LinkedIn export/)
 })

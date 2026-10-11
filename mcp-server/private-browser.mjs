@@ -36,7 +36,9 @@ import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
-import { renderScan, fillMeHeadline, TOP_BAR_SCRIPT, LINKEDIN_EXPORT_PROGRESS_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError } from './private-onboarding-views.mjs'
+import { renderScan, fillMeHeadline, TOP_BAR_SCRIPT, LINKEDIN_EXPORT_PROGRESS_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError, renderMemberHome } from './private-onboarding-views.mjs'
+import { summarizeImports } from '../src/utils/private-import/import-summary.mjs'
+import { IMPORT_REMINDER } from './home-preferences.mjs'
 import { MEET_SCRIPT } from './public-discovery.mjs'
 import { PHOTO_ID } from './profile-photos.mjs'
 import { publicSearchDocument } from './public-web-search.mjs'
@@ -153,7 +155,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -164,6 +166,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   if (notifications !== undefined && ['list', 'counts', 'markSeen', 'open', 'markAllRead', 'removeOwner'].some(key => typeof notifications[key] !== 'function')) throw new Error('notification_configuration_required')
   if (memberEmail !== undefined && (typeof memberEmail.sending !== 'boolean' || ['rememberAddress', 'settings', 'savePreferences', 'sendInvite', 'inspectUnsubscribe', 'unsubscribe', 'exportOwner', 'removeOwner'].some(key => typeof memberEmail[key] !== 'function'))) throw new Error('member_email_configuration_required')
   if (contactCards !== undefined && ['read', 'save', 'rotate', 'syncIdentity', 'open', 'exportOwner', 'removeOwner'].some(key => typeof contactCards[key] !== 'function')) throw new Error('contact_card_configuration_required')
+  if (homePreferences !== undefined && ['get', 'set', 'removeOwner'].some(key => typeof homePreferences?.[key] !== 'function')) throw new Error('home_preference_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
   if (oauth !== undefined && (typeof signup !== 'function' || typeof oauth.readAuthorization !== 'function' || typeof oauth.approve !== 'function' || typeof oauth.deny !== 'function')) throw new Error('oauth_connector_configuration_required')
@@ -1287,6 +1290,34 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         return { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
       const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts?.accepted ?? 0, indexed: payload.counts?.indexed ?? 0, rejected: payload.counts?.rejected ?? 0, failedFiles: payload.counts?.failedFiles ?? 0, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
+      // What this member has imported, from both sources that count (uploads
+      // here and files recovered from their original Unlinked account), so no
+      // page tells someone with an import to bring one (unlinked-5e5). Reads only.
+      const importSummary = async jobs => {
+        let recovered = null, legacyConnections = 0, recoveredUnavailable = false
+        if (typeof backend.readLegacyFiles === 'function') { try { recovered = await backend.readLegacyFiles() } catch { recoveredUnavailable = true } }
+        if (!recovered?.objects?.length && !recoveredUnavailable && typeof backend.readLegacyProfile === 'function') {
+          try { legacyConnections = (await backend.readLegacyProfile())?.connections?.length ?? 0 } catch { recoveredUnavailable = true }
+        }
+        return summarizeImports({ jobs: jobs.filter(resource => resource.payload.origin?.kind !== ADDED_PERSON).map(resource => resource.payload), recovered, legacyConnections, recoveredUnavailable })
+      }
+      // The member's newest connections for Home, within a short budget: a slow
+      // network read costs that card, never the page (the read keeps warming the cache).
+      const homeNetwork = async () => {
+        const work = (async () => {
+          const cards = await personCards((await accountNetwork(session.owner)).assertions.filter(row => row.category === 'connections'))
+          return { size: cards.length, recent: cards.filter(card => validTimestamp(card.connectedAt)).sort((a, b) => b.connectedAt - a.connectedAt || compareNames(a.name, b.name)).slice(0, 5) }
+        })()
+        work.catch(() => {})
+        return Promise.race([work.catch(() => null), new Promise(resolve => setTimeout(resolve, 2500, null).unref?.())])
+      }
+      if (request.method === 'POST' && url.pathname === '/home/import-reminder' && signup && homePreferences) {
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('reminder').length !== 1 || !IMPORT_REMINDER.includes(input.get('reminder')) || [...input.keys()].some(key => !['csrf', 'reminder'].includes(key))) throw new Error('private_browser_csrf')
+        // A display choice only: imports and their status are not touched.
+        await homePreferences.set(session.owner, { importReminder: input.get('reminder') })
+        redirect(response, '/'); return
+      }
       const statusMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/status$/)
       if (request.method === 'GET' && statusMatch) {
         const resource = await backend.readResource('import', statusMatch[1])
@@ -1294,7 +1325,19 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(importJobStatus(resource.payload))); return
       }
       if (request.method === 'GET' && (url.pathname === '/' || (signup && url.pathname === '/import'))) {
-        if (signup) { const jobs = await jobResources(); if (url.pathname === '/' && jobs.length) { redirect(response, '/network'); return } const props = jobProps(jobs); journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic' }), props.importJob, uploadProgressScript()); return }
+        if (signup) {
+          const jobs = await jobResources(), props = jobProps(jobs), summary = await importSummary(jobs)
+          const archive = extra => journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic', ...extra }), props.importJob, uploadProgressScript())
+          if (url.pathname === '/import') { archive(summary.lastComplete ? { refresh: summary } : {}); return }
+          // Home. A member with nothing imported keeps the default-on getting-started
+          // reminder until they hide it; everyone else gets their real status and next steps.
+          const preference = homePreferences ? await bounded(() => homePreferences.get(session.owner), null) : null
+          const dismissed = preference?.importReminder === 'dismissed'
+          if (summary.state === 'none' && !dismissed) { archive(homePreferences ? { reminder: 'dismissible' } : {}); return }
+          const [network, alerts] = await Promise.all([homeNetwork(), settleAlerts(response)])
+          journey(response, renderMemberHome({ ...props, summary, recent: network?.recent, networkSize: network?.size, alerts, reminderDismissed: dismissed, reminderControl: Boolean(homePreferences) }), props.importJob)
+          return
+        }
         const ids = signup ? await backend.listImportIds() : []
         const jobs = await Promise.all(ids.map(id => backend.readResource('import', id)))
         render(response, 'Import your LinkedIn archive', `${signup ? accountNav : ''}<p>Complete archive preferred. Connections-only ZIP or CSV also works. Re-uploading the same named archive returns its durable receipt.</p><form method="post" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${html(session.csrf)}"><label>LinkedIn export ZIP or CSV <input required type="file" name="archive" accept=".zip,.csv"></label><small>Maximum 64 MiB and 100,000 parser records. Larger imports fail explicitly and do not publish observations.</small><p>By importing, your profile and connections join your Unlinked network, searchable by you and by any agent you connect. Contact details stay private.</p>${dataMode === 'synthetic' ? '<label><input required type="checkbox" name="syntheticConsent" value="yes"> This file contains synthetic test data only.</label>' : ''}<button>Import archive</button></form>${signup ? `<h2>Your imports</h2>${jobs.filter(job => job && !job.deleted && job.sourceOwnerId === session.owner.ownerId).map(job => `<article><a href="/imports/${html(job.sourceId)}">${html(job.payload.filename)}</a><p>${html(job.payload.counts?.indexed ?? 0)} observations indexed</p></article>`).join('') || '<p>Your first upload will appear here.</p>'}` : ''}`)
@@ -1353,6 +1396,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
         const jobs = await jobResources(), props = jobProps(jobs)
         if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
+        const summary = await importSummary(jobs)
         // Reuse the card's snapshot-verified public context; private rows and
         // imported contact details never establish a cross-product recipient.
         const { profile, hasStoredProfile, publicProfileUrl } = await readOwnCard(jobs)
@@ -1379,7 +1423,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
           for (const key of ['linkedinUrl', 'website', 'company', 'industry', 'location']) if (!profile[key] && published?.profile?.[key] && (key !== 'company' || !profile.positions?.length)) profile[key] = published.profile[key]
         }
-        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
+        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), summary, ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
       }
       // The contact version of the card, for its owner: the details, their show
       // switches, and the link and QR once something is shown.
@@ -1630,9 +1674,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const jobs = await jobResources(), props = jobProps(jobs)
         // Email choices appear only while email is on; a slow read costs the section, never the page.
         const email = memberEmail?.sending ? await bounded(() => memberEmail.settings(session.owner), null) : null
-        const view=renderSettings({ ...props, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
-          ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
+        const view=renderSettings({ ...props, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+          ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
         return
@@ -1700,6 +1744,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
+        if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)

@@ -8,6 +8,8 @@ export const LABELS = Object.freeze([
   'UnlinkedNotification', 'UnlinkedSignupLookup', 'UnlinkedSignupCache', 'UnlinkedCompanyRevision',
   'UnlinkedSignupProfile', 'UnlinkedContactCard', 'UnlinkedConnectionRequest', 'UnlinkedLegacyManifest',
   'UnlinkedLegacyStorage', 'UnlinkedCompanyDataset', 'UnlinkedSignupGate',
+  // Signed-in home display choices (mcp-server/home-preferences.mjs).
+  'UnlinkedHomePreference',
   // Reviewed source schema exists for these currently empty domains. Later
   // email/invitation writes must remain included in shared recovery snapshots.
   'UnlinkedEmailInviteLock', 'UnlinkedEmailSend', 'UnlinkedEmailSuppression', 'UnlinkedMemberInvitation',

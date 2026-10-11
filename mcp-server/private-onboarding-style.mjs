@@ -558,4 +558,35 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .private-context .pc-explore{margin-top:10px;min-height:36px}
 .unlinked-onboarding .private-context .pc-hint{margin:14px 0 0;font-size:13px}
 @media(max-width:600px){.unlinked-onboarding .private-context{margin-top:12px}}
+.unlinked-onboarding .home{max-width:1040px;margin:0 auto;padding-top:28px}
+.unlinked-onboarding .home-head .hq{margin-bottom:6px}
+.unlinked-onboarding .home-head .lead{margin:0 0 16px}
+.unlinked-onboarding .home-search{display:flex;gap:8px;max-width:620px}
+.unlinked-onboarding .home-search input{flex:1;min-width:0;min-height:44px;padding:10px 14px;border:1px solid var(--line2);border-radius:var(--r);font:inherit;font-size:16px;background:#fff}
+.unlinked-onboarding .home-search input:focus-visible{outline:2px solid var(--brand);outline-offset:1px;border-color:var(--brand)}
+.unlinked-onboarding .home-search button{min-height:44px;padding:8px 18px;font-size:15px}
+.unlinked-onboarding .home-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start;margin-top:8px}
+.unlinked-onboarding .home-card{margin:12px 0}
+.unlinked-onboarding .home-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:0 0 8px}
+.unlinked-onboarding .home-card-head h2{margin:0;font-size:15px;font-weight:600;letter-spacing:0}
+.unlinked-onboarding .home-card p{margin:6px 0;font-size:15px}
+.unlinked-onboarding .home-card .notice{font-size:14px;margin:10px 0}
+.unlinked-onboarding .home-pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;line-height:18px;border:1px solid var(--line2);color:var(--muted);background:#fff;white-space:nowrap}
+.unlinked-onboarding .home-pill.ok{color:#166534;border-color:#9fd3ad;background:#f0faf2}
+.unlinked-onboarding .home-pill.busy{color:var(--brand-d);border-color:var(--brand);background:var(--tint)}
+.unlinked-onboarding .home-pill.warn{color:#a3461b;border-color:#f0c2a8;background:#fff6f1}
+.unlinked-onboarding .home-row{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:44px;padding:6px 0;border-top:1px solid var(--line);color:var(--fg);text-decoration:none;font-size:15px}
+.unlinked-onboarding .home-card-head+.home-row{border-top:0}
+.unlinked-onboarding .home-row b{font-weight:600}
+.unlinked-onboarding .home-row span{color:var(--brand-d);font-size:14px}
+.unlinked-onboarding .home-row:hover b{text-decoration:underline;text-underline-offset:3px}
+.unlinked-onboarding .home-when{margin:-4px 0 4px 46px!important;font-size:13px!important}
+.unlinked-onboarding .home-links{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px!important}
+.unlinked-onboarding .home-links .quiet-link{color:var(--muted)}
+.unlinked-onboarding .reminder-hide{margin:14px 0 0}
+.unlinked-onboarding .reminder-hide .link-button{font-size:14px;color:var(--muted)}
+@media(max-width:860px){.unlinked-onboarding .home-grid{grid-template-columns:minmax(0,1fr)}.unlinked-onboarding .home{padding-top:18px}}
+/* Phones already have the header search directly above. */
+@media(max-width:600px){.unlinked-onboarding .home-search{display:none}}
+@media(prefers-reduced-motion:reduce){.unlinked-onboarding .home *{transition:none!important}}
 `
