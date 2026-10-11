@@ -235,3 +235,33 @@ test('real Neo4j home preferences: owner-keyed upsert, user check and removal', 
   await store.removeOwner(member)
   assert.equal(await store.get(member), null)
 })
+
+// Regression (0.6.25): the composition created the store but the pilot wrapper
+// did not forward it, so production Home had no hide control.
+test('the isolated pilot forwards the home preference store to the browser', async t => {
+  const { startPrivatePilot } = await import('../mcp-server/private-pilot.mjs')
+  const { randomBytes } = await import('node:crypto')
+  const { createServer: createNetServer } = await import('node:net')
+  let port
+  for (let attempt = 0; attempt < 50 && !port; attempt++) {
+    const candidate = 7000 + Math.floor(Math.random() * 3000)
+    if (await new Promise(resolve => { const probe = createNetServer().once('error', () => resolve(false)).listen(candidate, '127.0.0.1', () => probe.close(() => resolve(true))) })) port = candidate
+  }
+  const preferences = createMemoryHomePreferenceStore()
+  const backend = { adapter: {}, readResource: async () => null, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => [], writeResource: async () => {} }
+  const running = await startPrivatePilot({ baseUrl: `https://127.0.0.1:${port}`, port, host: '127.0.0.1', dataMode: 'synthetic',
+    login: { begin: async () => ({ location: 'https://synthetic-idp.invalid/authorize', transaction: { state: 'synthetic-state' } }),
+      finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'home-subject', verifiedEmail: 'member@example.invalid' }) },
+    resolveOwner: async () => owner, signup: async () => owner, accountGrantKey: randomBytes(32), getBackend: async () => backend,
+    complete: async () => ({ matches: [] }), readPublishedSnapshot: async () => ({ people: [] }), homePreferences: preferences })
+  t.after(() => running.stop())
+  const go = (path, init = {}) => fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual', ...init })
+  const start = await go('/login')
+  const callback = await go('/auth/callback/ideaflow?state=synthetic-state&code=x', { headers: { Cookie: start.headers.getSetCookie()[0].split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(x => x.startsWith('__Host-ul-session=')).split(';')[0]
+  const home = await (await go('/', { headers: { Cookie: cookie } })).text()
+  assert.match(home, /action="\/home\/import-reminder"/)
+  const hidden = await go('/home/import-reminder', { method: 'POST', headers: { Cookie: cookie, Origin: `https://127.0.0.1:${port}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: home.match(/name="csrf" value="([^"]+)"/)[1], reminder: 'dismissed' }) })
+  assert.equal(hidden.status, 303)
+  assert.equal((await preferences.get(owner)).importReminder, 'dismissed')
+})
