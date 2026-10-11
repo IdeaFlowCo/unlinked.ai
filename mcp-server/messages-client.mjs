@@ -17,12 +17,13 @@ function messagesClient(config) {
   // In the dock, nothing streams or marks read unless the panel is open and visible.
   // (The dock is position:fixed, so offsetParent cannot tell visibility; the CSS hides it below 1024 px.)
   const dockWide = () => matchMedia('(min-width: 1024px)').matches
-  const dormant = () => docked && (dock.dataset.expanded !== 'true' || !dockWide())
+  // Open chat windows keep the stream on while the dock list is collapsed.
+  const dormant = () => docked && (!dockWide() || (dock.dataset.expanded !== 'true' && !state.windows.length))
   const counted = new Set()
   const state = {
     me: null, conversations: new Map(), threads: new Map(), open: null, loadedAt: new Date().toISOString(), readMaps: new Map(),
     stream: null, streamState: 'connecting', filter: '', unreadFirst: false, retryMs: 2000, retryTimer: null, paused: false,
-    replyTo: null, editing: null, editText: '', picker: null, rerender: false, uploads: [], searchResults: null, typing: new Map(), markedUnread: new Set(), newBelow: false, people: null,
+    windows: [], replyTo: null, editing: null, editText: '', picker: null, rerender: false, uploads: [], searchResults: null, typing: new Map(), markedUnread: new Set(), newBelow: false, people: null,
   }
 
   // ── Local preferences (this browser only) ──────────────────────────────────
@@ -163,7 +164,7 @@ function messagesClient(config) {
       const preview = typingNames.length ? 'typing…' : last ? `${last.senderId === state.me ? 'You: ' : ''}${last.content || 'Attachment'}` : 'No messages yet'
       const unread = conversation.id !== state.open ? unreadOf(conversation) : 0
       return h('li', {},
-        h('a', { class: `msg-item${conversation.id === state.open ? ' active' : ''}${unread ? ' unread' : ''}`, href: `/messages/c/${encodeURIComponent(conversation.id)}`, 'data-id': conversation.id, 'aria-current': conversation.id === state.open ? 'page' : null, onclick: event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return; event.preventDefault(); openConversation(conversation.id) } },
+        h('a', { class: `msg-item${conversation.id === state.open ? ' active' : ''}${unread ? ' unread' : ''}`, href: `/messages/c/${encodeURIComponent(conversation.id)}`, 'data-id': conversation.id, 'aria-current': conversation.id === state.open ? 'page' : null, onclick: event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return; event.preventDefault(); if (docked) openWindow(conversation.id); else openConversation(conversation.id) } },
           avatar(title, peer?.id || conversation.id, peer?.presence),
           h('span', { class: 'msg-item-body' },
             h('span', { class: 'msg-item-top' }, h('b', { class: 'msg-item-name' }, title), peer?.isBot || conversation.containsBot ? h('span', { class: 'msg-tag' }, 'Bot') : null, muted(conversation) ? h('span', { class: 'msg-muted', title: 'Muted', 'aria-label': 'Muted' }, '🔕') : null, h('span', { class: 'msg-item-time' }, ago(conversation.lastMessageAt))),
@@ -311,8 +312,8 @@ function messagesClient(config) {
       own ? act('Delete', '🗑', () => removeMessage(message)) : null)
   }
 
-  function messageNode(message, { own, grouped, group, status }) {
-    const editing = state.editing === message.id
+  function messageNode(message, { own, grouped, group, status, bare = false }) {
+    const editing = !bare && state.editing === message.id
     const bubble = editing ? editBox(message) : h('div', { class: `msg-bubble${message.deletedAt ? ' deleted' : ''}`, title: time(message.createdAt) },
       message.replyTo && !message.deletedAt ? h('button', { type: 'button', class: 'msg-quote', onclick: () => jumpTo(message.replyTo.id) }, h('b', {}, message.replyTo.senderId === state.me ? 'You' : message.replyTo.senderName || 'Message'), ' ', message.replyTo.content) : null,
       message.deletedAt ? 'Message deleted' : linkify(message.content),
@@ -320,7 +321,7 @@ function messagesClient(config) {
       message.editedAt && !message.deletedAt ? h('span', { class: 'msg-edited' }, ' (edited)') : null)
     return h('div', { class: `msg-row${own ? ' own' : ''}${grouped ? ' grouped' : ''}`, id: `m-${message.id}`, 'data-id': message.id },
       !own && group && !grouped ? h('span', { class: 'msg-sender' }, message.sender?.name || 'Someone') : null,
-      h('div', { class: 'msg-line' }, bubble, editing ? null : messageActions(message, own)),
+      h('div', { class: 'msg-line' }, bubble, editing || bare ? null : messageActions(message, own)),
       ...(message.deletedAt ? [] : message.linkPreviews || []).map(preview => h('a', { class: 'msg-preview', href: preview.url, target: '_blank', rel: 'noopener noreferrer' }, h('b', {}, preview.title || preview.url), preview.description ? h('span', {}, preview.description) : null, h('span', { class: 'small' }, preview.siteName || new URL(preview.url).hostname))),
       message.reactions?.length && !message.deletedAt ? h('div', { class: 'msg-reactions' }, message.reactions.map(reaction => h('button', { type: 'button', class: `msg-reaction${reaction.byMe ? ' mine' : ''}`, 'data-key': `react:${reaction.emoji}`, 'aria-pressed': String(Boolean(reaction.byMe)), 'aria-label': `${reaction.emoji} ${reaction.count}${reaction.byMe ? ', including you' : ''}`, onclick: () => react(message, reaction.emoji, !reaction.byMe) }, reaction.emoji, ' ', reaction.count))) : null,
       message.pending === 'failed' ? h('span', { class: 'msg-meta failed' }, 'Not sent · ', h('button', { class: 'link-button', type: 'button', onclick: () => retry(message) }, 'Retry')) : status ? h('span', { class: 'msg-meta' }, status) : null)
@@ -549,7 +550,7 @@ function messagesClient(config) {
     const reply = replyToId ? thread?.items.find(item => item.id === replyToId) : null
     const optimistic = { id: `pending-${clientId}`, clientId, conversationId, senderId: state.me, content, createdAt: new Date().toISOString(), reactions: [], pending: 'sending', uploads, attachments: uploads.map(entry => ({ mimeType: entry.mimeType, name: entry.name, src: entry.src })), replyToId, replyTo: reply ? { id: reply.id, senderId: reply.senderId, senderName: reply.sender?.name, content: reply.content.slice(0, 200) } : null }
     if (thread) { thread.items = thread.items.filter(item => item.clientId !== clientId); thread.items.push(optimistic) }
-    renderMessages({ scroll: 'bottom' })
+    renderMessages({ scroll: 'bottom' }); renderWindowLog(conversationId, { scroll: 'bottom' })
     try {
       const value = await api(`/conversations/${encodeURIComponent(conversationId)}/messages`, { content, clientId, ...(replyToId ? { replyToId } : {}), ...(uploads.length ? { attachments: uploads.map(entry => entry.key) } : {}) })
       if (value.message) upsert(value.message)
@@ -557,10 +558,12 @@ function messagesClient(config) {
       const conversation = state.conversations.get(conversationId)
       if (conversation) conversation.unreadCount = 0
       renderList(); if (state.open === conversationId) renderMessages()
+      renderWindowLog(conversationId)
     } catch {
       const item = thread?.items.find(entry => entry.clientId === clientId)
       if (item) item.pending = 'failed'
       if (state.open === conversationId) renderMessages()
+      renderWindowLog(conversationId)
       announce('Message not sent')
     }
   }
@@ -650,11 +653,12 @@ function messagesClient(config) {
       // Count each message once, and only if it is newer than this member's last read.
       const fresh = !known && !counted.has(message.id) && (!conversation.lastReadAt || message.createdAt > conversation.lastReadAt) && (!conversation.lastMessageAt || message.createdAt >= conversation.lastMessageAt)
       counted.add(message.id); if (counted.size > 2000) counted.delete(counted.values().next().value)
-      const visible = message.conversationId === state.open && document.visibilityState === 'visible'
+      const visible = (message.conversationId === state.open || windowShown(message.conversationId)) && document.visibilityState === 'visible'
       if (fresh && message.senderId !== state.me && !visible) conversation.unreadCount = (conversation.unreadCount || 0) + 1
       state.typing.get(message.conversationId)?.delete(message.senderId)
       upsert(message)
       renderList(); updateUnread()
+      if (windowNodes.has(message.conversationId)) { renderWindowLog(message.conversationId); renderWindowHead(message.conversationId); markWindowRead(message.conversationId) }
       if (message.conversationId === state.open) {
         const log = $('msg-log'), below = log && log.scrollHeight - log.scrollTop - log.clientHeight > 80
         renderMessages(); renderTyping()
@@ -675,11 +679,11 @@ function messagesClient(config) {
       if (value.userId === state.me) return
       let entries = state.typing.get(value.conversationId)
       if (value.active) { if (!entries) state.typing.set(value.conversationId, entries = new Map()); entries.set(value.userId, Date.now() + 6000) } else entries?.delete(value.userId)
-      renderTyping(); renderList()
+      renderTyping(); renderList(); if (windowNodes.has(value.conversationId)) renderWindowHead(value.conversationId)
     })
-    on('presence', value => { for (const conversation of state.conversations.values()) for (const person of conversation.participants) if (person.id === value.userId) person.presence = value.presence; renderList(); renderThreadHeader() })
+    on('presence', value => { for (const conversation of state.conversations.values()) for (const person of conversation.participants) if (person.id === value.userId) person.presence = value.presence; renderList(); renderThreadHeader(); for (const id of windowNodes.keys()) renderWindowHead(id) })
     on('conversation', refreshSoon)
-    on('resync', () => { state.threads.clear(); loadConversations() })
+    on('resync', () => { state.threads.clear(); loadConversations().then(reloadWindows) })
     on('expired', () => { source.close(); showStatus('Your session ended.', { href: `/login?next=${encodeURIComponent(location.pathname)}`, label: 'Sign in again' }) })
     on('superseded', () => { source.close(); state.stream = null; state.paused = true; setStream('paused') })
     source.addEventListener('open', () => { state.retryMs = 2000 })
@@ -746,7 +750,7 @@ function messagesClient(config) {
   // Pages may be kept in the back/forward cache: close the stream when hidden
   // and catch up (list, open thread, stream) when the page comes back.
   addEventListener('pagehide', () => { stopTyping(); if (state.open) saveDraft(state.open, $('msg-input')?.value.trim() || ''); state.stream?.close(); state.stream = null })
-  addEventListener('pageshow', event => { if (!event.persisted || (docked && dock.dataset.expanded !== 'true')) return; state.threads.clear(); state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) })
+  addEventListener('pageshow', event => { if (!event.persisted || (docked && dock.dataset.expanded !== 'true' && !state.windows.length)) return; state.threads.clear(); state.loadedAt = new Date().toISOString(); loadConversations().then(() => { reloadWindows(); if (!state.stream) connect() }) })
   addEventListener('offline', () => { statusEl.dataset.offline = '1'; showStatus('You are offline. Messages will send when you reconnect.') })
   addEventListener('online', () => { delete statusEl.dataset.offline; showStatus(''); refreshSoon(); retryFailed() })
 
@@ -764,7 +768,8 @@ function messagesClient(config) {
       else if (!state.stream && !state.paused) { state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) }
       if (focus) (state.open ? $('msg-input') : filterEl)?.focus({ preventScroll: true })
     } else {
-      stopTyping(); state.stream?.close(); state.stream = null; clearTimeout(state.retryTimer); delete dock.dataset.stream
+      stopTyping()
+      if (!state.windows.length) { state.stream?.close(); state.stream = null; clearTimeout(state.retryTimer); delete dock.dataset.stream }
       if (focus) $('msg-dock-toggle').focus()
     }
     saveDock()
@@ -777,15 +782,146 @@ function messagesClient(config) {
       if (value.status !== 'ready') { location.href = href; return }
       const id = /^https:\/\/www\.unlinked\.ai\/people\/([A-Za-z0-9._~%-]+)$/.exec(profile)?.[1]
       if (id) { try { profiles[value.conversationId] = decodeURIComponent(id); store.set('unlinked.messages.profiles', profiles) } catch { /* Keep going without View on Unlinked. */ } }
-      expandDock(true, { focus: false })
-      if (!state.conversations.has(value.conversationId)) await loadConversations()
-      openConversation(value.conversationId)
+      await openWindow(value.conversationId)
     } catch { location.href = href }
+  }
+
+  // ── Chat windows (dock) ────────────────────────────────────────────────────
+  // Each conversation opens in its own window beside the dock, as on LinkedIn:
+  // as many as fit (at most three), newest nearest the dock, kept for this tab
+  // across page loads. The stream stays on while any window is open.
+  const WINDOW_WIDTH = 336, WINDOW_GAP = 12, MAX_WINDOWS = 3, WINDOWS_KEY = 'unlinked.messages.windows'
+  const windowNodes = new Map()
+  let windowsEl = null
+  const saveWindows = () => { try { sessionStorage.setItem(WINDOWS_KEY, JSON.stringify(state.windows)) } catch { /* Windows then last this page only. */ } }
+  const windowFit = () => Math.max(1, Math.min(MAX_WINDOWS, Math.floor((dock.getBoundingClientRect().left - 8) / (WINDOW_WIDTH + WINDOW_GAP))))
+  const windowShown = id => state.windows.some(entry => entry.id === id && !entry.minimized)
+  function ensureStream() {
+    if (state.stream || state.paused || dormant()) return
+    started = true; state.loadedAt = new Date().toISOString()
+    loadConversations().then(() => { if (!state.stream && !state.paused) connect() })
+  }
+  async function openWindow(id, { focus = true } = {}) {
+    state.windows = [{ id, minimized: false }, ...state.windows.filter(entry => entry.id !== id)]
+    while (state.windows.length > windowFit()) state.windows.pop()
+    state.markedUnread.delete(id)
+    saveWindows(); ensureStream()
+    if (!state.conversations.has(id)) await loadConversations().catch(() => {})
+    renderWindows()
+    if (focus) windowNodes.get(id)?.input.focus({ preventScroll: true })
+    await loadWindowThread(id)
+  }
+  function closeWindow(id) {
+    const input = windowNodes.get(id)?.input
+    if (input) saveDraft(id, input.value.trim())
+    state.windows = state.windows.filter(entry => entry.id !== id)
+    saveWindows(); renderWindows()
+    if (dormant()) { state.stream?.close(); state.stream = null; clearTimeout(state.retryTimer); delete dock.dataset.stream }
+  }
+  function toggleWindow(id) {
+    const entry = state.windows.find(value => value.id === id)
+    if (!entry) return
+    entry.minimized = !entry.minimized
+    saveWindows(); renderWindows()
+    if (!entry.minimized) { renderWindowLog(id, { scroll: 'bottom' }); markWindowRead(id) }
+  }
+  async function loadWindowThread(id) {
+    const node = windowNodes.get(id)
+    if (!node) return
+    try {
+      if (!state.threads.has(id)) { const page = await api(`/conversations/${encodeURIComponent(id)}/messages`); state.threads.set(id, { items: page.messages, hasMore: page.hasMore }) }
+      renderWindowLog(id, { scroll: 'bottom' }); markWindowRead(id)
+    } catch (error) {
+      if (error.message !== 'signed_out') node.log.replaceChildren(h('p', { class: 'msg-loading' }, 'Messages could not load. ', h('button', { class: 'link-button', type: 'button', onclick: () => loadWindowThread(id) }, 'Try again')))
+    }
+  }
+  const reloadWindows = () => { for (const entry of state.windows) loadWindowThread(entry.id) }
+  function buildWindow(id) {
+    const head = h('div', { class: 'msg-win-head' })
+    const log = h('div', { class: 'msg-log', role: 'log', 'aria-live': 'off', 'aria-label': 'Messages', tabindex: '0' }, h('p', { class: 'msg-loading' }, 'Loading…'))
+    const input = h('textarea', { class: 'msg-win-input', rows: '1', maxlength: '8000', placeholder: 'Write a message…', 'aria-label': 'Write a message' })
+    input.value = drafts[id] || ''
+    const submit = () => { const text = input.value.trim(); if (!text) return; input.value = ''; saveDraft(id, ''); send(id, text) }
+    input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing && (prefs.enterSends ? !event.shiftKey : event.metaKey || event.ctrlKey)) { event.preventDefault(); submit() } })
+    input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(120, input.scrollHeight)}px`; saveDraft(id, input.value.trim()) })
+    input.addEventListener('focus', () => markWindowRead(id))
+    const body = h('div', { class: 'msg-win-body' }, log, h('div', { class: 'msg-win-composer' }, input, h('button', { class: 'msg-send sm', type: 'button', onclick: submit }, 'Send')))
+    const root = h('section', { class: 'msg-win', 'data-id': id, 'aria-label': 'Conversation' }, head, body)
+    const node = { root, head, log, input, body }
+    windowNodes.set(id, node)
+    return node
+  }
+  function renderWindowHead(id) {
+    const node = windowNodes.get(id), entry = state.windows.find(value => value.id === id)
+    if (!node || !entry) return
+    const conversation = state.conversations.get(id), peer = conversation ? peerOf(conversation) : null, title = conversation ? titleOf(conversation) : 'Conversation'
+    const typing = typingIn(id), unread = entry.minimized && conversation ? unreadOf(conversation) : 0
+    const profileId = profiles[id]
+    const button = (label, symbol, onclick) => h('button', { type: 'button', class: 'msg-act', 'aria-label': `${label}: ${title}`, title: label, onclick: event => { event.stopPropagation(); onclick() } }, symbol)
+    node.root.setAttribute('aria-label', `Conversation with ${title}`)
+    node.head.replaceChildren(...[
+      avatar(title, peer?.id || id, peer?.presence),
+      h('span', { class: 'msg-win-title' },
+        profileId ? h('a', { href: `/people/${encodeURIComponent(profileId)}`, onclick: event => event.stopPropagation() }, title) : h('b', {}, title),
+        h('span', { class: 'msg-win-sub' }, typing.length ? 'typing…' : peer?.presence === 'online' ? 'Active now' : '')),
+      unread ? h('span', { class: 'msg-pill', 'aria-label': `${unread} unread` }, unread > 99 ? '99+' : unread) : null,
+      button(entry.minimized ? 'Expand' : 'Minimise', entry.minimized ? '⌃' : '⌄', () => toggleWindow(id)),
+      h('a', { class: 'msg-act', href: `/messages/c/${encodeURIComponent(id)}`, 'aria-label': `Open in Messages: ${title}`, title: 'Open in Messages', onclick: event => event.stopPropagation() }, '↗'),
+      button('Close', '×', () => closeWindow(id))].filter(Boolean))
+    node.head.onclick = () => toggleWindow(id)
+  }
+  function renderWindowLog(id, { scroll } = {}) {
+    const node = windowNodes.get(id), thread = state.threads.get(id), conversation = state.conversations.get(id)
+    if (!node || !thread) return
+    const log = node.log, nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80
+    const group = conversation ? conversation.type !== 'direct' : false
+    const lastOwn = [...thread.items].reverse().find(message => message.senderId === state.me)
+    const nodes = []
+    if (thread.hasMore) nodes.push(h('div', { class: 'msg-more' }, h('a', { class: 'small', href: `/messages/c/${encodeURIComponent(id)}` }, 'Earlier messages in Messages ↗')))
+    if (!thread.items.length) nodes.push(h('p', { class: 'msg-loading' }, 'No messages yet. Say hello.'))
+    let previous = null
+    for (const message of thread.items) {
+      if (!previous || new Date(previous.createdAt).toDateString() !== new Date(message.createdAt).toDateString()) nodes.push(h('div', { class: 'msg-day', role: 'separator' }, h('span', {}, dayLabel(message.createdAt))))
+      const own = message.senderId === state.me
+      const grouped = Boolean(previous && previous.senderId === message.senderId && Date.parse(message.createdAt) - Date.parse(previous.createdAt) < FIVE_MINUTES && new Date(previous.createdAt).toDateString() === new Date(message.createdAt).toDateString())
+      nodes.push(messageNode(message, { own, grouped, group, status: own && message === lastOwn && conversation ? ownStatus(message, conversation) : null, bare: true }))
+      previous = message
+    }
+    log.replaceChildren(...nodes)
+    if (scroll === 'bottom' || nearBottom) log.scrollTop = log.scrollHeight
+  }
+  async function markWindowRead(id) {
+    const conversation = state.conversations.get(id)
+    if (!conversation || !windowShown(id) || document.visibilityState !== 'visible' || !document.hasFocus()) return
+    const latest = state.threads.get(id)?.items.filter(item => !item.pending).at(-1)
+    if (!conversation.unreadCount && !conversation.markedUnread && conversation.lastReadAt && latest && conversation.lastReadAt >= latest.createdAt) return
+    try {
+      const value = await api(`/conversations/${encodeURIComponent(id)}/read`, {})
+      conversation.unreadCount = 0; conversation.markedUnread = false; conversation.lastReadAt = value.lastReadAt
+      state.readMaps.set(id, { ...(state.readMaps.get(id) || {}), ...value.readMap })
+      renderList(); updateUnread(); renderWindowHead(id); renderWindowLog(id)
+    } catch { /* Read state catches up on the next open. */ }
+  }
+  function renderWindows() {
+    if (!windowsEl) { windowsEl = h('div', { class: 'msg-windows', id: 'msg-windows' }); dock.before(windowsEl) }
+    windowsEl.style.right = `${Math.max(0, innerWidth - dock.getBoundingClientRect().left) + WINDOW_GAP}px`
+    for (const [id, node] of windowNodes) if (!state.windows.some(entry => entry.id === id)) { node.root.remove(); windowNodes.delete(id) }
+    for (const entry of state.windows) {
+      const node = windowNodes.get(entry.id) || buildWindow(entry.id)
+      node.root.dataset.minimized = String(entry.minimized); node.body.hidden = entry.minimized
+      renderWindowHead(entry.id)
+    }
+    // Left to right: farthest first, so the newest sits next to the dock. Reorder only when needed (moving a node drops its focus).
+    const order = [...state.windows].reverse().map(entry => windowNodes.get(entry.id).root)
+    if (order.some((node, index) => windowsEl.children[index] !== node) || windowsEl.children.length !== order.length) windowsEl.replaceChildren(...order)
   }
 
   if (docked) {
     const saved = store.get('unlinked.messages.dock', {})
-    if (saved.open && /^[A-Za-z0-9_-]{1,80}$/.test(saved.open)) { state.open = saved.open; root.dataset.open = saved.open; threadShell() }
+    const validWindow = entry => entry && typeof entry.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(entry.id)
+    try { state.windows = (JSON.parse(sessionStorage.getItem(WINDOWS_KEY) || '[]') || []).filter(validWindow).map(entry => ({ id: entry.id, minimized: entry.minimized === true })).slice(0, MAX_WINDOWS) } catch { state.windows = [] }
+    // A conversation left open inside the dock (before windows) becomes a window.
+    if (saved.open && /^[A-Za-z0-9_-]{1,80}$/.test(saved.open) && !state.windows.some(entry => entry.id === saved.open)) { state.windows.unshift({ id: saved.open, minimized: false }); state.windows = state.windows.slice(0, MAX_WINDOWS); saveWindows(); store.set('unlinked.messages.dock', { ...saved, open: null }) }
     $('msg-dock-toggle').addEventListener('click', () => expandDock(dock.dataset.expanded !== 'true'))
     dock.addEventListener('keydown', event => { if (event.key === 'Escape' && dock.dataset.expanded === 'true' && !state.open && !document.querySelector('dialog[open]') && !event.defaultPrevented) expandDock(false) })
     document.addEventListener('click', event => {
@@ -798,8 +934,15 @@ function messagesClient(config) {
     if (navCount) { $('msg-dock-count').textContent = navCount; $('msg-dock-count').hidden = false }
     dock.hidden = false
     if (saved.expanded && dockWide()) expandDock(true, { focus: false })
+    if (state.windows.length && dockWide()) {
+      while (state.windows.length > windowFit()) state.windows.pop()
+      renderWindows(); ensureStream()
+      ;(state.conversations.size ? Promise.resolve() : loadConversations()).then(() => { for (const entry of state.windows) renderWindowHead(entry.id); reloadWindows() })
+    }
+    let resizeTimer = null
+    addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (!windowsEl || !dockWide()) return; const before = state.windows.length; while (state.windows.length > windowFit()) state.windows.pop(); if (state.windows.length !== before) saveWindows(); renderWindows() }, 150) })
     // The dock is hidden below 1024 px: drop its stream there and resume when it shows again.
-    matchMedia('(min-width: 1024px)').addEventListener('change', event => { if (!event.matches) { stopTyping(); state.stream?.close(); state.stream = null; delete dock.dataset.stream } else if (dock.dataset.expanded === 'true' && !state.stream) { state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (!state.stream) connect() }) } })
+    matchMedia('(min-width: 1024px)').addEventListener('change', event => { if (!event.matches) { stopTyping(); state.stream?.close(); state.stream = null; delete dock.dataset.stream } else if ((dock.dataset.expanded === 'true' || state.windows.length) && !state.stream) { state.paused = false; state.loadedAt = new Date().toISOString(); loadConversations().then(() => { if (state.windows.length) { renderWindows(); reloadWindows() } if (!state.stream) connect() }) } })
     return
   }
   if (config.conversationId) { state.open = config.conversationId; root.dataset.open = config.conversationId; threadShell() }

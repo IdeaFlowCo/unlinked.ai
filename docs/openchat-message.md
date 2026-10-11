@@ -121,9 +121,17 @@ Notifications for accepted connection requests open the direct conversation.
   and loads up to ten earlier pages to reach and highlight the message.
 - **Dock.** Other signed-in pages at 1024 px and wider show a collapsed
   **Messaging** bar with the unread count. It opens the same client in a
-  380×560 panel. The event stream runs only while the dock is open. Open/closed
-  state and the current thread persist in localStorage. A profile's **Message**
-  link opens the conversation in the dock instead of leaving the page. The
+  380×560 panel. Choosing a conversation opens it in its own **chat window**
+  beside the dock, as on LinkedIn, and the list stays in place. As many windows
+  open as fit (at most three, 336 px each), newest nearest the dock; the oldest
+  closes when another opens. Each window has minimise (or click its header),
+  Open in Messages and Close, a composer (Enter sends) and live updates. Windows
+  show plain bubbles; reactions, replies and edits stay in Messages. Open
+  windows persist per tab across page loads (sessionStorage
+  `unlinked.messages.windows`). A thread left open inside the dock by an older
+  client becomes a window. The event stream runs while the dock is open or any
+  window is open. Dock open/closed state persists in localStorage. A profile's
+  **Message** link opens a chat window instead of leaving the page. The
   client is one static, content-hashed script
   (`/public-assets/messages-client.js?v=`) that reads a non-executable
   `#msg-config` block (CSRF token, thread id, emoji list, dock flag).
