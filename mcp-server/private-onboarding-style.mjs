@@ -93,9 +93,12 @@ body:has(.msg) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
 .unlinked-onboarding .msg-toggle{min-height:38px;padding:6px 10px;font-size:13px;font-weight:600;background:#fff;color:var(--fg);border:1px solid var(--line2);border-radius:var(--r);white-space:nowrap}
 .unlinked-onboarding .msg-toggle[aria-pressed=true]{background:var(--tint);border-color:var(--brand);color:var(--brand-d)}
 .unlinked-onboarding .msg-item-preview.typing{color:var(--brand-d);font-style:italic}
-.unlinked-onboarding .msg-line{position:relative;display:flex;align-items:center;gap:6px;max-width:100%}
+.unlinked-onboarding .msg-line{position:relative;display:flex;align-items:center;max-width:100%}
 .unlinked-onboarding .msg-row.own .msg-line{flex-direction:row-reverse}
-.unlinked-onboarding .msg-actions{display:flex;gap:2px;opacity:0;pointer-events:none;transition:opacity .12s}
+/* A floating toolbar over the bubble's top corner: hidden actions never take width from the message. */
+.unlinked-onboarding .msg-actions{position:absolute;bottom:calc(100% - 6px);left:8px;z-index:3;display:flex;gap:0;padding:2px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #2529531f;opacity:0;pointer-events:none;transition:opacity .12s}
+.unlinked-onboarding .msg-row.own .msg-actions{left:auto;right:8px}
+.unlinked-onboarding .msg-actions .msg-act{border-color:transparent;min-height:30px;min-width:30px}
 .unlinked-onboarding .msg-row:hover .msg-actions,.unlinked-onboarding .msg-row:focus-within .msg-actions,.unlinked-onboarding .msg-row.show-actions .msg-actions{opacity:1;pointer-events:auto}
 .unlinked-onboarding .msg-act{display:inline-grid;place-items:center;min-height:32px;min-width:32px;padding:0;background:#fff;color:var(--muted);border:1px solid var(--line);border-radius:8px;font-size:15px;line-height:1}
 .unlinked-onboarding .msg-act:hover{color:var(--fg);border-color:var(--line2)}
