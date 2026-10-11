@@ -15,3 +15,9 @@ Basic person links have a muted page-outline icon with screen-reader text. The c
 `.lavish/connections-options.html` contains two interactive alternatives using Unlinked’s existing Public Sans, slate, indigo and white-panel styling, with fictional data. A is the implemented continuous list with quiet page cues. B is a design alternative: headings in detail order, page cues in alphabetical order. The spend-limit recovery continues with A, matching the implemented feature and Gemini’s recommendation. Both alternatives remain available for later feedback.
 
 Gemini 2.5 Pro reviewed both via Vertex on 2026-10-03. It preferred A with a semantic page icon and visible legend over an arbitrary circle. Its proposed alternative combines B’s grouped default with A’s cues in other sort orders. The complete second opinion is in `connection-design-second-opinion.md`.
+
+## Hover cards
+
+On a fine pointer (mouse or trackpad), resting 400 ms on any `/people/<id>` link shows a hover card. It has the photo, name, headline, location and connection count, plus "On Unlinked" for members. A signed-in viewer also sees **N mutual connections** (from the same known-people set as "You both know") and their connection state. For members it shows **Message** (`/messages?profile=…`, which the dock opens as a chat window) and **Connect** (a native form POST with the page's CSRF token). The card stays open while the pointer moves onto it. Leaving it, scrolling or pressing Escape closes it. Touch and keyboard keep plain links.
+
+Data comes from `GET /api/people/<id>/card` (`reader.card`). The response is `no-store, private`, with its own budget (600/min, 8 in flight), so hovering never spends the public page budget. Signed out, it returns public summary fields only. The client is `HOVER_CARD_SCRIPT` (`mcp-server/hover-card.mjs`), cached per page.

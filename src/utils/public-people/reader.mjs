@@ -301,6 +301,20 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const connections = page(rows, decodedCursor, scope, data.revision)
       return { profile: { ...withPhoto(data.details.get(id)), connectionCount, connectionsTotal: rows.length, connectionFacets, connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
+    // A small public card for hover previews: the summary, plus for a signed-in
+    // viewer (`known`: published ids they are connected to; never read here)
+    // how many of this person's connections they know too.
+    async card(request = {}) {
+      const { id, signal, known } = requestValue(request)
+      if (!idValid(id) || (known !== undefined && !(known instanceof Set))) invalid()
+      const data = await snapshot(signal)
+      const resolved = data.aliases.get(id) ?? id
+      const summary = data.summaries.get(resolved)
+      if (!summary) return null
+      let mutual
+      if (known) { mutual = 0; for (const other of data.connected.get(resolved) ?? []) if (other !== resolved && known.has(other)) mutual++ }
+      return { card: { ...withPhoto(summary), ...(mutual === undefined ? {} : { mutual }) } }
+    },
     // The public summaries for known IDs, so a private row can link to the
     // matching public profile only when one is published.
     async lookup(request = {}) {
