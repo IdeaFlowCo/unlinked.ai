@@ -68,7 +68,11 @@ services:
     tmpfs:
       - '/srv/unlinked-private-guest-pilot-20261001:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}'
       - '/tmp:mode=700,uid=${PILOT_UID:?explicit host operator uid required},gid=${PILOT_GID:?explicit host operator gid required}'
-    mem_limit: 1g
+    # 1.5 GiB: the public index with all enrichment shards uses ~530 MiB at rest.
+    mem_limit: 1536m
+    # Recover from a crash on its own (a segfault on 2026-10-11 left the site down
+    # until a manual start). Logging stays off: request data must not reach Docker logs.
+    restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     logging: {driver: none}
