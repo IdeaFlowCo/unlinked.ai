@@ -734,11 +734,12 @@ export function renderInvitations({ accountLabel, displayName, csrf, importJob, 
   return base('My Network', `<section class="narrow wide mynet"><h1 class="hq">My Network</h1><p class="lead">Invitations to connect with members of Unlinked.</p>${Object.hasOwn(INVITATION_NOTICES, raw(notice)) ? `<p class="notice" role="status">${html(INVITATION_NOTICES[notice])}</p>` : ''}<nav class="subtabs" aria-label="Invitations">${tabLink('/invitations', `Received${list(received).length ? ` · ${count(list(received).length)}` : ''}`, !onSent)}${tabLink('/invitations?tab=sent', `Sent${list(sent).length ? ` · ${count(list(sent).length)}` : ''}`, onSent)}<a href="/invites">Off-platform invites</a></nav><div class="card">${body}</div><p class="small">Accepting connects you both: each of you shows in the other’s people, and on both public profiles. Ignoring is private; the sender is not told. Inviting someone who is not on Unlinked yet? <a href="/invites">Create an invite link</a>.</p></section>`, { accountLabel, displayName, csrf, importJob })
 }
 
+// `who` is the rendered name: a link to their profile when they have one.
 const NOTIFICATION_TEXT = {
-  connection_request_received: value => `${named(value)} wants to connect with you`,
-  connection_request_accepted: value => `${named(value)} accepted your invitation to connect`,
-  invite_accepted: value => `${named(value)} accepted your invite and joined Unlinked. You are now connected.`,
-  profile_claimed: value => `${named(value)}, someone in your connections, joined Unlinked and claimed their profile`,
+  connection_request_received: who => `${who} wants to connect with you`,
+  connection_request_accepted: who => `${who} accepted your invitation to connect`,
+  invite_accepted: who => `${who} accepted your invite and joined Unlinked. You are now connected.`,
+  profile_claimed: who => `${who}, someone in your connections, joined Unlinked and claimed their profile`,
 }
 // The notification feed. `pending` maps request ids that still await an answer,
 // so a request notification can be answered in place; `connected` holds request
@@ -746,12 +747,16 @@ const NOTIFICATION_TEXT = {
 // an answered request says so instead of still asking.
 export function renderNotifications({ accountLabel, displayName, csrf, importJob, items = [], pending = new Map(), connected = new Set(), pendingCount = 0, now = Date.now(), notice, emailEnabled = false } = {}) {
   const rows = list(items).filter(value => NOTIFICATION_TEXT[value.kind]).map(value => {
-    // The whole row opens the item (and marks it read), so the name is not a separate link.
+    // The whole row opens the item (and marks it read); the name and photo open
+    // the person's profile, through the same route so they mark it read too.
     const request = value.kind === 'connection_request_received'
     const waiting = request && pending.has(value.subjectId)
     const done = request && !waiting && connected.has(value.subjectId)
-    const text = done ? `${named({ name: value.actorName })} is now connected with you` : NOTIFICATION_TEXT[value.kind]({ name: value.actorName })
-    return `<li class="note${value.read ? '' : ' unread'}"><a class="note-open" href="/notifications/${html(value.id)}">${avatar(value.actorName, value.actorProfileId ?? value.actorName)}<span class="note-text">${text}${value.read ? '' : '<span class="vh"> (unread)</span>'}<span class="small note-time">${html(ago(value.createdAt, now))}${done ? ' · <span class="note-state">Connected</span>' : ''}</span></span></a>${waiting ? respondForm(csrf, value.subjectId, '/notifications') : ''}</li>`
+    const toProfile = value.actorProfileId ? html(`/notifications/${value.id}?to=profile`) : null
+    const who = toProfile ? `<a class="note-person" href="${toProfile}"><b>${html(value.actorName)}</b></a>` : `<b>${html(value.actorName)}</b>`
+    const face = avatar(value.actorName, value.actorProfileId ?? value.actorName)
+    const text = done ? `${who} is now connected with you` : NOTIFICATION_TEXT[value.kind](who)
+    return `<li class="note${value.read ? '' : ' unread'}"><div class="note-row">${toProfile ? `<a class="note-face" href="${toProfile}" tabindex="-1" aria-hidden="true">${face}</a>` : face}<span class="note-text">${text}${value.read ? '' : '<span class="vh"> (unread)</span>'}<span class="small note-time"><a class="note-open" href="/notifications/${html(value.id)}">${html(ago(value.createdAt, now))}<span class="vh"> · open notification</span></a>${done ? ' · <span class="note-state">Connected</span>' : ''}</span></span></div>${waiting ? respondForm(csrf, value.subjectId, '/notifications') : ''}</li>`
   }).join('')
   const unread = list(items).some(value => !value.read)
   const summary = pendingCount > 0 ? `<a class="note-summary" href="/invitations">${NETWORK_NAV_ICON}<span><b>${count(pendingCount)} pending ${pendingCount === 1 ? 'invitation' : 'invitations'}</b><span class="small">Review them in My Network</span></span></a>` : ''

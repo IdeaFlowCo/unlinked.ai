@@ -512,8 +512,17 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .notes .card .empty{padding:18px 22px}
 .unlinked-onboarding .note{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:12px 22px;border-top:1px solid var(--line)}
 .unlinked-onboarding .note.unread{background:#f3f4fd;box-shadow:inset 3px 0 0 var(--brand)}
-.unlinked-onboarding .note-open{display:flex;gap:14px;align-items:center;flex:1 1 280px;min-width:0;color:var(--fg);text-decoration:none}
-.unlinked-onboarding .note-open:hover .note-text{text-decoration:underline}
+/* The row is one stretched link (opens the item); the name, photo and answer buttons sit above it. */
+.unlinked-onboarding .note{position:relative}
+.unlinked-onboarding .note-row{display:flex;gap:14px;align-items:center;flex:1 1 280px;min-width:0}
+.unlinked-onboarding .note-open{color:inherit;text-decoration:none}
+.unlinked-onboarding .note-open::after{content:"";position:absolute;inset:0}
+.unlinked-onboarding .note-open:focus-visible{outline:none}
+.unlinked-onboarding .note:has(.note-open:focus-visible){outline:3px solid var(--brand);outline-offset:-3px}
+.unlinked-onboarding .note-person,.unlinked-onboarding .note-face,.unlinked-onboarding .note .row-actions{position:relative;z-index:1}
+.unlinked-onboarding .note-person{color:var(--fg);text-decoration:none}
+.unlinked-onboarding .note-person:hover{text-decoration:underline}
+.unlinked-onboarding .note-face{display:inline-flex;text-decoration:none}
 .unlinked-onboarding .note-text{font-size:15px}
 .unlinked-onboarding .note-time{display:block}
 .unlinked-onboarding .note-state{color:var(--brand-d);font-weight:600}
