@@ -96,7 +96,7 @@ test('browser rows and member-only filter count both graph directions; removal i
   assert.match(await page(sa),/Pending.*?Withdraw/s);assert.match(await page(sb),/Accept invitation.*?Ignore/s)
   const id=(await p.connections.received(b))[0].id
   await p.post(sb,'/connections/respond',{id,action:'accept'})
-  assert.match(await page(sa),/Remove connection…/)
+  assert.match(await page(sa),/class="more-actions".*>Remove connection<\/button>/s)
   const filtered=await(await p.go('/network?connected=1&presence=member',{headers:{Cookie:sa.cookie}})).text()
   assert.match(filtered,/My connections on Unlinked · 2/);assert.match(filtered,/Person b/);assert.match(filtered,/Person c/);assert.doesNotMatch(filtered,/>Person shadow</)
   assert.equal((await p.post(sc,'/connections/remove',{id})).headers.get('location'),'/invitations?notice=connection_not_found')

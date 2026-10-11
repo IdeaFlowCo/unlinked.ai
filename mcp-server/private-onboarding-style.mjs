@@ -539,6 +539,16 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding details.sources ul{margin:4px 0 0;padding-left:18px}
 .unlinked-onboarding details.sources a{color:inherit}
 .unlinked-onboarding [data-network-enhanced] .network-apply{display:none}
+.unlinked-onboarding .pconn-filter{margin:10px 0 8px}
+.unlinked-onboarding .pconn-filter input[type=search]{display:block;width:100%;margin:0;min-height:40px;padding:8px 12px;border:1px solid var(--line2);border-radius:8px;background:#fff;font:400 15px "Public Sans",system-ui,sans-serif;color:var(--fg)}
+.unlinked-onboarding .pconn-filter input[type=search]:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--tint)}
+.unlinked-onboarding .pconn-shows{width:100%;flex-wrap:nowrap;font-size:13px;margin:0 0 4px}
+.unlinked-onboarding .pconn-shows a{flex:1;text-align:center;padding:6px 6px;min-height:34px;white-space:nowrap}
+.unlinked-onboarding .pconn-shows a span{opacity:.8;font-size:12px}
+.unlinked-onboarding .pconn-status:empty{display:none}
+.unlinked-onboarding .pconn[aria-busy=true] .crow,.unlinked-onboarding .pconn[aria-busy=true] .pconn-status{opacity:.55}
+.unlinked-onboarding .pconn-all{margin:10px 0 0}
+@media(max-width:900px),(pointer:coarse){.unlinked-onboarding .pconn-filter input[type=search]{font-size:16px}}
 @media(max-width:600px){.unlinked-onboarding .network-toolbar{padding:14px}.unlinked-onboarding .network-query{min-width:100%}.unlinked-onboarding .network-sort{flex:1}.unlinked-onboarding .network-segments{width:100%;font-size:13px}.unlinked-onboarding .network-segments a{flex:1;text-align:center;padding:9px 5px}.unlinked-onboarding .network-reset{margin-left:0}}
 .unlinked-onboarding .private-context{margin-top:16px;border-left:3px solid var(--brand)}
 .unlinked-onboarding .private-context .pc-head{display:flex;align-items:center;gap:10px}

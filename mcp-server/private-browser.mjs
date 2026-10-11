@@ -3,7 +3,7 @@ import { createMessagingProxy, validId as validMessagingId, REACTION_EMOJI } fro
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { groupConnectionRows, publishedPeopleFor, rowProvenanceType, rowPublicTarget, rowSourceLabel } from './connection-identity.mjs'
-import { NETWORK_FILTER_SCRIPT } from './network-filter-script.mjs'
+import { NETWORK_FILTER_SCRIPT, PROFILE_CONNECTIONS_SCRIPT } from './network-filter-script.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
@@ -365,6 +365,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (!entry) knownCache.set(owner.ownerId, held)
     }
     return entry?.ids ?? null
+  }
+  // The same set for a page that filters by it: waits briefly for a first read.
+  const knownPeopleReady = async owner => {
+    const ids = knownPeople(owner)
+    if (ids) return ids
+    const pending = knownCache.get(owner?.ownerId)?.pending
+    if (pending) await bounded(() => pending, null)
+    return knownCache.get(owner?.ownerId)?.ids ?? null
   }
   // A member's own network read (every published import, the legacy link,
   // invites and accepted requests) costs many backend round trips, so signed-in
@@ -919,7 +927,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (++publicRequests > 120 || publicBusy >= PUBLIC_IN_FLIGHT) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         publicBusy++
         try {
-          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1 || url.searchParams.getAll('presence').length > 1 || url.searchParams.getAll('sort').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1 || url.searchParams.getAll('presence').length > 1 || url.searchParams.getAll('sort').length > 1 || url.searchParams.getAll('show').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
           if (publicCompanyApi || publicCompany) {
             let name
             try { name = decodeURIComponent((publicCompanyApi ?? publicCompany)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
@@ -940,7 +948,15 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             try { id = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
             const connectionQuery = publicProfile ? url.searchParams.get('q') ?? '' : ''
             const connectionSort = publicProfile ? url.searchParams.get('sort') ?? 'detail' : 'name'
-            const result = await publicReader.profile({ id, cursor: url.searchParams.get('cursor') ?? undefined, query: connectionQuery, sort: connectionSort })
+            // "You both know" needs the viewer's own people; signed out, or
+            // before that set can be read, the list falls back to everyone.
+            const requestedShow = publicProfile ? url.searchParams.get('show') ?? undefined : undefined
+            if (![undefined, 'members', 'known'].includes(requestedShow)) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+            // Only that filter waits for a first read; otherwise a page never
+            // waits and its count appears once the set is cached.
+            const known = !publicProfile || !viewer ? null : requestedShow === 'known' ? await knownPeopleReady(viewer.owner) : knownPeople(viewer.owner)
+            const connectionShow = requestedShow === 'known' && !known ? undefined : requestedShow
+            const result = await publicReader.profile({ id, cursor: url.searchParams.get('cursor') ?? undefined, query: connectionQuery, sort: connectionSort, show: connectionShow, ...(known ? { known } : {}) })
             if (!result) { response.writeHead(404).end(); return }
             // A merged profile's old address moves to the profile it was merged into.
             if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? '/api/people/' : '/people/'}${encodeURIComponent(result.moved)}${publicProfile?.[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
@@ -957,7 +973,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             // The owner's private context mounts only for a signed-in viewer and is
             // fetched separately; the page itself never carries it.
             const withContext = Boolean(viewer && privateContext && !publicProfile?.[2])
-            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, withContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
+            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'

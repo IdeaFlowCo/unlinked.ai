@@ -275,10 +275,14 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: rows.length }
     },
     async profile(request = {}) {
-      const { id, cursor, signal, query = '', sort = 'name' } = requestValue(request)
-      if (!idValid(id) || !['name', 'detail'].includes(sort)) invalid()
+      // `show` narrows to members ('members') or to `known`, the published ids
+      // the signed-in viewer is connected to ('known'). `known` also yields the
+      // "You both know" count; it is never read here.
+      const { id, cursor, signal, query = '', sort = 'name', show, known } = requestValue(request)
+      if (!idValid(id) || !['name', 'detail'].includes(sort) || ![undefined, 'members', 'known'].includes(show) || (known !== undefined && !(known instanceof Set)) || (show === 'known' && !known)) invalid()
       const search = queryValue(query)
-      const scope = `connections:${id}${sort === 'name' && !search ? '' : `:${sort}:${search}`}`, decodedCursor = cursorValue(cursor, scope)
+      const narrowed = show ? `:${show}${show === 'known' ? `:${hash([...known].sort().join('\n'))}` : ''}` : ''
+      const scope = `connections:${id}${sort === 'name' && !search && !show ? '' : `:${sort}:${search}${narrowed}`}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
       if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
       if (data.aliases.has(id)) return { moved: data.aliases.get(id) }
@@ -286,9 +290,13 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       let rows = data.ordered.filter(person => person.id !== id && data.connected.get(id).has(person.id))
       const connectionCount = rows.length
       if (search) { const matcher = createQueryMatcher(search, 'best'); rows = matcher ? rows.filter(person => matcher.test(data.tokens.get(person.id)).all) : [] }
+      // Counts for each narrowing, within the current search.
+      const connectionFacets = { all: rows.length, members: rows.filter(person => person.presence === 'member').length, ...(known ? { known: rows.filter(person => known.has(person.id)).length } : {}) }
+      if (show === 'members') rows = rows.filter(person => person.presence === 'member')
+      else if (show === 'known') rows = rows.filter(person => known.has(person.id))
       if (sort === 'detail') rows.sort((a, b) => Number(b.detailLevel === 'detailed') - Number(a.detailLevel === 'detailed'))
       const connections = page(rows, decodedCursor, scope, data.revision)
-      return { profile: { ...withPhoto(data.details.get(id)), connectionCount, connectionsTotal: rows.length, connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
+      return { profile: { ...withPhoto(data.details.get(id)), connectionCount, connectionsTotal: rows.length, connectionFacets, connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
     // The public summaries for known IDs, so a private row can link to the
     // matching public profile only when one is published.

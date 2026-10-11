@@ -68,3 +68,39 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
   });
   addEventListener('popstate',()=>{if(!enhanced){location.reload();return}typingEntry=false;load(new URL(location.href),{historyMode:'none'})});
 })();`;
+
+// A profile's connections sidebar: the filter field and All / You both know /
+// On Unlinked update the list in place. Without JS they are a native GET form
+// and links to the same page.
+export const PROFILE_CONNECTIONS_SCRIPT = `(()=>{
+  let root=document.querySelector('[data-profile-connections]');if(!root||!root.querySelector('#pconn-q'))return;
+  let timer,controller,version=0,composing=false;
+  const cancel=()=>{clearTimeout(timer);controller?.abort();version++};
+  const target=(href)=>{const url=new URL(href,location.href);url.hash='';return url};
+  const fromForm=()=>{const form=root.querySelector('.pconn-filter'),url=target(form.action);const fields=new URLSearchParams(new FormData(form));for(const [key,value] of [...fields])if(!value)fields.delete(key);url.search=fields.toString();return url};
+  async function load(url,{focusHref=null}={}){
+    cancel();const current=version;controller=new AbortController();root.setAttribute('aria-busy','true');
+    try{
+      const response=await fetch(url,{credentials:'same-origin',signal:controller.signal,headers:{'Accept':'text/html'}});
+      if(!response.ok||response.redirected)throw Error('profile_connections_failed');
+      const doc=new DOMParser().parseFromString(await response.text(),'text/html'),next=doc.querySelector('[data-profile-connections]');
+      if(current!==version)return;if(!next)throw Error('profile_connections_failed');
+      const input=root.querySelector('#pconn-q'),typing=document.activeElement===input,start=input.selectionStart,end=input.selectionEnd;
+      if(typing){const fresh=next.querySelector('#pconn-q');input.value=fresh.value;fresh.replaceWith(input)}
+      root.replaceWith(next);root=next;
+      history.replaceState(history.state,'',url.pathname+url.search+'#connections');
+      if(typing){input.focus({preventScroll:true});try{input.setSelectionRange(start,end)}catch{}}
+      else if(focusHref){const link=[...root.querySelectorAll('.pconn-shows a')].find(a=>target(a.href).search===focusHref);link?.focus({preventScroll:true})}
+    }catch(error){if(current!==version||error.name==='AbortError')return;location.assign(url.pathname+url.search+'#connections')}
+    finally{if(current===version)root.removeAttribute('aria-busy')}
+  }
+  document.addEventListener('input',event=>{if(event.target.id!=='pconn-q'||!root.contains(event.target))return;cancel();if(composing)return;timer=setTimeout(()=>load(fromForm()),300)});
+  document.addEventListener('compositionstart',event=>{if(event.target.id==='pconn-q'){composing=true;cancel()}});
+  document.addEventListener('compositionend',event=>{if(event.target.id==='pconn-q'){composing=false;event.target.dispatchEvent(new Event('input',{bubbles:true}))}});
+  document.addEventListener('submit',event=>{if(!event.target.classList.contains('pconn-filter')||!root.contains(event.target))return;event.preventDefault();load(fromForm())});
+  document.addEventListener('click',event=>{
+    const link=event.target.closest('.pconn-shows a,.pconn-status a');if(!link||!root.contains(link)||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.altKey||event.shiftKey)return;
+    const url=target(link.href);if(url.origin!==location.origin||url.pathname!==location.pathname)return;
+    event.preventDefault();load(url,{focusHref:link.closest('.pconn-shows')?url.search:null});
+  });
+})();`
