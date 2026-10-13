@@ -316,8 +316,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       if (known) { mutual = 0; for (const other of data.connected.get(resolved) ?? []) if (other !== resolved && known.has(other)) mutual++ }
       return { card: { ...withPhoto(summary), ...(mutual === undefined ? {} : { mutual }) } }
     },
-    // The public summaries for known IDs, so a private row can link to the
-    // matching public profile only when one is published.
+    // Exact URL evidence only; names never establish a person match.
     async lookupLinkedin(request = {}) {
       const { address, signal } = requestValue(request), parsed = parseLinkedinProfileUrl(address)
       if (!parsed) invalid()
@@ -327,6 +326,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       matches.sort((a, b) => Number(b.presence === 'member') - Number(a.presence === 'member') || compare(a.id, b.id))
       return matches.length ? withPhoto(data.summaries.get(matches[0].id)) : null
     },
+    // The public summaries for known IDs, so a private row can link to the
+    // matching public profile only when one is published.
     async lookup(request = {}) {
       const { ids, signal } = requestValue(request)
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(idValid)) invalid()

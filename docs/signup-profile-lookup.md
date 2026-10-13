@@ -86,6 +86,12 @@ No web build variables or public configuration are needed.
 
 ## Limits and failures
 
+The adapter, global reservation gate and professional cache are also used by
+[general person discovery](linkedin-discovery-and-queue.md#person-lookup).
+The self-claim restrictions and lifetime account limit below apply only to
+signup lookup; general discovery has its own owner allowance and cannot claim
+an identity. Both services consume the same configured global budget and pacing.
+
 There is no automatic retry or background queue. A busy gate, cap, timeout,
 not-found result, or adapter or storage failure returns a typed result with a
 friendly notice. The member can continue with a name-only profile and add an

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import { createPersonLookup, createNeo4jPersonLookupStore } from '../mcp-server/person-lookup.mjs'
 import { createNeo4jProfileLinkStore } from '../mcp-server/profile-social-links.mjs'
+import { createNeo4jSignupProfileStore } from '../mcp-server/signup-profile-lookup.mjs'
 
 const uri = process.env.UNLINKED_TEST_NEO4J_URI
 const enabled = /^bolt:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uri ?? '') && process.env.UNLINKED_TEST_NEO4J_DRIVER
@@ -22,6 +23,8 @@ test('durable person lookup shares reservations across processes, caps owners, e
     await driver.close()
   })
   for (const who of [owner, other]) await run("CREATE (:OperationalOwner {namespace:'unlinked',sourceOwnerId:$ownerId,userId:$userId,active:true,testRun:$tag})", { ...who, tag })
+  // Match composition startup: the shared gate/cache constraints belong to signup.
+  await createNeo4jSignupProfileStore(driver, 'neo4j', tag).initialize()
   const store = createNeo4jPersonLookupStore(driver, 'neo4j', tag); await store.initialize()
   let time = Date.now() + 120000, reads = 0, successful = false
   const settings = { dailyCap: 50, pacingMs: 4000, timeoutMs: 1000 }
