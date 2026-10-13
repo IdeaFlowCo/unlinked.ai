@@ -14,7 +14,9 @@ by address, with one LinkedIn at most (the professional address wins).
 HTTPS only (bare addresses get `https://`, `http:` upgrades, every other scheme
 fails), LinkedIn restricted to the existing person grammar, known hosts
 labelled by name and anything else labelled by host and path, at most
-`SOCIAL_LINK_LIMITS.maxLinks` entries of `maxLength` characters. Both the store
+`SOCIAL_LINK_LIMITS.maxLinks` entries. The `maxLength` bound applies to both
+the trimmed input and the canonical percent-encoded URL stored, so an accepted
+link remains valid when read and normalized again. Both the store
 and the renderer re-validate: a stored row that no longer classifies is
 dropped, never rendered. Labels are escaped like all view text.
 
