@@ -8,6 +8,9 @@ import { createNeo4jSignupProfileStore } from '../mcp-server/signup-profile-look
 
 const uri = process.env.UNLINKED_TEST_NEO4J_URI
 const enabled = /^bolt:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uri ?? '') && process.env.UNLINKED_TEST_NEO4J_DRIVER
+if (process.env.UNLINKED_TEST_NEO4J_REQUIRED === '1') {
+  assert.ok(enabled && process.env.UNLINKED_TEST_NEO4J_PASSWORD, 'Required disposable Neo4j fixture must configure a loopback Bolt URI, driver and password')
+}
 test('durable person lookup shares reservations across processes, caps owners, expires caches and fences removed owners', { skip: !enabled }, async t => {
   const neo4j = createRequire(import.meta.url)(process.env.UNLINKED_TEST_NEO4J_DRIVER)
   const driver = neo4j.driver(uri, neo4j.auth.basic('neo4j', process.env.UNLINKED_TEST_NEO4J_PASSWORD))
