@@ -7,6 +7,9 @@ import { NETWORK_FILTER_SCRIPT, PROFILE_CONNECTIONS_SCRIPT } from './network-fil
 import { HOVER_CARD_SCRIPT } from './hover-card.mjs'
 import { companyDetailLevel } from '../src/utils/public-people/detail-level.mjs'
 import { signupProfileSlug, signupLookupNotice } from './signup-profile-lookup.mjs'
+import { parseLinkedinProfileUrl } from '../src/utils/linkedin-profile-url.mjs'
+import { personLookupNotice } from './person-lookup.mjs'
+import { renderPersonLookup } from './person-lookup-view.mjs'
 import { createKnownConnectionsReader } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
@@ -77,7 +80,7 @@ export const autoSignInEnabled = env => !/^(?:off|false|0|no)$/i.test(String(env
 // the sign-in, callback, sign-out, join, invitation, confirmation (legacy
 // account, find-me, claim), unsubscribe or contact-card token routes, assets,
 // photos, APIs, /mcp, /oauth/* or /.well-known/*.
-const AUTO_SIGNIN_PAGES = new Set(['/', '/messages', '/people', '/network', '/profile', '/card', '/settings', '/import', '/invites', '/invitations', '/notifications', '/people/add', '/scan', '/meet', '/agents', '/import-linkedin'])
+const AUTO_SIGNIN_PAGES = new Set(['/', '/messages', '/people', '/network', '/profile', '/card', '/settings', '/import', '/invites', '/invitations', '/notifications', '/people/add', '/people/lookup', '/scan', '/meet', '/agents', '/import-linkedin'])
 export const autoSignInPage = pathname => typeof pathname === 'string' && (AUTO_SIGNIN_PAGES.has(pathname) ||
   /^\/people\/[^/]{1,480}$/.test(pathname) || /^\/companies\/[^/]{1,200}$/.test(pathname))
 // Header guards (server side): a real top-level document navigation asking for
@@ -156,7 +159,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -238,7 +241,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // Pages a sign-in may return to. Everything else lands on the home route.
   // An OAuth connector authorization request returns to its own validated
   // consent page (the query is re-validated there, never trusted).
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const lookupReturn = value => { try { const u = new URL(value, base); return value.startsWith('/people/lookup?') && u.pathname === '/people/lookup' && u.searchParams.getAll('url').length === 1 && [...u.searchParams.keys()].every(key => key === 'url') && Boolean(parseLinkedinProfileUrl(u.searchParams.get('url'))) } catch { return false } }
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -948,6 +952,27 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const relation = target ? await memberConnections.between(viewer.owner, target) : null
         journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, relation: relation?.state, addError: url.searchParams.get('add') === 'failed' }), null, '', card ? 200 : 404); return
       }
+      // Native header/directory searches accept LinkedIn URLs as well as names.
+      // Navigating never spends a provider request; the lookup form does that.
+      if (request.method === 'GET' && ['/network', '/people'].includes(url.pathname) && url.searchParams.getAll('q').length === 1 && parseLinkedinProfileUrl(url.searchParams.get('q'))) {
+        redirect(response, `/people/lookup?url=${encodeURIComponent(parseLinkedinProfileUrl(url.searchParams.get('q')).url)}`); return
+      }
+      if (request.method === 'GET' && url.pathname === '/people/lookup') {
+        if (url.searchParams.getAll('url').length > 1 || [...url.searchParams.keys()].some(key => key !== 'url')) throw Error('person_lookup_input_invalid')
+        const address = url.searchParams.get('url') ?? '', parsed = parseLinkedinProfileUrl(address)
+        let notice = address && !parsed ? personLookupNotice('invalid_url') : ''
+        if (parsed) {
+          try {
+            const existing = await publicReader.lookupLinkedin({ address: parsed.url })
+            if (existing) { redirect(response, `/people/${encodeURIComponent(existing.id)}`); return }
+          } catch { notice = 'Unlinked’s people directory is temporarily unavailable. Please try again later.' }
+        }
+        if (!viewer) {
+          const next = `/people/lookup${parsed ? `?url=${encodeURIComponent(parsed.url)}` : ''}`
+          journey(response, renderSignInRequired({ next }), null, '', 401); return
+        }
+        journey(response, renderPersonLookup({ ...chrome, address: parsed?.url ?? address, notice, enabled: personLookup?.enabled })); return
+      }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
       // /people/add is the signed-in Add a person page, never a profile id.
       const publicProfile = url.pathname === '/people/add' ? null : url.pathname.match(/^\/people\/([^/]+)(\/connections)?$/)
@@ -1513,6 +1538,42 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         redirect(response, `/card?share=contact&done=${url.pathname === '/card/contact' ? 'saved' : 'reset'}`); return
       }
       // Off-platform people: add someone to your own people, or invite them.
+      if (request.method === 'POST' && ['/people/lookup', '/people/lookup/save'].includes(url.pathname)) {
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        const saving = url.pathname.endsWith('/save'), keys = saving ? ['csrf', 'lookupToken'] : ['csrf', 'linkedinUrl']
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => !keys.includes(key)) || keys.some(key => input.getAll(key).length !== 1)) throw Error('private_browser_csrf')
+        const props = jobProps(await jobResources())
+        if (!saving) {
+          session.personLookupCandidate = null
+          const address = input.get('linkedinUrl'), parsed = parseLinkedinProfileUrl(address)
+          if (!parsed) { journey(response, renderPersonLookup({ ...props, address: address.slice(0, 2048), notice: personLookupNotice('invalid_url'), enabled: personLookup?.enabled }), null, '', 400); return }
+          try {
+            const existing = await publicReader.lookupLinkedin({ address: parsed.url })
+            if (existing) { redirect(response, `/people/${encodeURIComponent(existing.id)}`); return }
+          } catch { journey(response, renderPersonLookup({ ...props, address: parsed.url, notice: 'Unlinked’s people directory is temporarily unavailable. Please try again later.', enabled: personLookup?.enabled }), null, '', 503); return }
+          const result = personLookup ? await personLookup.lookup({ owner: session.owner, address: parsed.url }) : { status: 'unavailable', code: 'disabled' }
+          if (result.status === 'found') session.personLookupCandidate = { result, token: token(), expiresAt: Date.now() + 10 * 60000 }
+          journey(response, renderPersonLookup({ ...props, address: parsed.url, enabled: personLookup?.enabled,
+            ...(result.status === 'found' ? { result, lookupToken: session.personLookupCandidate.token } : { notice: personLookupNotice(result.code) }) })); return
+        }
+        const candidate = session.personLookupCandidate
+        if (!candidate || candidate.token !== input.get('lookupToken') || candidate.expiresAt <= Date.now()) throw Error('person_lookup_candidate_expired')
+        // Check again: another user may have published the same person while
+        // this preview was open. A lookup never fabricates a member or claim.
+        const existing = await publicReader.lookupLinkedin({ address: candidate.result.address })
+        if (existing) { redirect(response, `/people/${encodeURIComponent(existing.id)}`); return }
+        if (!candidate.saved) {
+          const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
+          const slug = parseLinkedinProfileUrl(candidate.result.address).slug
+          const duplicate = network.assertions.find(row => row.category === 'connections' && parseLinkedinProfileUrl(row.fields?.url)?.slug === slug)
+          if (duplicate) { redirect(response, `/network/contacts/${encodeURIComponent(duplicate.id)}`); return }
+          const profile = candidate.result.profile, pieces = profile.name.split(/\s+/), cell = value => `"${String(value ?? '').replace(/"/g, '""')}"`
+          const csv = `First Name,Last Name,URL,Email Address,Company,Position,Connected On\n${[pieces.shift(), pieces.join(' '), candidate.result.address, '', profile.company, profile.headline, ''].map(cell).join(',')}\n`
+          await stageArchive({ ownerId: session.owner.ownerId, filename: 'Added people.csv', bytes: Buffer.from(csv, 'utf8'), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT, origin: { kind: ADDED_PERSON, label: [...profile.name].slice(0, 241).join('') } })
+          candidate.saved = true
+        }
+        redirect(response, '/network?added=1'); return
+      }
       if (signup && request.method === 'GET' && url.pathname === '/people/add') {
         const props = jobProps(await jobResources())
         journey(response, renderAddPerson(props), props.importJob); return
@@ -1795,6 +1856,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
         if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
+        if (personLookup) await personLookup.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)

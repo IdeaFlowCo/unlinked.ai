@@ -93,3 +93,9 @@ jobs:
           UNLINKED_MIGRATION_TEST: isolated-fixture
           MIGRATION_NEO4J_MODULE_ROOT: ${{ runner.temp }}/unlinked-migration-driver
         run: node --test tests/graph-migration.integration.test.mjs
+      - name: Exercise durable LinkedIn lookup reservations on the disposable source graph
+        env:
+          UNLINKED_TEST_NEO4J_URI: bolt://127.0.0.1:8967
+          UNLINKED_TEST_NEO4J_PASSWORD: unlinked-s21-fixture
+          UNLINKED_TEST_NEO4J_DRIVER: ${{ runner.temp }}/unlinked-migration-driver/node_modules/neo4j-driver
+        run: node --test tests/person-lookup-neo4j.test.mjs

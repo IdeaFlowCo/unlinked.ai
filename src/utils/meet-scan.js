@@ -1,5 +1,6 @@
 import { parseOpenChatCard, openChatCardUrl } from './openchat-card.js'
 import { parseUnlinkedCard, unlinkedProfilePath } from './unlinked-card.js'
+import { parseLinkedinProfileUrl } from './linkedin-profile-url.mjs'
 
 /**
  * Classify a scanned or pasted Meet code. Returns a displayable, pre-validated
@@ -11,5 +12,7 @@ export function classifyMeetCode(value) {
   if (openChat) return { kind: 'openchat', href: openChatCardUrl(openChat), label: `OpenChat card on ${new URL(openChat.origin).host}` }
   const unlinked = parseUnlinkedCard(value)
   if (unlinked) return { kind: 'unlinked', href: unlinkedProfilePath(unlinked), label: unlinked.contact ? 'Unlinked contact card' : 'Unlinked profile' }
+  const linkedin = parseLinkedinProfileUrl(value)
+  if (linkedin) return { kind: 'linkedin', href: `/people/lookup?url=${encodeURIComponent(linkedin.url)}`, label: `LinkedIn profile: ${linkedin.slug}` }
   return null
 }

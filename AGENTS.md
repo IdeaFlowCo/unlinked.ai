@@ -177,3 +177,5 @@ Settings manual-key setup, lifecycle, compatibility and release/rollback constra
 Default-off standalone REST/MCP diagnostics, trust/redaction boundaries, private retention and the operator reader are documented in [docs/request-diagnostics.md](docs/request-diagnostics.md). Never enable broad access logging or log request bodies/credentials to diagnose an agent. Enabling collection requires the normal scoped runtime release gate.
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract [Historical membership](docs/public-people-reader.md#historical-membership).
+
+Browser-only LinkedIn URL/QR lookup is documented in [docs/linkedin-discovery-and-queue.md](docs/linkedin-discovery-and-queue.md). General person lookup shares signup’s global adapter budget, never its claim/lifetime account policy; private save uses the existing added-person importer. Agentbook and LinkedIn queue execution remain planning-only.

@@ -1,5 +1,6 @@
+import { parseLinkedinProfileUrl } from '../src/utils/linkedin-profile-url.mjs'
 // Serialized into the page's nonce-bearing header script; no extra bundle or CDN.
-function omniSearch() {
+function omniSearch(linkedin) {
   const form = document.querySelector('.header-search')
   if (!form) return
   const input = form.querySelector('input[name=q]')
@@ -97,6 +98,8 @@ function omniSearch() {
   }
   // Same URL the native form submits, including its hidden filters.
   const fullSearch = term => {
+    const person = linkedin(term)
+    if (person) return '/people/lookup?url=' + encodeURIComponent(person.url)
     const params = new URLSearchParams(new FormData(form))
     params.set('q', term)
     return '/network?' + params
@@ -110,7 +113,7 @@ function omniSearch() {
     addGroup('Companies', companies.map(row => ({ name: row.name, subtitle: 'Company · View people and details', href: '/companies/' + encodeURIComponent(row.name) })), 'Companies', term)
     const shortcuts = destinations.filter(row => !term || row.name.toLowerCase().includes(term.toLowerCase()))
     addGroup('Go to', shortcuts, 'Go to', term)
-    if (term) addGroup('Search', [{ name: 'See all results for “' + term + '”', subtitle: 'People, roles, companies and skills', href: fullSearch(term) }], 'Search', '')
+    if (term) addGroup('Search', [{ name: linkedin(term) ? 'Find this person from LinkedIn' : 'See all results for “' + term + '”', subtitle: linkedin(term) ? 'Open on Unlinked or retrieve a live preview' : 'People, roles, companies and skills', href: fullSearch(term) }], 'Search', '')
     if (selectedHref) activate(options.findIndex(option => option.getAttribute('href') === selectedHref))
     status.textContent = message || (term.length < 2 ? 'Search people, roles and companies, or jump to a page.' : people.length + companies.length ? (people.length + companies.length) + ' suggestions. Use ↑ ↓ to choose, Enter to open.' : 'No matching people or companies. Try the full search.')
     panel.hidden = false; input.setAttribute('aria-expanded', 'true')
@@ -119,6 +122,7 @@ function omniSearch() {
     cancel()
     if (composing || document.activeElement !== input) return
     const term = query(), current = generation
+    if (linkedin(term)) { draw(term); status.textContent = 'Find this person from their LinkedIn address.'; return }
     if (term.length < 2) { draw(term); return }
     if (seen.has(term)) { shown = seen.get(term); draw(term, shown); return }
     const earlier = narrow(term, shown)
@@ -174,4 +178,4 @@ function omniSearch() {
   })
   addEventListener('pagehide', close)
 }
-export const OMNI_SEARCH_SCRIPT = `(${omniSearch.toString()})();`
+export const OMNI_SEARCH_SCRIPT = `(${omniSearch.toString()})(${parseLinkedinProfileUrl.toString()});`

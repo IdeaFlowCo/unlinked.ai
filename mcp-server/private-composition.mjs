@@ -8,6 +8,7 @@ import { createMessagingResolver, createMessagingSession, createMessagingIdentit
 import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
+import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
@@ -174,6 +175,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // already confirmed sources stay readable.
     const lookup = signupLookupStore ? await prepareProfileLookup({ env: profileLookupEnv, load: profileLookupLoader, log: emailLog }) : null
     const signupLookup = signupLookupStore ? createSignupProfileLookup({ store: signupLookupStore, ...lookup }) : undefined
+    const personLookupStore = publicPeople ? createNeo4jPersonLookupStore(driver) : null
+    await personLookupStore?.initialize()
+    const personLookup = personLookupStore ? { ...createPersonLookup({ store: personLookupStore, ...lookup }), enabled: Boolean(lookup?.adapter) } : undefined
     const legacyBoundary = publicPeople ? createLegacyProfileBoundary(driver) : null
     const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(legacyBoundary?.driver ?? driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
     await legacyLinks?.initialize()
@@ -594,6 +598,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       } : undefined,
       // Self-serve claims, including the test-profile lane (mcp-server/self-claims.mjs).
       signupLookup,
+      personLookup,
       selfClaims: legacyLinks && publicPeople ? legacyBoundary.wrapSelfClaims(createSelfClaims({ driver: legacyBoundary.driver, publicPeople, slugIndex })) : undefined,
       removeOwnerAssets: async ownerId => {
         // Exact one-segment owner directory under the composition's asset root;

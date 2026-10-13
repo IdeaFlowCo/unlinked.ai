@@ -1,4 +1,5 @@
 import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
+import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
@@ -317,6 +318,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     },
     // The public summaries for known IDs, so a private row can link to the
     // matching public profile only when one is published.
+    async lookupLinkedin(request = {}) {
+      const { address, signal } = requestValue(request), parsed = parseLinkedinProfileUrl(address)
+      if (!parsed) invalid()
+      const data = await snapshot(signal)
+      const matches = [...data.details.values()].filter(profile => parseLinkedinProfileUrl(profile.linkedinUrl)?.slug === parsed.slug)
+      // Prefer a live member when two published sources describe one person.
+      matches.sort((a, b) => Number(b.presence === 'member') - Number(a.presence === 'member') || compare(a.id, b.id))
+      return matches.length ? withPhoto(data.summaries.get(matches[0].id)) : null
+    },
     async lookup(request = {}) {
       const { ids, signal } = requestValue(request)
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(idValid)) invalid()
