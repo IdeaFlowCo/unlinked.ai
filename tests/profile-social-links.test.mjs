@@ -33,6 +33,15 @@ test('one pasted address classifies by host, with only safe HTTPS surviving', ()
   }
 })
 
+test('accepted social links remain valid after canonical encoding and overlong Unicode URLs are rejected up front', () => {
+  assert.equal(classifySocialLink('https://example.com/' + 'é'.repeat(100)), null)
+  for (const address of ['https://example.com/café', 'https://x.com/synthetic-person', 'synthetic.substack.com', 'linkedin.com/in/synthetic-person']) {
+    const link = classifySocialLink(address)
+    assert.ok(link)
+    assert.deepEqual(classifySocialLink(link.url), link)
+  }
+})
+
 test('a member list deduplicates, reports bad lines and bounds the count', () => {
   const result = normalizeSocialLinks(['x.com/jacob', 'https://x.com/jacob', 'nope^', 'jacob.substack.com'])
   assert.deepEqual(result.links.map(link => link.kind), ['x', 'substack'])

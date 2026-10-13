@@ -403,6 +403,15 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     return entry.pending
   }
   const dropAccountNetwork = owner => { if (owner?.ownerId) networkCache.delete(`${owner.ownerId}\u0000${owner.userId}`) }
+  const linkedinPersonDestination = async (owner, address) => {
+    const published = await publicReader.lookupLinkedin({ address })
+    if (published) return `/people/${encodeURIComponent(published.id)}`
+    if (!owner) return null
+    const slug = parseLinkedinProfileUrl(address)?.slug
+    const network = await accountNetwork(owner)
+    const contact = network.assertions.find(row => row.category === 'connections' && parseLinkedinProfileUrl(row.fields?.url)?.slug === slug)
+    return contact ? `/network/contacts/${encodeURIComponent(contact.id)}` : null
+  }
   const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || (pathname !== '/people/add' && /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname)) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
   let photoRequests = 0, photoWindow = Date.now(), photoBusy = 0
@@ -965,8 +974,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         let notice = address && !parsed ? personLookupNotice('invalid_url') : ''
         if (parsed) {
           try {
-            const existing = await publicReader.lookupLinkedin({ address: parsed.url })
-            if (existing) { redirect(response, `/people/${encodeURIComponent(existing.id)}`); return }
+            const destination = await linkedinPersonDestination(viewer?.owner, parsed.url)
+            if (destination) { redirect(response, destination); return }
           } catch { notice = 'Unlinked’s people directory is temporarily unavailable. Please try again later.' }
         }
         if (!viewer) {
@@ -1585,8 +1594,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const address = input.get('linkedinUrl'), parsed = parseLinkedinProfileUrl(address)
           if (!parsed) { journey(response, renderPersonLookup({ ...props, address: address.slice(0, 2048), notice: personLookupNotice('invalid_url'), enabled: personLookup?.enabled }), null, '', 400); return }
           try {
-            const existing = await publicReader.lookupLinkedin({ address: parsed.url })
-            if (existing) { redirect(response, `/people/${encodeURIComponent(existing.id)}`); return }
+            const destination = await linkedinPersonDestination(session.owner, parsed.url)
+            if (destination) { redirect(response, destination); return }
           } catch { journey(response, renderPersonLookup({ ...props, address: parsed.url, notice: 'Unlinked’s people directory is temporarily unavailable. Please try again later.', enabled: personLookup?.enabled }), null, '', 503); return }
           const result = personLookup ? await personLookup.lookup({ owner: session.owner, address: parsed.url }) : { status: 'unavailable', code: 'disabled' }
           if (result.status === 'found') session.personLookupCandidate = { result, token: token(), expiresAt: Date.now() + 10 * 60000 }

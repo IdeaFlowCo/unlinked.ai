@@ -36,7 +36,7 @@ export function classifySocialLink(value) {
   const address = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text.replace(/^http:\/\//i, 'https://') : `https://${text}`
   let url
   try { url = new URL(address) } catch { return null }
-  if (url.protocol !== 'https:' || url.username || url.password || !url.hostname.includes('.')) return null
+  if (url.protocol !== 'https:' || url.username || url.password || !url.hostname.includes('.') || url.href.length > SOCIAL_LINK_LIMITS.maxLength) return null
   const host = url.hostname.toLowerCase().replace(/^www\./, '')
   if (host === 'linkedin.com' || host.endsWith('.linkedin.com')) {
     const linkedin = publicLinkedinUrl(url.href)

@@ -6,6 +6,8 @@ import { createPersonLookup } from '../mcp-server/person-lookup.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { parseLinkedinProfileUrl } from '../src/utils/linkedin-profile-url.mjs'
 import { classifyMeetCode } from '../src/utils/meet-scan.js'
+import { ingestArchive } from '../src/utils/private-import/job.mjs'
+import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 
 const owner = { ownerId: 'synthetic-lookup-owner', userId: 'synthetic-lookup-user' }
 const publicPerson = value => ({ positions: [], education: [], skills: [], ...value })
@@ -62,27 +64,31 @@ test('deadline holds even for an adapter ignoring cancellation; stale store comp
   assert.equal((await stale.lookup({ owner, address })).code, 'unavailable')
 })
 
-async function browser(t) {
+async function browser(t, { lookupEnabled = true } = {}) {
   const resources = new Map(), assets = new Map(), snapshot = { state: 'published', complete: true, revision: 'http-test', profiles: [], members: [], connections: [] }
-  let calls = 0, handler
+  let calls = 0, handler, nextSubject = 'lookup-person'
+  const otherOwner = { ownerId: 'synthetic-other-owner', userId: 'synthetic-other-user' }
+  const emptyBackend = { adapter: {}, readResource: async () => null, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => [] }
   const backend = {
-    adapter: { withImport: async (_owner, id, work) => work({ getJob: async () => resources.get(id)?.payload,
-      putAsset: async (hash, bytes) => assets.set(hash, Buffer.from(bytes)), saveJob: async job => resources.set(id, { type: 'import', sourceId: id, sourceOwnerId: owner.ownerId, payload: structuredClone(job), sourceRevision: job.revision, deleted: false }) }) },
-    readResource: async (_type, id) => resources.get(id), listImportIds: async () => [...resources.keys()], listImportJobIds: async () => [...resources.keys()], listAccountGrantIds: async () => [],
+    adapter: { withImport: async (_owner, id, work) => work({ publicationStatus: 'indexed', getJob: async () => resources.get(id)?.payload,
+      putAsset: async (hash, bytes) => assets.set(hash, Buffer.from(bytes)), saveJob: async job => resources.set(id, { type: 'import', sourceId: id, sourceOwnerId: owner.ownerId, payload: structuredClone(job), sourceRevision: job.revision, deleted: false }),
+      publish: async (job, assertions) => { job.assertionIds = assertions.map(row => row.id); for (const row of assertions) resources.set(row.id, { type: 'assertion', sourceId: row.id, sourceOwnerId: owner.ownerId, sourceRevision: 1, deleted: false, payload: structuredClone(row) }); resources.set(id, { type: 'import', sourceId: id, sourceOwnerId: owner.ownerId, sourceRevision: job.revision, deleted: false, payload: structuredClone(job) }) },
+    }) },
+    readResource: async (_type, id) => resources.get(id), listImportIds: async () => [...resources.values()].filter(row => row.type === 'import' && ['indexed', 'partial'].includes(row.payload.status)).map(row => row.sourceId), listImportJobIds: async () => [...resources.values()].filter(row => row.type === 'import').map(row => row.sourceId), listAccountGrantIds: async () => [],
   }
   const server = createServer((req, res) => void handler(req, res))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
   const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
-  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'synthetic', login: { begin: async () => ({ location: 'https://id.invalid/', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://id.invalid', subject: 'lookup-person', displayName: 'Lookup Owner' }) }, resolveOwner: async () => owner, signup: async () => owner,
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'synthetic', login: { begin: async () => ({ location: 'https://id.invalid/', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://id.invalid', subject: nextSubject, displayName: 'Lookup Owner' }) }, resolveOwner: async identity => identity.subject === 'other-person' ? otherOwner : owner, signup: async () => owner,
     issueAccountGrant: async () => ({ accessToken: 'synthetic' }), revokeAccountGrant: async () => {},
-    getBackend: async caller => { assert.deepEqual(caller, owner); return backend }, readPublishedSnapshot: async () => snapshot,
-    personLookup: { enabled: true, lookup: async args => { calls++; assert.deepEqual(args.owner, owner); return { status: 'found', address, observedAt: Date.now(), profile: { name: 'New Person', headline: '<script>unsafe</script>', company: 'Example', positions: [], education: [] } } }, removeOwner: async () => {} } })
+    getBackend: async caller => { if (caller.ownerId === otherOwner.ownerId) { assert.deepEqual(caller, otherOwner); return emptyBackend }; assert.deepEqual(caller, owner); return backend }, readPublishedSnapshot: async () => snapshot,
+    personLookup: lookupEnabled ? { enabled: true, lookup: async args => { calls++; assert.deepEqual(args.owner, owner); return { status: 'found', address, observedAt: Date.now(), profile: { name: 'New Person', headline: '<script>unsafe</script>', company: 'Example', positions: [], education: [] } } }, removeOwner: async () => {} } : undefined })
   const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
-  const start = await request('/login'), callback = await request('/auth/callback/ideaflow?state=state&code=x', { headers: { Cookie: start.headers.getSetCookie()[0].split(';')[0] } })
-  const cookie = callback.headers.getSetCookie().find(row => row.startsWith('__Host-ul-session=')).split(';')[0]
+  const signIn = async subject => { nextSubject = subject; const start = await request('/login'), callback = await request('/auth/callback/ideaflow?state=state&code=x', { headers: { Cookie: start.headers.getSetCookie()[0].split(';')[0] } }); return callback.headers.getSetCookie().find(row => row.startsWith('__Host-ul-session=')).split(';')[0] }
+  const cookie = await signIn('lookup-person')
   const page = await (await request('/people/lookup', { headers: { Cookie: cookie } })).text(), csrf = /name="csrf" value="([^"]+)"/.exec(page)[1]
   const post = (path, fields, authenticated = true) => request(path, { method: 'POST', headers: { ...(authenticated ? { Cookie: cookie } : {}), Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(fields) })
-  return { request, post, cookie, csrf, snapshot, resources, get calls() { return calls } }
+  return { request, post, cookie, csrf, snapshot, resources, backend, signIn, get calls() { return calls } }
 }
 
 test('browser lookup finds existing public people without a provider; URL search and QR lead to same route', async t => {
@@ -110,4 +116,22 @@ test('only a CSRF-protected member lookup fetches; preview is escaped, save is p
   assert.equal(b.resources.size, 1)
   const job = [...b.resources.values()][0].payload
   assert.equal(job.origin.kind, 'added-person'); assert.equal(job.status, 'uploaded'); assert.equal(b.snapshot.profiles.length, 0)
+})
+
+test('a LinkedIn URL opens the caller’s existing private contact even with live lookup disabled, without exposing it to another account', async t => {
+  const b = await browser(t, { lookupEnabled: false })
+  await ingestArchive({ ownerId: owner.ownerId, filename: 'Connections.csv', bytes: Buffer.from(`First Name,Last Name,URL,Company,Position\nPrivate,Person,${address},Private Example,Engineer\n`), adapter: b.backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const row = [...b.resources.values()].find(value => value.type === 'assertion')
+  assert.ok(row)
+  const path = '/people/lookup?url=' + encodeURIComponent(address)
+  for (const result of [await b.request(path, { headers: { Cookie: b.cookie } }), await b.post('/people/lookup', { csrf: b.csrf, linkedinUrl: address })]) {
+    assert.equal(result.status, 303); assert.equal(result.headers.get('location'), '/network/contacts/' + row.sourceId)
+  }
+  const contact = await b.request('/network/contacts/' + row.sourceId, { headers: { Cookie: b.cookie } })
+  assert.equal(contact.status, 200); assert.match(await contact.text(), /Private Person/)
+  const otherCookie = await b.signIn('other-person')
+  const other = await b.request(path, { headers: { Cookie: otherCookie } })
+  assert.equal(other.status, 200); assert.doesNotMatch(await other.text(), /Private Person|Private Example/); assert.equal(b.calls, 0)
+  const forbidden = await b.request('/network/contacts/' + row.sourceId, { headers: { Cookie: otherCookie } })
+  assert.equal(forbidden.status, 404); assert.doesNotMatch(await forbidden.text(), /Private Person|Private Example/)
 })
