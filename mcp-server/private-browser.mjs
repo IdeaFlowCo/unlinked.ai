@@ -1512,7 +1512,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         let socialLinks
         if (profileSocialLinks) {
           const saved = await bounded(() => profileSocialLinks.get(session.owner), null)
-          if (saved?.links?.length && mine && saved.profileId !== mine) await profileSocialLinks.set(session.owner, { profileId: mine, links: saved.links.map(link => link.url) }).catch(() => {})
+          if (saved?.links?.length && mine && saved.profileId !== mine) await profileSocialLinks.rebind(session.owner, { profileId: mine, observed: saved }).catch(() => {})
           if (saved?.links?.length) profile.socialLinks = saved.links
           const notice = url.searchParams.get('links')
           const line = Number.parseInt(url.searchParams.get('line') ?? '', 10)

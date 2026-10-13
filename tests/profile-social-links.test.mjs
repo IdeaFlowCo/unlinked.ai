@@ -202,3 +202,23 @@ test('the isolated pilot forwards the profile link store to the browser', async 
   assert.match(await found.text(), /New Person/)
   assert.equal(personLookups, 1)
 })
+
+
+test('profile rebinding rejects stale replacements and deletions even with identical timestamps', async () => {
+  const store = createMemoryProfileLinkStore({ now: () => 1000 })
+  const original = await store.set(owner, { profileId: 'old', links: ['x.com/original'] })
+  await store.set(owner, { profileId: 'old', links: ['x.com/replacement'] })
+  assert.equal(await store.rebind(owner, { profileId: 'new', observed: original }), null)
+  assert.equal(await store.forProfile('new'), null)
+  const current = await store.get(owner)
+  assert.equal(await store.rebind({ ...owner, userId: 'other' }, { profileId: 'new', observed: current }), null)
+  const rebound = await store.rebind(owner, { profileId: 'new', observed: current })
+  assert.deepEqual(rebound.links, current.links)
+  assert.equal(await store.forProfile('old'), null)
+  assert.deepEqual(await store.forProfile('new'), current.links)
+  await store.set(owner, { profileId: 'new', links: [] })
+  assert.equal(await store.rebind(owner, { profileId: 'resurrected', observed: rebound }), null)
+  assert.equal(await store.get(owner), null)
+  await store.set(owner, { profileId: 'new', links: ['x.com/replacement'] })
+  assert.equal(await store.rebind(owner, { profileId: 'resurrected', observed: rebound }), null)
+})
