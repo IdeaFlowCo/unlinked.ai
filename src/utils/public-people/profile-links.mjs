@@ -40,7 +40,7 @@ export function classifySocialLink(value) {
   const host = url.hostname.toLowerCase().replace(/^www\./, '')
   if (host === 'linkedin.com' || host.endsWith('.linkedin.com')) {
     const linkedin = publicLinkedinUrl(url.href)
-    return linkedin ? { kind: 'linkedin', label: 'LinkedIn', url: linkedin } : null
+    return linkedin && linkedin.length <= SOCIAL_LINK_LIMITS.maxLength ? { kind: 'linkedin', label: 'LinkedIn', url: linkedin } : null
   }
   for (const [match, kind, label] of SOCIAL_HOSTS) if (match(host)) return { kind, label, url: url.href }
   const label = `${host}${url.pathname === '/' ? '' : url.pathname}`

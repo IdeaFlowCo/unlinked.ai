@@ -35,9 +35,14 @@ test('one pasted address classifies by host, with only safe HTTPS surviving', ()
 
 test('accepted social links remain valid after canonical encoding and overlong Unicode URLs are rejected up front', () => {
   assert.equal(classifySocialLink('https://example.com/' + 'é'.repeat(100)), null)
-  for (const address of ['https://example.com/café', 'https://x.com/synthetic-person', 'synthetic.substack.com', 'linkedin.com/in/synthetic-person']) {
+  const linkedinPrefix = 'https://www.linkedin.com/in/'
+  const boundarySlug = 'a'.repeat(SOCIAL_LINK_LIMITS.maxLength - linkedinPrefix.length)
+  assert.equal(classifySocialLink('https://linkedin.com/in/' + 'a'.repeat(274)), null)
+  assert.equal(classifySocialLink('https://linkedin.com/in/' + boundarySlug + 'a'), null)
+  for (const address of ['https://example.com/café', 'https://x.com/synthetic-person', 'synthetic.substack.com', 'linkedin.com/in/synthetic-person', 'https://linkedin.com/in/' + boundarySlug]) {
     const link = classifySocialLink(address)
     assert.ok(link)
+    assert.ok(link.url.length <= SOCIAL_LINK_LIMITS.maxLength)
     assert.deepEqual(classifySocialLink(link.url), link)
   }
 })
