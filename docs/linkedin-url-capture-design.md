@@ -1,7 +1,8 @@
 # Design recommendations: pasted LinkedIn URLs and a connection queue
 
-Status: recommendations only (unlinked-8dm companion). Nothing here is
-implemented; `/scan`, `/meet`, `src/utils/meet-scan.js` and the search surfaces
+Status: Fable recommendations (unlinked-8dm companion). These were written
+before integration; [the integrated decision and behavior](linkedin-discovery-and-queue.md)
+is authoritative. These recommendations alone do not prove implementation; `/scan`, `/meet`, `src/utils/meet-scan.js` and the search surfaces
 are owned by the integrating session. The connection-queue section is a plan,
 not a build order. Agentbook is tracked, not designed here.
 

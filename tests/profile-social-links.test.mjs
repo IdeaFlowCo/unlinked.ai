@@ -178,11 +178,13 @@ test('the isolated pilot forwards the profile link store to the browser', async 
   }
   const store = createMemoryProfileLinkStore()
   const backend = { adapter: {}, readResource: async () => null, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => [], writeResource: async () => {} }
+  let personLookups = 0
   const running = await startPrivatePilot({ baseUrl: `https://127.0.0.1:${port}`, port, host: '127.0.0.1', dataMode: 'synthetic',
     login: { begin: async () => ({ location: 'https://synthetic-idp.invalid/authorize', transaction: { state: 'synthetic-state' } }),
       finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'links-subject', verifiedEmail: 'member@example.invalid' }) },
     resolveOwner: async () => owner, signup: async () => owner, accountGrantKey: randomBytes(32), getBackend: async () => backend,
-    complete: async () => ({ matches: [] }), readPublishedSnapshot: async () => ({ people: [] }),
+    complete: async () => ({ matches: [] }), readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'lookup-pilot', profiles: [], connections: [] }),
+    personLookup: { enabled: true, lookup: async () => { personLookups++; return { status: 'found', address: 'https://www.linkedin.com/in/synthetic-person', profile: { name: 'New Person', positions: [], education: [] } } }, removeOwner: async () => {} },
     ownProfileId: async () => 'jacob-profile', accountForProfile: async () => null, profileSocialLinks: store })
   t.after(() => running.stop())
   const go = (path, init = {}) => fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual', ...init })
@@ -195,4 +197,8 @@ test('the isolated pilot forwards the profile link store to the browser', async 
   assert.equal(saved.status, 303)
   assert.deepEqual((await store.get(owner)).links.map(link => link.url), ['https://x.com/jacob'])
   assert.equal((await store.get(owner)).profileId, 'jacob-profile')
+  const found = await go('/people/lookup', { method: 'POST', headers: { Cookie: cookie, Origin: `https://127.0.0.1:${port}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, linkedinUrl: 'https://www.linkedin.com/in/synthetic-person' }) })
+  assert.equal(found.status, 200)
+  assert.match(await found.text(), /New Person/)
+  assert.equal(personLookups, 1)
 })

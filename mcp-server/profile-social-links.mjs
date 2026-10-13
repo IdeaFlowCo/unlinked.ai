@@ -75,7 +75,7 @@ export function createNeo4jProfileLinkStore(driver, database = 'neo4j', { now = 
     },
     async forProfile(profileId) {
       if (typeof profileId !== 'string' || !profileId) return null
-      const result = await run('MATCH (p:UnlinkedProfileLinks {profileId: $profileId}) RETURN p.links AS links ORDER BY p.updatedAt DESC LIMIT 1', { profileId }, 'READ')
+      const result = await run("MATCH (p:UnlinkedProfileLinks {profileId: $profileId}) MATCH (b:OperationalOwner {namespace:'unlinked',sourceOwnerId:p.ownerId,userId:p.userId}) WHERE coalesce(b.active,true)=true RETURN p.links AS links ORDER BY p.updatedAt DESC LIMIT 1", { profileId }, 'READ')
       if (!result.records.length) return null
       const links = parse(result.records[0].get('links'))
       return links.length ? links : null

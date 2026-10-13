@@ -26,7 +26,7 @@ session CSRF and origin rules and redirects with `links=saved|invalid|limit`
 (plus the 1-based `line` for an invalid entry). Records live one per account in
 `mcp-server/profile-social-links.mjs` (`UnlinkedProfileLinks`; memory and Neo4j
 stores, label registered with the graph migration), carrying the public profile
-id they were published for. The public page reads by profile id with the same
+id they were published for. The public page reads only records with an active exact owner/user binding, by profile id with the same
 bounded lookup as company facts — a slow graph read costs the link row, never
 the page. A record saved before the profile was published (or under a profile
 id that has since moved or merged) stops matching and `/profile` rebinds it to

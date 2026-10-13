@@ -1895,7 +1895,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
         if (personLookup) await personLookup.removeOwner(session.owner)
         // Member-published public links go with the account.
-        if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner).catch(() => {})
+        if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
