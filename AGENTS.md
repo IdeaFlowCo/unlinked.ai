@@ -48,7 +48,7 @@ The open-account private runtime adds issuer/subject signup, durable profile-fir
 The exact canonical-host callback/runtime transition is documented in `deploy/private-pilot/CANONICAL-HOST.md`.
 The standalone private runtime composition and guarded deployment/recovery commands are in `mcp-server/private-composition.mjs` and `deploy/private-pilot/README.md`; the canonical beta uses that runtime at `https://www.unlinked.ai` while the public Next.js application retains historical/source routes.
 Account grant provisioning and OAuth isolation are owned by `docs/agent-api.md` ("Grant provisioning" and "OAuth connector"). Bearer tokens are re-derived from durable grant records and must never enter logs, audit events or error messages.
-Card versions, QR targets, browser-only joining and contact privacy are owned by [docs/contact-card.md](docs/contact-card.md). `/meet` classifies Unlinked profile and OpenChat QR codes through `src/utils/meet-scan.js` and always requires an explicit confirm before opening. The header search field's QR button opens `/scan` (`renderScan`): a Scan tab reusing the `/meet` scanner (`MEET_SCRIPT`, same element ids) and a My card tab; signed-in members get one `<details>` "Me" menu (`meMenu`) whose headline is filled per request via `fillMeHeadline`, enhanced by `TOP_BAR_SCRIPT` on every page's nonce. The PWA surface (`public/manifest.webmanifest`, `public/sw.js`, icons via `scripts/generate-pwa-icons.mjs`) precaches only fixed public shell assets — never member content; keep it that way when changing caching.
+Card versions, QR targets, browser-only joining and contact privacy are owned by [docs/contact-card.md](docs/contact-card.md). Meet scanning behavior is owned by [README.md](README.md#meet-someone). The header search field's QR button opens `/scan` (`renderScan`): a Scan tab reusing the `/meet` scanner (`MEET_SCRIPT`, same element ids) and a My card tab; signed-in members get one `<details>` "Me" menu (`meMenu`) whose headline is filled per request via `fillMeHeadline`, enhanced by `TOP_BAR_SCRIPT` on every page's nonce. The PWA surface (`public/manifest.webmanifest`, `public/sw.js`, icons via `scripts/generate-pwa-icons.mjs`) precaches only fixed public shell assets — never member content; keep it that way when changing caching.
 
 See `docs/private-archive-import.md` for the bounded parser/job adapter contract, `docs/durable-archive-import.md` for the default-off background worker/status/profile behavior, the test adapter boundary and links to live activation gates; see `README.md` for the public archive entry.
 
@@ -154,7 +154,7 @@ Unlinked is the network and OpenChat its messenger. The confidential `/api/messa
 
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. Its `/messages/api` JSON and event stream are browser-session only (same origin, CSRF on writes); Unlinked's server holds the member's OpenChat credential and never returns it. It is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
-Professional profile links and the in-memory enrichment of immutable published rows are documented in `docs/profile-details.md`; never copy raw assertion or contact-card fields into public profiles.
+Professional profile links and the in-memory enrichment of immutable published rows are documented in `docs/profile-details.md`; member-published header links (X, Substack, websites) and their edit flow in `docs/profile-social-links.md`; never copy raw assertion or contact-card fields into public profiles.
 
 ## People directory controls
 
@@ -177,3 +177,5 @@ Settings manual-key setup, lifecycle, compatibility and release/rollback constra
 Default-off standalone REST/MCP diagnostics, trust/redaction boundaries, private retention and the operator reader are documented in [docs/request-diagnostics.md](docs/request-diagnostics.md). Never enable broad access logging or log request bodies/credentials to diagnose an agent. Enabling collection requires the normal scoped runtime release gate.
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract [Historical membership](docs/public-people-reader.md#historical-membership).
+
+Browser-only LinkedIn URL/QR lookup is documented in [docs/linkedin-discovery-and-queue.md](docs/linkedin-discovery-and-queue.md). General person lookup shares signup’s global adapter budget, never its claim/lifetime account policy; private save uses the existing added-person importer. Agentbook and LinkedIn queue execution remain planning-only.

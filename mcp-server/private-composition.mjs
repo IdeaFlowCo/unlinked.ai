@@ -8,6 +8,7 @@ import { createMessagingResolver, createMessagingSession, createMessagingIdentit
 import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
+import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
@@ -20,6 +21,7 @@ import { createNeo4jCompanyFactsStore } from './company-facts-store.mjs'
 import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
 import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
+import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
 import { createProfilePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
 import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
@@ -83,7 +85,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -174,6 +176,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // already confirmed sources stay readable.
     const lookup = signupLookupStore ? await prepareProfileLookup({ env: profileLookupEnv, load: profileLookupLoader, log: emailLog }) : null
     const signupLookup = signupLookupStore ? createSignupProfileLookup({ store: signupLookupStore, ...lookup }) : undefined
+    const personLookupStore = publicPeople ? createNeo4jPersonLookupStore(driver) : null
+    await personLookupStore?.initialize()
+    const personLookup = personLookupStore ? { ...createPersonLookup({ store: personLookupStore, ...lookup }), enabled: Boolean(lookup?.adapter) } : undefined
     const legacyBoundary = publicPeople ? createLegacyProfileBoundary(driver) : null
     const legacyLinks = typeof dependencies.UnlinkedLegacyLinks === 'function' ? new dependencies.UnlinkedLegacyLinks(legacyBoundary?.driver ?? driver, 'neo4j', { role: 'callback', actorId: 'unlinked-private-browser', issuer: config.issuer, clientId: config.clientId }) : null
     await legacyLinks?.initialize()
@@ -192,6 +197,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // The signed-in home's display choices (docs/member-home.md); UI preferences only.
     const homePreferences = typeof dependencies.createHomePreferenceStore === 'function' ? dependencies.createHomePreferenceStore(driver, 'neo4j') : undefined
     await homePreferences?.initialize()
+    // Member-published public profile links (docs/profile-social-links.md).
+    const profileSocialLinks = typeof dependencies.createProfileLinkStore === 'function' ? dependencies.createProfileLinkStore(driver, 'neo4j') : undefined
+    await profileSocialLinks?.initialize()
     // Operator-published company facts (docs/company-facts.md), merged over the
     // static list with a 60 s cache; a failed read serves the static list.
     const companyFactsStore = typeof dependencies.createCompanyFactsStore === 'function' ? dependencies.createCompanyFactsStore(driver, 'neo4j') : null
@@ -552,6 +560,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       notifications,
       contactCards,
       homePreferences,
+      profileSocialLinks,
       lookupCompanyFacts,
       sessionStore,
       memberEmail,
@@ -594,6 +603,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       } : undefined,
       // Self-serve claims, including the test-profile lane (mcp-server/self-claims.mjs).
       signupLookup,
+      personLookup,
       selfClaims: legacyLinks && publicPeople ? legacyBoundary.wrapSelfClaims(createSelfClaims({ driver: legacyBoundary.driver, publicPeople, slugIndex })) : undefined,
       removeOwnerAssets: async ownerId => {
         // Exact one-segment owner directory under the composition's asset root;

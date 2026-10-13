@@ -4,8 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
 import { isAbsolute, normalize } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { linkedinUrl } from '../src/utils/private-import/archive.mjs'
-import { linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
+import { parseLinkedinProfileUrl } from '../src/utils/linkedin-profile-url.mjs'
 
 // Optional operator-configured public profile lookup at signup
 // (docs/signup-profile-lookup.md). The lookup itself is a private host module
@@ -31,18 +30,7 @@ const ownerKey = owner => {
 }
 export const signupProfileId = owner => 'member-signup-' + ownerKey(owner)
 export function signupProfileSlug(address) {
-  if (typeof address !== 'string' || address.length > 2048) return null
-  let parsed
-  try {
-    parsed = new URL(/^https:\/\//i.test(address.trim()) ? address.trim() : `https://${address.trim()}`)
-    // Share my profile adds tracking query parameters and sometimes a fragment.
-    // Strip them only after validating the exact LinkedIn profile origin.
-    if (parsed.protocol !== 'https:' || !['linkedin.com', 'www.linkedin.com'].includes(parsed.hostname) || parsed.username || parsed.password || parsed.port) return null
-    parsed.search = ''; parsed.hash = ''
-  } catch { return null }
-  const url = linkedinUrl(parsed.href)
-  const slug = url && linkedinSlug(url)
-  return slug && /^[\p{L}\p{N}_.-]{1,120}$/u.test(slug) ? slug : null
+  return parseLinkedinProfileUrl(address)?.slug ?? null
 }
 
 // Off unless UNLINKED_PROFILE_LOOKUP_ADAPTER names a module under the fixed

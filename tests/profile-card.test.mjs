@@ -279,6 +279,6 @@ test('professional profile and company links work through anonymous and signed-i
   const missing = await fetch(`${signed.endpoint}/people/missing-links`)
   assert.equal(missing.status, 200)
   const missingDocument = await missing.text()
-  assert.doesNotMatch(missingDocument, /LinkedIn profile ↗|Website ↗|https:\/\/www.linkedin.com\/in\//)
+  assert.doesNotMatch(missingDocument, /LinkedIn profile ↗|Website ↗|href="https:\/\/www.linkedin.com\/in\//)
   await profileEvidence('person-without-retained-links.html', missingDocument)
 })

@@ -115,6 +115,17 @@ test('pending filtering restores the current focus after tabbing', async () => {
   assert.equal(b.document.activeElement, b.root().querySelector('#network-sort'))
 })
 
+test('a pasted LinkedIn URL offers person lookup and Enter navigates without filtering it as a name', async () => {
+  const b = browser(), input = b.root().querySelector('#network-query')
+  input.value = 'https://www.linkedin.com/in/synthetic-person/?trk=qr'
+  b.dispatch('input', input)
+  assert.match(b.root().querySelector('.network-count').textContent, /Press Enter/)
+  assert.equal(b.pending.length, 0)
+  assert.equal(b.dispatch('submit', b.root().querySelector('#network-filters')).defaultPrevented, true)
+  assert.equal(b.location.href, '/people/lookup?url=' + encodeURIComponent('https://www.linkedin.com/in/synthetic-person'))
+  assert.equal(b.pending.length, 0)
+})
+
 test('pending filtering leaves focus outside the directory alone', async () => {
   const b = browser()
   b.document.activeElement = b.root().querySelector('#network-query')

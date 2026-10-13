@@ -17,3 +17,5 @@ The progressively enhanced combobox supports Arrow Up/Down, Enter, Escape, Tab, 
 Verification: `node --test tests/omni-search.test.mjs tests/topbar-me-menu.test.mjs tests/shared-people-browser.test.mjs tests/profile-card.test.mjs`. Browser smoke checks should also cover mobile width, a slow response overtaken by a later query, offline fallback, company/profile navigation and native Enter submission.
 
 Latency (2026-10-10, M4, synthetic 25,000-profile snapshot shaped like the live index of 24,668 people, 22 name/company/role/school/skill queries × 5): prefix index p50 0.4 ms, p95 5.7 ms, max 8 ms per suggestion with the index warm; index build 233 ms once per snapshot revision (off the request path). The earlier full-scan ranking measured p50 44 ms, p95 65 ms on the same data.
+
+Pasted LinkedIn profile addresses offer **Find this person from LinkedIn** immediately, without a provider request per keystroke. The destination resolves the exact public URL or offers a live preview. Native header/People GET searches route the same address to that flow; see [LinkedIn discovery](linkedin-discovery-and-queue.md).

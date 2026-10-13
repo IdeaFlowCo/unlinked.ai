@@ -4,7 +4,7 @@ Unlinked helps people carry their network into useful introductions. The canonic
 
 Open **My card** in the main navigation to show your card. See the [contact-card guide](docs/contact-card.md) for card versions, sharing controls and signup from a shared card.
 
-`/meet` supports camera scanning and pasted Unlinked profile/contact-card or OpenChat card URLs, with an explicit confirmation before opening. The accepted URL grammar is defined by `src/utils/meet-scan.js` and its card parsers. Opening a card never sends a connection request. OpenChat owns its card's sign-in, friend status and requests; Unlinked's joining flow is described in the contact-card guide.
+`/meet` supports camera scanning and pasted Unlinked profile/contact-card, LinkedIn profile or OpenChat card URLs, with an explicit confirmation before opening. See [LinkedIn discovery](docs/linkedin-discovery-and-queue.md#person-lookup) for finding and privately saving someone from a LinkedIn address. The accepted URL grammar is defined by `src/utils/meet-scan.js` and its parsers. Opening a card never sends a connection request. OpenChat owns its card's sign-in, friend status and requests; Unlinked's joining flow is described in the contact-card guide.
 
 Meet is anonymous and does not read an archive or import profiles/cards into Unlinked.
 

@@ -1,5 +1,7 @@
+import { parseLinkedinProfileUrl } from '../src/utils/linkedin-profile-url.mjs'
 // Progressive enhancement only: native GET forms/links remain complete without JS.
 export const NETWORK_FILTER_SCRIPT = `(()=>{
+  const linkedin=${parseLinkedinProfileUrl.toString()};
   let root=document.querySelector('[data-network]');if(!root)return;
   const initialForm=root.querySelector('#network-filters');
   let renderedURL=new URL(initialForm.action);renderedURL.search=new URLSearchParams(new FormData(initialForm)).toString();
@@ -40,12 +42,13 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
   document.addEventListener('input',event=>{
     if(!enhanced||event.target.id!=='network-query'||!root.contains(event.target))return;
     cancel();busy(true);if(composing)return;
+    if(linkedin(event.target.value)){busy(false);const status=root.querySelector('.network-count');if(status)status.textContent='Press Enter to find this LinkedIn person.';return;}
     timer=setTimeout(()=>{const mode=typingEntry?'replace':'push';load(formURL(),{historyMode:mode,typing:true})},300);
   });
   document.addEventListener('compositionstart',event=>{if(event.target.id==='network-query'){composing=true;cancel()}});
   document.addEventListener('compositionend',event=>{if(event.target.id==='network-query'){composing=false;event.target.dispatchEvent(new Event('input',{bubbles:true}))}});
   document.addEventListener('change',event=>{if(enhanced&&event.target.id==='network-sort'&&root.contains(event.target)){typingEntry=false;load(formURL(),{})}});
-  document.addEventListener('submit',event=>{if(!enhanced||event.target.id!=='network-filters')return;event.preventDefault();typingEntry=false;load(formURL(),{})});
+  document.addEventListener('submit',event=>{if(event.target.id!=='network-filters')return;const person=linkedin(root.querySelector('#network-query').value);if(person){event.preventDefault();cancel();location.href='/people/lookup?url='+encodeURIComponent(person.url);return;}if(!enhanced)return;event.preventDefault();typingEntry=false;load(formURL(),{})});
   document.addEventListener('click',event=>{
     const link=event.target.closest('a');if(!enhanced||!link||!root.contains(link)||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.altKey||event.shiftKey||link.target)return;
     const destination=new URL(link.href);if(destination.origin!==location.origin||destination.pathname!=='/network')return;
