@@ -154,7 +154,7 @@ Unlinked is the network and OpenChat its messenger. The confidential `/api/messa
 
 Unlinked web Messages (`/messages`) uses the same OpenChat inbox. Its `/messages/api` JSON and event stream are browser-session only (same origin, CSRF on writes); Unlinked's server holds the member's OpenChat credential and never returns it. It is not an agent-grant endpoint. Live profile membership is shown separately from imported profile detail. See docs/openchat-message.md.
 
-Professional profile links and the in-memory enrichment of immutable published rows are documented in `docs/profile-details.md`; never copy raw assertion or contact-card fields into public profiles.
+Professional profile links and the in-memory enrichment of immutable published rows are documented in `docs/profile-details.md`; member-published header links (X, Substack, websites) and their edit flow in `docs/profile-social-links.md`; never copy raw assertion or contact-card fields into public profiles.
 
 ## People directory controls
 

@@ -1,4 +1,4 @@
-import { publicLinkedinUrl, publicWebsite } from '../src/utils/public-people/profile-links.mjs'
+import { publicLinkedinUrl, publicWebsite, classifySocialLink, SOCIAL_LINK_LIMITS } from '../src/utils/public-people/profile-links.mjs'
 import { parseAccountScope, scopeAllowsConnectionActions, scopeAllowsPrivateNotes } from './account-grants.mjs'
 import { readFileSync } from 'node:fs'
 import { OMNI_SEARCH_SCRIPT } from './omni-search.mjs'
@@ -129,7 +129,16 @@ const profileFace = (profile, toneClass = '') => photoSrc(profile.photo) ? photo
 const externalProfile = value => { try { const url = new URL(value); return url.protocol === 'https:' && ['linkedin.com', 'www.linkedin.com'].includes(url.hostname) && !url.username && !url.password ? url.href : null } catch { return null } }
 const profileLinks = profile => {
   const linkedin = publicLinkedinUrl(profile.linkedinUrl), website = publicWebsite(profile.website)
-  const links = [linkedin ? `<a href="${html(linkedin)}" target="_blank" rel="noopener noreferrer">LinkedIn profile ↗</a>` : '', website ? `<a href="${html(website)}" target="_blank" rel="noopener noreferrer nofollow">Website ↗</a>` : ''].filter(Boolean)
+  const links = [], seen = new Set()
+  const add = (href, label, nofollow) => { if (href && !seen.has(href)) { seen.add(href); links.push(`<a href="${html(href)}" target="_blank" rel="noopener noreferrer${nofollow ? ' nofollow' : ''}">${html(label)} ↗</a>`) } }
+  add(linkedin, 'LinkedIn profile', false)
+  add(website, 'Website', true)
+  // Member-published links (unlinked-8dm), re-validated here so only safe HTTPS
+  // addresses render; a professional LinkedIn address above wins over a saved one.
+  for (const entry of list(profile.socialLinks)) {
+    const link = classifySocialLink(entry?.url)
+    if (link && !(link.kind === 'linkedin' && linkedin)) add(link.url, link.label, true)
+  }
   return links.length ? `<p class="small profile-links">${links.join(' · ')}</p>` : ''
 }
 const PRESENCE_FILTERS = [[undefined, 'All'], ['member', 'On Unlinked'], ['legacy', 'Legacy members'], ['shadow', 'Not yet on Unlinked']]
@@ -324,13 +333,28 @@ export function renderConnectorError({ accountLabel, displayName, csrf, importJo
   return base('This connection could not start', `<section class="narrow"><h1 class="hq">This connection could not start</h1><p class="lead">${html(message)}</p><p>Nothing was shared. Remove Unlinked from the app's connectors and add it again with <code>https://www.unlinked.ai/mcp</code>.</p><p><a class="button" href="/settings">Open Settings</a></p></section>`, { accountLabel, displayName, csrf, importJob })
 }
 
-export function renderOwnProfile({ accountLabel, displayName, csrf, publicProfessionalSearch = false, profile = {}, publicProfileUrl, contacts = [], connectionCount, imports = [], importJob, linkedinLookup, lookupResult, testClaim, summary }) {
+// The member's own public links (unlinked-8dm), edited as one address per
+// line and previewed exactly as the public header renders them. These are
+// public by design; contact details belong on the contact card, never here.
+const SOCIAL_LINK_NOTICES = {
+  saved: 'Saved. Your links are part of your public profile.',
+  invalid: 'That link could not be used. Use web addresses like x.com/you or https://you.substack.com.',
+  limit: `Keep it to ${SOCIAL_LINK_LIMITS.maxLinks} links.`,
+}
+const socialLinksCard = ({ socialLinks, csrf }) => {
+  if (!socialLinks || !csrf) return ''
+  const links = list(socialLinks.links).map(entry => classifySocialLink(entry?.url)).filter(Boolean)
+  const notice = SOCIAL_LINK_NOTICES[raw(socialLinks.notice)]
+  const line = socialLinks.notice === 'invalid' && Number.isSafeInteger(socialLinks.line) && socialLinks.line > 0 ? ` (line ${socialLinks.line})` : ''
+  return `<div class="card sec" id="public-links"><h3>Links</h3><p class="small">Shown with your public profile: LinkedIn, X, Substack, GitHub or any website.</p>${links.length ? `<p class="small profile-links">${links.map(link => `<a href="${html(link.url)}" target="_blank" rel="noopener noreferrer nofollow">${html(link.label)} ↗</a>`).join(' · ')}</p>` : ''}${notice ? `<p class="notice${socialLinks.notice === 'saved' ? '' : ' error'}" role="${socialLinks.notice === 'saved' ? 'status' : 'alert'}">${html(notice + line)}</p>` : ''}<form method="post" action="/profile/links">${csrfInput(csrf)}<label for="profile-links-input">Your links <span class="small">One address per line, up to ${SOCIAL_LINK_LIMITS.maxLinks}. Leave empty to remove them all.</span></label><textarea id="profile-links-input" name="links" rows="4" maxlength="2000" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="x.com/you&#10;you.substack.com">${html(list(socialLinks.links).map(entry => entry?.url).filter(Boolean).join('\n'))}</textarea><div class="actions"><button class="sm" type="submit">Save links</button></div>${socialLinks.canPublish === false ? '<p class="small">They will appear once your profile is published on Unlinked.</p>' : ''}<p class="small">These are public. Phone numbers and email addresses belong on <a href="/card">your contact card</a>, not here.</p></form></div>`
+}
+export function renderOwnProfile({ accountLabel, displayName, csrf, publicProfessionalSearch = false, profile = {}, publicProfileUrl, contacts = [], connectionCount, imports = [], importJob, linkedinLookup, lookupResult, testClaim, summary, socialLinks }) {
   const people = list(contacts), files = list(imports).length
   // Files recovered from the member's original Unlinked account are an import too (unlinked-5e5).
   const recovered = !files && summary?.recovered?.complete === true, imported = files > 0 || summary?.hasImport === true
   const total = Number.isSafeInteger(connectionCount) && connectionCount >= people.length ? connectionCount : people.length
   const facts = [raw(profile.location), raw(profile.industry), total ? `${count(total)} ${total === 1 ? 'connection' : 'connections'}` : ''].filter(Boolean).join(' · ')
-  return base("Here's your profile", `<section class="profile"><div><div class="card phead"><div class="banner"></div>${profileFace(profile)}<h1>${html(profile.name) || 'Your profile'}</h1>${profile.headline ? `<p class="hl">${html(profile.headline)}</p>` : ''}${facts ? `<span class="small">${html(facts)}</span>` : ''}${profile.company ? `<p class="small">${companyLink(profile.company)}</p>` : ''}${profileLinks(profile)}${testClaim?.name ? `<p class="notice test-claim" role="status"><b>Test profile claimed:</b> ${html(testClaim.name)}. This is test data. It is not public and is not part of your profile, network or agent.</p>` : ''}<div class="actions"><a class="button" href="/network">Looks good</a><a class="button sec" href="/card">My card</a>${openChatAction(publicProfileUrl)}<a class="button sec" href="/import">${files ? 'Add another file' : imported ? 'Upload a newer export' : 'Bring my LinkedIn export'}</a><a class="button sec" href="/settings">Connect my agent</a></div>${openChatNote(publicProfileUrl)}<p class="notice">Built from your file. Fix anything later. <span class="small">Editing comes soon.</span></p></div>${profile.about ? `<div class="card sec"><h3>About</h3><p>${html(profile.about)}</p></div>` : ''}${experience(profile.positions, 'A full archive can include your experience.')}${education(profile.education)}${skills(profile.skills)}${profileLookup({ linkedinLookup, lookupResult, csrf })}</div><aside><div class="card sec"><h3>My connections${total ? ` · ${count(total)}` : ''}</h3>${people.length ? `${people.slice(0, 10).map(connectionRow).join('')}<p class="small"><a href="/network">See all the people you know →</a></p>` : (imported ? '<p class="small">Your connections could not be shown right now.</p><p><a href="/network">See your people →</a></p>' : '<p class="small">Bring your LinkedIn export to fill this in.</p><p><a href="/import">Add a file →</a></p>')}</div><p class="small">${files ? `${files} ${files === 1 ? 'file has' : 'files have'} been added to your account.` : recovered ? 'Your LinkedIn files from your original Unlinked account are on this account.' : 'You can add your file later.'} ${publicProfessionalSearch ? 'Contact details and your original file stay private.' : 'Your people remain private to your account.'}</p></aside></section>`, { accountLabel, displayName, csrf, importJob })
+  return base("Here's your profile", `<section class="profile"><div><div class="card phead"><div class="banner"></div>${profileFace(profile)}<h1>${html(profile.name) || 'Your profile'}</h1>${profile.headline ? `<p class="hl">${html(profile.headline)}</p>` : ''}${facts ? `<span class="small">${html(facts)}</span>` : ''}${profile.company ? `<p class="small">${companyLink(profile.company)}</p>` : ''}${profileLinks(profile)}${testClaim?.name ? `<p class="notice test-claim" role="status"><b>Test profile claimed:</b> ${html(testClaim.name)}. This is test data. It is not public and is not part of your profile, network or agent.</p>` : ''}<div class="actions"><a class="button" href="/network">Looks good</a><a class="button sec" href="/card">My card</a>${openChatAction(publicProfileUrl)}<a class="button sec" href="/import">${files ? 'Add another file' : imported ? 'Upload a newer export' : 'Bring my LinkedIn export'}</a><a class="button sec" href="/settings">Connect my agent</a></div>${openChatNote(publicProfileUrl)}<p class="notice">Built from your file. Fix anything later. <span class="small">Editing comes soon.</span></p></div>${profile.about ? `<div class="card sec"><h3>About</h3><p>${html(profile.about)}</p></div>` : ''}${experience(profile.positions, 'A full archive can include your experience.')}${education(profile.education)}${skills(profile.skills)}${socialLinksCard({ socialLinks, csrf })}${profileLookup({ linkedinLookup, lookupResult, csrf })}</div><aside><div class="card sec"><h3>My connections${total ? ` · ${count(total)}` : ''}</h3>${people.length ? `${people.slice(0, 10).map(connectionRow).join('')}<p class="small"><a href="/network">See all the people you know →</a></p>` : (imported ? '<p class="small">Your connections could not be shown right now.</p><p><a href="/network">See your people →</a></p>' : '<p class="small">Bring your LinkedIn export to fill this in.</p><p><a href="/import">Add a file →</a></p>')}</div><p class="small">${files ? `${files} ${files === 1 ? 'file has' : 'files have'} been added to your account.` : recovered ? 'Your LinkedIn files from your original Unlinked account are on this account.' : 'You can add your file later.'} ${publicProfessionalSearch ? 'Contact details and your original file stay private.' : 'Your people remain private to your account.'}</p></aside></section>`, { accountLabel, displayName, csrf, importJob })
 }
 
 // The signed-in member's card, in two versions.

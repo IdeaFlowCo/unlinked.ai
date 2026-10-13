@@ -24,6 +24,7 @@ import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/private-import/scoped-setup.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
+import { normalizeSocialLinks, SOCIAL_LINK_LIMITS } from '../src/utils/public-people/profile-links.mjs'
 import { stageArchive, importJobStatus, importErrorMessage, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
@@ -159,7 +160,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -171,6 +172,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   if (memberEmail !== undefined && (typeof memberEmail.sending !== 'boolean' || ['rememberAddress', 'settings', 'savePreferences', 'sendInvite', 'inspectUnsubscribe', 'unsubscribe', 'exportOwner', 'removeOwner'].some(key => typeof memberEmail[key] !== 'function'))) throw new Error('member_email_configuration_required')
   if (contactCards !== undefined && ['read', 'save', 'rotate', 'syncIdentity', 'open', 'exportOwner', 'removeOwner'].some(key => typeof contactCards[key] !== 'function')) throw new Error('contact_card_configuration_required')
   if (homePreferences !== undefined && ['get', 'set', 'removeOwner'].some(key => typeof homePreferences?.[key] !== 'function')) throw new Error('home_preference_configuration_required')
+  if (profileSocialLinks !== undefined && ['get', 'set', 'forProfile', 'removeOwner'].some(key => typeof profileSocialLinks?.[key] !== 'function')) throw new Error('profile_links_configuration_required')
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
   if (oauth !== undefined && (typeof signup !== 'function' || typeof oauth.readAuthorization !== 'function' || typeof oauth.approve !== 'function' || typeof oauth.deny !== 'function')) throw new Error('oauth_connector_configuration_required')
@@ -1027,6 +1029,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             const notice = url.searchParams.get('connect')
             const companies = new Map(await Promise.all([...new Set(result.profile.positions.map(position => position.company).filter(Boolean))].map(async name => [name, companyDetailLevel(await bounded(() => lookupCompanyFacts(name), null))])))
             const profile = { ...result.profile, positions: result.profile.positions.map(position => ({ ...position, companyDetailLevel: companies.get(position.company) })) }
+            // Member-published links (unlinked-8dm), bounded like company facts:
+            // a slow graph read costs the link row, never the page.
+            if (profileSocialLinks && !publicProfile?.[2]) {
+              const socialLinks = await bounded(() => profileSocialLinks.forProfile(result.profile.id), null)
+              if (socialLinks?.length) profile.socialLinks = socialLinks
+            }
             // The owner's private context mounts only for a signed-in viewer and is
             // fetched separately; the page itself never carries it.
             const withContext = Boolean(viewer && privateContext && !publicProfile?.[2])
@@ -1489,14 +1497,43 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         } catch { /* The profile stands on its own while the network is still being read. */ }
         await warming
         // The photo published for this member's public profile, when there is one.
+        let mine = null
         if (typeof ownProfileId === 'function') {
-          const mine = await ownProfileId(session.owner).catch(() => null)
+          mine = await ownProfileId(session.owner).catch(() => null)
           const photo = mine ? profilePhotos?.urlFor(mine) : null
           if (photo) profile.photo = photo
           const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
           for (const key of ['linkedinUrl', 'website', 'company', 'industry', 'location']) if (!profile[key] && published?.profile?.[key] && (key !== 'company' || !profile.positions?.length)) profile[key] = published.profile[key]
         }
-        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), summary, ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
+        // The member's own public links (unlinked-8dm): saved choice, header
+        // preview, and the edit card. A record saved before the profile was
+        // published (or under a profile id that has since moved) rebinds to
+        // the current public profile id, like /card's identity sync.
+        let socialLinks
+        if (profileSocialLinks) {
+          const saved = await bounded(() => profileSocialLinks.get(session.owner), null)
+          if (saved?.links?.length && mine && saved.profileId !== mine) await profileSocialLinks.set(session.owner, { profileId: mine, links: saved.links.map(link => link.url) }).catch(() => {})
+          if (saved?.links?.length) profile.socialLinks = saved.links
+          const notice = url.searchParams.get('links')
+          const line = Number.parseInt(url.searchParams.get('line') ?? '', 10)
+          socialLinks = { links: saved?.links ?? [], canPublish: Boolean(mine), ...(['saved', 'invalid', 'limit'].includes(notice) ? { notice } : {}), ...(Number.isSafeInteger(line) && line > 0 && line <= 99 ? { line } : {}) }
+        }
+        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), summary, socialLinks, ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
+      }
+      // Saving the member's own public links (unlinked-8dm): one address per
+      // line, validated by the shared grammar; an empty list removes them.
+      // Links publish under the member's current public profile id and are
+      // always safe HTTPS addresses — never contact-card fields.
+      if (signup && profileSocialLinks && request.method === 'POST' && url.pathname === '/profile/links') {
+        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('links').length > 1 || [...input.keys()].some(key => !['csrf', 'links'].includes(key))) throw new Error('private_browser_csrf')
+        const lines = (input.get('links') ?? '').slice(0, 4000).split(/\r?\n/).map(value => value.trim()).filter(Boolean)
+        const normalized = normalizeSocialLinks(lines)
+        if (normalized.overLimit || lines.length > SOCIAL_LINK_LIMITS.maxLinks) { redirect(response, '/profile?links=limit#public-links'); return }
+        if (normalized.problems.length) { redirect(response, `/profile?links=invalid&line=${normalized.problems[0] + 1}#public-links`); return }
+        const mine = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
+        await profileSocialLinks.set(session.owner, { profileId: mine, links: normalized.links.map(link => link.url) })
+        redirect(response, '/profile?links=saved#public-links'); return
       }
       // The contact version of the card, for its owner: the details, their show
       // switches, and the link and QR once something is shown.
@@ -1857,6 +1894,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (contactCards) await contactCards.removeOwner(session.owner)
         if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
         if (personLookup) await personLookup.removeOwner(session.owner)
+        // Member-published public links go with the account.
+        if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner).catch(() => {})
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
