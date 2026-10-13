@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import { createPersonLookup, createNeo4jPersonLookupStore } from '../mcp-server/person-lookup.mjs'
+import { createNeo4jProfileLinkStore } from '../mcp-server/profile-social-links.mjs'
 
 const uri = process.env.UNLINKED_TEST_NEO4J_URI
 const enabled = /^bolt:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uri ?? '') && process.env.UNLINKED_TEST_NEO4J_DRIVER
@@ -14,6 +15,7 @@ test('durable person lookup shares reservations across processes, caps owners, e
   const prefix = `lookup-${tag}-`
   t.after(async () => {
     await run('MATCH (n:UnlinkedPersonLookup) WHERE n.ownerId IN $owners DETACH DELETE n', { owners: [owner.ownerId, other.ownerId] })
+    await run('MATCH (n:UnlinkedProfileLinks) WHERE n.ownerId IN $owners DETACH DELETE n', { owners: [owner.ownerId, other.ownerId] })
     await run('MATCH (n:UnlinkedSignupCache) WHERE n.slug STARTS WITH $prefix DETACH DELETE n', { prefix })
     await run('MATCH (n:UnlinkedSignupGate {id:$tag}) DETACH DELETE n', { tag })
     await run('MATCH (n:OperationalOwner {testRun:$tag}) DETACH DELETE n', { tag })
@@ -38,7 +40,17 @@ test('durable person lookup shares reservations across processes, caps owners, e
   assert.equal((await lookup(service(), owner)).cached, true); assert.equal(reads, 21)
   time += 86400000 + 4000
   assert.equal((await lookup(service(), owner)).cached, false); assert.equal(reads, 22)
+  const links = createNeo4jProfileLinkStore(driver)
+  await links.initialize()
+  const profileId = `profile-${tag}`
+  await links.set(owner, { profileId, links: ['https://x.com/fictional_person'] })
+  assert.deepEqual(await links.forProfile(profileId), [{ kind: 'x', label: 'X', url: 'https://x.com/fictional_person' }])
+  await run('MATCH (b:OperationalOwner {sourceOwnerId:$ownerId}) SET b.userId=$differentUser', { ownerId: owner.ownerId, differentUser: `different-${tag}` })
+  assert.equal(await links.forProfile(profileId), null, 'a mismatched owner binding hides public links')
+  await run('MATCH (b:OperationalOwner {sourceOwnerId:$ownerId}) SET b.userId=$userId', owner)
+  assert.equal((await links.forProfile(profileId)).length, 1)
   await run("MATCH (b:OperationalOwner {sourceOwnerId:$ownerId}) SET b.active=false", owner)
+  assert.equal(await links.forProfile(profileId), null, 'an inactive owner hides public links')
   assert.equal((await lookup(service(), owner)).code, 'unavailable'); assert.equal(reads, 22)
   await store.removeOwner(owner)
   assert.equal((await run('MATCH (n:UnlinkedPersonLookup {ownerId:$ownerId}) RETURN count(n) AS count', owner)).records[0].get('count').toNumber(), 0)
