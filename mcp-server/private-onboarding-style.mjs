@@ -274,6 +274,14 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding button.danger{background:#b0413e;border-color:#b0413e}
 .unlinked-onboarding .link-button{display:inline;min-height:0;padding:0;border:0;background:none;color:var(--brand-d);font:inherit;text-decoration:underline;text-underline-offset:3px}
 .unlinked-onboarding .small{font-size:14px;color:var(--muted)}
+.unlinked-onboarding .linkedin-email-help{display:inline}
+.unlinked-onboarding .linkedin-email-trigger{display:inline;min-height:0;padding:0;border:0;border-radius:0;background:none;color:var(--brand-d);font:inherit;font-weight:600;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;vertical-align:baseline;cursor:help}
+.unlinked-onboarding .linkedin-email-trigger:hover,.unlinked-onboarding .linkedin-email-trigger[aria-expanded=true]{color:var(--brand);text-decoration-style:solid}
+.unlinked-onboarding .linkedin-email-trigger:focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:2px}
+.unlinked-onboarding .linkedin-email-panel:popover-open{position:fixed;inset:auto;z-index:100;margin:0;display:grid;gap:9px;width:min(360px,calc(100vw - 24px));max-height:min(400px,calc(100dvh - 24px));overflow:auto;padding:16px 18px;border:1px solid var(--line2);border-radius:12px;background:#fff;color:var(--fg);box-shadow:0 12px 36px rgba(30,42,52,.18);font:400 14px/1.45 "Public Sans",system-ui,sans-serif;text-align:left}
+.unlinked-onboarding .linkedin-email-panel strong{font-size:15px}
+.unlinked-onboarding .land-steps .linkedin-email-panel b,.unlinked-onboarding .linkedin-email-panel b{display:inline;font-size:inherit}
+.unlinked-onboarding .linkedin-email-panel code{overflow-wrap:anywhere;font-size:.92em}
 .unlinked-onboarding .import-status{max-width:780px;margin:20px auto 0;padding:14px 18px;background:var(--tint);border:1px solid var(--brand);border-radius:var(--r);font-size:14px;overflow-wrap:anywhere}
 .unlinked-onboarding .import-status p{margin:6px 0 0}
 .unlinked-onboarding progress{display:block;width:100%;height:9px;accent-color:var(--brand);margin:10px 0}
