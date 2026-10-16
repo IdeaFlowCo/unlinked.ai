@@ -18,7 +18,8 @@ const csrfInput = csrf => `<input type="hidden" name="csrf" value="${html(csrf)}
 const openChatAction = profileUrl => `<a class="button sec sm" href="${html(profileUrl ? `/messages?profile=${encodeURIComponent(profileUrl)}` : '/messages')}">Message</a>`
 const openChatNote = () => ''
 const LINKEDIN_EXPORT = 'https://www.linkedin.com/mypreferences/d/download-my-data'
-const linkedinEmailHelp = id => `<span class="linkedin-email-help"><button class="linkedin-email-trigger" type="button" aria-controls="linkedin-email-${id}" aria-expanded="false">LinkedIn’s email</button><span class="linkedin-email-panel" id="linkedin-email-${id}" popover="auto" role="note" aria-label="What to look for in LinkedIn’s export email"><strong>What to look for</strong><span>Check the primary email address on your LinkedIn account. A recent export came from <code>messages-noreply@linkedin.com</code>.</span><span>A large archive may arrive in two parts: <b>“The first installment of your LinkedIn data archive is ready!”</b>, then <b>“Your full LinkedIn data archive is ready!”</b> The second email can follow the next day.</span><span>Download each file within 72 hours of its email. If you requested Connections only, you may receive one email.</span></span></span>`
+const LINKEDIN_AGENT_INSTRUCTION = 'Monitor the email account linked to my LinkedIn profile, including Inbox and Spam/Junk, for LinkedIn data export notices from messages-noreply@linkedin.com. Look for “The first installment of your LinkedIn data archive is ready!” and “Your full LinkedIn data archive is ready!” (or equivalent current wording). When each installment arrives, verify the message and download link are genuinely from LinkedIn, then automatically download the archive within 72 hours and save each file locally. Tell me which installment arrived and where you saved it. Do not upload or share the archive. If you need mailbox or LinkedIn access, ask me.'
+const linkedinEmailHelp = id => `<span class="linkedin-email-help"><button class="linkedin-email-trigger" type="button" aria-controls="linkedin-email-${id}" aria-expanded="false">LinkedIn’s email</button><span class="linkedin-email-panel" id="linkedin-email-${id}" popover="auto" role="dialog" aria-label="What to look for in LinkedIn’s export email"><strong>What to look for</strong><span>From <code>messages-noreply@linkedin.com</code> to your LinkedIn email address.</span><span>Subject: <b>“The first installment of your LinkedIn data archive is ready!”</b> or <b>“Your full LinkedIn data archive is ready!”</b></span><span>Check Inbox and Spam/Junk. A full archive may arrive in two emails; download each within 72 hours.</span><span class="linkedin-agent-help"><button class="linkedin-agent-toggle" type="button" aria-controls="linkedin-agent-${id}" aria-expanded="false">Use an agent to watch for it</button><span class="linkedin-agent-content" id="linkedin-agent-${id}" hidden><span class="linkedin-agent-instruction">${html(LINKEDIN_AGENT_INSTRUCTION)}</span><button class="linkedin-agent-copy" type="button">Copy agent instruction to monitor and automatically download</button><span class="linkedin-agent-copy-status" role="status" aria-live="polite"></span></span></span></span></span>`
 export const LINKEDIN_EMAIL_HELP_SCRIPT = `(()=>{
   for (const help of document.querySelectorAll('.linkedin-email-help')) {
     const trigger=help.querySelector('.linkedin-email-trigger'), panel=help.querySelector('.linkedin-email-panel');
@@ -31,7 +32,7 @@ export const LINKEDIN_EMAIL_HELP_SCRIPT = `(()=>{
     };
     const open=()=>{clearTimeout(closeTimer);if(!panel.matches(':popover-open'))panel.showPopover();position();trigger.setAttribute('aria-expanded','true')};
     const close=()=>{clearTimeout(closeTimer);if(panel.matches(':popover-open'))panel.hidePopover();pinned=false;trigger.setAttribute('aria-expanded','false')};
-    const scheduleClose=()=>{clearTimeout(closeTimer);if(!pinned)closeTimer=setTimeout(close,180)};
+    const scheduleClose=()=>{clearTimeout(closeTimer);if(!pinned)closeTimer=setTimeout(()=>{if(!panel.matches(':hover,:focus-within')&&!trigger.matches(':hover,:focus'))close()},180)};
     trigger.addEventListener('pointerenter',event=>{if(event.pointerType==='mouse')open()});
     trigger.addEventListener('pointerleave',scheduleClose);
     trigger.addEventListener('focus',open);
@@ -39,7 +40,17 @@ export const LINKEDIN_EMAIL_HELP_SCRIPT = `(()=>{
     trigger.addEventListener('click',()=>{if(pinned)close();else{open();pinned=true}});
     panel.addEventListener('pointerenter',()=>clearTimeout(closeTimer));
     panel.addEventListener('pointerleave',scheduleClose);
+    panel.addEventListener('focusin',()=>clearTimeout(closeTimer));
+    panel.addEventListener('focusout',scheduleClose);
     panel.addEventListener('toggle',()=>{if(!panel.matches(':popover-open')){pinned=false;trigger.setAttribute('aria-expanded','false')}});
+    const agentToggle=panel.querySelector('.linkedin-agent-toggle'), agentContent=panel.querySelector('.linkedin-agent-content');
+    agentToggle?.addEventListener('click',()=>{agentContent.hidden=!agentContent.hidden;agentToggle.setAttribute('aria-expanded',String(!agentContent.hidden));requestAnimationFrame(position)});
+    const copy=panel.querySelector('.linkedin-agent-copy');
+    copy?.addEventListener('click',async()=>{
+      const status=panel.querySelector('.linkedin-agent-copy-status');
+      try{await navigator.clipboard.writeText(panel.querySelector('.linkedin-agent-instruction').textContent);status.textContent='Copied';}
+      catch{status.textContent='Copy unavailable here. Select the instruction above instead.';}
+    });
     addEventListener('resize',()=>{if(panel.matches(':popover-open'))position()});
   }
 })();`;
