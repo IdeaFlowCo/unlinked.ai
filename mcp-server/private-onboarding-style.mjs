@@ -283,10 +283,6 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .land-steps .linkedin-email-panel b,.unlinked-onboarding .linkedin-email-panel b{display:inline;font-size:inherit}
 .unlinked-onboarding .linkedin-email-panel code{overflow-wrap:anywhere;font-size:.92em}
 .unlinked-onboarding .linkedin-agent-help{display:block;margin-top:2px;padding-top:10px;border-top:1px solid var(--line2)}
-.unlinked-onboarding button.linkedin-agent-toggle{display:inline;min-height:0;padding:0;border:0;background:none;color:var(--brand-d);font:600 13px/1.4 "Public Sans",system-ui,sans-serif;text-align:left;text-decoration:underline;text-underline-offset:3px}
-.unlinked-onboarding .linkedin-agent-toggle:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
-.unlinked-onboarding .linkedin-agent-content:not([hidden]){display:grid;gap:8px;margin-top:10px}
-.unlinked-onboarding .linkedin-agent-instruction{display:block;color:var(--fg);font-size:13px;line-height:1.5;user-select:text}
 .unlinked-onboarding button.linkedin-agent-copy{display:inline-flex;min-height:34px;padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.2}
 .unlinked-onboarding .linkedin-agent-copy-status{display:block;color:var(--brand-d);font-size:12px}
 .unlinked-onboarding .import-status{max-width:780px;margin:20px auto 0;padding:14px 18px;background:var(--tint);border:1px solid var(--brand);border-radius:var(--r);font-size:14px;overflow-wrap:anywhere}
