@@ -249,7 +249,9 @@ test('Join and Bring-export offer one quiet LinkedIn export link with safe outbo
     assert.match(links[0][0], /rel="noopener noreferrer"/)
     assert.match(links[0][0], />Don't have your LinkedIn export yet\? Request it now ↗<\/a>/)
     assert.doesNotMatch(links[0][0], /class="button/)
-    assert.match(view.content, /complete archive \(recommended\).*about a day/); assert.match(view.content, /Download your file within 3 days of LinkedIn’s email/)
+    assert.match(view.content, /complete archive \(recommended\).*about a day/)
+    assert.match(view.content, /Download your file within 3 days of <span class="linkedin-email-help"><button class="linkedin-email-trigger"/)
+    assert.match(view.content, /messages-noreply@linkedin\.com/)
   }
   assert.doesNotMatch(renderJoin({ ...account, signedIn: true }).content, /download-my-data/)
   assert.match(renderBringArchive(account).content, /<details><summary>Don’t have your export yet\?<\/summary><ol><li>Open LinkedIn’s data download settings/)
@@ -666,7 +668,7 @@ test('LinkedIn export click progress survives anonymous reloads, expires and res
     const handlers = {}, events = {}, classes = new Set(), stepClasses = new Set()
     const toggle = (set, name, on) => on ? set.add(name) : set.delete(name)
     const link = { textContent: 'Start my LinkedIn export ↗', classList: { toggle: (name, on) => toggle(classes, name, on) }, closest: () => ({ classList: { toggle: (name, on) => toggle(stepClasses, name, on) } }), addEventListener: (name, fn) => { handlers[name] = fn } }
-    const status = { hidden: true, textContent: '' }
+    const status = { hidden: true, textContent: 'If you requested your archive, check your inbox for LinkedIn’s email.' }
     vm.runInNewContext(LINKEDIN_EXPORT_PROGRESS_SCRIPT, { document: { querySelectorAll: () => [link], getElementById: () => status }, localStorage, Date: { now: () => now }, addEventListener: (name, fn) => { events[name] = fn } })
     return { link, status, classes, events, click: event => handlers.click({ button: 0, ...event }) }
   }
@@ -682,6 +684,7 @@ test('LinkedIn export click progress survives anonymous reloads, expires and res
   assert.ok(first.classes.has('export-opened'))
   assert.equal(first.status.hidden, false)
   assert.match(first.status.textContent, /If you requested your archive/)
+  assert.match(renderLanding().content, /id="linkedin-export-status"[^>]*hidden>If you requested your archive, check your inbox for <span class="linkedin-email-help">/)
   const anonymousReload = page()
   assert.equal(anonymousReload.link.textContent, 'Export page opened ✓')
   values.clear(); anonymousReload.events.storage({ key: null })
