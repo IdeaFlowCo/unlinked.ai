@@ -13,6 +13,8 @@ export const LABELS = Object.freeze([
   'UnlinkedPersonLookup',
   // Member-published public profile links (mcp-server/profile-social-links.mjs).
   'UnlinkedProfileLinks',
+  // Removal requests and reports for operator review (mcp-server/safety-reports.mjs).
+  'UnlinkedSafetyReport',
   // Reviewed source schema exists for these currently empty domains. Later
   // email/invitation writes must remain included in shared recovery snapshots.
   'UnlinkedEmailInviteLock', 'UnlinkedEmailSend', 'UnlinkedEmailSuppression', 'UnlinkedMemberInvitation',

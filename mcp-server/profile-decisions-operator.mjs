@@ -11,6 +11,7 @@ import { operatorBoltUrl } from './operator-bolt-url.mjs'
 //   node profile-decisions-operator.mjs list
 //   node profile-decisions-operator.mjs merge <mergedId> <survivorId> <decidedBy> <evidence>
 //   node profile-decisions-operator.mjs rename <profileId> <name> <decidedBy> <reason>
+//   node profile-decisions-operator.mjs remove <profileId> <decidedBy> <reason>   (an imported profile; members are never removed)
 //   node profile-decisions-operator.mjs revoke <decisionId> <decidedBy>
 export async function operateProfileDecisions({ args, session, now = () => new Date().toISOString() }) {
   const [action, ...rest] = args
@@ -22,6 +23,15 @@ export async function operateProfileDecisions({ args, session, now = () => new D
     if (rest.length !== 4 || !text(decidedBy) || !text(why)) throw Error('profile_decision_arguments_invalid')
     const decision = { id: randomUUID(), kind: action, profileId, ...(action === 'merge' ? { survivorId: value, evidence: why } : { name: value, reason: why }), decidedBy, decidedAt: now(), revoked: false }
     // The new decision must keep the whole active set valid (no chains, no repeats).
+    validateProfileDecisions([...(await active()).map(value => ({ ...value })), decision])
+    await session.executeWrite(tx => tx.run('CREATE (d:UnlinkedProfileDecision) SET d = $decision', { decision }))
+    return { action, decision }
+  }
+  if (action === 'remove') {
+    // Removal requests (docs/removal-requests.md): the reason names the request, e.g. "removal request <id>".
+    const [profileId, decidedBy, reason] = rest
+    if (rest.length !== 3 || !text(decidedBy) || !text(reason)) throw Error('profile_decision_arguments_invalid')
+    const decision = { id: randomUUID(), kind: 'remove', profileId, reason, decidedBy, decidedAt: now(), revoked: false }
     validateProfileDecisions([...(await active()).map(value => ({ ...value })), decision])
     await session.executeWrite(tx => tx.run('CREATE (d:UnlinkedProfileDecision) SET d = $decision', { decision }))
     return { action, decision }
