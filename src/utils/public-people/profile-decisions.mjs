@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto'
 // Operator decisions about published people, applied when the shared snapshot
 // is built. Inputs are never changed: a merge drops the merged profile from the
 // projection, points its edges at the survivor and leaves an alias, so its old
-// address keeps resolving. Revoking a decision restores the projection exactly.
-// Claimed (member) profiles are never merged away.
+// address keeps resolving. A removal drops an imported profile, its edges and
+// any address merged into it (removal requests, docs/removal-requests.md).
+// Revoking a decision restores the projection exactly.
+// Claimed (member) profiles are never merged away or removed.
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const id = value => typeof value === 'string' && value.length > 0 && value.length <= 160
@@ -12,7 +14,7 @@ const name = value => typeof value === 'string' && value.trim() && [...value].le
 
 export function validateProfileDecisions(decisions) {
   if (!Array.isArray(decisions) || decisions.length > 5000) throw Error('profile_decisions_invalid')
-  const merged = new Set(), renamed = new Set(), ids = new Set()
+  const merged = new Set(), renamed = new Set(), removed = new Set(), ids = new Set()
   for (const decision of decisions) {
     if (!decision || !id(decision.id) || ids.has(decision.id)) throw Error('profile_decisions_invalid')
     ids.add(decision.id)
@@ -22,6 +24,9 @@ export function validateProfileDecisions(decisions) {
     } else if (decision.kind === 'rename') {
       if (!id(decision.profileId) || !name(decision.name) || renamed.has(decision.profileId)) throw Error('profile_decisions_invalid')
       renamed.add(decision.profileId)
+    } else if (decision.kind === 'remove') {
+      if (!id(decision.profileId) || removed.has(decision.profileId)) throw Error('profile_decisions_invalid')
+      removed.add(decision.profileId)
     } else throw Error('profile_decisions_invalid')
   }
   // No chains: a survivor is never itself merged away.
@@ -53,6 +58,11 @@ export function applyProfileDecisions(snapshot, stored) {
   // claimed profile away, is inert rather than fatal.
   const merges = new Map(decisions.filter(value => value.kind === 'merge' && known.has(value.profileId) && known.has(value.survivorId) && !members.has(value.profileId)).map(value => [value.profileId, value.survivorId]))
   const renames = new Map(decisions.filter(value => value.kind === 'rename' && known.has(value.profileId)).map(value => [value.profileId, value.name.trim()]))
+  const point = value => merges.get(value) ?? value
+  // A removal names a published profile (or an address merged into one) that
+  // nobody has claimed; it removes the profile it resolves to.
+  const removals = new Map(decisions.filter(value => value.kind === 'remove' && known.has(value.profileId) && !members.has(point(value.profileId))).map(value => [value.profileId, point(value.profileId)]))
+  const removed = new Set(removals.values())
   const fill = (survivor, merged) => {
     const result = { ...survivor }
     for (const key of ['headline', 'location', 'about', 'company', 'industry', 'linkedinUrl', 'website']) if (result[key] === undefined && merged[key] !== undefined) result[key] = merged[key]
@@ -61,25 +71,25 @@ export function applyProfileDecisions(snapshot, stored) {
   }
   const survivors = new Map()
   for (const [mergedId, survivorId] of merges) survivors.set(survivorId, fill(survivors.get(survivorId) ?? known.get(survivorId), known.get(mergedId)))
-  const profiles = snapshot.profiles.filter(profile => !merges.has(profile.id)).map(profile => {
+  const profiles = snapshot.profiles.filter(profile => !merges.has(profile.id) && !removed.has(profile.id)).map(profile => {
     const value = survivors.get(profile.id) ?? profile
     return renames.has(profile.id) ? { ...value, name: renames.get(profile.id) } : value
   })
-  const point = value => merges.get(value) ?? value
   const pairs = new Map()
   for (const edge of snapshot.connections) {
     const fromId = point(edge.fromId), toId = point(edge.toId)
-    if (fromId !== toId) pairs.set(JSON.stringify([fromId, toId]), { fromId, toId })
+    if (fromId !== toId && !removed.has(fromId) && !removed.has(toId)) pairs.set(JSON.stringify([fromId, toId]), { fromId, toId })
   }
-  const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : renames.has(value.profileId))
-    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.name.trim()])
+  const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : value.kind === 'remove' ? removals.has(value.profileId) : renames.has(value.profileId))
+    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.name.trim()])
   return {
     ...snapshot,
     revision: `${snapshot.revision}+decisions:${hash(JSON.stringify(applied)).slice(0, 16)}`,
     profiles,
     connections: [...pairs.values()],
     ...(snapshot.members ? { members: [...new Set(snapshot.members.map(point))].sort() } : {}),
-    ...(snapshot.legacyMembers ? { legacyMembers: [...new Set(snapshot.legacyMembers.map(point))].sort() } : {}),
-    aliases: Object.fromEntries([...merges].sort()),
+    ...(snapshot.legacyMembers ? { legacyMembers: [...new Set(snapshot.legacyMembers.map(point))].filter(value => !removed.has(value)).sort() } : {}),
+    // An address merged into a removed profile no longer resolves.
+    aliases: Object.fromEntries([...merges].filter(([, survivor]) => !removed.has(survivor)).sort()),
   }
 }

@@ -36,7 +36,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderRemovalRequest, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
@@ -47,6 +47,8 @@ import { IMPORT_REMINDER } from './home-preferences.mjs'
 import { MEET_SCRIPT } from './public-discovery.mjs'
 import { PHOTO_ID } from './profile-photos.mjs'
 import { publicSearchDocument } from './public-web-search.mjs'
+import { createMembersOnlySnapshotReader, iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
+import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -160,7 +162,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, safetyReports, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -179,6 +181,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   if (listAccountGrants !== undefined && typeof listAccountGrants !== 'function') throw new Error('account_signup_configuration_required')
   if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
   if (profilePhotos !== undefined && ['refresh', 'urlFor', 'read'].some(key => typeof profilePhotos?.[key] !== 'function')) throw new Error('profile_photo_configuration_required')
+  if (safetyReports !== undefined && ['submit', 'forgetReporter'].some(key => typeof safetyReports?.[key] !== 'function')) throw new Error('safety_report_configuration_required')
   if (selfClaims !== undefined && (typeof selfClaims.lookupSlug !== 'function' || typeof selfClaims.lookupName !== 'function' || typeof selfClaims.claimable !== 'function' || typeof selfClaims.claim !== 'function')) throw new Error('self_claims_configuration_required')
   const invitationMode = typeof claimInvitation === 'function' && typeof signup !== 'function'
   const authorizationOrigin = login.authorizationOrigin ?? null
@@ -254,6 +257,15 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // while one background read refreshes it, so a keystroke never waits on the
   // graph (docs/omni-search.md). Every other public read checks the source.
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot, photoFor, suggestFreshMs: 10000, suggestStaleMs: 60000 })
+  // The Unlinked iOS app (user agent `UnlinkediOS/`) lists only people who
+  // joined Unlinked: search, browse, company pages, suggestions, hover cards
+  // and profiles read a members-only index. A member's own imported people
+  // still show in their own network (docs/ios-app-directory.md).
+  const memberSnapshot = typeof readPublishedSnapshot === 'function' ? createMembersOnlySnapshotReader(readPublishedSnapshot) : undefined
+  const memberReader = memberSnapshot ? createPublicPeopleReader({ readPublishedSnapshot: memberSnapshot, photoFor, suggestFreshMs: 10000, suggestStaleMs: 60000 }) : publicReader
+  const iosApp = request => iosAppUserAgent(request?.headers?.['user-agent'])
+  const readerFor = request => iosApp(request) ? memberReader : publicReader
+  const snapshotFor = request => iosApp(request) && memberSnapshot ? memberSnapshot : readPublishedSnapshot
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
@@ -321,7 +333,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // The words a card is found by: every name and professional line of every record.
   const cardTokens = card => ({ name: words(card.searchNames ?? card.name), text: words(card.searchText ?? [card.name, card.company, card.headline].filter(Boolean).join(' ')) })
   // One reader per page view: every read of the index on that page shares one build.
-  const pageReader = () => createPublicPeopleReader({ readPublishedSnapshot, reuse: true, photoFor })
+  const pageReader = request => createPublicPeopleReader({ readPublishedSnapshot: snapshotFor(request), reuse: true, photoFor })
   // The published profiles an account is connected to, once each: its own
   // network rows that link to a public profile (imported connections,
   // accepted invites and connection requests) plus everyone the public graph
@@ -403,8 +415,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     return entry.pending
   }
   const dropAccountNetwork = owner => { if (owner?.ownerId) networkCache.delete(`${owner.ownerId}\u0000${owner.userId}`) }
-  const linkedinPersonDestination = async (owner, address) => {
-    const published = await publicReader.lookupLinkedin({ address })
+  const linkedinPersonDestination = async (owner, address, reader = publicReader) => {
+    const published = await reader.lookupLinkedin({ address })
     if (published) return `/people/${encodeURIComponent(published.id)}`
     if (!owner) return null
     const slug = parseLinkedinProfileUrl(address)?.slug
@@ -688,6 +700,56 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const connector = oauth && mcpEndpoint ? { url: mcpEndpoint } : undefined
   // The invite form says where replies go: the member's own verified address.
   const inviteEmailProps = async owner => memberEmail?.sending ? { emailInvites: true, replyAddress: (await bounded(() => memberEmail.settings(owner), null))?.address ?? null } : { emailInvites: false }
+  // Removal requests and reports share one site-wide budget: a person needs a
+  // few, a script filling the review queue does not (docs/removal-requests.md).
+  let safetyMinute = Date.now(), safetyMinuteCount = 0, safetyDay = Math.floor(Date.now() / 86400000), safetyDayCount = 0
+  const spendSafety = () => {
+    const now = Date.now(), day = Math.floor(now / 86400000)
+    if (now - safetyMinute >= 60000) { safetyMinute = now; safetyMinuteCount = 0 }
+    if (day !== safetyDay) { safetyDay = day; safetyDayCount = 0 }
+    if (safetyMinuteCount >= 20 || safetyDayCount >= 500) return false
+    safetyMinuteCount++; safetyDayCount++; return true
+  }
+  // One safety form post: fixed fields, the session's CSRF token when signed
+  // in, and an empty honeypot. Values come back for re-display after an error.
+  async function readSafetyForm(request, viewer, fields) {
+    const input = new URLSearchParams((await body(request, 16384)).toString('utf8'))
+    const allowed = ['csrf', 'reason', 'details', 'contact', 'website', ...fields]
+    if ([...input.keys()].some(key => !allowed.includes(key)) || allowed.some(key => input.getAll(key).length > 1)) throw new Error('private_browser_csrf')
+    if (viewer ? input.get('csrf') !== viewer.csrf : input.has('csrf')) throw new Error('private_browser_csrf')
+    return { values: Object.fromEntries(['reason', 'details', 'contact', ...fields].map(key => [key, (input.get(key) ?? '').slice(0, 4000)])), bot: Boolean(input.get('website')) }
+  }
+  async function removalRequest(request, response, rawId, viewer, chrome) {
+    response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+    let id
+    try { id = decodeURIComponent(rawId) } catch { response.writeHead(404).end(); return }
+    let found
+    // The whole directory, on every client: the request is about the person, wherever they were seen.
+    try { found = typeof readPublishedSnapshot === 'function' ? await publicReader.profile({ id }) : null }
+    catch { journey(response, renderPeopleUnavailable(chrome), null, '', 503); return }
+    if (!found) { response.writeHead(404).end(); return }
+    if (found.moved) { redirect(response, `/people/${encodeURIComponent(found.moved)}/removal`); return }
+    const profile = found.profile
+    const view = (extra, status = 200) => journey(response, renderRemovalRequest({ ...chrome, profile, ...extra }), null, '', status)
+    if (profile.presence === 'member') { view({ state: 'member' }); return }
+    if (!safetyReports) { view({ state: 'unavailable' }); return }
+    if (request.method === 'GET') { view({ state: 'form' }); return }
+    const { values, bot } = await readSafetyForm(request, viewer, ['confirm'])
+    // A filled honeypot gets the same answer and stores nothing.
+    if (bot) { view({ state: 'done', reference: randomBytes(4).toString('hex').toUpperCase() }); return }
+    if (values.confirm !== 'yes') { view({ state: 'form', values, error: safetyError('report_confirm_required') }, 400); return }
+    if (!spendSafety()) { response.setHeader('Retry-After', '60'); view({ state: 'form', values, error: 'Too many requests are arriving right now. Try again in a minute, or email support@ideaflow.app.' }, 429); return }
+    let receipt
+    try {
+      receipt = await safetyReports.submit({ kind: 'removal', targetType: 'profile', targetId: profile.id, targetName: profile.name, targetPresence: profile.presence,
+        reason: values.reason, details: values.details, contact: values.contact, reporterOwnerHash: viewer ? ownerHash(viewer.owner) : null, reporterLabel: viewer?.accountLabel ?? null })
+    } catch (error) {
+      if (!(error instanceof SafetyReportError)) throw error
+      view({ state: 'form', values, error: safetyError(error.code) }, 400); return
+    }
+    await recordAudit({ event: 'safety_report_received', kind: 'removal', reference: receipt.reference, emailed: receipt.emailed })
+    view({ state: 'done', reference: receipt.reference })
+  }
   let lastPrune = Date.now()
   return async (request, response) => {
     // GET page navigations allow the browser's back/forward cache, so Back
@@ -731,8 +793,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           // set is read in the background and kept briefly; a keystroke never waits for it.
           const viewer = sessionFor(request), known = viewer ? knownPeople(viewer.owner) : null
           // An empty query is the field gaining focus: start loading, answer nothing.
-          if (query === '') publicReader.warm()
-          const result = query === '' ? { people: [], companies: [] } : await publicReader.suggest({ query, ...(known ? { known } : {}) })
+          if (query === '') readerFor(request).warm()
+          const result = query === '' ? { people: [], companies: [] } : await readerFor(request).suggest({ query, ...(known ? { known } : {}) })
           response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify(result))
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
@@ -753,7 +815,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           let id
           try { id = decodeURIComponent(hoverCard[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
           const viewer = sessionFor(request), known = viewer ? knownPeople(viewer.owner) : null
-          const result = await publicReader.card({ id, ...(known ? { known } : {}) })
+          const result = await readerFor(request).card({ id, ...(known ? { known } : {}) })
           if (!result) { response.writeHead(404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'not_found' })); return }
           const card = { ...result.card }
           if (viewer && card.presence === 'member') {
@@ -974,7 +1036,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         let notice = address && !parsed ? personLookupNotice('invalid_url') : ''
         if (parsed) {
           try {
-            const destination = await linkedinPersonDestination(viewer?.owner, parsed.url)
+            const destination = await linkedinPersonDestination(viewer?.owner, parsed.url, readerFor(request))
             if (destination) { redirect(response, destination); return }
           } catch { notice = 'Unlinked’s people directory is temporarily unavailable. Please try again later.' }
         }
@@ -984,6 +1046,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         }
         journey(response, renderPersonLookup({ ...chrome, address: parsed?.url ?? address, notice, enabled: personLookup?.enabled })); return
       }
+      // Request removal of an imported profile (docs/removal-requests.md):
+      // public, because the person in it usually has no account.
+      const removal = url.pathname.match(/^\/people\/([^/]{1,480})\/removal$/)
+      if (removal && ['GET', 'POST'].includes(request.method)) { await removalRequest(request, response, removal[1], viewer, chrome); return }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
       // /people/add is the signed-in Add a person page, never a profile id.
       const publicProfile = url.pathname === '/people/add' ? null : url.pathname.match(/^\/people\/([^/]+)(\/connections)?$/)
@@ -1003,7 +1069,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             // graph read costs the facts block, never the page.
             const begun = performance.now()
             const [result, facts] = await Promise.all([
-              publicReader.company({ name, cursor: url.searchParams.get('cursor') ?? undefined }).then(value => { mark(response, 'company', begun); return value }),
+              readerFor(request).company({ name, cursor: url.searchParams.get('cursor') ?? undefined }).then(value => { mark(response, 'company', begun); return value }),
               bounded(() => lookupCompanyFacts(name), null).then(value => { mark(response, 'facts', begun); return value }),
             ])
             // A name nobody lists and we know nothing about is not a page.
@@ -1024,8 +1090,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             // waits and its count appears once the set is cached.
             const known = !publicProfile || !viewer ? null : requestedShow === 'known' ? await knownPeopleReady(viewer.owner) : knownPeople(viewer.owner)
             const connectionShow = requestedShow === 'known' && !known ? undefined : requestedShow
-            const result = await publicReader.profile({ id, cursor: url.searchParams.get('cursor') ?? undefined, query: connectionQuery, sort: connectionSort, show: connectionShow, ...(known ? { known } : {}) })
-            if (!result) { response.writeHead(404).end(); return }
+            const result = await readerFor(request).profile({ id, cursor: url.searchParams.get('cursor') ?? undefined, query: connectionQuery, sort: connectionSort, show: connectionShow, ...(known ? { known } : {}) })
+            if (!result) {
+              // In the app, a profile it does not list is a page, not a blank 404.
+              if (publicProfile && iosApp(request) && request.method === 'GET') { journey(response, renderProfileUnavailable(chrome), null, '', 404); return }
+              response.writeHead(404).end(); return
+            }
             // A merged profile's old address moves to the profile it was merged into.
             if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? '/api/people/' : '/people/'}${encodeURIComponent(result.moved)}${publicProfile?.[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
@@ -1051,14 +1121,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
-          const result = await publicReader.list({ query, mode, presence, sort, includeTotal: url.pathname !== '/api/people', cursor: url.searchParams.get('cursor') ?? undefined })
+          const result = await readerFor(request).list({ query, mode, presence, sort, includeTotal: url.pathname !== '/api/people', cursor: url.searchParams.get('cursor') ?? undefined })
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
           if (url.pathname === '/search-public') {
             const content = publicSearchDocument(result, { query, mode, presence })
             response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(content) })
             response.end(request.method === 'HEAD' ? undefined : content); return
           }
-          const view = renderPeople({ ...chrome, scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, presence, sort, total: result.total, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
+          const view = renderPeople({ ...chrome, membersOnly: iosApp(request), scope: 'everyone', everyone: result.profiles, anonymousPublic: true, anonymousAi: publicAi, query, mode, presence, sort, total: result.total, match: result.match, nextCursor: result.nextCursor, state: 'ready' })
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
@@ -1074,8 +1144,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (input.getAll('query').length !== 1 || !query.trim() || query.length > 200 || [...input.keys()].some(key => key !== 'query')) throw new Error('public_ask_input_invalid')
         // The ordinary list for the same words stays on the page beside the AI picks.
         let listed = {}
-        try { const result = await publicReader.list({ query }); listed = { everyone: result.profiles, match: result.match, nextCursor: result.nextCursor } } catch { /* The AI picks stand alone when the list cannot be read. */ }
-        const page = extra => renderPeople({ query, state: 'ready', anonymousAi: true, ...listed, ...extra })
+        try { const result = await readerFor(request).list({ query }); listed = { everyone: result.profiles, match: result.match, nextCursor: result.nextCursor } } catch { /* The AI picks stand alone when the list cannot be read. */ }
+        const page = extra => renderPeople({ membersOnly: iosApp(request), query, state: 'ready', anonymousAi: true, ...listed, ...extra })
         const now = Date.now(), day = Math.floor(now / 86400000)
         if (now - askMinute >= 60000) { askMinute = now; askMinuteCount = 0 }
         if (day !== askDay) { askDay = day; askDayCount = 0 }
@@ -1087,7 +1157,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         try {
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
-          const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
+          const result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
           journey(response, page({ aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }))
         } catch {
           journey(response, page({ aiError: 'AI search could not finish. Try again; the regular results are below.' }), null, '', 503)
@@ -1195,7 +1265,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (pickerBudgets.size > 5000) pickerBudgets.clear()
         pickerBudgets.set(viewer.owner.ownerId, budget)
         try {
-          const people = await connectedProfiles(viewer.owner, await createAccountNetwork({ owner: viewer.owner, getBackend }).readNetwork(), pageReader())
+          const people = await connectedProfiles(viewer.owner, await createAccountNetwork({ owner: viewer.owner, getBackend }).readNetwork(), pageReader(request))
           send(200, { people: people.filter(person => person.presence === 'member').map(person => ({ id: person.id, name: person.name, ...(person.headline ? { headline: String(person.headline).slice(0, 200) } : {}), profile: unlinkedProfileContext(person.id) })).filter(person => person.profile).slice(0, 3000) })
         } catch { send(503, { error: 'people_unavailable' }) }
         return
@@ -1395,7 +1465,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       // network read costs that card, never the page (the read keeps warming the cache).
       const homeNetwork = async () => {
         const work = (async () => {
-          const cards = await personCards((await accountNetwork(session.owner)).assertions.filter(row => row.category === 'connections'))
+          const cards = await personCards((await accountNetwork(session.owner)).assertions.filter(row => row.category === 'connections'), readerFor(request))
           return { size: cards.length, recent: cards.filter(card => validTimestamp(card.connectedAt)).sort((a, b) => b.connectedAt - a.connectedAt || compareNames(a.name, b.name)).slice(0, 5) }
         })()
         work.catch(() => {})
@@ -1496,11 +1566,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
         // Start reading the public index now; the contact lookup below joins it.
-        const warming = typeof readPublishedSnapshot === 'function' ? publicReader.lookup({ ids: [] }).catch(() => null) : null
+        const warming = typeof readPublishedSnapshot === 'function' ? readerFor(request).lookup({ ids: [] }).catch(() => null) : null
         try {
           const connections = (await accountNetwork(session.owner)).assertions.filter(row => row.category === 'connections')
           // One card per person, so the count and the preview never repeat someone.
-          const cards = await personCards(connections)
+          const cards = await personCards(connections, readerFor(request))
           connectionCount = cards.length
           contacts = cards.slice(0, 10)
         } catch { /* The profile stands on its own while the network is still being read. */ }
@@ -1594,7 +1664,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const address = input.get('linkedinUrl'), parsed = parseLinkedinProfileUrl(address)
           if (!parsed) { journey(response, renderPersonLookup({ ...props, address: address.slice(0, 2048), notice: personLookupNotice('invalid_url'), enabled: personLookup?.enabled }), null, '', 400); return }
           try {
-            const destination = await linkedinPersonDestination(session.owner, parsed.url)
+            const destination = await linkedinPersonDestination(session.owner, parsed.url, readerFor(request))
             if (destination) { redirect(response, destination); return }
           } catch { journey(response, renderPersonLookup({ ...props, address: parsed.url, notice: 'Unlinked’s people directory is temporarily unavailable. Please try again later.', enabled: personLookup?.enabled }), null, '', 503); return }
           const result = personLookup ? await personLookup.lookup({ owner: session.owner, address: parsed.url }) : { status: 'unavailable', code: 'disabled' }
@@ -1606,7 +1676,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (!candidate || candidate.token !== input.get('lookupToken') || candidate.expiresAt <= Date.now()) throw Error('person_lookup_candidate_expired')
         // Check again: another user may have published the same person while
         // this preview was open. A lookup never fabricates a member or claim.
-        const existing = await publicReader.lookupLinkedin({ address: candidate.result.address })
+        const existing = await readerFor(request).lookupLinkedin({ address: candidate.result.address })
         if (existing) { redirect(response, `/people/${encodeURIComponent(existing.id)}`); return }
         if (!candidate.saved) {
           const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
@@ -1759,7 +1829,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const matcher = typed ? createQueryMatcher(typed, mode) : null
         const index = Number(url.searchParams.get('page') ?? '0')
         if (!Number.isSafeInteger(index) || index < 0 || index > 1000) throw new Error('network_page_limit')
-        const props = jobProps(await jobResources()), reader = pageReader()
+        const props = jobProps(await jobResources()), reader = pageReader(request)
         const publicProfessionalSearch = typeof readPublishedSnapshot === 'function'
         // Row forms come back to this exact listing, with a notice.
         const listing = networkReturn(`${url.pathname}${url.search}`)
@@ -1775,7 +1845,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const ranked = matcher ? rankMatches(kept, matcher, value => ({ name: words(value.name), text: words([value.name, value.headline, value.location].filter(Boolean).join(' ')) })) : { rows: kept, match: 'none' }
           const ordered = orderNetwork(ranked.rows, sort)
           const rows = await withConnect(session.owner, ordered.slice(index * 100, (index + 1) * 100), reader)
-          const view = renderPeople({ ...props, query: typed, mode, presence, sort, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
+          const view = renderPeople({ ...props, membersOnly: iosApp(request), query: typed, mode, presence, sort, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
             connectedView: { rows, total: ranked.rows.length, ...(ranked.rows.length > (index + 1) * 100 ? { nextPage: index + 1 } : {}) } })
           journey(response, view, props.importJob); return
         }
@@ -1802,7 +1872,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const own = ownShown ? contacts : undefined
         // Cards on both sections are counted once each.
         const counted = Number.isSafeInteger(total) ? total + (own !== undefined ? matchingContacts.length : 0) : total
-        const view = renderPeople({ ...props, scope, own, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total: counted, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
+        const view = renderPeople({ ...props, membersOnly: iosApp(request), scope, own, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total: counted, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
         journey(response, view, props.importJob)
         return
       }
@@ -1814,7 +1884,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const network = await accountNetwork(session.owner)
         const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
         if (!row) { response.writeHead(404).end(); return }
-        const [contact] = await contactRows([row], pageReader())
+        const [contact] = await contactRows([row], pageReader(request))
         const props = jobProps(await jobResources())
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         journey(response, renderContactDetail({ ...props, contact, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
@@ -1905,6 +1975,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (personLookup) await personLookup.removeOwner(session.owner)
         // Member-published public links go with the account.
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
+        // Reports this member sent stay for review, without who sent them.
+        if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
@@ -1939,10 +2011,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
           if (scope === 'everyone') {
             let result = null
-            try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) }) }
+            try { result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) }) }
             catch { /* The page still shows the people this account knows, with a notice. */ }
             const props = jobProps(await jobResources()), network = await accountNetwork(session.owner)
-            const reader = pageReader()
+            const reader = pageReader(request)
             const connections = network.assertions.filter(row => row.category === 'connections')
             // On failure, the account's own people for the same words stand in for the AI picks.
             const ownRows = async () => {
@@ -1954,7 +2026,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             const ai = result
               ? { aiMatches: await withConnect(session.owner, result.matches, reader), aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }
               : { aiError: own === undefined ? 'AI search could not finish. Try again in a minute.' : 'AI search could not finish. Try again in a minute; your own matching people are below.' }
-            const view = renderPeople({ ...props, scope, ...ai, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
+            const view = renderPeople({ ...props, membersOnly: iosApp(request), scope, ...ai, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
             journey(response, view, props.importJob, '', result ? 200 : 503); return
           }
           const account = createAccountNetwork({ owner: session.owner, getBackend, complete })
@@ -1962,13 +2034,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const props = jobProps(await jobResources())
           // Picks carry only the assertion; its source row says where the public profile is.
           const sources = result.matches.length ? new Map((await account.readNetwork()).assertions.map(row => [row.id, row])) : new Map()
-          const reader = pageReader()
+          const reader = pageReader(request)
           const picked = await contactRows(result.matches.map(match => sources.get(match.assertionId) ?? { fields: match.fields }), reader)
           // Two picked records of one person show once, with the first reason.
           const seenPeople = new Set()
           const unique = picked.map((value, index) => ({ ...value, reason: result.matches[index].reason })).filter(value => { const key = value.id ? `profile:${value.id}` : value.linkedinUrl ? `linkedin:${value.linkedinUrl}` : null; if (!key) return true; if (seenPeople.has(key)) return false; seenPeople.add(key); return true })
           const searchResults = await withConnect(session.owner, unique, reader)
-          const view = renderPeople({ ...props, scope: 'own', query: input.get('query'), searchResults, returnTo: searchReturn(input.get('query')) })
+          const view = renderPeople({ ...props, membersOnly: iosApp(request), scope: 'own', query: input.get('query'), searchResults, returnTo: searchReturn(input.get('query')) })
           extend(view, `<p class="dir small">${result.considered} ${result.considered === 1 ? 'connection' : 'connections'} searched across your own files.</p>`)
           journey(response, view, props.importJob); return
         }

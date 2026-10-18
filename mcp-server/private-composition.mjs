@@ -22,6 +22,7 @@ import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
 import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
 import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
+import { createNeo4jSafetyReportStore, createSafetyReports } from './safety-reports.mjs'
 import { createProfilePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
 import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
@@ -85,7 +86,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore, createSafetyReportStore: createNeo4jSafetyReportStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -232,6 +233,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         // Failures carry only a code; at most one audit row per ten minutes.
         onError: event => { if (Date.now() - lastReport < 600000) return; lastReport = Date.now(); return audit({ ...event, at: new Date().toISOString() }) } })
     }
+    // Removal requests and reports (docs/removal-requests.md): stored for the
+    // operator and emailed to the support inbox when member email can send.
+    const safetyReportStore = typeof dependencies.createSafetyReportStore === 'function' ? dependencies.createSafetyReportStore(driver, 'neo4j') : null
+    await safetyReportStore?.initialize()
+    const safetyReports = safetyReportStore ? createSafetyReports({ store: safetyReportStore, origin: base.origin,
+      ...(emailSettings?.enabled ? { transport: emailTransportFactory({ apiKey: emailSettings.apiKey }), from: memberEmail?.from ?? null } : {}),
+      onError: event => audit({ ...event, at: new Date().toISOString() }) }) : undefined
     const sessionStore = typeof dependencies.createSessionStore === 'function' ? dependencies.createSessionStore(driver, 'neo4j') : null
     await sessionStore?.initialize()
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
@@ -561,6 +569,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       contactCards,
       homePreferences,
       profileSocialLinks,
+      safetyReports,
       lookupCompanyFacts,
       sessionStore,
       memberEmail,
