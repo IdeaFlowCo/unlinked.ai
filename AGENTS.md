@@ -132,6 +132,8 @@ The immutable private legacy Storage recovery, owner confirmation/download bound
 
 Shared browser/agent connection authorization is in `mcp-server/connection-actions.mjs`; opt-in writes and grant update hints are documented in `docs/agent-api.md`.
 
+Public Help & support (`/support`, the App Store support URL), the `/privacy` and `/terms` redirects to the Ideaflow policies, and where policy links must appear are owned by [docs/support-and-legal.md](docs/support-and-legal.md).
+
 Member email configuration, invite caps, export reminders, privacy and unsubscribe boundaries are owned by [docs/email.md](docs/email.md); implementation: `mcp-server/member-email.mjs`.
 
 The signed-in Home (`GET /`), its import status from uploads plus recovered legacy files (`summarizeImports`, `src/utils/private-import/import-summary.mjs`) and the per-account reminder display choice (`UnlinkedHomePreference`) are documented in [docs/member-home.md](docs/member-home.md). Never decide "has imported" from upload jobs alone.

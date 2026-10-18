@@ -14,7 +14,7 @@ test('the header retains QR scanning when directory search moves into the list',
   }
 })
 
-test('signed-in members get one Me menu: profile header, card, settings, then switch account and sign-out last', () => {
+test('signed-in members get one Me menu: profile header, card, settings, help, then switch account and sign-out last', () => {
   const nav = header(renderPeople({ ...account, state: 'ready' })).match(/<nav[^>]*>(.*?)<\/nav>/s)[1]
   // The bar itself carries no separate profile, name chip or sign-out.
   const outside = nav.replace(/<details class="me">.*<\/details>/s, '')
@@ -26,7 +26,7 @@ test('signed-in members get one Me menu: profile header, card, settings, then sw
   assert.match(menu, /<div class="me-panel" role="menu" aria-label="Account">/)
   assert.match(menu, /<div class="me-who"><b>Sam Rivera<\/b><!--me-headline--><\/div><a class="button sec sm me-view" role="menuitem" href="\/profile">View profile<\/a>/)
   const items = [...menu.matchAll(/role="menuitem"[^>]*?(?:href="([^"]+)")?>([^<]*)/g)].map(match => match[1] ?? match[2])
-  assert.deepEqual(items, ['/profile', '/card', '/scan', '/settings', 'Switch account', 'Sign out'])
+  assert.deepEqual(items, ['/profile', '/card', '/scan', '/settings', '/support', 'Switch account', 'Sign out'])
   // Switch account and Sign out are CSRF-protected POSTs, never links.
   assert.match(menu, /<div class="me-sep" role="separator"><\/div><form method="post" action="\/switch-account" role="none"><input type="hidden" name="csrf" value="csrf-value"><button type="submit" class="me-out" role="menuitem">Switch account<\/button><\/form><form method="post" action="\/logout" role="none"><input type="hidden" name="csrf" value="csrf-value"><button type="submit" class="me-out" role="menuitem">Sign out<\/button><\/form><\/div>$/)
   assert.doesNotMatch(header(renderLanding()), /class="me"|role="menu"/)

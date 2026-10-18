@@ -2,7 +2,7 @@ import { CONNECTION_FEEDBACK_SRC } from './connection-feedback.mjs'
 import { readFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { renderAgents, renderImportGuide, renderMeet, fillMeHeadline, fillNavAlerts, TOP_BAR_SCRIPT } from './private-onboarding-views.mjs'
+import { renderAgents, renderImportGuide, renderMeet, renderSupport, fillMeHeadline, fillNavAlerts, TOP_BAR_SCRIPT, PRIVACY_URL, TERMS_URL } from './private-onboarding-views.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
 
@@ -21,6 +21,8 @@ const assets = new Map([
   ['/sw.js', ['public/sw.js', 'text/javascript']],
   ['/offline.html', ['public/offline.html', 'text/html; charset=utf-8']],
   ['/app-icon-192.png', ['public/app-icon-192.png', 'image/png']],
+  // Browsers ask for /favicon.ico on pages without an icon link (the public guides).
+  ['/favicon.ico', ['public/app-icon-192.png', 'image/png']],
   ['/app-icon-512.png', ['public/app-icon-512.png', 'image/png']],
   ['/app-icon-maskable-512.png', ['public/app-icon-maskable-512.png', 'image/png']],
   ['/llms.txt', ['public/llms.txt', 'text/plain']],
@@ -35,8 +37,11 @@ const assets = new Map([
   ['/.well-known/agent.json', ['public/.well-known/unlinked.json', 'application/json']],
   ['/.well-known/mcp/server-card.json', ['public/.well-known/mcp/server-card.json', 'application/json']],
 ])
-const pages = new Set(['/agents', '/meet', '/import-linkedin'])
-export const isPublicDiscoveryPath = pathname => pages.has(pathname) || assets.has(pathname) || pathname === '/public-assets/jsqr-module.mjs'
+const pages = new Set(['/agents', '/meet', '/import-linkedin', '/support'])
+// Policy addresses people and reviewers type by hand. Unlinked follows the
+// Ideaflow policies, so these redirect there (docs/support-and-legal.md).
+const redirects = new Map([['/privacy', PRIVACY_URL], ['/privacy-policy', PRIVACY_URL], ['/terms', TERMS_URL], ['/terms-of-service', TERMS_URL], ['/contact', '/support'], ['/help', '/support']])
+export const isPublicDiscoveryPath = pathname => pages.has(pathname) || assets.has(pathname) || redirects.has(pathname) || pathname === '/public-assets/jsqr-module.mjs'
 // Every scanned or pasted value goes through classifyMeetCode and then a visible
 // confirm step; nothing navigates, adds a contact or grants access on scan alone.
 export const MEET_SCRIPT = `import { BrowserCardScanner } from '/public-assets/browser-card-scanner.js';import { classifyMeetCode } from '/public-assets/meet-scan.js';const status=document.getElementById('status'),confirmBox=document.getElementById('confirm'),confirmLabel=document.getElementById('confirm-label'),confirmOpen=document.getElementById('confirm-open');let scanner=null;const stop=()=>{scanner?.stop();scanner=null};const clear=()=>{confirmBox.hidden=true;confirmOpen.setAttribute('href','/meet');confirmLabel.textContent=''};const offer=code=>{stop();confirmLabel.textContent=code.label;confirmOpen.setAttribute('href',code.href);confirmBox.hidden=false;status.textContent='Nothing opens until you choose Open.'};document.getElementById('confirm-cancel').addEventListener('click',()=>{clear();status.textContent=''});document.getElementById('paste').addEventListener('submit',event=>{event.preventDefault();const code=classifyMeetCode(document.getElementById('card-url').value);if(code)offer(code);else{clear();status.textContent='Use an Unlinked, LinkedIn profile, or OpenChat card link.'}});document.getElementById('start').addEventListener('click',async()=>{stop();clear();scanner=new BrowserCardScanner(document.getElementById('camera'),{parse:classifyMeetCode,onCard:offer,onUnsupportedCode:()=>{status.textContent='This QR code is not an Unlinked, LinkedIn profile, or OpenChat card.'}});try{await scanner.start();status.textContent='Point your camera at a card.'}catch{stop();status.textContent='Camera unavailable or permission declined. Paste the link printed with the card instead.'}});document.getElementById('stop').addEventListener('click',stop);addEventListener('pagehide',stop);`
@@ -54,6 +59,7 @@ const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; fo
 export async function servePublicDiscovery(request, response, pathname, chrome = {}, { signInOrigin = null } = {}) {
   if (!['GET', 'HEAD'].includes(request.method) || !isPublicDiscoveryPath(pathname)) return false
   let type, content
+  if (redirects.has(pathname)) { response.writeHead(302, { Location: redirects.get(pathname) }); response.end(); return true }
   if (assets.has(pathname)) {
     const [file, mime] = assets.get(pathname)
     const assetPath = typeof file === 'function' ? file() : new URL(file, root)
@@ -73,6 +79,7 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (pathname === '/agents') content = document(renderAgents(chrome), page)
     if (pathname === '/import-linkedin') content = document(renderImportGuide(chrome), page)
+    if (pathname === '/support') content = document(renderSupport(chrome), page)
     if (pathname === '/meet') {
       response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
       response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
