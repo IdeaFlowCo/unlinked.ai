@@ -265,9 +265,10 @@ function messagesClient(config) {
         muted(conversation) ? item('Unmute', () => setMute(null)) : [item('Mute for 1 hour', () => setMute(new Date(Date.now() + 3600000).toISOString())), item('Mute for 8 hours', () => setMute(new Date(Date.now() + 8 * 3600000).toISOString())), item('Mute until I unmute', () => setMute('always'))],
         item('Mark as unread', markUnread),
         h('label', { class: 'msg-menu-check' }, h('input', { type: 'checkbox', checked: prefs.enterSends ? true : null, onchange: event => { prefs.enterSends = event.target.checked; store.set('unlinked.messages.prefs', prefs); updateComposerHint() } }), 'Enter sends (Shift+Enter for a new line)'),
-        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'),
-        // Blocking and reporting need a direct OpenChat sign-in (embedded sessions cannot block).
-        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Block or report in OpenChat ↗'))) : null
+        // Report and block are Unlinked pages (docs/report-and-block.md); blocking is for one-to-one conversations.
+        h('a', { href: `/messages/report?conversation=${encodeURIComponent(conversation.id)}` }, 'Report conversation'),
+        peer && !peer.isBot ? h('a', { href: `/messages/block?conversation=${encodeURIComponent(conversation.id)}` }, `Block ${peer.name || 'this person'}`) : null,
+        h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'))) : null
     head.replaceChildren(...[
       h('button', { class: 'msg-back', type: 'button', 'aria-label': 'Back to conversations', onclick: () => closeConversation() }, '←'),
       avatar(title, peer?.id || state.open, peer?.presence),
@@ -309,7 +310,9 @@ function messagesClient(config) {
       act('Reply', '↩', () => startReply(message)),
       message.content ? act('Copy text', '⧉', () => { navigator.clipboard?.writeText(message.content).then(() => announce('Copied'), () => announce('Copy failed')) }) : null,
       own && message.messageType === 'text' ? act('Edit', '✎', () => startEdit(message)) : null,
-      own ? act('Delete', '🗑', () => removeMessage(message)) : null)
+      own ? act('Delete', '🗑', () => removeMessage(message)) : null,
+      // Report opens a short form page about this message (docs/report-and-block.md).
+      !own ? act('Report', '⚑', () => { location.href = `/messages/report?conversation=${encodeURIComponent(message.conversationId)}&message=${encodeURIComponent(message.id)}` }) : null)
   }
 
   function messageNode(message, { own, grouped, group, status, bare = false }) {

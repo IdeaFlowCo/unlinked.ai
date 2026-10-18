@@ -209,11 +209,10 @@ const enabled = /^bolt:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uri ?? '') && pro
 test('real Neo4j safety reports: create, list by status, decide and forget the reporter', { skip: !enabled }, async t => {
   const neo4j = createRequire(import.meta.url)(process.env.UNLINKED_TEST_NEO4J_DRIVER)
   const driver = neo4j.driver(uri, neo4j.auth.basic('neo4j', process.env.UNLINKED_TEST_NEO4J_PASSWORD))
-  t.after(() => driver.close())
   const store = createNeo4jSafetyReportStore(driver)
-  await store.initialize(); await store.initialize()
   const target = 'neo4j-test-' + randomUUID(), hash = 'f'.repeat(64)
-  t.after(async () => { const session = driver.session(); try { await session.run('MATCH (r:UnlinkedSafetyReport {targetId: $target}) DETACH DELETE r', { target }) } finally { await session.close() } })
+  t.after(async () => { const session = driver.session(); try { await session.run('MATCH (r:UnlinkedSafetyReport {targetId: $target}) DETACH DELETE r', { target }) } finally { await session.close(); await driver.close() } })
+  await store.initialize(); await store.initialize()
   const reports = createSafetyReports({ store, origin: 'https://www.unlinked.ai' })
   const first = await reports.submit({ kind: 'removal', targetType: 'profile', targetId: target, targetName: 'Morgan', reason: 'about_me', contact: 'm@example.invalid', reporterOwnerHash: hash, reporterLabel: 'r@example.invalid' })
   const stored = await store.read(first.id)

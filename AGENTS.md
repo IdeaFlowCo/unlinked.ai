@@ -136,6 +136,8 @@ Public Help & support (`/support`, the App Store support URL), the `/privacy` an
 
 The iOS app (user agent `UnlinkediOS/`) lists only members; imported profiles stay out of its directory while a member still sees their own imported people: [docs/ios-app-directory.md](docs/ios-app-directory.md). Removal requests for imported profiles, the `UnlinkedSafetyReport` store, support-inbox email and the operator review/`remove` decision flow: [docs/removal-requests.md](docs/removal-requests.md).
 
+Report (profiles, messages, conversations) and Block (members, one-to-one conversations), the `UnlinkedMemberBlock` store, OpenChat's block/report and how a block refuses connection requests and hides messages: [docs/report-and-block.md](docs/report-and-block.md).
+
 Member email configuration, invite caps, export reminders, privacy and unsubscribe boundaries are owned by [docs/email.md](docs/email.md); implementation: `mcp-server/member-email.mjs`.
 
 The signed-in Home (`GET /`), its import status from uploads plus recovered legacy files (`summarizeImports`, `src/utils/private-import/import-summary.mjs`) and the per-account reminder display choice (`UnlinkedHomePreference`) are documented in [docs/member-home.md](docs/member-home.md). Never decide "has imported" from upload jobs alone.

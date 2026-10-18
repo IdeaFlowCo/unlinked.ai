@@ -36,7 +36,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderRemovalRequest, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard } from './contact-card.mjs'
@@ -49,6 +49,7 @@ import { PHOTO_ID } from './profile-photos.mjs'
 import { publicSearchDocument } from './public-web-search.mjs'
 import { createMembersOnlySnapshotReader, iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { SafetyReportError, ownerHash } from './safety-reports.mjs'
+import { BlockError } from './member-blocks.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -162,7 +163,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, safetyReports, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -181,6 +182,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   if (listAccountGrants !== undefined && typeof listAccountGrants !== 'function') throw new Error('account_signup_configuration_required')
   if (legacyAccount !== undefined && (typeof legacyAccount.candidate !== 'function' || typeof legacyAccount.confirm !== 'function')) throw new Error('legacy_account_configuration_required')
   if (profilePhotos !== undefined && ['refresh', 'urlFor', 'read'].some(key => typeof profilePhotos?.[key] !== 'function')) throw new Error('profile_photo_configuration_required')
+  if (memberBlocks !== undefined && ['block', 'list', 'unblock', 'between', 'hidden', 'removeOwner'].some(key => typeof memberBlocks?.[key] !== 'function')) throw new Error('member_block_configuration_required')
   if (safetyReports !== undefined && ['submit', 'forgetReporter'].some(key => typeof safetyReports?.[key] !== 'function')) throw new Error('safety_report_configuration_required')
   if (selfClaims !== undefined && (typeof selfClaims.lookupSlug !== 'function' || typeof selfClaims.lookupName !== 'function' || typeof selfClaims.claimable !== 'function' || typeof selfClaims.claim !== 'function')) throw new Error('self_claims_configuration_required')
   const invitationMode = typeof claimInvitation === 'function' && typeof signup !== 'function'
@@ -193,7 +195,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map(), pickerBudgets = new Map()
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
-  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args) } : {}), ...messagingOptions }) : null
+  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users } : {}), ...messagingOptions }) : null
   // "View on Unlinked" for conversation partners (docs/openchat-message.md):
   // OpenChat names which of the member's own partners have a shared Ideaflow
   // identity; that identity's owner links only if they claimed a published
@@ -750,6 +752,56 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     await recordAudit({ event: 'safety_report_received', kind: 'removal', reference: receipt.reference, emailed: receipt.emailed })
     view({ state: 'done', reference: receipt.reference })
   }
+  // Reports about people, messages and conversations (docs/report-and-block.md).
+  // GET shows the form; POST stores the report (and emails the support inbox).
+  async function reportRoute(request, response, { viewer, chrome, kind, targetType, targetId, target, action, back, evidence = null, excerpt = null, blockHref = null, forward = null }) {
+    response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+    const view = (extra, status = 200) => journey(response, renderReport({ ...chrome, kind, target, action, back, excerpt, ...extra }), null, '', status)
+    if (!safetyReports) { response.setHeader('Location', '/support#report'); response.writeHead(303).end(); return }
+    if (request.method === 'GET') { view({ state: 'form' }); return }
+    const { values, bot } = await readSafetyForm(request, viewer, [])
+    if (bot) { view({ state: 'done', reference: randomBytes(4).toString('hex').toUpperCase() }); return }
+    if (!spendSafety()) { response.setHeader('Retry-After', '60'); view({ state: 'form', values, error: 'Too many reports are arriving right now. Try again in a minute, or email support@ideaflow.app.' }, 429); return }
+    let receipt
+    try {
+      receipt = await safetyReports.submit({ kind: 'report', targetType, targetId, targetName: target.name, targetPresence: target.presence, reason: values.reason, details: values.details, contact: values.contact,
+        reporterOwnerHash: viewer ? ownerHash(viewer.owner) : null, reporterLabel: viewer?.accountLabel ?? null, evidence })
+    } catch (error) {
+      if (!(error instanceof SafetyReportError)) throw error
+      view({ state: 'form', values, error: safetyError(error.code) }, 400); return
+    }
+    if (typeof forward === 'function') await bounded(() => forward(values), false)
+    await recordAudit({ event: 'safety_report_received', kind: 'report', targetType, reference: receipt.reference, emailed: receipt.emailed })
+    view({ state: 'done', reference: receipt.reference, blockHref })
+  }
+  // Blocking: kept by Unlinked for the blocker, applied to connection requests
+  // here and to messages through OpenChat's own block (docs/report-and-block.md).
+  async function applyBlock(session, { profileId = null, openChatUserId = null, name = null }) {
+    let blocked = null
+    if (profileId && typeof accountForProfile === 'function') blocked = await accountForProfile(profileId).catch(() => null)
+    if (blocked && blocked.ownerId === session.owner.ownerId && blocked.userId === session.owner.userId) throw new BlockError('block_self')
+    // A member's OpenChat user, through the same confidential path as Message.
+    if (!openChatUserId && profileId && messaging) {
+      const context = unlinkedProfileContext(profileId)
+      if (context) openChatUserId = (await bounded(() => messaging.recipientFor(session, context), null))?.id ?? null
+    }
+    const record = await memberBlocks.block(session.owner, { blocked: blocked ? { ownerId: blocked.ownerId, userId: blocked.userId } : null, profileId, openChatUserId, name })
+    // Open requests either way, and the connection itself, end now.
+    if (connectionActions && profileId) {
+      const relation = await bounded(() => connectionActions.relationTo(session.owner, profileId), null)
+      try {
+        if (relation?.state === 'incoming') await memberConnections.respond(session.owner, relation.requestId, 'ignore')
+        else if (relation?.state === 'outgoing') await memberConnections.withdraw(session.owner, relation.requestId)
+        else if (relation?.state === 'connected' && relation.requestId) await connectionActions.remove(session.owner, relation.requestId)
+      } catch { /* The block stands; the connection can still be removed by hand. */ }
+    }
+    const openChat = openChatUserId && messaging ? await messaging.blockUser(session, openChatUserId).then(() => true, () => false) : false
+    messaging?.invalidateBlocks(session)
+    knownCache.delete(session.owner.ownerId)
+    await recordAudit({ event: 'member_blocked', ownerHash: ownerHash(session.owner), openChat, account: Boolean(blocked) })
+    return record
+  }
+  const blockFor = async (owner, profileId) => memberBlocks && profileId ? (await bounded(() => memberBlocks.list(owner), [])).find(value => value.blockedProfileId === profileId) ?? null : null
   let lastPrune = Date.now()
   return async (request, response) => {
     // GET page navigations allow the browser's back/forward cache, so Back
@@ -1048,6 +1100,31 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       }
       // Request removal of an imported profile (docs/removal-requests.md):
       // public, because the person in it usually has no account.
+      const profileSafety = url.pathname.match(/^\/people\/([^/]{1,480})\/(report|block)$/)
+      if (profileSafety && ['GET', 'POST'].includes(request.method)) {
+        let id
+        try { id = decodeURIComponent(profileSafety[1]) } catch { response.writeHead(404).end(); return }
+        let found
+        try { found = typeof readPublishedSnapshot === 'function' ? await publicReader.profile({ id }) : null }
+        catch { journey(response, renderPeopleUnavailable(chrome), null, '', 503); return }
+        if (!found) { response.writeHead(404).end(); return }
+        if (found.moved) { redirect(response, `/people/${encodeURIComponent(found.moved)}/${profileSafety[2]}`); return }
+        const profile = found.profile, path = `/people/${encodeURIComponent(profile.id)}`
+        if (profileSafety[2] === 'report') {
+          const canBlock = Boolean(viewer && memberBlocks && profile.presence === 'member' && !(await blockFor(viewer.owner, profile.id)))
+          await reportRoute(request, response, { viewer, chrome, kind: 'profile', targetType: 'profile', targetId: profile.id, target: { name: profile.name, presence: profile.presence, profile }, action: `${path}/report`, back: path, blockHref: canBlock ? `${path}/block` : null }); return
+        }
+        // Blocking needs an account; only members (an account behind the profile) can be blocked.
+        if (!viewer) { redirect(response, `/login?next=${encodeURIComponent(path)}`); return }
+        if (!memberBlocks || profile.presence !== 'member') { redirect(response, path); return }
+        const blockView = (state, status = 200, error) => journey(response, renderBlock({ ...chrome, name: profile.name, action: `${path}/block`, back: path, state, error }), null, '', status)
+        if (request.method === 'GET') { blockView('confirm'); return }
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== viewer.csrf || [...input.keys()].some(key => key !== 'csrf')) throw new Error('private_browser_csrf')
+        try { await applyBlock(viewer, { profileId: profile.id, name: profile.name }) }
+        catch (error) { if (!(error instanceof BlockError)) throw error; blockView('confirm', 400, error.code === 'block_self' ? 'That is your own profile.' : error.code === 'block_limit' ? 'You have blocked the most people Unlinked allows. Unblock someone in Settings first.' : 'We could not block this person. Try again.'); return }
+        blockView('done'); return
+      }
       const removal = url.pathname.match(/^\/people\/([^/]{1,480})\/removal$/)
       if (removal && ['GET', 'POST'].includes(request.method)) { await removalRequest(request, response, removal[1], viewer, chrome); return }
       const publicDetail = url.pathname.match(/^\/api\/people\/([^/]+)$/)
@@ -1117,7 +1194,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             // The owner's private context mounts only for a signed-in viewer and is
             // fetched separately; the page itself never carries it.
             const withContext = Boolean(viewer && privateContext && !publicProfile?.[2])
-            journey(response, renderPerson({ ...chrome, profile, connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
+            // A member this viewer blocked shows as blocked, with Unblock instead of Connect and Message.
+            const blocked = viewer && !publicProfile?.[2] ? await blockFor(viewer.owner, result.profile.id) : null
+            const canBlock = Boolean(viewer && memberBlocks && result.profile.presence === 'member' && connect?.state !== 'self')
+            journey(response, renderPerson({ ...chrome, blocked, canBlock, profile, connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
@@ -1305,6 +1385,47 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           }
         }
         journey(response, { ...renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, conversationId, entry, available: Boolean(messaging) }), ...(messaging ? { messagesClient: { csrf: session.csrf, conversationId } } : {}) }); return
+      }
+      // Report a message or conversation, or block the other person in a direct
+      // conversation (docs/report-and-block.md). Pages, so they work in the dock too.
+      if (['/messages/report', '/messages/block'].includes(url.pathname) && ['GET', 'POST'].includes(request.method)) {
+        const conversationId = url.searchParams.get('conversation'), messageId = url.searchParams.get('message')
+        if ([...url.searchParams.keys()].some(key => !['conversation', 'message'].includes(key)) || url.searchParams.getAll('conversation').length !== 1 || url.searchParams.getAll('message').length > 1 || !validMessagingId(conversationId) || (messageId !== null && !validMessagingId(messageId))) { redirect(response, '/messages'); return }
+        if (!messaging) { redirect(response, '/support#report'); return }
+        const back = `/messages/c/${encodeURIComponent(conversationId)}`
+        if (url.pathname === '/messages/report') {
+          let evidence
+          try { evidence = await messaging.evidence(session, conversationId, messageId) }
+          catch { journey(response, renderMessages({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, entry: { status: 'unavailable' }, available: true }), null, '', 404); return }
+          const person = messageId ? { id: evidence.message.senderId, name: evidence.message.senderName } : evidence.peer
+          const name = person?.name ?? evidence.conversation.title ?? 'this conversation'
+          const blockable = Boolean(memberBlocks && evidence.peer && (!messageId || evidence.peer.id === evidence.message.senderId))
+          await reportRoute(request, response, { viewer: session, chrome, kind: messageId ? 'message' : 'conversation', targetType: messageId ? 'message' : 'conversation', targetId: messageId ?? conversationId, target: { name },
+            action: `/messages/report?${new URLSearchParams({ conversation: conversationId, ...(messageId ? { message: messageId } : {}) })}`, back, evidence, excerpt: evidence.message?.content ?? null,
+            blockHref: blockable ? `/messages/block?conversation=${encodeURIComponent(conversationId)}` : null,
+            forward: values => messaging.forwardReport(session, { targetType: messageId ? 'message' : 'user', targetId: messageId ?? evidence.peer?.id ?? conversationId, reason: values.reason, freeform: values.details }) }); return
+        }
+        if (!memberBlocks) { redirect(response, back); return }
+        let peer
+        try { peer = (await messaging.conversationPeer(session, conversationId)).peer } catch { peer = null }
+        if (!peer) { journey(response, renderBlock({ ...chrome, name: 'this person', action: url.pathname + url.search, back, state: 'confirm', error: 'Only a one-to-one conversation can be blocked from here. Report it instead.' }), null, '', 404); return }
+        if (request.method === 'GET') { journey(response, renderBlock({ ...chrome, name: peer.name, action: `${url.pathname}${url.search}`, back })); return }
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => key !== 'csrf')) throw new Error('private_browser_csrf')
+        // Their published profile, when they claimed one, so connection requests stop too.
+        const profiles = typeof messagingIdentities === 'function' ? await bounded(() => profilesForParticipants(session, [peer.id]), null) : null
+        try { await applyBlock(session, { openChatUserId: peer.id, profileId: profiles?.get?.(peer.id) ?? null, name: peer.name }) }
+        catch (error) { if (!(error instanceof BlockError)) throw error; journey(response, renderBlock({ ...chrome, name: peer.name, action: `${url.pathname}${url.search}`, back, error: 'We could not block this person. Try again.' }), null, '', 400); return }
+        journey(response, renderBlock({ ...chrome, name: peer.name, back: '/messages', state: 'done' })); return
+      }
+      if (memberBlocks && request.method === 'POST' && url.pathname === '/blocks/unblock') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('id').length !== 1 || input.getAll('next').length > 1 || [...input.keys()].some(key => !['csrf', 'id', 'next'].includes(key))) throw new Error('private_browser_csrf')
+        const removed = await memberBlocks.unblock(session.owner, input.get('id'))
+        if (removed?.openChatUserId && messaging) await messaging.blockUser(session, removed.openChatUserId, false).catch(() => {})
+        messaging?.invalidateBlocks(session)
+        const next = input.get('next')
+        redirect(response, next === '/settings#blocked' ? '/settings?blocks=unblocked#blocked' : typeof next === 'string' && /^\/people\/[A-Za-z0-9._~%-]{1,480}$/.test(next) ? `${next}?connect=unblocked` : '/settings#blocked'); return
       }
       if (request.method === 'GET' && url.pathname === '/join') { redirect(response, '/'); return }
       if (request.method === 'GET' && url.pathname === '/legacy-account') {
@@ -1771,7 +1892,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       }
       if (signup && notifications && request.method === 'GET' && url.pathname === '/notifications') {
         const props = jobProps(await jobResources())
-        const items = await notifications.list(session.owner)
+        // Nothing from people this member blocked.
+        const hiddenProfiles = memberBlocks ? (await bounded(() => memberBlocks.hidden(session.owner), { profiles: new Set() })).profiles : new Set()
+        const items = (await notifications.list(session.owner)).filter(item => !item.actorProfileId || !hiddenProfiles.has(item.actorProfileId))
         const [received, connections] = memberConnections ? await Promise.all([memberConnections.received(session.owner), memberConnections.connections(session.owner)]) : [[], []]
         // Opening the feed clears the bell; each item stays highlighted until opened.
         await notifications.markSeen(session.owner)
@@ -1902,7 +2025,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // Email choices appear only while email is on; a slow read costs the section, never the page.
         const email = memberEmail?.sending ? await bounded(() => memberEmail.settings(session.owner), null) : null
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
-        const view=renderSettings({ ...props, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+        const blocks = memberBlocks ? await bounded(() => memberBlocks.list(session.owner), []) : null
+        const view=renderSettings({ ...props, blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
           ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
@@ -1977,6 +2101,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
         // Reports this member sent stay for review, without who sent them.
         if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
+        // Blocks this member made, and blocks of this member.
+        if (memberBlocks) await memberBlocks.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
