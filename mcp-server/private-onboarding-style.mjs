@@ -409,7 +409,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .agentband{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center;background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:var(--r);padding:20px 24px;margin-top:44px}
 .unlinked-onboarding .agentband pre{margin:0 0 8px}
 .unlinked-onboarding footer{display:flex;gap:10px 28px;flex-wrap:wrap;justify-content:space-between;align-items:center;border-top:1px solid var(--line);margin-top:56px;padding-top:20px;font-size:14px;color:var(--muted)}
-.unlinked-onboarding footer a{margin-right:18px}
+.unlinked-onboarding footer a{display:inline-block;margin-right:18px}
 .unlinked-onboarding footer form{display:inline}
 .unlinked-onboarding .account{margin:0}
 .unlinked-onboarding :is(a,button,input,textarea,summary):focus-visible{outline:3px solid var(--brand);outline-offset:3px}
