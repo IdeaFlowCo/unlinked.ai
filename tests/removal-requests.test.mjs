@@ -139,7 +139,12 @@ test('a failed or slow email never loses a stored request', async () => {
   assert.equal(receipt.emailed, false); assert.equal((await store.list()).length, 1)
   assert.deepEqual(errors, [{ event: 'safety_report_email_failed', code: 'email_transport_status_500' }])
   const slow = createSafetyReports({ store, origin: 'https://www.unlinked.ai', from: 'x <noreply@id.ideaflow.app>', notifyTimeoutMs: 20, transport: { send: () => new Promise(() => {}) } })
-  assert.equal((await slow.submit({ kind: 'removal', targetType: 'profile', targetId: 'imported', reason: 'about_me' })).emailed, false)
+  // The notify timeout is unref'd so it never holds a server open. A bare test
+  // process has nothing else pending, and Node 22 (the release image) would end
+  // the run before it fires, so keep the loop alive for this one call.
+  const keepAlive = setInterval(() => {}, 1000)
+  try { assert.equal((await slow.submit({ kind: 'removal', targetType: 'profile', targetId: 'imported', reason: 'about_me' })).emailed, false) }
+  finally { clearInterval(keepAlive) }
   assert.equal((await store.list()).length, 2)
 })
 
