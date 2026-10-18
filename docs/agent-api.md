@@ -205,7 +205,7 @@ an extra sanitized `cause` identifier).
 | `not_a_member` | 409 | The target profile is not an Unlinked member. |
 | `already_connected` | 409 | The owner and target are already connected. |
 | `request_pending` | 409 | An open request already exists for the pair. |
-| `request_unavailable` | 409 | The requested state transition is no longer available. |
+| `request_unavailable` | 409 | The requested state transition is no longer available, or a block between the two members refuses it ([report-and-block.md](report-and-block.md)). |
 | `cooldown_active` | 429 | The withdrawal cooldown has not elapsed. |
 | `ambiguous_name` | 409 | (private notes) Several of the owner's saved things share that name. The body adds `candidates` (`id`, `kind`, `name`, the owner's own); ask the user, then pass an id, or `createNew` with `clientRequestId`. |
 | `identity_unavailable` | 409 | (private notes) The account has no Ideaflow sign-in identity, so it has no people overlay. Sign in to Unlinked with Ideaflow once. |

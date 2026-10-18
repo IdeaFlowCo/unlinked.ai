@@ -23,6 +23,7 @@ import { createNeo4jSessionStore } from './session-store.mjs'
 import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
 import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
 import { createNeo4jSafetyReportStore, createSafetyReports } from './safety-reports.mjs'
+import { createNeo4jBlockStore, createMemberBlocks } from './member-blocks.mjs'
 import { createProfilePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
 import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
@@ -86,7 +87,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore, createSafetyReportStore: createNeo4jSafetyReportStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -242,9 +243,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       onError: event => audit({ ...event, at: new Date().toISOString() }) }) : undefined
     const sessionStore = typeof dependencies.createSessionStore === 'function' ? dependencies.createSessionStore(driver, 'neo4j') : null
     await sessionStore?.initialize()
+    // Member blocks (docs/report-and-block.md): refuse connection requests either way.
+    const blockStore = typeof dependencies.createBlockStore === 'function' ? dependencies.createBlockStore(driver, 'neo4j') : null
+    await blockStore?.initialize()
+    const memberBlocks = blockStore ? createMemberBlocks({ store: blockStore }) : undefined
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
     await connectionStore?.initialize()
-    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, onAccepted: () => connectionSync?.wake() }) : undefined
+    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
     const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
       // The inviter hears that their invite was accepted (and so that the invitee joined).
       onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,
@@ -570,6 +575,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       homePreferences,
       profileSocialLinks,
       safetyReports,
+      memberBlocks,
       lookupCompanyFacts,
       sessionStore,
       memberEmail,

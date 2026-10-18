@@ -116,8 +116,31 @@ const invalid = () => new MessagingError(400, 'invalid_input')
  * `createMessagingSession(session)` is the existing confidential exchange in
  * messaging.mjs: it returns `{ token, user: { userId } }` for the session's live owner.
  */
-export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null } = {}) {
-  const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map()
+// `blockedUsers(session)` (optional) returns the OpenChat user ids this member
+// blocked (member-blocks.mjs): their direct conversations are hidden, their
+// messages are not delivered, and no message is sent to them from here.
+export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, blockedUsers = null } = {}) {
+  const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map(), blockCache = new Map(), peers = new Map()
+  // The member's blocked OpenChat users, read at most every 30 seconds (and again after a change).
+  async function blockedFor(session) {
+    const key = ownerKey(session)
+    if (typeof blockedUsers !== 'function' || !key) return new Set()
+    const held = blockCache.get(key)
+    if (held && now() - held.at < 30000) return held.set
+    let set
+    try { set = new Set([...(await blockedUsers(session) ?? [])].filter(validId)) } catch { set = held?.set ?? new Set() }
+    blockCache.set(key, { set, at: now() }); trim(blockCache, 5000)
+    return set
+  }
+  const knownBlocked = session => blockCache.get(ownerKey(session))?.set ?? new Set()
+  function invalidateBlocks(session) { blockCache.delete(ownerKey(session)); badges.delete(ownerKey(session)) }
+  // Each member's direct conversations and who is on the other side, from their last inbox read.
+  const rememberPeers = (session, conversations, me) => {
+    const map = new Map()
+    for (const conversation of conversations) if (conversation.type === 'direct') { const other = conversation.participants.find(person => person.id !== me); if (other) map.set(conversation.id, other.id) }
+    peers.set(ownerKey(session), map); trim(peers, 5000)
+  }
+  const blockedConversation = (session, conversationId) => { const peer = peers.get(ownerKey(session))?.get(conversationId); return Boolean(peer && knownBlocked(session).has(peer)) }
   const ownerKey = session => session?.owner?.ownerId
   const trim = (map, limit) => { while (map.size > limit) map.delete(map.keys().next().value) }
 
@@ -189,7 +212,11 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
 
   async function listConversations(session) {
     const { value, credential } = await upstream(session, 'GET', '/api/chat/conversations')
-    const conversations = array(value).map(projectConversation).filter(Boolean).slice(0, 500)
+    const all = array(value).map(projectConversation).filter(Boolean).slice(0, 500)
+    rememberPeers(session, all, credential.userId)
+    // Conversations with someone this member blocked are hidden from the inbox.
+    const blocked = await blockedFor(session)
+    const conversations = blocked.size ? all.filter(conversation => !(conversation.type === 'direct' && conversation.participants.some(person => person.id !== credential.userId && blocked.has(person.id)))) : all
     // "View on Unlinked": public profile ids of partners who claimed a published
     // Unlinked profile. Bounded; a slow or failed lookup only omits the links.
     if (typeof profilesForParticipants === 'function') {
@@ -207,6 +234,8 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
 
   async function listMessages(session, conversationId, before) {
+    await blockedFor(session)
+    if (blockedConversation(session, conversationId)) return { messages: [], hasMore: false, blocked: true }
     const query = new URLSearchParams({ limit: '50', ...(before ? { before } : {}) })
     const { value } = await upstream(session, 'GET', `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages?${query}`)
     return { messages: array(value?.messages).map(projectMessage).filter(Boolean).map(message => withClientId(ownerKey(session), message)), hasMore: bool(value?.hasMore) }
@@ -220,6 +249,8 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const attachments = (input.attachments ?? []).map(key => mine?.get(key))
     if (attachments.some(item => !item)) throw invalid()
     if ((!content && !attachments.length) || content.length > MAX_CONTENT || !CLIENT_ID.test(input.clientId ?? '') || (input.replyToId !== undefined && input.replyToId !== null && !validId(input.replyToId))) throw invalid()
+    await blockedFor(session)
+    if (blockedConversation(session, conversationId)) throw new MessagingError(403, 'blocked')
     const credential = await credentialFor(session)
     const id = derivedId(credential.userId, input.clientId)
     remember(ownerKey(session), id, input.clientId)
@@ -353,6 +384,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const { value } = await upstream(session, 'POST', '/api/unlinked/recipient', { profile })
     if (value?.status === 'unclaimed') return { status: 'unclaimed', name: text(value.name, 160) }
     if (value?.status !== 'ready' || !validId(value?.recipient?.id)) return { status: 'unavailable' }
+    if ((await blockedFor(session)).has(value.recipient.id)) return { status: 'blocked', name: text(value.recipient.name, 160) }
     const created = await upstream(session, 'POST', '/api/chat/conversations', { participantIds: [value.recipient.id], type: 'direct' })
     const conversation = projectConversation(created.value)
     if (!conversation) return { status: 'unavailable' }
@@ -396,6 +428,8 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   const deliver = (link, raw, targets = link.streams) => {
     const message = projectMessage(raw)
     if (!message) return
+    // Nothing from someone this member blocked reaches the page.
+    if (message.senderId && knownBlocked(link.session).has(message.senderId)) return
     if (message.createdAt && message.createdAt > link.lastAt) link.lastAt = message.createdAt
     const value = withClientId(link.key, message)
     for (const stream of targets) {
@@ -492,6 +526,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
 
   function openStream(request, response, session, url) {
+    void blockedFor(session).catch(() => {})
     const link = linkFor(session)
     // At most 3 open streams per member; a new tab or reload retires the oldest.
     if (link.streams.size >= 3) { const oldest = [...link.streams][0]; oldest.write('superseded', {}); oldest.end() }
@@ -599,6 +634,53 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     return true
   }
 
+  // ── Safety (docs/report-and-block.md) ────────────────────────────────────
+  // The other person in one of this member's direct conversations, from OpenChat.
+  async function conversationPeer(session, conversationId) {
+    if (!validId(conversationId)) throw invalid()
+    const { value, credential } = await upstream(session, 'GET', '/api/chat/conversations')
+    const conversation = array(value).map(projectConversation).find(item => item?.id === conversationId)
+    if (!conversation) throw new MessagingError(404, 'not_found')
+    const others = conversation.participants.filter(person => person.id !== credential.userId)
+    return { conversation, me: credential.userId, peer: conversation.type === 'direct' && others.length === 1 ? others[0] : null }
+  }
+  // A public profile's OpenChat user (the same confidential path Message uses), or null.
+  async function recipientFor(session, profile) {
+    const { value } = await upstream(session, 'POST', '/api/unlinked/recipient', { profile })
+    return value?.status === 'ready' && validId(value?.recipient?.id) ? { id: value.recipient.id, name: text(value.recipient.name, 160) } : null
+  }
+  async function blockUser(session, userId, active = true) {
+    if (!validId(userId)) throw invalid()
+    spend(session, 'write')
+    try { await upstream(session, active ? 'POST' : 'DELETE', `/api/chat/users/${encodeURIComponent(userId)}/block`); return true }
+    finally { invalidateBlocks(session) }
+  }
+  // What a reviewer needs to see, kept with the report: the message (or the
+  // conversation's latest messages) as OpenChat has it now. Bounded.
+  async function evidence(session, conversationId, messageId = null) {
+    if (!validId(conversationId) || (messageId !== null && !validId(messageId))) throw invalid()
+    const { conversation, peer } = await conversationPeer(session, conversationId)
+    const pick = message => ({ id: message.id, senderId: message.senderId, senderName: message.sender?.name ?? null, content: message.content.slice(0, 1000), createdAt: message.createdAt, ...(message.attachments.length ? { attachments: message.attachments.length } : {}) })
+    let before = null, found = null, recent = []
+    for (let page = 0; page < 4 && !found; page++) {
+      const query = new URLSearchParams({ limit: '50', ...(before ? { before } : {}) })
+      const { value } = await upstream(session, 'GET', `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages?${query}`)
+      const messages = array(value?.messages).map(projectMessage).filter(Boolean)
+      if (page === 0) recent = messages.slice(-20).map(pick)
+      if (messageId === null) break
+      found = messages.find(message => message.id === messageId) ?? null
+      if (!messages.length || value?.hasMore !== true) break
+      before = messages.map(message => message.createdAt).filter(Boolean).sort()[0]
+    }
+    if (messageId !== null && !found) throw new MessagingError(404, 'not_found')
+    return { conversation: { id: conversation.id, type: conversation.type, title: conversation.title, participants: conversation.participants.map(person => ({ id: person.id, name: person.name })) }, peer: peer ? { id: peer.id, name: peer.name } : null,
+      ...(found ? { message: pick(found) } : { recent }) }
+  }
+  // OpenChat keeps its own report queue (OpenChat-wgl); Unlinked's copy is the one reviewed here.
+  async function forwardReport(session, { targetType, targetId, reason, freeform }) {
+    try { await upstream(session, 'POST', '/api/chat/reports', { targetType, targetId, reason, ...(freeform ? { freeform: text(freeform, 2000) } : {}) }); return true } catch { return false }
+  }
+
   function close() { for (const link of [...links.values()]) closeLink(link) }
-  return { handle, openProfile, unreadTotal, close, _links: links }
+  return { handle, openProfile, unreadTotal, close, conversationPeer, recipientFor, blockUser, evidence, forwardReport, invalidateBlocks, _links: links }
 }

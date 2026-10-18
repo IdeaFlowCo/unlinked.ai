@@ -124,6 +124,8 @@ const CONNECTION_FAILURES = Object.freeze({
   connection_note_invalid: ['invalid_input', 'The note must be one paragraph of at most 300 characters.'],
   connection_not_found: ['not_found', 'No connection request with that id belongs to the owner in that direction.'],
   connection_unavailable: ['request_unavailable', 'That request is no longer open.'],
+  // A block between the two accounts (docs/report-and-block.md); which side blocked is not said.
+  connection_not_available: ['request_unavailable', 'This member cannot be asked to connect.'],
   connection_profile_not_found: ['not_found', 'No published public profile has that id.'],
 })
 const connectionFailure = code => new AccountToolError(...(CONNECTION_FAILURES[code] ?? ['upstream_unavailable', 'The connection request could not be completed; retry.']))

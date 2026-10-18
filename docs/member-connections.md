@@ -140,3 +140,4 @@ that runtime has email enabled.
 
 For OpenChat synchronization, rollout requirements, durable retry and removal
 semantics, see [Accepted connections in OpenChat](openchat-accepted-connections.md).
+- A block between two members refuses new requests and accepts either way (`connection_not_available`); see [report-and-block.md](report-and-block.md).

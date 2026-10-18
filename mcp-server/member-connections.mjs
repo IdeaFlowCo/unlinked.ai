@@ -58,7 +58,8 @@ export function connectionNote(value) {
   return note
 }
 
-export function createConnectionRequests({ store, notifications = null, onAccepted = null, now = Date.now, perDay = CONNECTION_REQUESTS_PER_DAY, cooldownMs = RESEND_COOLDOWN_MS } = {}) {
+// `blocked(a, b)`: whether either account blocked the other (member-blocks.mjs); a block refuses new requests and accepts.
+export function createConnectionRequests({ store, notifications = null, onAccepted = null, blocked = null, now = Date.now, perDay = CONNECTION_REQUESTS_PER_DAY, cooldownMs = RESEND_COOLDOWN_MS } = {}) {
   if (!store || ['insert', 'get', 'listPair', 'listByRecipient', 'listBySender', 'listAccepted', 'transition', 'countSentSince', 'countReceivedPending', 'deleteOwner'].some(name => typeof store[name] !== 'function')) throw new Error('connection_store_required')
   if (!Number.isSafeInteger(perDay) || perDay < 1 || !Number.isSafeInteger(cooldownMs) || cooldownMs < 0) throw new Error('connection_limits_invalid')
   // Notifications never decide whether a request works.
@@ -77,6 +78,7 @@ export function createConnectionRequests({ store, notifications = null, onAccept
       owner(sender); owner(recipient)
       if (same(sender, recipient)) throw new ConnectionError('connection_self')
       const text = connectionNote(note)
+      if (blocked && await blocked(sender, recipient)) throw new ConnectionError('connection_not_available')
       const pair = pairKey(sender, recipient), existing = await store.listPair(pair)
       if (existing.some(record => record.status === 'accepted')) throw new ConnectionError('connection_exists')
       // They already asked you: connecting answers their request.
@@ -106,6 +108,7 @@ export function createConnectionRequests({ store, notifications = null, onAccept
       if (!['accept', 'ignore'].includes(action)) throw new ConnectionError('connection_action_invalid')
       const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
       if (!record || !same(recipientOf(record), recipient)) throw new ConnectionError('connection_not_found')
+      if (action === 'accept' && blocked && await blocked(recipient, senderOf(record))) throw new ConnectionError('connection_not_available')
       const at = now()
       let changed
       try {
