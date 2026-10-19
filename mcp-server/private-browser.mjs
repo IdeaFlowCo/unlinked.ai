@@ -39,9 +39,9 @@ import { exportAccountData, deleteAccountData } from '../src/utils/private-impor
 import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
-import { ContactCardError, renderContactVcard, vcardContentDisposition } from './contact-card.mjs'
+import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
-import { renderScan, fillMeHeadline, TOP_BAR_SCRIPT, LINKEDIN_EMAIL_HELP_SCRIPT, LINKEDIN_EXPORT_PROGRESS_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError, renderMemberHome } from './private-onboarding-views.mjs'
+import { iosAppView, renderScan, fillMeHeadline, TOP_BAR_SCRIPT, LINKEDIN_EMAIL_HELP_SCRIPT, LINKEDIN_EXPORT_PROGRESS_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError, renderMemberHome } from './private-onboarding-views.mjs'
 import { summarizeImports } from '../src/utils/private-import/import-summary.mjs'
 import { IMPORT_REMINDER } from './home-preferences.mjs'
 import { MEET_SCRIPT } from './public-discovery.mjs'
@@ -249,7 +249,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   // An OAuth connector authorization request returns to its own validated
   // consent page (the query is re-validated there, never trusted).
   const lookupReturn = value => { try { const u = new URL(value, base); return value.startsWith('/people/lookup?') && u.pathname === '/people/lookup' && u.searchParams.getAll('url').length === 1 && [...u.searchParams.keys()].every(key => key === 'url') && Boolean(parseLinkedinProfileUrl(u.searchParams.get('url'))) } catch { return false } }
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  // Scanning flows return to what was scanned: a contact card (/c/<token>), the
+  // LinkedIn lookup (with or without its one address) and the scan sheet itself.
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -476,6 +478,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const responseAlerts = new WeakMap()
   // Signed-in page responses that include the Messages dock.
   const responseDock = new WeakSet()
+  // Responses to the Unlinked iOS app: pages get iosAppView and no floating feedback bubble.
+  const iosResponses = new WeakSet()
   // Per-response route stage durations for Server-Timing on rendered pages:
   // fixed stage names and whole milliseconds only, never identifiers or paths.
   const responseTimings = new WeakMap()
@@ -518,7 +522,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       ...(notifications ? { notifications: 0 } : {}),
       ...(messaging ? { messages: 0 } : {}),
     } : undefined)
-    view = { ...view, content: fillNavAlerts(view.content, alerts) }
+    view = { ...view, content: fillNavAlerts(iosResponses.has(response) ? iosAppView(view.content) : view.content, alerts) }
     // Messages page or dock: the static client plus its non-executable configuration.
     const dockOn = responseDock.has(response) && readers.has(response) && view.content.includes('</main>')
     if (dockOn) view.content = view.content.replace('</main>', `</main>${renderMessagesDock()}`)
@@ -543,13 +547,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${feedbackWidgetTag(nonce)}</html>`)
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? '' : feedbackWidgetTag(nonce)}</html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   // `silentBack` (automatic sign-in) returns to the original page without
   // publishing a profile or opening an onboarding/confirmation step. A verified
   // Ideaflow identity receives its private account, just as in OpenChat.
-  async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null, cardToken = null) {
+  async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null, cardToken = null, connectProfileId = null) {
     let claimed
     let owner = await resolveOwner(identity)
     let newOwner = false
@@ -597,7 +601,15 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     if (cardToken) {
       let added = false
       try { await addCard(owner, cardToken, displayName); added = true } catch { /* Keep the new session and offer retry on the card. */ }
-      redirect(response, `/c/${cardToken}${added ? '' : '?add=failed'}`); return 'signed_in'
+      redirect(response, `/c/${cardToken}${added ? '?added=1' : '?add=failed'}`); return 'signed_in'
+    }
+    // Join & connect from someone's public profile: the request is sent the
+    // way every connection request is (they accept it), then the profile shows
+    // the new member's own card to share back.
+    if (connectProfileId && connectionActions) {
+      let code = 'connection_unavailable'
+      try { code = (await connectionActions.send(owner, { profileId: connectProfileId, fallbackName: displayName })).code } catch (failure) { if (failure instanceof ConnectionError) code = failure.code === 'connection_profile_not_found' ? 'connection_not_available' : failure.code }
+      redirect(response, `/people/${encodeURIComponent(connectProfileId)}?connect=${encodeURIComponent(connectNoticeCodes.includes(code) ? code : 'connection_unavailable')}&joined=1`); return 'signed_in'
     }
     // An invitation link someone signed in to answer comes first; its page then
     // continues to the old-account or find-me step when there is one.
@@ -645,6 +657,28 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     if (sent.status !== 'accepted') await memberConnections.respond(target, sent.request.id, 'accept')
   }
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
+  // The contact version of the card, for its owner: the details, their show
+  // switches, and the link and QR once the card is shared.
+  const ownContactCard = stored => {
+    const shareUrl = stored?.card ? new URL(`/c/${stored.token}`, base).href : null
+    return { settings: stored?.settings ?? {}, card: stored?.card ?? null, shareUrl, qr: shareUrl ? qrSvg(shareUrl, { label: 'QR code opening your contact card' }) : null }
+  }
+  // A display name fit for a card: never an email address or a bare identifier.
+  const cardName = value => typeof value === 'string' && value.trim() && !value.includes('@') && [...value.trim()].length <= 120 && !/^[0-9a-f-]{20,}$/i.test(value.trim()) ? value.trim() : null
+  // Every member has a card from day one: a missing card is created as their
+  // name alone (docs/contact-card.md, "Day-one card"). Read failures cost the card, never the page.
+  const ensureOwnCard = async (owner, identity) => {
+    if (!contactCards) return null
+    try {
+      const stored = await contactCards.read(owner)
+      if (stored || typeof contactCards.ensure !== 'function') return stored ? ownContactCard(stored) : null
+      const name = cardName(identity?.name)
+      const created = name ? await contactCards.ensure(owner, { ...identity, name }) : null
+      return created ? ownContactCard(created) : null
+    } catch { return null }
+  }
+  // The sign-in address, offered as a one-tap email for the card.
+  const accountEmail = session => { try { return typeof session?.accountLabel === 'string' && session.accountLabel.includes('@') ? normalizeEmail(session.accountLabel) : null } catch { return null } }
   // A People listing a Connect/answer/withdraw/remove form may return to: the
   // /network path with only its own filter parameters (a stale notice is dropped).
   const NETWORK_RETURN_KEYS = ['q', 'mode', 'presence', 'connected', 'scope', 'cursor', 'page', 'sort']
@@ -835,6 +869,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     // APIs, auth, export, assets and every POST stay no-store.
     // Not back/forward-cache eligible: photo bytes (content-versioned header of
     // their own) and capability-URL contact cards, which stay no-store.
+    if (iosApp(request)) iosResponses.add(response)
     const navigationPath = new URL(request.url, base).pathname
     const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/')
     response.setHeader('Cache-Control', navigation ? 'private, no-cache' : 'no-store')
@@ -1041,7 +1076,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
         if (Date.now() - invitationWindow >= 60000) { invitationWindow = Date.now(); invitationRequests = 0 }
         if (++invitationRequests > 60) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
-        response.setHeader('Referrer-Policy', 'no-referrer')
+        // The token never leaves this site; same-origin (not no-referrer) so the
+        // page's own form POST carries a real Origin (no-referrer makes it "null").
+        response.setHeader('Referrer-Policy', 'same-origin')
         const invitation = await memberInvitations.open(invitationLink[1])
         journey(response, renderInviteLanding({ ...chrome, token: invitationLink[1], invitation }), null, '', invitation ? 200 : 404); return
       }
@@ -1077,7 +1114,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         if (viewer) {
           let added = false
           try { await addCard(viewer.owner, cardAdd[1], viewer.displayName); added = true } catch { /* Retry remains available. */ }
-          redirect(response, `/c/${cardAdd[1]}${added ? '' : '?add=failed'}`); return
+          redirect(response, `/c/${cardAdd[1]}${added ? '?added=1' : '?add=failed'}`); return
         }
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
@@ -1090,7 +1127,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
       if (request.method === 'GET' && contactLink && contactCards && signup) {
         if (Date.now() - contactWindow >= 60000) { contactWindow = Date.now(); contactRequests = 0 }
         if (++contactRequests > 1200) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
-        response.setHeader('Referrer-Policy', 'no-referrer')
+        // Never sent to another site; same-origin rather than no-referrer, because
+        // no-referrer makes browsers send `Origin: null` with the Join/Add form,
+        // which the same-origin POST check refuses (WebKit and Chromium).
+        response.setHeader('Referrer-Policy', 'same-origin')
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         const card = await contactCards.open(contactLink[1])
         if (contactLink[2]) {
@@ -1098,9 +1138,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           response.writeHead(200, { 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': vcardContentDisposition(card) })
           response.end(renderContactVcard(card, base.origin)); return
         }
-        const target = card && canAddCard && viewer ? await contactCards.ownerForToken(contactLink[1]) : null
-        const relation = target ? await memberConnections.between(viewer.owner, target) : null
-        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, relation: relation?.state, addError: url.searchParams.get('add') === 'failed' }), null, '', card ? 200 : 404); return
+        const target = card && viewer ? await contactCards.ownerForToken(contactLink[1]) : null
+        // Your own card, scanned: say so instead of offering to add yourself.
+        const self = Boolean(target && target.ownerId === viewer.owner.ownerId && target.userId === viewer.owner.userId)
+        const relation = self ? { state: 'self' } : target && canAddCard ? await memberConnections.between(viewer.owner, target) : null
+        // Right after joining or adding from a card: the new connection's own card to share back.
+        const added = url.searchParams.get('added') === '1' && relation?.state === 'connected'
+        const own = added ? await ensureOwnCard(viewer.owner, { name: viewer.displayName }) : null
+        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, relation: relation?.state, addError: url.searchParams.get('add') === 'failed', added, own }), null, '', card ? 200 : 404); return
       }
       // Native header/directory searches accept LinkedIn URLs as well as names.
       // Navigating never spends a provider request; the lookup form does that.
@@ -1122,6 +1167,29 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           journey(response, renderSignInRequired({ next }), null, '', 401); return
         }
         journey(response, renderPersonLookup({ ...chrome, address: parsed?.url ?? address, notice, enabled: personLookup?.enabled })); return
+      }
+      // Join & connect from a member's public profile (a scanned public QR):
+      // a same-origin POST starts Ideaflow sign-up or sign-in with the profile
+      // recorded in the one-use login transaction; after sign-in the request is
+      // sent (docs/contact-card.md, "Joining from a scan"). Viewing never writes.
+      const profileJoin = url.pathname.match(/^\/people\/([^/]{1,480})\/join$/)
+      if (request.method === 'POST' && profileJoin && signup && connectionActions && typeof readPublishedSnapshot === 'function') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if ([...input.keys()].length) throw new Error('private_browser_csrf')
+        let id
+        try { id = decodeURIComponent(profileJoin[1]) } catch { response.writeHead(404).end(); return }
+        let found = await publicReader.profile({ id }).catch(() => null)
+        if (found?.moved) found = await publicReader.profile({ id: found.moved }).catch(() => null)
+        const target = found?.profile?.presence === 'member' ? found.profile.id : null
+        if (!target) { response.writeHead(404).end(); return }
+        const path = `/people/${encodeURIComponent(target)}`
+        if (viewer) { redirect(response, path); return }
+        purge(pending)
+        if (pending.size >= 100) throw new Error('private_login_capacity')
+        const started = await login.begin(cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}), transactionId = token()
+        pending.set(transactionId, { ...started.transaction, connectProfileId: target, expiresAt: Date.now() + 5 * 60000 })
+        response.setHeader('Set-Cookie', cookie('__Host-ul-login', transactionId, 300))
+        redirect(response, started.location); return
       }
       // Request removal of an imported profile (docs/removal-requests.md):
       // public, because the person in it usually has no account.
@@ -1222,7 +1290,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             // A member this viewer blocked shows as blocked, with Unblock instead of Connect and Message.
             const blocked = viewer && !publicProfile?.[2] ? await blockFor(viewer.owner, result.profile.id) : null
             const canBlock = Boolean(viewer && memberBlocks && result.profile.presence === 'member' && connect?.state !== 'self')
-            journey(response, renderPerson({ ...chrome, blocked, canBlock, profile, connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
+            // Right after "Join Unlinked & connect": the new member's own card to share back.
+            const shareBack = viewer && url.searchParams.get('joined') === '1' && !publicProfile?.[2] && connect?.state !== 'self' ? await ensureOwnCard(viewer.owner, { name: viewer.displayName }) : null
+            journey(response, renderPerson({ ...chrome, shareBack, blocked, canBlock, profile, connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
@@ -1361,7 +1431,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           render(response, 'Confirm your Ideaflow account', `<p>Ideaflow returned this verified account for your invitation. Confirm it here before Unlinked creates a private owner for the invitation.</p><article><strong>${displayIdentity(identity)}</strong></article><form method="post" action="/invite/confirm"><input type="hidden" name="csrf" value="${html(csrf)}"><button name="action" value="confirm">Use this account</button><button name="action" value="restart">Use another account</button><button name="action" value="cancel">Cancel</button></form>`)
           return
         }
-        await establishSession(response, identity, null, transaction.next, null, transaction.cardToken); return
+        await establishSession(response, identity, null, transaction.next, null, transaction.cardToken, transaction.connectProfileId ?? null); return
       }
       if (oauth && url.pathname === '/oauth/authorize') { await authorizeConnector(request, response, url, viewer, chrome); return }
       // New-message picker: the member's connections who are on Unlinked, as
@@ -1770,35 +1840,39 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         await profileSocialLinks.set(session.owner, { profileId: mine, links: normalized.links.map(link => link.url) })
         redirect(response, '/profile?links=saved#public-links'); return
       }
-      // The contact version of the card, for its owner: the details, their show
-      // switches, and the link and QR once something is shown.
-      const ownContactCard = stored => {
-        const shareUrl = stored?.card ? new URL(`/c/${stored.token}`, base).href : null
-        return { settings: stored?.settings ?? {}, card: stored?.card ?? null, shareUrl, qr: shareUrl ? qrSvg(shareUrl, { label: 'QR code opening your contact card' }) : null }
-      }
       if (signup && request.method === 'GET' && (url.pathname === '/card' || url.pathname === '/scan')) {
         const jobs = await jobResources(), props = jobProps(jobs)
         const { profile, cardUrl, identity } = await readOwnCard(jobs)
         const card = { ...props, profile, cardUrl, qr: cardUrl ? qrSvg(cardUrl, { label: `QR code opening ${cardUrl}` }) : null }
-        if (url.pathname === '/scan') { journey(response, renderScan({ ...card, tab: url.searchParams.get('tab') }), props.importJob); return }
         let contact = null
         if (contactCards) {
           // The card still renders, without its contact version, while the graph is unavailable.
-          try { await contactCards.syncIdentity(session.owner, identity); contact = ownContactCard(await contactCards.read(session.owner)) } catch { contact = null }
+          try { await contactCards.syncIdentity(session.owner, identity) } catch { /* shown as stored */ }
+          contact = await ensureOwnCard(session.owner, identity)
         }
-        const notice = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.' }[url.searchParams.get('done')]
-        journey(response, renderCard({ ...card, contact, share: contact && url.searchParams.get('share') !== 'public' ? 'contact' : 'public', notice }), props.importJob); return
+        if (url.pathname === '/scan') { journey(response, renderScan({ ...card, contact, tab: url.searchParams.get('tab') }), props.importJob); return }
+        const notice = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.', email: 'Your email is on your card.' }[url.searchParams.get('done')]
+        journey(response, renderCard({ ...card, contact, share: contact && url.searchParams.get('share') !== 'public' ? 'contact' : 'public', notice, accountEmail: accountEmail(session) }), props.importJob); return
       }
-      if (signup && contactCards && request.method === 'POST' && ['/card/contact', '/card/contact/reset'].includes(url.pathname)) {
+      if (signup && contactCards && request.method === 'POST' && ['/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
         const fields = ['phone', 'whatsapp', 'email', 'link'], switches = ['showPhone', 'showWhatsapp', 'showEmail', 'showLink']
-        const allowed = url.pathname === '/card/contact' ? ['csrf', ...fields, ...switches] : ['csrf']
+        const allowed = url.pathname === '/card/contact' ? ['csrf', ...fields, ...switches, 'shareCard', 'shareCardSwitch'] : ['csrf']
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || allowed.some(key => input.getAll(key).length > 1) || [...input.keys()].some(key => !allowed.includes(key))) throw new Error('private_browser_csrf')
         const jobs = await jobResources(), props = jobProps(jobs)
         const { profile, cardUrl, identity } = await readOwnCard(jobs)
-        const values = { ...Object.fromEntries(fields.map(key => [key, (input.get(key) ?? '').slice(0, 400)])), ...Object.fromEntries(switches.map(key => [key, input.get(key) === 'yes'])) }
+        // The share switch counts only when the form carries it (an older page never hides a card).
+        const values = { ...Object.fromEntries(fields.map(key => [key, (input.get(key) ?? '').slice(0, 400)])), ...Object.fromEntries(switches.map(key => [key, input.get(key) === 'yes'])), ...(input.get('shareCardSwitch') === '1' ? { shareCard: input.get('shareCard') === 'yes' } : {}) }
         try {
           if (url.pathname === '/card/contact') await contactCards.save(session.owner, values, identity)
+          else if (url.pathname === '/card/contact/email') {
+            // One tap: the sign-in address from the session, shown on the card; everything else stays as saved.
+            const email = accountEmail(session)
+            if (!email) throw new ContactCardError('contact_email_invalid')
+            const current = (await contactCards.read(session.owner))?.settings ?? {}
+            await contactCards.save(session.owner, { ...current, email, showEmail: true, ...(current.shareCard === false ? { shareCard: true } : {}) }, identity)
+            redirect(response, '/card?share=contact&done=email'); return
+          }
           else await contactCards.rotate(session.owner)
         } catch (failure) {
           if (!(failure instanceof ContactCardError)) throw failure

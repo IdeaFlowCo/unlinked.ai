@@ -121,7 +121,7 @@ test('an invite link is created once, opens signed out, and is accepted once by 
   assert.doesNotMatch(await (await request('/invites', { headers: { Cookie: jacob.cookie } })).text(), new RegExp(token))
   assert.equal((await post('/invites', jacob.cookie, { csrf: 'wrong', inviteeName: 'Ada' })).status >= 400, true)
   const landing = await request(`/i/${token}`)
-  assert.equal(landing.status, 200); assert.equal(landing.headers.get('referrer-policy'), 'no-referrer')
+  assert.equal(landing.status, 200); assert.equal(landing.headers.get('referrer-policy'), 'same-origin')
   const landingHtml = await landing.text()
   assert.match(landingHtml, /Jacob Cole invited Ada Lovelace to Unlinked/); assert.match(landingHtml, new RegExp(`/login\\?next=%2Fi%2F${token}`))
   assert.equal((await request(`/i/${'z'.repeat(43)}`)).status, 404)

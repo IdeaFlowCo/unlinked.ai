@@ -117,8 +117,13 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   assert.match(uploadForm, /<button[^>]*>Import my file<\/button><p class="small">By importing,/)
   const own = renderOwnProfile(account)
   assert.equal(own.title, "Here's your profile")
-  assert.match(own.content, /Built from your file\. Fix anything later\./)
-  assert.match(own.content, /class="button" href="\/network">Looks good<\/a>/)
+  // A new profile without an import gets a clear next step, not "Looks good".
+  assert.match(own.content, /Next: bring your LinkedIn export\./)
+  assert.match(own.content, /class="button" href="\/import">Bring my LinkedIn export<\/a>/)
+  assert.doesNotMatch(own.content, /Looks good|Built from your file|Editing comes soon/)
+  const imported = renderOwnProfile({ ...account, imports: [{ id: 'f', filename: 'f.zip', status: 'indexed' }] })
+  assert.match(imported.content, /Built from your LinkedIn file\. To update it, upload a newer export\./)
+  assert.match(imported.content, /class="button" href="\/network">See my people<\/a>/)
   const people = renderPeople({ ...account, state: 'welcome', own: [] })
   assert.match(people.content, /You're in\. The people you know, ready to search\./)
   assert.match(people.content, /placeholder="Name, company, role, or keyword"/)
@@ -398,7 +403,8 @@ test('only HTTPS LinkedIn profile links are exposed, with safe outbound attribut
 })
 
 test('unimplemented editing, public discovery and removal are stated truthfully', () => {
-  assert.match(renderOwnProfile(account).content, /Editing comes soon/)
+  // Profile editing is not offered, and the page no longer promises it.
+  assert.doesNotMatch(renderOwnProfile(account).content, /Editing comes soon/)
   assert.match(renderPeople(account).content, /Friends come soon/)
   assert.match(renderSettings(account).content, /action="\/export"/)
   assert.match(renderSettings(account).content, /action="\/delete-account"/)
