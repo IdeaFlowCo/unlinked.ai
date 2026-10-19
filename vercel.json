@@ -9,73 +9,26 @@
   "headers": [
     {
       "source": "/.well-known/apple-app-site-association",
-      "headers": [
-        {
-          "key": "Content-Type",
-          "value": "application/json"
-        }
-      ]
+      "headers": [{ "key": "Content-Type", "value": "application/json" }]
     },
     {
       "source": "/apple-app-site-association",
-      "headers": [
-        {
-          "key": "Content-Type",
-          "value": "application/json"
-        }
-      ]
+      "headers": [{ "key": "Content-Type", "value": "application/json" }]
     }
   ],
   "rewrites": [
-    {
-      "source": "/apple-app-site-association",
-      "destination": "/.well-known/apple-app-site-association"
-    }
+    { "source": "/apple-app-site-association", "destination": "/.well-known/apple-app-site-association" }
   ],
   "redirects": [
     {
       "source": "/",
-      "has": [
-        {
-          "type": "header",
-          "key": "x-unlinked-apex-test",
-          "value": "1"
-        }
-      ],
+      "has": [{ "type": "host", "value": "unlinked.ai" }],
       "destination": "https://www.unlinked.ai/",
       "permanent": true
     },
     {
       "source": "/:path((?!\\.well-known/apple-app-site-association$|apple-app-site-association$).+)",
-      "has": [
-        {
-          "type": "header",
-          "key": "x-unlinked-apex-test",
-          "value": "1"
-        }
-      ],
-      "destination": "https://www.unlinked.ai/:path",
-      "permanent": true
-    },
-    {
-      "source": "/",
-      "has": [
-        {
-          "type": "host",
-          "value": "unlinked.ai"
-        }
-      ],
-      "destination": "https://www.unlinked.ai/",
-      "permanent": true
-    },
-    {
-      "source": "/:path((?!\\.well-known/apple-app-site-association$|apple-app-site-association$).+)",
-      "has": [
-        {
-          "type": "host",
-          "value": "unlinked.ai"
-        }
-      ],
+      "has": [{ "type": "host", "value": "unlinked.ai" }],
       "destination": "https://www.unlinked.ai/:path",
       "permanent": true
     }
