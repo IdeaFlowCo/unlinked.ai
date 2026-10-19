@@ -261,7 +261,7 @@ test('views: escaped names, inline answers, header badges only for configured fe
   assert.match(control({ state: 'incoming', requestId: 'r9', note: 'Hello <b>' }), /Ada wants to connect with you\. <q>Hello &lt;b&gt;<\/q>.*?Accept invitation/)
   assert.match(control({ state: 'connected' }), /✓ Connected/); assert.match(control({ state: 'self' }), /This is you/)
   assert.match(control({ state: 'invite' }), /href="\/invites">Invite to Unlinked/)
-  assert.match(renderPerson({ profile, connect: { state: 'signed-out' } }).content, /href="\/login\?next=%2Fpeople%2Fada">Sign in to connect/)
+  assert.match(renderPerson({ profile, connect: { state: 'signed-out' } }).content, /<form class="connect" method="post" action="\/people\/ada\/join"><button class="sm" type="submit">.*?Join Unlinked &amp; connect with Ada<\/button><\/form>/)
   assert.match(renderPerson({ csrf: 'tok', profile, connect: { state: 'none' }, connectNotice: 'sent' }).content, /role="status">Request sent\./)
   assert.doesNotMatch(renderPerson({ csrf: 'tok', profile, connectNotice: '<script>' }).content, /script>/)
 })
@@ -305,8 +305,8 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   const { request, signIn, get, post, notifications } = await site(t)
   const me = await signIn('jacob-subject'), her = await signIn('ada-subject'), third = await signIn('grace-subject')
   // Signed out: members offer sign-in, shadows offer nothing.
-  assert.match(await (await request('/people/ada-profile')).text(), /Sign in to connect/)
-  assert.doesNotMatch(await (await request('/people/shadow')).text(), /Sign in to connect|connections\/request/)
+  assert.match(await (await request('/people/ada-profile')).text(), /Join Unlinked &amp; connect/)
+  assert.doesNotMatch(await (await request('/people/shadow')).text(), /Join Unlinked &amp; connect|connections\/request|\/people\/[^"]*\/join"/)
   // Signed in: Connect on a member; an invite link on a shadow; already linked through an import; yourself.
   const adaPage = await get('/people/ada-profile', me)
   assert.match(adaPage.text, /action="\/connections\/request"/)

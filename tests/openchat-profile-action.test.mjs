@@ -65,21 +65,22 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
   await evidence('signed-in-person', signedInMarkup)
   const own = await request('/profile', session); assert.equal(own.status, 200)
   const ownMarkup = await own.text()
-  assert.equal(action(ownMarkup).searchParams.get('profile'), publicUrl)
+  // Your own profile offers no Message button (you cannot message yourself).
+  assert.doesNotMatch(ownMarkup, /href="\/messages(?:\?[^"]*)?"[^>]*>Message</)
   await evidence('own-published-profile', ownMarkup)
   snapshot.profiles = []
   const privateOwn = await request('/profile', session); assert.equal(privateOwn.status, 200)
   const privateMarkup = await privateOwn.text()
-  assert.deepEqual([...action(privateMarkup).searchParams], [])
+  assert.doesNotMatch(privateMarkup, /href="\/messages\?profile=/)
   await evidence('own-private-fallback', privateMarkup)
   snapshotUnavailable = true
   const unavailableOwn = await request('/profile', session); assert.equal(unavailableOwn.status, 200)
-  assert.deepEqual([...action(await unavailableOwn.text()).searchParams], [])
+  assert.doesNotMatch(await unavailableOwn.text(), /href="\/messages\?profile=/)
   signupSourceUnavailable = true
   const unavailableSignup = await request('/profile', session); assert.equal(unavailableSignup.status, 200)
   const unavailableSignupMarkup = await unavailableSignup.text()
   assert.match(unavailableSignupMarkup, /Seed Owner/)
-  assert.deepEqual([...action(unavailableSignupMarkup).searchParams], [])
+  assert.doesNotMatch(unavailableSignupMarkup, /href="\/messages\?profile=/)
   await evidence('own-unavailable-source-fallback', unavailableSignupMarkup)
   const unavailableSignupCard = await request('/card', session); assert.equal(unavailableSignupCard.status, 200)
   assert.match(await unavailableSignupCard.text(), /Seed Owner/)
@@ -89,7 +90,7 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
   assert.equal(restoredPublicProfile.status, 200)
   const restoredMarkup = await restoredPublicProfile.text()
   assert.match(restoredMarkup, /Seed Owner/)
-  assert.equal(action(restoredMarkup).searchParams.get('profile'), publicUrl)
+  assert.doesNotMatch(restoredMarkup, /href="\/messages\?profile=/, 'no Message button on your own profile')
   await evidence('own-unavailable-source-published', restoredMarkup)
   const restoredCard = await request('/card', session)
   assert.equal(restoredCard.status, 200)
@@ -103,8 +104,7 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
 
 test('private-only own profile never exports its name, imported email, account id or private profile id', () => {
   const page = renderOwnProfile({ csrf: 'c', profile: { id: 'private-person-id', name: 'Private Person', email: 'private@example.invalid' } })
-  assert.deepEqual([...action(page.content).searchParams], [])
-  assert.equal(action(page.content).pathname, '/messages')
+  assert.doesNotMatch(page.content.split('<footer>')[0].replace(/<header>.*?<\/header>/s, ''), /\/messages\?|private-person-id|private@example\.invalid/)
 })
 
 test('rendered public action escapes RFC3986 profile ids and never exports profile fields', () => {

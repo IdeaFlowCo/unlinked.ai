@@ -17,12 +17,31 @@ Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard),
 | `/c/<token>` and `/c/<token>/contact.vcf` | Only the fields switched on |
 | The member's own `/card` (also `/card?share=contact`) and `/export` | Everything they entered |
 
-The contact card is reached only through `/c/<token>`. The token is 24 random alphanumerics (about 143 bits), unrelated to any account or profile id, so it cannot be derived from a public page. The page is sent with `noindex`, `no-store` and `Referrer-Policy: no-referrer`, and requests are bounded for the whole site.
+The contact card is reached only through `/c/<token>`. The token is 24 random alphanumerics (about 143 bits), unrelated to any account or profile id, so it cannot be derived from a public page. The page is sent with `noindex`, `no-store` and `Referrer-Policy: same-origin` (the token never leaves the site; `no-referrer` would make browsers send `Origin: null` with the page's Join/Add form, which the same-origin POST check refuses), and requests are bounded for the whole site.
+
+## Day-one card
+
+Every member has a QR code from the moment they sign up. The first time their
+card is needed (`/card`, the scan sheet, or the "share it back" screen after
+joining from someone's card), a missing card is created as **their name
+alone** (plus headline and public profile link when they have them),
+`shareCard: true`, with no contact detail. Why this option: it needs no tap
+and publishes nothing. The card is not in the People index or any search; only
+someone the member shows the code or link to can open it, and it reveals only
+the name they introduce themselves with. The sign-in email is offered with
+one tap (**Add you@… to my card**, `POST /card/contact/email`; the address
+comes from the session, never the form), never added silently. A display name
+that is an email address never becomes an automatic card. Creation is
+create-if-absent (`MERGE … ON CREATE`), so two tabs end with one card and one link.
+
+`/card` shows the card with its QR code first (on phones the QR panel sits
+above the details), then the link, then the explanation and the form.
+Scanning your own card says **This is your card**.
 
 ## Hiding
 
 - **One detail:** switch off "Show on my contact card" and save. The value stays with the member; the card stops showing it.
-- **Everything:** with every switch off, `/c/<token>` and its contact file answer 404, the same as an unknown token.
+- **Everything:** switch off **Share my card** (`shareCard: false`) and save; `/c/<token>` and its contact file answer 404, the same as an unknown token. A card saved before this switch existed has none and keeps the old rule: shared exactly while some detail is shown.
 - **People who already have the link:** "Reset the link" issues a new token. Every earlier link and QR code stops working at once.
 - Deleting the account deletes the card and its link.
 
@@ -60,6 +79,23 @@ Finding a person by phone number across apps is a separate question (`unlinked-a
 
 The owner sees their full professional details alongside the card. Contact details remain behind the separate, revocable `/c/<token>` link.
 
-A contact card offers **Sign up & add [name]** to guests and **Add [name] to my connections** to members. Viewing or scanning alone never writes. A same-origin POST records the token in the existing one-use OIDC login transaction; after verified signup/sign-in, the callback rechecks card visibility, token validity and active owners, connects the two accounts, and returns to that card. No archive or published profile is required. A shared contact-card token is an invitation capability, so its holder can connect without a separate owner approval. Owners see this disclosure beside their QR. Ordinary public-profile URLs remain read-only and retain the normal connection-request flow.
+A contact card offers **Join Unlinked & connect with [name]** to guests (plus **Save contact**, which needs no account) and **Add [name] to my connections** to members. Viewing or scanning alone never writes. A same-origin POST records the token in the existing one-use OIDC login transaction; after verified signup/sign-in, the callback rechecks card visibility, token validity and active owners, connects the two accounts, and returns to that card. No archive or published profile is required. A shared contact-card token is an invitation capability, so its holder can connect without a separate owner approval. Owners see this disclosure beside their QR. Ordinary public-profile URLs remain read-only and retain the normal connection-request flow.
 
 Existing connections and own-card scans are harmless; pending requests settle through the existing connection service. Hidden, reset or deleted cards cannot be used. Failed additions preserve the login and offer retry. Contact-card tokens and owner identifiers never go into provider URLs, public projections or agent grants. Browser-only endpoint: `POST /c/<token>/add`, same-origin required and session CSRF required when signed in.
+
+## Joining from a scan
+
+- **Contact card** (`/c/<token>`): after Join/Add the visitor lands on
+  `/c/<token>?added=1`: "You and [name] are connected. Here's your card, share
+  it back", with their own day-one card and QR code above the card they scanned.
+- **Public profile** (`/people/<id>` of a member, the public QR): signed out,
+  **Join Unlinked & connect with [name]** is a same-origin `POST
+  /people/<id>/join` with no fields. It records the profile in the one-use
+  login transaction (never in a URL); after Ideaflow sign-up or sign-in the
+  connection request is sent like any other (the member accepts it), and the
+  visitor lands on `/people/<id>?connect=sent&joined=1` with their own card to
+  share back. Only member profiles accept it.
+- Both work in Safari and in the iOS app. Sign-in keeps the scan target:
+  `returnPath` accepts `/c/<token>`, `/people/lookup`, `/scan`
+  (`?tab=scan|card`) and `/meet`, and those pages' header **Sign in** carries it.
+

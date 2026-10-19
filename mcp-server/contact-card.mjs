@@ -11,7 +11,11 @@ import { publicLinkedinUrl } from '../src/utils/public-people/profile-links.mjs'
 //   hands over themselves, usually as a QR code. The token is unrelated to any
 //   account or profile id, so it cannot be derived from a public page.
 // - Every field has its own show switch, off until the member turns it on.
-//   With nothing shown the link answers as not found.
+// - Sharing: a card made for a new member starts as their name alone (with
+//   their headline and public profile link when they have one), so everyone
+//   has a QR code from day one; nothing private is on it until they add it.
+//   `shareCard: false` hides the whole card. A card saved before this switch
+//   existed has none: it is shared exactly while some detail is shown, as before.
 // - Resetting the link issues a new token; every earlier link and QR stops
 //   working at once.
 //
@@ -73,13 +77,15 @@ export function normalizeLink(value) {
 const plain = (value, max) => { const typed = text(value); return typed && [...typed].length <= max && !/[\u0000-\u001f\u007f]/.test(typed) ? typed : null }
 // A `profilePath` or `linkedinUrl` left undefined means "not known right now"
 // (that source could not be read): the stored one is kept rather than cleared.
-const identityOf = (value, existing) => ({ name: plain(value?.name, 120), headline: plain(value?.headline, 220), location: plain(value?.location, 120),
+// Likewise a name, headline or location left undefined keeps the stored one.
+const kept = (value, existing, key, max) => value?.[key] === undefined && existing ? existing[key] ?? null : plain(value?.[key], max)
+const identityOf = (value, existing) => ({ name: kept(value, existing, 'name', 120), headline: kept(value, existing, 'headline', 220), location: kept(value, existing, 'location', 120),
   linkedinUrl: value?.linkedinUrl === undefined && existing ? existing.linkedinUrl ?? null : publicLinkedinUrl(value?.linkedinUrl),
   profilePath: value?.profilePath === undefined && existing ? existing.profilePath ?? null : typeof value?.profilePath === 'string' && PROFILE_PATH.test(value.profilePath) ? value.profilePath : null })
 const IDENTITY_KEYS = ['name', 'headline', 'location', 'linkedinUrl', 'profilePath']
 
 const settingsOf = record => ({ phone: record?.phone ?? null, showPhone: record?.showPhone === true, whatsapp: record?.whatsapp ?? null, showWhatsapp: record?.showWhatsapp === true,
-  email: record?.email ?? null, showEmail: record?.showEmail === true, link: record?.link ?? null, showLink: record?.showLink === true })
+  email: record?.email ?? null, showEmail: record?.showEmail === true, link: record?.link ?? null, showLink: record?.showLink === true, ...(typeof record?.shareCard === 'boolean' ? { shareCard: record.shareCard } : {}) })
 
 /**
  * Exactly what someone holding the link may see. Pure, so the matrix of what a
@@ -94,12 +100,15 @@ export function projectContactCard(record) {
   const whatsappNumber = settings.showWhatsapp ? settings.whatsapp ?? settings.phone : null
   const email = settings.showEmail && settings.email ? settings.email : null
   const link = settings.showLink && settings.link && isSafeContactLink(settings.link) ? settings.link : null
-  if (!phone && !whatsappNumber && !email && !link) return null
-  return { ...identityOf(record), phone, whatsapp: whatsappNumber ?? null, email, link }
+  const identity = identityOf(record), detail = Boolean(phone || whatsappNumber || email || link)
+  if (record.shareCard === false) return null
+  // A name-only card is shared once the member's card says so (new cards do).
+  if (!detail && (record.shareCard !== true || !identity.name)) return null
+  return { ...identity, phone, whatsapp: whatsappNumber ?? null, email, link }
 }
 
 export function createContactCards({ store, now = Date.now } = {}) {
-  if (!store || ['get', 'getByToken', 'put', 'setIdentity', 'delete'].some(name => typeof store[name] !== 'function')) throw new Error('contact_card_store_required')
+  if (!store || ['get', 'getByToken', 'put', 'create', 'setIdentity', 'delete'].some(name => typeof store[name] !== 'function')) throw new Error('contact_card_store_required')
   const view = record => ({ token: record.token, settings: settingsOf(record), card: projectContactCard(record) })
   return {
     // The owner's own view: their settings, and the link once a card exists.
@@ -116,9 +125,25 @@ export function createContactCards({ store, now = Date.now } = {}) {
         showEmail: input.showEmail === true && fields.email !== null, showLink: input.showLink === true && fields.link !== null }
       const existing = await store.get(member)
       const at = now()
-      const record = { ownerKey: ownerKey(member), ownerId: member.ownerId, userId: member.userId, token: existing?.token ?? generateContactCardToken(), ...fields, ...shows, ...identityOf(identity, existing), createdAt: existing?.createdAt ?? at, updatedAt: at }
+      // The share switch is saved only when the form sends it (`shareCard`);
+      // otherwise the stored choice (or its absence, for older cards) stays.
+      const share = typeof input.shareCard === 'boolean' ? { shareCard: input.shareCard } : typeof existing?.shareCard === 'boolean' ? { shareCard: existing.shareCard } : {}
+      const record = { ownerKey: ownerKey(member), ownerId: member.ownerId, userId: member.userId, token: existing?.token ?? generateContactCardToken(), ...fields, ...shows, ...share, ...identityOf(identity, existing), createdAt: existing?.createdAt ?? at, updatedAt: at }
       await store.put(record)
       return view(record)
+    },
+    // Day-one card: the member's first card is their name alone, shared, so
+    // they have a QR code right away. Never replaces an existing card (or its
+    // link), and never adds a contact detail. Returns the owner's view.
+    async ensure(member, identity = {}) {
+      const existing = await store.get(owner(member))
+      if (existing) return view(existing)
+      const named = identityOf(identity)
+      if (!named.name) return null
+      const at = now()
+      const record = { ownerKey: ownerKey(member), ownerId: member.ownerId, userId: member.userId, token: generateContactCardToken(), shareCard: true, ...named, createdAt: at, updatedAt: at }
+      // Two tabs at once must end with one card and one link: create only if absent.
+      return view(await store.create(record))
     },
     // A new link; every earlier link and QR code stops working.
     async rotate(member) {
@@ -167,12 +192,13 @@ export function createMemoryContactCardStore() {
     async get(member) { const value = records.get(ownerKey(member)); return value ? structuredClone(value) : null },
     async getByToken(token) { const value = [...records.values()].find(record => record.token === token); return value ? structuredClone(value) : null },
     async put(record) { records.set(record.ownerKey, structuredClone(record)) },
+    async create(record) { if (!records.has(record.ownerKey)) records.set(record.ownerKey, structuredClone(record)); return structuredClone(records.get(record.ownerKey)) },
     async setIdentity(member, identity) { const value = records.get(ownerKey(member)); if (value) for (const key of IDENTITY_KEYS) { if (identity[key] === null) delete value[key]; else value[key] = identity[key] } },
     async delete(member) { return records.delete(ownerKey(member)) ? 1 : 0 },
   }
 }
 
-const RECORD_KEYS = ['ownerKey', 'ownerId', 'userId', 'token', 'phone', 'showPhone', 'whatsapp', 'showWhatsapp', 'email', 'showEmail', 'link', 'showLink', 'name', 'headline', 'location', 'linkedinUrl', 'profilePath', 'createdAt', 'updatedAt']
+const RECORD_KEYS = ['ownerKey', 'ownerId', 'userId', 'token', 'phone', 'showPhone', 'whatsapp', 'showWhatsapp', 'email', 'showEmail', 'link', 'showLink', 'shareCard', 'name', 'headline', 'location', 'linkedinUrl', 'profilePath', 'createdAt', 'updatedAt']
 const fromNode = properties => {
   const value = {}
   for (const name of RECORD_KEYS) if (properties[name] !== undefined && properties[name] !== null) value[name] = typeof properties[name]?.toNumber === 'function' ? properties[name].toNumber() : properties[name]
@@ -197,6 +223,11 @@ export function createNeo4jContactCardStore(driver, database = 'neo4j') {
     async put(record) {
       const stored = Object.fromEntries(RECORD_KEYS.filter(name => record[name] !== undefined && record[name] !== null).map(name => [name, record[name]]))
       await write('MERGE (c:UnlinkedContactCard {ownerKey: $ownerKey}) SET c = $stored', { ownerKey: record.ownerKey, stored })
+    },
+    // Only when no card exists for the owner; returns whichever card is stored.
+    async create(record) {
+      const stored = Object.fromEntries(RECORD_KEYS.filter(name => record[name] !== undefined && record[name] !== null).map(name => [name, record[name]]))
+      return one(await write('MERGE (c:UnlinkedContactCard {ownerKey: $ownerKey}) ON CREATE SET c = $stored RETURN properties(c) AS c', { ownerKey: record.ownerKey, stored }))
     },
     // Setting a property to null removes it.
     async setIdentity(member, identity) {

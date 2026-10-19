@@ -655,4 +655,26 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 /* Phones already have the header search directly above. */
 @media(max-width:600px){.unlinked-onboarding .home-search{display:none}}
 @media(prefers-reduced-motion:reduce){.unlinked-onboarding .home *{transition:none!important}}
+/* My card: the QR code first (phones show the card's QR panel above the details). */
+.unlinked-onboarding .card-top{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap}
+.unlinked-onboarding .card-top .hq{margin:0}
+.unlinked-onboarding .card-top nav.tabs{margin:0;flex:0 1 auto}
+.unlinked-onboarding .card-top nav.tabs a{padding:7px 14px;font-size:14px}
+.unlinked-onboarding .cc-lead,.unlinked-onboarding .cc-name-only{margin:10px 0}
+.unlinked-onboarding .cc-add-email{display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;margin:6px 0 14px}
+.unlinked-onboarding .cc-add-email .small{margin:0}
+.unlinked-onboarding .cc-share-switch{align-items:flex-start;padding:0 0 16px;margin:0 0 16px!important;border-bottom:1px solid var(--line)}
+.unlinked-onboarding .cc-share-switch input{margin-top:3px}
+.unlinked-onboarding .cc-share-switch .small{display:block;margin:2px 0 0}
+.unlinked-onboarding .notice.ok{border-left-color:#1f8a4c}
+.unlinked-onboarding .share-back{margin:6px 0 26px}
+.unlinked-onboarding .share-back h2{margin:18px 0 4px}
+.unlinked-onboarding .ios-export-help{display:block;margin:8px 0 0;font-size:14px;line-height:1.45;color:var(--muted)}
+.unlinked-onboarding .ios-export-help .link-button{font-size:14px}
+.unlinked-onboarding .self-note{margin:12px 0 0}
+@media(max-width:600px){.unlinked-onboarding .bcard.qr-first .bc-side{order:-1;padding:16px 18px 12px}.unlinked-onboarding .bcard.qr-first .bc-side .qr{max-width:200px}}
+/* Phones: one header row of navigation (icons for My card), and room at the
+   bottom so the floating feedback button never sits on the last actions. */
+@media(max-width:600px){.unlinked-onboarding header{gap:10px 8px}.unlinked-onboarding .logo strong{font-size:21px}.unlinked-onboarding nav{gap:2px;flex-wrap:nowrap;margin-left:auto}.unlinked-onboarding header:has(.me) nav{width:100%;justify-content:space-between;margin-left:0}.unlinked-onboarding nav .nav-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.unlinked-onboarding nav .my-card-link{width:40px;justify-content:center}.unlinked-onboarding nav>a:not(.button):not(.nav-ico):not(.my-card-link):not(.me-face){padding:0 6px}.unlinked-onboarding nav .me-face{display:none}.unlinked-onboarding nav .nav-ico{width:38px;height:38px}.unlinked-onboarding{padding-bottom:96px}}
+@media(max-width:370px){.unlinked-onboarding nav{font-size:13px}.unlinked-onboarding nav .nav-ico{width:34px}}
 `

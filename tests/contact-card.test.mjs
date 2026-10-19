@@ -196,26 +196,36 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   const fixture = harness(t)
   const signed = await fixture.start()
 
-  // The card page offers both versions; the public one still carries no contact channel.
-  let html = await (await signed.get('/card?share=public')).text()
-  assert.match(html, /<nav class="tabs" aria-label="Card version"><a href="\/card\?share=public" aria-current="page">Public<\/a><a href="\/card\?share=contact">With contact details<\/a><\/nav>/)
-  assert.doesNotMatch(html, /mailto:|tel:|wa\.me|name="phone"/)
-
-  // The contact version starts empty: a form, and no link or QR yet.
+  // Every member has a card from day one: their name alone, shared, with a QR code
+  // and link. The card page opens on it; the public version carries no contact channel.
+  let html = await (await signed.get('/card')).text()
+  assert.match(html, /<nav class="tabs" aria-label="Card version"><a href="\/card\?share=contact" aria-current="page">Contact card<\/a><a href="\/card\?share=public">Public profile<\/a><\/nav>/)
+  assert.match(html, /<div class="bcard qr-first">/)
+  assert.match(html, /<svg[^>]*aria-label="QR code opening your contact card"/)
+  assert.match(html, /Only your name is on this card so far/)
+  assert.equal(fixture.store.records.size, 1)
+  const dayOne = [...fixture.store.records.values()][0]
+  assert.deepEqual({ name: dayOne.name, shareCard: dayOne.shareCard, phone: dayOne.phone, email: dayOne.email }, { name: 'Card Owner', shareCard: true, phone: undefined, email: undefined })
+  // A second visit (or a second tab) keeps the same card and link.
+  const firstLink = html.match(/id="cc-link-out" type="text" readonly value="([^"]+)"/)[1]
   html = await (await signed.get('/card?share=contact')).text()
-  assert.match(html, /Nothing is shared yet/)
+  assert.equal(html.match(/id="cc-link-out" type="text" readonly value="([^"]+)"/)[1], firstLink)
+  assert.equal(fixture.store.records.size, 1)
+  const dayOnePage = await (await signed.get(new URL(firstLink).pathname, false)).text()
+  assert.match(dayOnePage, /<h1 class="bc-name">Card Owner<\/h1>/)
+  assert.doesNotMatch(dayOnePage, /mailto:|tel:|wa\.me/)
+  assert.doesNotMatch(await (await signed.get('/card?share=public')).text(), /mailto:|tel:|wa\.me|name="phone"/)
   assert.match(html, /<form class="card cc-form" method="post" action="\/card\/contact">/)
+  assert.match(html, /name="shareCard" value="yes" checked/)
   assert.match(html, /name="showPhone" value="yes" checked/)
   assert.doesNotMatch(html, /name="showWhatsapp" value="yes" checked/)
-  assert.doesNotMatch(html, /QR code opening your contact card|\/c\/[0-9A-Za-z]{24}/)
-  assert.equal(fixture.store.records.size, 0)
 
   // Saving needs the session token, this origin and only the known fields.
   assert.equal((await signed.post('/card/contact', { csrf: 'wrong', phone: '+14155550123' })).status >= 400, true)
   assert.equal((await signed.post('/card/contact', { phone: '+14155550123' }, { Origin: 'https://evil.test' })).status, 403)
   assert.equal((await signed.post('/card/contact', { phone: '+14155550123', ownerId: 'someone-else' })).status >= 400, true)
   assert.equal((await fetch(`${signed.endpoint}/card/contact`, { method: 'POST', redirect: 'manual', headers: { Origin: signed.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: signed.csrf, phone: '+14155550123' }) })).status >= 400, true)
-  assert.equal(fixture.store.records.size, 0)
+  assert.equal([...fixture.store.records.values()][0].phone, undefined)
 
   // A number without its country code is refused, and what was typed comes back escaped.
   let response = await signed.post('/card/contact', { phone: '415 555 "0123"', showPhone: 'yes', email: 'ada@example.test' })
@@ -224,7 +234,7 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   assert.match(html, /role="alert">Write your phone number with its country code/)
   assert.match(html, /name="phone"[^>]*value="415 555 &quot;0123&quot;"/)
   assert.match(html, /name="email"[^>]*value="ada@example\.test"/)
-  assert.equal(fixture.store.records.size, 0)
+  assert.equal([...fixture.store.records.values()][0].phone, undefined)
 
   response = await signed.post('/card/contact', { phone: '+1 (415) 555-0123', showPhone: 'yes', showWhatsapp: 'yes', email: 'ada@example.test', link: 'example.test/ada', showLink: 'yes' })
   assert.equal(response.status, 303)
@@ -236,19 +246,24 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   assert.equal(shareUrl, `${signed.baseUrl}/c/${token}`)
   assert.match(html, /<svg[^>]*aria-label="QR code opening your contact card"/)
   // The owner's preview shows what a holder sees: phone, WhatsApp and link, not the hidden email.
-  const face = html.match(/<div class="bcard">(.*?)<label for="cc-link-out"/s)[1]
+  const face = html.match(/<div class="bcard qr-first">(.*?)<label for="cc-link-out"/s)[1]
+  assert.equal(shareUrl, firstLink, 'saving details keeps the day-one link')
   assert.match(face, /href="tel:\+14155550123"/); assert.match(face, /href="https:\/\/wa\.me\/14155550123"/); assert.match(face, /href="https:\/\/example\.test\/ada"/)
   assert.doesNotMatch(face, /ada@example\.test/)
   assert.match(html, /name="email"[^>]*value="ada@example\.test"/)
   // The public version and the scan sheet still show none of it.
-  for (const path of ['/card?share=public', '/scan?tab=card', '/profile', '/settings']) assert.doesNotMatch(await (await signed.get(path)).text(), /4155550123|555-0123|ada@example\.test/, path)
+  // The scan sheet's My card tab is the card the member shows: its QR and what it shares.
+  const sheet = await (await signed.get('/scan?tab=card')).text()
+  assert.ok(sheet.includes(`QR code opening your contact card`)); assert.match(sheet, /href="tel:\+14155550123"/); assert.doesNotMatch(sheet, /ada@example\.test/)
+  for (const path of ['/card?share=public', '/profile', '/settings']) assert.doesNotMatch(await (await signed.get(path)).text(), /4155550123|555-0123|ada@example\.test/, path)
 
   // Anyone with the link, signed in or not, sees the card. It is never indexed, cached or leaked by referrer.
   for (const signedIn of [false, true]) {
     const page = await signed.get(`/c/${token}`, signedIn)
     assert.equal(page.status, 200)
     assert.equal(page.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive')
-    assert.equal(page.headers.get('referrer-policy'), 'no-referrer')
+    // Same-origin: the token never leaves the site, and the Join/Add form still sends a real Origin.
+    assert.equal(page.headers.get('referrer-policy'), 'same-origin')
     assert.equal(page.headers.get('cache-control'), 'no-store')
     assert.match(page.headers.get('content-security-policy'), /default-src 'none'/)
     const body = await page.text()
@@ -279,17 +294,21 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   assert.equal(exported.contactCard.phone, '+14155550123')
   assert.doesNotMatch(JSON.stringify(exported), new RegExp(token))
 
-  // Hide everything: the same link answers as not found, for the page and the contact file.
-  assert.equal((await signed.post('/card/contact', { phone: '+14155550123', email: 'ada@example.test', link: 'https://example.test/ada' })).status, 303)
+  // Every detail off: the card still shares the name alone.
+  assert.equal((await signed.post('/card/contact', { phone: '+14155550123', email: 'ada@example.test', link: 'https://example.test/ada', shareCardSwitch: '1', shareCard: 'yes' })).status, 303)
+  assert.doesNotMatch(await (await signed.get(`/c/${token}`, false)).text(), /4155550123|ada@example|example\.test\/ada/)
+  // Stop sharing: the same link answers as not found, for the page and the contact file.
+  assert.equal((await signed.post('/card/contact', { phone: '+14155550123', email: 'ada@example.test', link: 'https://example.test/ada', shareCardSwitch: '1' })).status, 303)
   assert.equal((await signed.get(`/c/${token}`, false)).status, 404)
   assert.equal((await signed.get(`/c/${token}/contact.vcf`, false)).status, 404)
   html = await (await signed.get('/card?share=contact')).text()
-  assert.match(html, /Nothing is shared yet/)
+  assert.match(html, /Your card isn’t shared right now/)
+  assert.doesNotMatch(html, /name="shareCard" value="yes" checked/)
   assert.match(html, /name="phone"[^>]*value="\+14155550123"/)
   assert.doesNotMatch(html, /name="showPhone" value="yes" checked/)
 
   // Show the email only, then reset the link: the old one is dead, the new one works.
-  assert.equal((await signed.post('/card/contact', { phone: '+14155550123', email: 'ada@example.test', showEmail: 'yes' })).status, 303)
+  assert.equal((await signed.post('/card/contact', { phone: '+14155550123', email: 'ada@example.test', showEmail: 'yes', shareCardSwitch: '1', shareCard: 'yes' })).status, 303)
   let page = await (await signed.get(`/c/${token}`, false)).text()
   assert.match(page, /href="mailto:ada@example\.test"/); assert.doesNotMatch(page, /4155550123|wa\.me/)
   assert.equal((await signed.post('/card/contact/reset', { extra: 'x' })).status >= 400, true)

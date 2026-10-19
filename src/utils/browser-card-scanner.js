@@ -93,3 +93,39 @@ export class BrowserCardScanner {
     this.context = null
   }
 }
+
+/** Reads a QR code from an image file (a photo or a screenshot chosen with
+ * "Scan from photo"). Returns the raw value or null. The picture is drawn at a
+ * few sizes because phone screenshots are large and photos are noisy; it never
+ * leaves the browser. */
+export async function decodeImageFile(file, { sizes = [1600, 900, 2400] } = {}) {
+  if (!file || typeof file.size !== 'number' || file.size === 0 || file.size > 30 * 1024 * 1024) return null
+  const image = await loadImage(file)
+  try {
+    const width = image.width, height = image.height
+    if (!width || !height) return null
+    const canvas = document.createElement('canvas'), context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) return null
+    for (const side of sizes) {
+      const scale = Math.min(1, side / Math.max(width, height))
+      canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale))
+      context.drawImage(image.element ?? image, 0, 0, canvas.width, canvas.height)
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+      const code = jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: 'attemptBoth' })
+      if (code?.data) return code.data
+      if (scale === 1) break
+    }
+    return null
+  } finally { image.close?.() }
+}
+
+async function loadImage(file) {
+  if (typeof createImageBitmap === 'function') { try { return await createImageBitmap(file) } catch { /* fall back to an image element */ } }
+  const url = URL.createObjectURL(file)
+  try {
+    const element = new Image()
+    element.decoding = 'async'
+    await new Promise((resolve, reject) => { element.onload = resolve; element.onerror = () => reject(new Error('image_unreadable')); element.src = url })
+    return { width: element.naturalWidth, height: element.naturalHeight, element, close() {} }
+  } finally { URL.revokeObjectURL(url) }
+}
