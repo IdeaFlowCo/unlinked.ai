@@ -21,6 +21,7 @@ export function membersOnlySnapshot(snapshot) {
   const kept = new Set(profiles.map(profile => profile.id))
   const connections = Array.isArray(snapshot?.connections) ? snapshot.connections.filter(edge => kept.has(edge?.fromId) && kept.has(edge?.toId)) : []
   const aliases = snapshot?.aliases && typeof snapshot.aliases === 'object' ? Object.fromEntries(Object.entries(snapshot.aliases).filter(([, to]) => kept.has(to))) : undefined
+  const unlisted = Array.isArray(snapshot?.unlisted) ? snapshot.unlisted.filter(entry => kept.has(entry?.id)) : undefined
   return {
     ...snapshot,
     // Its own revision, so a compiled index, cursor or cache of the whole
@@ -28,6 +29,7 @@ export function membersOnlySnapshot(snapshot) {
     revision: `members-only-v1:${hash(String(snapshot?.revision ?? '')).slice(0, 40)}`,
     profiles, connections, members: [...kept].sort(), legacyMembers: [],
     ...(aliases ? { aliases } : {}),
+    ...(unlisted ? { unlisted } : {}),
   }
 }
 

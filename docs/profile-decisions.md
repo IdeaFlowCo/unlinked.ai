@@ -21,6 +21,9 @@ built (`src/utils/public-people/profile-decisions.mjs`, wired through
   removal requests ([removal-requests.md](removal-requests.md)). A member's
   profile is never removed; a removal naming a merged address removes the
   profile it resolves to.
+- **unlist** `{profileId, group?}`: keeps the profile published but out of
+  listings, optionally still listed for one group
+  ([unlisted-profiles.md](unlisted-profiles.md)).
 - Inputs are never changed. A decision is **revoked**, not deleted, and the next
   snapshot is exactly what it would have been without it.
 
@@ -38,6 +41,7 @@ docker exec -i unlinked-private-guest-pilot-20261001-runtime node \
   merge <mergedId> <survivorId> <decidedBy> "<evidence>"
 #   rename <profileId> "<name>" <decidedBy> "<reason>"
 #   remove <profileId> <decidedBy> "<reason>"
+#   unlist <profileId> <group|-> <decidedBy> "<reason>"
 #   revoke <decisionId> <decidedBy>
 #   list
 ```

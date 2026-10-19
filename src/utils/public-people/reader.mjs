@@ -6,6 +6,7 @@ import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-index.mjs'
+import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
 
 export class PublicPeopleReaderError extends Error {
   constructor(status, code) { super(code); this.name = 'PublicPeopleReaderError'; this.status = status; this.code = code }
@@ -200,7 +201,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         const name = position.company.trim(), key = normalized(name), tokens = words(name)
         if (name.length <= 200 && tokens.length > 0 && tokens.length <= 12 && !companies.has(key)) companies.set(key, { name, tokens })
       }
-      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, companyList: [...companies.values()] }
+      // Published but left out of listings (docs/unlisted-profiles.md).
+      const unlisted = unlistedProfiles(value)
+      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, unlisted, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
@@ -213,6 +216,14 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     }
   }
 
+  // `unlistedGroups`: the signed-in viewer's own unlisted groups (a Set of
+  // names), so profiles unlisted in the same group stay listed for them.
+  const groupsValue = value => {
+    if (value === undefined || value === null) return null
+    if (!(value instanceof Set) || value.size > 8 || ![...value].every(group => typeof group === 'string' && UNLISTED_GROUP.test(group))) invalid()
+    return value.size ? value : null
+  }
+  const groupScope = groups => groups ? `g=${[...groups].sort().join(',')}:` : ''
   const queryValue = value => { if (value === undefined) return ''; if (typeof value !== 'string' || value.length > 200) invalid(); return normalized(value) }
   function cursorValue(cursor, scope) {
     if (cursor === undefined) return undefined
@@ -247,29 +258,32 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // `known`: published ids the signed-in member is connected to; they are
     // marked and preferred among equal matches. Never read here.
     async suggest(request = {}) {
-      const { query = '', signal, known } = requestValue(request)
+      const { query = '', signal, known, unlistedGroups } = requestValue(request)
       if (known !== undefined && !(known instanceof Set)) invalid()
+      const groups = groupsValue(unlistedGroups)
       const search = queryValue(query)
       if (search.length < 2 || !words(search).length) return { people: [], companies: [] }
       const data = await recent(signal), index = suggestIndexFor(data)
-      return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
+      return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known, listed: listedFor(data.unlisted, groups) }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
     },
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [] } = requestValue(request)
+      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [], unlistedGroups } = requestValue(request)
+      const groups = groupsValue(unlistedGroups)
       if (!PUBLIC_LIST_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
       // `exclude`: published ids the caller already shows elsewhere on the page
       // (a signed-in owner's own people), left out before paging and totals.
       if (!Array.isArray(exclude) || exclude.length > maxProfiles || !exclude.every(idValid)) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
       // The presence filter and exclusions are part of the cursor scope, so a page never mixes filters.
-      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}`
+      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}${groupScope(groups)}`
       const data0 = exclude.length ? await snapshot(signal) : null
       const excluded = data0 ? new Set(exclude.map(id => data0.aliases.get(id) ?? id)) : null
       const without = excluded?.size ? `x=${hash([...excluded].sort().join('\n'))}:` : ''
       const scope = matcher ? `list:${filter}${without}${mode}:${normalizedQuery}` : `list:${filter}${without}`
       const decodedCursor = cursorValue(cursor, scope), data = data0 ?? await snapshot(signal)
       // A snapshot that does not name its members has no presence, so it matches no filter.
-      const people = presence ? data.ordered.filter(person => person.presence === presence) : data.ordered
+      const listed = listedFor(data.unlisted, groups)
+      const people = data.ordered.filter(person => (!presence || person.presence === presence) && listed(person.id))
       // Exclusions apply after ranking, so leaving out the full matches the
       // page already shows never promotes people who match only some words.
       const kept = rows => excluded?.size ? rows.filter(person => !excluded.has(person.id)) : rows
@@ -316,6 +330,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       if (known) { mutual = 0; for (const other of data.connected.get(resolved) ?? []) if (other !== resolved && known.has(other)) mutual++ }
       return { card: { ...withPhoto(summary), ...(mutual === undefined ? {} : { mutual }) } }
     },
+    // The group a profile is unlisted in (null when unlisted for everyone),
+    // or undefined when it is listed. Used for a viewer's own profile.
+    async unlistedGroup(request = {}) {
+      const { id, signal } = requestValue(request)
+      if (!idValid(id)) invalid()
+      const data = await snapshot(signal)
+      const resolved = data.aliases.get(id) ?? id
+      return data.unlisted.has(resolved) ? data.unlisted.get(resolved) : undefined
+    },
     // Exact URL evidence only; names never establish a person match.
     async lookupLinkedin(request = {}) {
       const { address, signal } = requestValue(request), parsed = parseLinkedinProfileUrl(address)
@@ -358,8 +381,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // Everyone whose public profile ties them to a company, by the company name
     // as it appears on profiles: a position at it, or a headline naming it.
     async company(request = {}) {
-      const { name, cursor, signal } = requestValue(request)
+      const { name, cursor, signal, unlistedGroups } = requestValue(request)
       if (typeof name !== 'string' || !name.trim() || name.length > 200) invalid()
+      const groups = groupsValue(unlistedGroups)
       const phrase = words(name)
       if (!phrase.length || phrase.length > 12) invalid()
       const contains = tokens => {
@@ -369,9 +393,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         }
         return false
       }
-      const scope = `company:${phrase.join(' ')}`, decodedCursor = cursorValue(cursor, scope)
+      const scope = `company:${groupScope(groups)}${phrase.join(' ')}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
-      const rows = data.ordered.filter(person => data.tokens.get(person.id).companies.some(contains))
+      const listed = listedFor(data.unlisted, groups)
+      const rows = data.ordered.filter(person => listed(person.id) && data.tokens.get(person.id).companies.some(contains))
       const people = page(rows, decodedCursor, scope, data.revision)
       return { name: name.trim(), total: rows.length, people: people.profiles, ...(people.nextCursor ? { nextCursor: people.nextCursor } : {}) }
     },

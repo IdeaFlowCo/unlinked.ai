@@ -477,13 +477,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         }
         return [...edges.values()]
       } : undefined,
-      // Operator merges and renames (mcp-server/profile-decisions-operator.mjs); revoked ones are ignored.
+      // Operator merges, renames, removals and unlistings (mcp-server/profile-decisions-operator.mjs); revoked ones are ignored.
       readDecisions: async () => {
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
         try {
           const result = await session.executeRead(tx => tx.run(`MATCH (d:UnlinkedProfileDecision) WHERE coalesce(d.revoked, false) = false
-            RETURN d.id AS id, d.kind AS kind, d.profileId AS profileId, d.survivorId AS survivorId, d.name AS name ORDER BY d.decidedAt, d.id LIMIT 5001`))
-          const explicit = result.records.map(record => Object.fromEntries(['id', 'kind', 'profileId', 'survivorId', 'name'].filter(key => record.get(key) !== null).map(key => [key, record.get(key)])))
+            RETURN d.id AS id, d.kind AS kind, d.profileId AS profileId, d.survivorId AS survivorId, d.name AS name, d.group AS group ORDER BY d.decidedAt, d.id LIMIT 5001`))
+          const explicit = result.records.map(record => Object.fromEntries(['id', 'kind', 'profileId', 'survivorId', 'name', 'group'].filter(key => record.get(key) !== null).map(key => [key, record.get(key)])))
           // Imported copies of legacy people, matched by LinkedIn address only.
           let automatic = []
           try { automatic = urlIdentityMerges({ rows: await readImportRows(session), slugIndex: await slugIndex(), explicit }) } catch { automatic = [] }
