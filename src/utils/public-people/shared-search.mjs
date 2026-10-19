@@ -6,9 +6,12 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 // Retrieval evaluates every public profile; model ranking receives the bounded
 // best lexical candidates, not private import rows or an arbitrary first page.
 // The caller must authenticate its member/grant before invoking this service.
+import { listedFor, unlistedProfiles } from './unlisted.mjs'
+
 export function createSharedPeopleSearch({ readPublishedSnapshot, complete }) {
   if (typeof readPublishedSnapshot !== 'function' || typeof complete !== 'function') throw new Error('shared_search_configuration_required')
-  return async ({ query, signal }) => {
+  // `unlistedGroups`: the viewer's own unlisted groups (docs/unlisted-profiles.md).
+  return async ({ query, signal, unlistedGroups = null }) => {
     if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('shared_search_query_invalid')
     signal?.throwIfAborted()
     const data = await readPublishedSnapshot({ signal })
@@ -17,7 +20,8 @@ export function createSharedPeopleSearch({ readPublishedSnapshot, complete }) {
     // Word forms count (“investors” reaches “investor”). Profiles with every word lead the
     // shortlist; the rest follow with rarer words first, so each part of the query is represented.
     const professional = profile => [profile.name, profile.headline, profile.company, profile.about, ...(profile.positions ?? []).flatMap(value => [value.title, value.company, value.description]), ...(profile.education ?? []).flatMap(value => [value.institution, value.degree]), ...(profile.skills ?? [])].filter(value => typeof value === 'string')
-    const ranked = matcher ? rankMatches(data.profiles, matcher, profile => ({ text: words(professional(profile).join(' ')), name: words(profile.name) }), { keepPartial: true, tie: (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0 }) : { rows: [], matched: 0 }
+    const listed = listedFor(unlistedProfiles(data), unlistedGroups instanceof Set ? unlistedGroups : null)
+    const ranked = matcher ? rankMatches(data.profiles.filter(profile => listed(profile.id)), matcher, profile => ({ text: words(professional(profile).join(' ')), name: words(profile.name) }), { keepPartial: true, tie: (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0 }) : { rows: [], matched: 0 }
     const shortlisted = ranked.rows.slice(0, 200), ids = new Map(), observations = shortlisted.map(profile => {
       const id = hash(`unlinked-public-profile:${profile.id}`); ids.set(id, profile)
       const fields = { name: profile.name.slice(0, 256), headline: (profile.headline ?? '').slice(0, 256), company: (profile.company ?? '').slice(0, 256), roles: (profile.positions ?? []).slice(0, 5).map(value => `${value.title} at ${value.company}`).join('; ').slice(0, 512), skills: (profile.skills ?? []).join(', ').slice(0, 512) }

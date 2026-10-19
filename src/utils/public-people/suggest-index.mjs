@@ -94,7 +94,7 @@ function matchAll(terms, { name, other, size }) {
 // signed-in member already knows, members before imported profiles, more
 // connected people, then name order. Two published profiles with the same
 // LinkedIn address are one person; the earlier one stays.
-export function suggestPeople(index, data, search, { limit = 5, known = null } = {}) {
+export function suggestPeople(index, data, search, { limit = 5, known = null, listed = null } = {}) {
   const terms = suggestTerms(search)
   if (!terms.length) return []
   const { ordinals, inName } = matchAll(terms, { name: index.names, other: index.professional, size: index.size })
@@ -107,6 +107,8 @@ export function suggestPeople(index, data, search, { limit = 5, known = null } =
   scored.sort((a, b) => b.allNamed - a.allNamed || b.priority - a.priority || b.known - a.known || b.member - a.member || b.reach - a.reach || a.ordinal - b.ordinal)
   const result = [], slugs = new Set()
   for (const value of scored) {
+    // Unlisted profiles (docs/unlisted-profiles.md) are never suggested.
+    if (listed && !listed(value.person.id)) continue
     const slug = index.slugs[value.ordinal]
     if (slug && slugs.has(slug)) continue
     if (slug) slugs.add(slug)

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { UNLISTED_GROUP } from './unlisted.mjs'
 
 // Operator decisions about published people, applied when the shared snapshot
 // is built. Inputs are never changed: a merge drops the merged profile from the
@@ -6,7 +7,9 @@ import { createHash } from 'node:crypto'
 // address keeps resolving. A removal drops an imported profile, its edges and
 // any address merged into it (removal requests, docs/removal-requests.md).
 // Revoking a decision restores the projection exactly.
-// Claimed (member) profiles are never merged away or removed.
+// Claimed (member) profiles are never merged away or removed. An `unlist`
+// keeps a profile (member or not) published but out of listings, optionally
+// visible to one named group (docs/unlisted-profiles.md).
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const id = value => typeof value === 'string' && value.length > 0 && value.length <= 160
@@ -14,7 +17,7 @@ const name = value => typeof value === 'string' && value.trim() && [...value].le
 
 export function validateProfileDecisions(decisions) {
   if (!Array.isArray(decisions) || decisions.length > 5000) throw Error('profile_decisions_invalid')
-  const merged = new Set(), renamed = new Set(), removed = new Set(), ids = new Set()
+  const merged = new Set(), renamed = new Set(), removed = new Set(), unlisted = new Set(), ids = new Set()
   for (const decision of decisions) {
     if (!decision || !id(decision.id) || ids.has(decision.id)) throw Error('profile_decisions_invalid')
     ids.add(decision.id)
@@ -27,6 +30,9 @@ export function validateProfileDecisions(decisions) {
     } else if (decision.kind === 'remove') {
       if (!id(decision.profileId) || removed.has(decision.profileId)) throw Error('profile_decisions_invalid')
       removed.add(decision.profileId)
+    } else if (decision.kind === 'unlist') {
+      if (!id(decision.profileId) || unlisted.has(decision.profileId) || (decision.group !== undefined && decision.group !== null && (typeof decision.group !== 'string' || !UNLISTED_GROUP.test(decision.group)))) throw Error('profile_decisions_invalid')
+      unlisted.add(decision.profileId)
     } else throw Error('profile_decisions_invalid')
   }
   // No chains: a survivor is never itself merged away.
@@ -63,6 +69,8 @@ export function applyProfileDecisions(snapshot, stored) {
   // nobody has claimed; it removes the profile it resolves to.
   const removals = new Map(decisions.filter(value => value.kind === 'remove' && known.has(value.profileId) && !members.has(point(value.profileId))).map(value => [value.profileId, point(value.profileId)]))
   const removed = new Set(removals.values())
+  // Unlisting follows merges to the profile shown; a removed profile has nothing to unlist.
+  const unlists = new Map(decisions.filter(value => value.kind === 'unlist' && known.has(value.profileId) && !removed.has(point(value.profileId))).map(value => [value.profileId, { id: point(value.profileId), group: typeof value.group === 'string' ? value.group : null }]))
   const fill = (survivor, merged) => {
     const result = { ...survivor }
     for (const key of ['headline', 'location', 'about', 'company', 'industry', 'linkedinUrl', 'website']) if (result[key] === undefined && merged[key] !== undefined) result[key] = merged[key]
@@ -80,8 +88,10 @@ export function applyProfileDecisions(snapshot, stored) {
     const fromId = point(edge.fromId), toId = point(edge.toId)
     if (fromId !== toId && !removed.has(fromId) && !removed.has(toId)) pairs.set(JSON.stringify([fromId, toId]), { fromId, toId })
   }
-  const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : value.kind === 'remove' ? removals.has(value.profileId) : renames.has(value.profileId))
-    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.name.trim()])
+  const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : value.kind === 'remove' ? removals.has(value.profileId) : value.kind === 'unlist' ? unlists.has(value.profileId) : renames.has(value.profileId))
+    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.kind === 'unlist' ? `${unlists.get(value.profileId).id}#${unlists.get(value.profileId).group ?? ''}` : value.name.trim()])
+  // One entry per shown profile; the first decision about it wins.
+  const unlisted = [...new Map([...unlists.values()].reverse().map(value => [value.id, value])).values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   return {
     ...snapshot,
     revision: `${snapshot.revision}+decisions:${hash(JSON.stringify(applied)).slice(0, 16)}`,
@@ -91,5 +101,6 @@ export function applyProfileDecisions(snapshot, stored) {
     ...(snapshot.legacyMembers ? { legacyMembers: [...new Set(snapshot.legacyMembers.map(point))].filter(value => !removed.has(value)).sort() } : {}),
     // An address merged into a removed profile no longer resolves.
     aliases: Object.fromEntries([...merges].filter(([, survivor]) => !removed.has(survivor)).sort()),
+    ...(unlisted.length ? { unlisted } : {}),
   }
 }

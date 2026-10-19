@@ -388,6 +388,30 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
     }
     return entry?.ids ?? null
   }
+  // A signed-in member whose own profile is unlisted in a group (the App Store
+  // review demo accounts) still sees the others in that group in listings
+  // (docs/unlisted-profiles.md). Read off the request path like knownPeople
+  // and kept 5 minutes; until then listings show the default, everyone's view.
+  const groupCache = new Map()
+  const viewerGroups = (owner, reader = publicReader) => {
+    if (typeof ownProfileId !== 'function' || typeof readPublishedSnapshot !== 'function' || !owner?.ownerId) return null
+    const entry = groupCache.get(owner.ownerId)
+    if ((!entry || Date.now() - entry.at >= KNOWN_FRESH_MS) && !entry?.pending) {
+      const held = entry ?? { groups: null, at: 0 }
+      held.pending = (async () => { const mine = await ownProfileId(owner); const group = mine ? await reader.unlistedGroup({ id: mine }) : undefined; return typeof group === 'string' ? new Set([group]) : null })()
+        .then(groups => { groupCache.delete(owner.ownerId); groupCache.set(owner.ownerId, { groups, at: Date.now(), pending: null }); while (groupCache.size > KNOWN_CAPACITY) groupCache.delete(groupCache.keys().next().value) },
+          () => { held.pending = null })
+      if (!entry) groupCache.set(owner.ownerId, held)
+    }
+    return entry?.groups ?? null
+  }
+  const viewerGroupsReady = async (owner, reader) => {
+    const groups = viewerGroups(owner, reader)
+    if (groups) return groups
+    const pending = groupCache.get(owner?.ownerId)?.pending
+    if (pending) await bounded(() => pending, null)
+    return groupCache.get(owner?.ownerId)?.groups ?? null
+  }
   // The same set for a page that filters by it: waits briefly for a first read.
   const knownPeopleReady = async owner => {
     const ids = knownPeople(owner)
@@ -846,7 +870,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           const viewer = sessionFor(request), known = viewer ? knownPeople(viewer.owner) : null
           // An empty query is the field gaining focus: start loading, answer nothing.
           if (query === '') readerFor(request).warm()
-          const result = query === '' ? { people: [], companies: [] } : await readerFor(request).suggest({ query, ...(known ? { known } : {}) })
+          const groups = viewer ? viewerGroups(viewer.owner) : null
+          const result = query === '' ? { people: [], companies: [] } : await readerFor(request).suggest({ query, ...(known ? { known } : {}), ...(groups ? { unlistedGroups: groups } : {}) })
           response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify(result))
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
@@ -1146,7 +1171,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
             // graph read costs the facts block, never the page.
             const begun = performance.now()
             const [result, facts] = await Promise.all([
-              readerFor(request).company({ name, cursor: url.searchParams.get('cursor') ?? undefined }).then(value => { mark(response, 'company', begun); return value }),
+              (async () => { const groups = viewer ? await viewerGroupsReady(viewer.owner) : null; return readerFor(request).company({ name, cursor: url.searchParams.get('cursor') ?? undefined, ...(groups ? { unlistedGroups: groups } : {}) }) })().then(value => { mark(response, 'company', begun); return value }),
               bounded(() => lookupCompanyFacts(name), null).then(value => { mark(response, 'facts', begun); return value }),
             ])
             // A name nobody lists and we know nothing about is not a page.
@@ -1995,7 +2020,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         let everyone, nextCursor, total, state = 'ready'
         if (publicProfessionalSearch) {
           everyone = []
-          try { const result = await reader.list({ query: filter, mode, presence, sort, includeTotal: true, exclude: known, cursor: url.searchParams.get('cursor') ?? undefined }); everyone = result.profiles; nextCursor = result.nextCursor; total = result.total; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
+          try { const groups = await viewerGroupsReady(session.owner, reader); const result = await reader.list({ query: filter, mode, presence, sort, includeTotal: true, exclude: known, cursor: url.searchParams.get('cursor') ?? undefined, ...(groups ? { unlistedGroups: groups } : {}) }); everyone = result.profiles; nextCursor = result.nextCursor; total = result.total; if (result.match === 'all' || (result.match === 'some' && match !== 'all')) match = result.match }
           catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) throw error; state = 'unavailable' }
         }
         const scope = publicProfessionalSearch ? url.searchParams.get('scope') ?? 'everyone' : 'own'
@@ -2147,7 +2172,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
           if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
           if (scope === 'everyone') {
             let result = null
-            try { result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) }) }
+            try { const groups = await viewerGroupsReady(session.owner); result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]), ...(groups ? { unlistedGroups: groups } : {}) }) }
             catch { /* The page still shows the people this account knows, with a notice. */ }
             const props = jobProps(await jobResources()), network = await accountNetwork(session.owner)
             const reader = pageReader(request)
