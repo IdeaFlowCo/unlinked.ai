@@ -386,7 +386,7 @@ test('member copy avoids forbidden technical and legacy words outside Settings d
   }
   const settings = views.at(-1)
   assert.match(settings.content, /<details>.*records accepted.*SHA-256.*<\/details>/s)
-  assert.match(settings.content, /<h2>Your agent<\/h2>/)
+  assert.match(settings.content, /<h2 id="agent">Your agent: API keys &amp; MCP<\/h2>/)
 })
 
 test('only HTTPS LinkedIn profile links are exposed, with safe outbound attributes', () => {
@@ -459,7 +459,8 @@ test('fixture previews cover every requested screen and are reproducible without
       assert.match(content, /^<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>/)
       assert.match(content, /<body><style>/)
       assert.equal([...content.matchAll(/<h1\b/g)].length >= 1, true)
-      assert.doesNotMatch(content, /<script|type="checkbox"|observations|parser records|durable receipt|Ideaflow ID|invitation|private pilot/i)
+      // The account-deletion step names the Ideaflow ID on purpose (the sign-in it deletes).
+      assert.doesNotMatch(content.replace(/<div class="ideaflow-id-delete">.*?<\/div>/gs, ''), /<script|type="checkbox"|observations|parser records|durable receipt|Ideaflow ID|invitation|private pilot/i)
     }
     const own = first[files.findIndex(file => file.endsWith('/own-profile-importing.html'))]
     assert.equal((own.match(/<div class="xp">/g) || []).length, 4)
@@ -616,7 +617,7 @@ test('a connections heading uses a given name, never a bare initial', () => {
 
 test('Settings opens with one compact account row: who is signed in and a native sign-out', () => {
   const view = renderSettings({ accountLabel: 'member@example.test', displayName: 'Member', csrf: 'csrf-value', imports: [] })
-  const section = view.content.match(/<h1 class="hq">Settings<\/h1>(.*?)<h2>Your agent<\/h2>/s)[1]
+  const section = view.content.match(/<h1 class="hq">Settings<\/h1>(.*?)<h2[ >]/s)[1]
   assert.match(section, /^<div class="acct"><span>Signed in as <b>member@example\.test<\/b><\/span><form method="post" action="\/logout">/)
   assert.match(section, /name="csrf" value="csrf-value"/)
   assert.match(section, /<button class="quiet sm" type="submit"[^>]*>Sign out</)

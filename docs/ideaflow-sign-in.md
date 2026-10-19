@@ -107,6 +107,18 @@ Each outcome after a returned code is recorded as audit event
 **Kill switch:** set `UNLINKED_AUTO_SIGNIN=off` (also `false`, `0`, `no`) in
 `runtime/runtime.env` and restart the runtime. Unset means on.
 
+## A callback this browser never started
+
+An Ideaflow ID email-verification link opened outside the app (or in another
+browser) can land on `/auth/callback/ideaflow` with a code but without this
+browser's one-use login cookie. The code is never exchanged. Instead of the
+generic error the page says **Your email is verified. Go back to the Unlinked
+app and sign in**, with a Sign in button (`/login`, which signs in silently
+when that browser already has an Ideaflow ID session), and records
+`auth_callback_other_browser`. A mismatched state or provider error from this
+browser's own sign-in keeps the existing handling. The real fix (returning the
+verified person to where they started) belongs to Ideaflow ID.
+
 ## Deployment
 
 `UNLINKED_AUTO_SIGNIN` is the only environment variable (optional, default on).

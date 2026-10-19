@@ -224,9 +224,35 @@ const fold = line => {
   }
   return result
 }
+// The structured name (RFC 6350 N: family;given;additional;prefixes;suffixes).
+// A display name is split at its last word: "Ada King Lovelace" files under
+// Lovelace with "Ada King" as the given name, which is how Contacts sorts and
+// shows it. A single word is a given name only.
+export function vcardNameParts(value) {
+  const words = String(value ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+  if (!words.length) return { family: '', given: '' }
+  if (words.length === 1) return { family: '', given: words[0] }
+  return { family: words.at(-1), given: words.slice(0, -1).join(' ') }
+}
+// "Ada Lovelace.vcf": the person's name, safe in every file system and header.
+// Control, path and quoting characters go; an empty result falls back to contact.vcf.
+export function vcardFileName(card) {
+  const name = [...String(card?.name ?? '').normalize('NFKC').replace(/[\u0000-\u001f\u007f-\u009f\/\\:*?"<>|;%]/g, ' ').replace(/\s+/g, ' ').trim()].slice(0, 80).join('').replace(/^[.\s]+/, '').trim()
+  return `${name || 'contact'}.vcf`
+}
+// Content-Disposition for that file: an ASCII fallback plus the exact UTF-8 name (RFC 6266/5987).
+export function vcardContentDisposition(card) {
+  const file = vcardFileName(card)
+  const ascii = file.slice(0, -'.vcf'.length).normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/\s+/g, ' ').trim()
+  const fallback = ascii ? `${ascii}.vcf` : 'contact.vcf'
+  const encoded = encodeURIComponent(file).replace(/['()*]/g, character => '%' + character.charCodeAt(0).toString(16).toUpperCase())
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`
+}
 export function renderContactVcard(card, origin) {
   const name = vcardText(card.name ?? '') || 'Unlinked member'
-  const lines = ['BEGIN:VCARD', 'VERSION:3.0', `N:;${name};;;`, `FN:${name}`]
+  const parts = vcardNameParts(card.name)
+  const structured = parts.given || parts.family ? `${vcardText(parts.family)};${vcardText(parts.given)};;;` : `;${name};;;`
+  const lines = ['BEGIN:VCARD', 'VERSION:3.0', `N:${structured}`, `FN:${name}`]
   if (card.headline) lines.push(`TITLE:${vcardText(card.headline)}`)
   if (card.phone) lines.push(`TEL;TYPE=CELL:${card.phone}`)
   if (card.whatsapp && card.whatsapp !== card.phone) lines.push(`TEL;TYPE=CELL:${card.whatsapp}`)

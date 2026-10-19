@@ -169,7 +169,9 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
   // for server-to-server provisioning. Mints the deterministic read-only
   // automatic grant when no eligible manual grant exists; its tombstone
   // prevents automatic reissuance. OAuth grants are never reused.
-  const ensureGrant = async (owner, { readOnly = false } = {}) => {
+  // `mint: false` only reads: the account's live grant or null, never a new one
+  // (Settings shows an existing key but no longer creates one on a page view).
+  const ensureGrant = async (owner, { readOnly = false, mint = true } = {}) => {
     const backend = await getBackend(owner)
     const autoId = privateId(owner.ownerId, 'account-grant-v1', AUTO_JTI)
     const derive = (record, onlyReads = readOnly) => record && !record.deleted && record.sourceOwnerId === owner.ownerId && record.payload?.kind === 'account_tool_grant' &&
@@ -182,6 +184,7 @@ export function createAccountGrantService({ issuer, signingKey, getBackend, publ
     const latest = records.sort((a, b) => (b.payload.issuedAt - a.payload.issuedAt) || a.sourceId.localeCompare(b.sourceId))[0]
     const shape = record => effectiveAccountGrant(record.payload)
     if (latest) return { accessToken: await signGrant(latest.sourceId, owner, latest.payload.jti, latest.payload.issuedAt, latest.payload.generation), grantId: latest.sourceId, created: false, ...shape(latest) }
+    if (!mint) return null
     const existing = await backend.readResource('import', autoId)
     if (existing?.deleted) return null // the owner revoked their agent access; it stays revoked
     const fallback = readOnly && derive(existing, false) && scopeAllowsConnectionActions(existing.payload.scope)

@@ -36,7 +36,7 @@ const configFrom = html => {
   return encoded ? JSON.parse(encoded.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')) : null
 }
 
-test('agent setup is prepared automatically, idempotently, stays revoked after revocation and regenerates cleanly', async t => {
+test('Settings never creates a key by being visited; an explicit key is shown idempotently, stays revoked and regenerates cleanly', async t => {
   const owner = { ownerId: 'synthetic-auto-owner', userId: 'synthetic-auto-user' }
   const f = fixture(owner)
   const auditEvents = []
@@ -61,7 +61,17 @@ test('agent setup is prepared automatically, idempotently, stays revoked after r
   const settings = () => fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } }).then(async r => ({ status: r.status, html: await r.text() }))
   const post = (path, input) => fetch(endpoint + path, { method: 'POST', redirect: 'manual', headers: { Cookie: cookie, Origin: baseUrl }, body: new URLSearchParams({ csrf, ...input }) })
 
-  // First Settings visit: setup ready without any click, exactly one grant.
+  // Visiting Settings creates nothing: no "Default key" appears on its own.
+  const untouched = await settings()
+  assert.equal(untouched.status, 200)
+  assert.equal(f.activeGrants().length, 0, 'a page view never mints a key')
+  assert.equal(configFrom(untouched.html), null)
+  assert.match(untouched.html, /No API key is prepared/)
+  assert.equal((await settings()).status, 200)
+  assert.equal(f.activeGrants().length, 0)
+
+  // The member creates one explicitly; every later visit shows that same key.
+  assert.equal((await post('/setup-account', {})).status, 200)
   const first = await settings()
   assert.equal(first.status, 200)
   const configA = configFrom(first.html)

@@ -14,8 +14,9 @@ export const config = {
          * - _next/static (static files)
          * - _next/image (image optimization files)
          * - favicon.ico (favicon file)
+         * - apple-app-site-association (static, fetched by Apple without cookies)
          * Feel free to modify this pattern to include more paths.
          */
-        '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!_next/static|_next/image|favicon.ico|\\.well-known/apple-app-site-association$|apple-app-site-association$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 }
