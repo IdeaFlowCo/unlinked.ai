@@ -17,7 +17,10 @@ The support page covers: contact (`support@ideaflow.app`, the brand-wide
 inbox that forwards to the operators), the public feedback board
 (`https://worldissuetracker.com/tracker/unlinked-ai`), how to delete an
 account (Settings → Your data → Delete everything…, anchored at
-`/settings#your-data`), how to report people or messages, how a person can
+`/settings#your-data`; afterwards, and on the deleted page, **Also delete your
+Ideaflow ID** links to `https://id.ideaflow.app/account/delete?return_to=https://www.unlinked.ai`,
+which removes sign-in for every Ideaflow app; that page belongs to Ideaflow ID
+and is built separately), how to report people or messages, how a person can
 have an imported profile about them removed, the community rules (no
 tolerance for objectionable content or abusive users; reports reviewed
 within 24 hours) and the two policies.

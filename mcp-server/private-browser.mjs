@@ -36,10 +36,10 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
-import { ContactCardError, renderContactVcard } from './contact-card.mjs'
+import { ContactCardError, renderContactVcard, vcardContentDisposition } from './contact-card.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { renderScan, fillMeHeadline, TOP_BAR_SCRIPT, LINKEDIN_EMAIL_HELP_SCRIPT, LINKEDIN_EXPORT_PROGRESS_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError, renderMemberHome } from './private-onboarding-views.mjs'
 import { summarizeImports } from '../src/utils/private-import/import-summary.mjs'
@@ -1070,7 +1070,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const card = await contactCards.open(contactLink[1])
         if (contactLink[2]) {
           if (!card) { response.writeHead(404).end(); return }
-          response.writeHead(200, { 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': 'attachment; filename="contact.vcf"' })
+          response.writeHead(200, { 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': vcardContentDisposition(card) })
           response.end(renderContactVcard(card, base.origin)); return
         }
         const target = card && canAddCard && viewer ? await contactCards.ownerForToken(contactLink[1]) : null
@@ -1316,6 +1316,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // prompt=none answers whose attempt is gone (expired, or the runtime
         // restarted mid-hop) go home signed out, without an error page.
         if (!transaction && url.searchParams.getAll('error').length === 1 && SILENT_PROVIDER_ERRORS.has(url.searchParams.get('error'))) { redirect(response, '/'); return }
+        // A successful Ideaflow answer that this browser never asked for: usually
+        // an email-verification link opened outside the app (or in another
+        // browser) that started the sign-in. The code is never exchanged; the
+        // person is told where to continue instead of seeing a generic error.
+        if (!transaction && id === undefined && url.searchParams.getAll('code').length === 1 && !url.searchParams.has('error')) {
+          await recordAudit({ event: 'auth_callback_other_browser' })
+          journey(response, renderSignInElsewhere({ inApp: iosApp(request) }), null, '', 400); return
+        }
         if (!transaction || url.searchParams.getAll('state').length !== 1 || url.searchParams.get('state') !== transaction.state || url.searchParams.getAll('code').length !== 1) throw new Error('private_login_transaction_invalid')
         const identity = await login.finish(url, transaction)
         if (transaction.invitationToken) {
@@ -1356,6 +1364,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         else { response.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify({ error: 'messaging_unavailable' })) }
         return
       }
+      // The old while-you-wait step (export-first onboarding, reverted) now lives on Home.
+      if (request.method === 'GET' && url.pathname === '/while-you-wait') { redirect(response, '/'); return }
       const session = sessionFor(request)
       if (!session) {
         if (request.method === 'GET' && url.pathname === '/') journey(response, renderLanding({ inApp: inAppBrowser(request.headers['user-agent']) }))
@@ -2013,11 +2023,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         journey(response, renderContactDetail({ ...props, contact, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
-        // The agent setup is prepared automatically: reuse the owner's live
-        // grant or mint the one idempotent automatic grant. A revoked automatic
-        // setup stays revoked (ensure returns null); explicit selection reads only.
+        // Settings shows the owner's live key, but a page view never creates
+        // one: a member creates a key when they want to connect an app.
+        // Explicit selection reads only.
         const selectedId = url.searchParams.get('key')
-        const ensured = selectedId && accountKeys ? await accountKeys.readKey(session.owner, selectedId) : typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner) : null
+        const ensured = selectedId && accountKeys ? await accountKeys.readKey(session.owner, selectedId) : typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner, { mint: false }) : null
         const configuration = ensured ? scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const setups = ensured ? agentClientSetups({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const grants = await grantList(session.owner, backend)
@@ -2244,6 +2254,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         response.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="unlinked-private-mcp.json"' })
         response.end(JSON.stringify(config)); return
       }
+      // An unknown signed-in page answers with a real page and a way back.
+      if (request.method === 'GET' && pageView(url.pathname)) { journey(response, renderNotFound(chrome), null, '', 404); return }
       response.writeHead(404).end()
     } catch (error) {
       if (connectionPost(request) && !response.headersSent) {

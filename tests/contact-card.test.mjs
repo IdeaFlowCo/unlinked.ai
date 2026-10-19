@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
-import { createContactCards, createMemoryContactCardStore, projectContactCard, normalizePhone, normalizeEmail, normalizeLink, displayPhone, renderContactVcard, ContactCardError, CONTACT_CARD_TOKEN } from '../mcp-server/contact-card.mjs'
+import { createContactCards, createMemoryContactCardStore, projectContactCard, normalizePhone, normalizeEmail, normalizeLink, displayPhone, renderContactVcard, vcardContentDisposition, vcardFileName, vcardNameParts, ContactCardError, CONTACT_CARD_TOKEN } from '../mcp-server/contact-card.mjs'
 import { parseUnlinkedCard, unlinkedProfilePath } from '../src/utils/unlinked-card.js'
 import { classifyMeetCode } from '../src/utils/meet-scan.js'
 
@@ -119,6 +119,9 @@ test('the saved contact file holds only the shown details and cannot be extended
   const lines = vcard.split('\r\n')
   assert.deepEqual(lines.slice(0, 2), ['BEGIN:VCARD', 'VERSION:3.0'])
   assert.ok(lines.includes('FN:Ada\\; Example\\nTEL:+1999'))
+  // The structured name never carries a line break either.
+  assert.equal(lines.filter(line => line.startsWith('N:')).length, 1)
+  assert.ok(lines.includes('N:TEL:+1999;Ada\\; Example;;;'))
   assert.equal(lines.filter(line => line.startsWith('TEL')).join('|'), 'TEL;TYPE=CELL:+14155550123|TEL;TYPE=CELL:+447700900123')
   assert.ok(lines.includes('TITLE:Engineer\\, Analytical'))
   assert.ok(lines.includes('EMAIL;TYPE=INTERNET:ada@example.test'))
@@ -129,6 +132,21 @@ test('the saved contact file holds only the shown details and cannot be extended
   const bare = renderContactVcard({ name: null, phone: null, whatsapp: null, email: 'ada@example.test', link: null, profilePath: null }, 'https://www.unlinked.ai')
   assert.doesNotMatch(bare, /TEL|URL/)
   assert.match(bare, /FN:Unlinked member/)
+  assert.match(bare, /\r\nN:;Unlinked member;;;\r\n/)
+})
+
+test('a contact file names the person: structured N and a <First Last>.vcf file name', () => {
+  const lines = renderContactVcard({ name: 'Ada King Lovelace', email: 'ada@example.test' }, 'https://www.unlinked.ai').split('\r\n')
+  assert.ok(lines.includes('N:Lovelace;Ada King;;;'))
+  assert.ok(lines.includes('FN:Ada King Lovelace'))
+  assert.ok(renderContactVcard({ name: 'Madonna', email: 'm@example.test' }, 'https://www.unlinked.ai').includes('\r\nN:;Madonna;;;\r\n'))
+  assert.deepEqual(vcardNameParts('  José   Ñúñez García '), { family: 'García', given: 'José Ñúñez' })
+  assert.equal(vcardFileName({ name: 'Ada Lovelace' }), 'Ada Lovelace.vcf')
+  assert.equal(vcardFileName({ name: '../../etc/passwd' }), 'etc passwd.vcf')
+  assert.equal(vcardFileName({ name: 'a"b;c\r\nd' }), 'a b c d.vcf')
+  assert.equal(vcardFileName({ name: '' }), 'contact.vcf')
+  assert.equal(vcardContentDisposition({ name: 'José Ñúñez' }), `attachment; filename="Jose Nunez.vcf"; filename*=UTF-8''Jos%C3%A9%20%C3%91%C3%BA%C3%B1ez.vcf`)
+  assert.equal(vcardContentDisposition({ name: '李' }), `attachment; filename="contact.vcf"; filename*=UTF-8''%E6%9D%8E.vcf`)
 })
 
 test('the scanner reads a contact card link and keeps it on this host', () => {
@@ -244,7 +262,8 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   const vcf = await signed.get(`/c/${token}/contact.vcf`, false)
   assert.equal(vcf.status, 200)
   assert.equal(vcf.headers.get('content-type'), 'text/vcard; charset=utf-8')
-  assert.match(vcf.headers.get('content-disposition'), /^attachment; filename="contact\.vcf"$/)
+  // Saved under the person's name, with the exact UTF-8 name alongside the ASCII fallback.
+  assert.equal(vcf.headers.get('content-disposition'), `attachment; filename="Card Owner.vcf"; filename*=UTF-8''Card%20Owner.vcf`)
   const vcard = await vcf.text()
   assert.match(vcard, /TEL;TYPE=CELL:\+14155550123\r\n/); assert.doesNotMatch(vcard, /EMAIL/)
 

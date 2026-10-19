@@ -48,7 +48,7 @@ OpenChat has the same idea: an AddMe card at `https://chat.ideaflow.app/c/<token
 - Same route (`/c/<token>`) and token grammar (24 alphanumerics), so `src/utils/meet-scan.js` reads both kinds of QR code.
 - Same consent convention: each optional field has a value plus a `show…` switch, and a pure projection decides what a stranger sees.
 - Same reset model: rotating the token kills earlier links.
-- Both offer `contact.vcf`.
+- Both offer `contact.vcf`. Unlinked's downloads as `<First Last>.vcf` (`Content-Disposition` with an ASCII fallback and the exact UTF-8 name) and carries a structured `N` (family name = the last word of the display name, the rest as given names; one word is a given name only).
 
 Differences today: OpenChat's card carries `headline`, `linkedIn`, `x`, `link`, avatar and status, and states that phone and email never appear on it. Unlinked's contact card adds `phone`, `whatsapp` and `email`.
 

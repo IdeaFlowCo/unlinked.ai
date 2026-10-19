@@ -74,6 +74,10 @@ cached tool list instead of replacing a key. Names are display-only,
 1–80 trimmed characters, without controls. Existing unnamed keys remain valid and
 appear as Default key or Existing key with a date and short identifier. Revoked
 automatic grants stay revoked; visiting Settings does not undo that choice.
+Visiting Settings never creates a key: it shows the account's live key, or none
+with the **Create API key** form open (`ensureGrant(owner, { mint: false })`).
+API keys and MCP setup sit below the personal settings (email, privacy, files,
+your data, blocked people, help).
 
 Server-to-server read-only fallback issuance and reuse are owned by the
 [grant provisioning contract](agent-api.md#grant-provisioning-v11--post-apiagentv1provision-grant). The fallback appears

@@ -31,6 +31,12 @@ const assets = new Map([
   ['/robots.txt', ['public/robots.txt', 'text/plain']],
   ['/sitemap.xml', ['public/sitemap.xml', 'application/xml']],
   ['/.well-known/security.txt', ['public/.well-known/security.txt', 'text/plain']],
+  // Universal links and passkeys for the iOS app (ai.unlinked.app). Apple's CDN
+  // fetches this without cookies and never follows a redirect, so it must answer
+  // 200 here, before any session or sign-in step. The same bytes are served at the
+  // apex by the Vercel project (vercel.json); see docs/ios-universal-links.md.
+  ['/.well-known/apple-app-site-association', ['public/.well-known/apple-app-site-association', 'application/json']],
+  ['/apple-app-site-association', ['public/.well-known/apple-app-site-association', 'application/json']],
   ['/AGENTS.md', ['public/AGENTS.md', 'text/plain']],
   ['/openapi.json', ['public/openapi.json', 'application/json']],
   ['/.well-known/unlinked.json', ['public/.well-known/unlinked.json', 'application/json']],

@@ -282,7 +282,7 @@ test('sign-in, consent, PKCE code exchange, scoped tools, Settings listing and r
   assert.equal((settings.match(/<b>Claude<\/b> · connected/g) ?? []).length, 2)
   assert.equal(settings.includes(body.access_token), false)
   assert.match(settings, /API keys/)
-  assert.equal(p.graph.live().length, 3, 'two connections plus the automatic credential')
+  assert.equal(p.graph.live().length, 2, 'two connections; visiting Settings creates no key')
 
   // Regenerating the copyable credential leaves connected apps connected.
   const regenerated = await p.go('/setup-account', { method: 'POST', headers: { Cookie: cookie, Origin: p.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: csrfFrom(settings) }) })
@@ -295,7 +295,7 @@ test('sign-in, consent, PKCE code exchange, scoped tools, Settings listing and r
   const dead = await p.go('/mcp', { method: 'POST', headers: { Authorization: `Bearer ${body.access_token}`, 'Content-Type': 'application/json' }, body: '{}' })
   assert.equal(dead.status, 401)
   assert.match(dead.headers.get('www-authenticate'), /error="invalid_token"/)
-  assert.equal(p.graph.live().filter(x => !x.payload.connection).length, 2)
+  assert.equal(p.graph.live().filter(x => !x.payload.connection).length, 1, 'only the key created explicitly above')
 
   // RFC 7009 revocation works only for the client the token was issued to.
   const foreign = await p.go('/oauth/revoke', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: narrow.access_token, client_id: otherClient.client_id }) })
@@ -304,7 +304,7 @@ test('sign-in, consent, PKCE code exchange, scoped tools, Settings listing and r
   const own = await p.go('/oauth/revoke', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: narrow.access_token, client_id: client.client_id }) })
   assert.equal(own.status, 200)
   assert.equal((await p.go('/mcp', { method: 'POST', headers: { Authorization: `Bearer ${narrow.access_token}`, 'Content-Type': 'application/json' }, body: '{}' })).status, 401)
-  assert.equal(p.graph.live().length, 2, 'both manual credentials remain')
+  assert.equal(p.graph.live().length, 1, 'the manual credential remains')
 })
 
 test('the official MCP SDK client completes discovery, registration, PKCE and the token exchange', async t => {

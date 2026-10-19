@@ -8,7 +8,11 @@ const tokenFrom = page => page.match(/id="agent-setup-token"[^>]*value="([^"]+)"
 
 test('signed-in named keys: revisit, fresh sign-in, rename, replace and revoke preserve other clients', async t => {
   const f = await manualKeyFixture(); t.after(f.close)
-  const session = await f.signIn(), initial = await (await f.page(session)).text()
+  const session = await f.signIn()
+  // Visiting Settings creates no key; the member's first key is made explicitly.
+  await f.page(session); assert.equal((await f.grants.listGrants(f.owner)).length, 0)
+  await f.grants.issueGrant(f.owner)
+  const initial = await (await f.page(session)).text()
   const defaultToken = tokenFrom(initial), defaultGrant = await auth(f.grants, defaultToken)
   assert.ok(defaultGrant)
   const oauth = await f.grants.issueGrant(f.owner, undefined, { connection: { kind: 'oauth', app: 'Claude', clientName: null, redirectHost: 'claude.ai', clientKey: 'a'.repeat(64), resource: null } })
