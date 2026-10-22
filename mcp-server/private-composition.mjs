@@ -191,7 +191,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // requests, when the runtime supplies their graph stores.
     const notificationStore = typeof dependencies.createNotificationStore === 'function' ? dependencies.createNotificationStore(driver, 'neo4j') : null
     await notificationStore?.initialize()
-    const notifications = notificationStore ? createNotifications({ store: notificationStore }) : undefined
+    const notifications = notificationStore ? createNotifications({ store: notificationStore, resolveActorProfile: owner => publicProfileIdFor(owner) }) : undefined
     // Each member's contact card (phone, WhatsApp, email), shared only by its link.
     const contactCardStore = typeof dependencies.createContactCardStore === 'function' ? dependencies.createContactCardStore(driver, 'neo4j') : null
     await contactCardStore?.initialize()

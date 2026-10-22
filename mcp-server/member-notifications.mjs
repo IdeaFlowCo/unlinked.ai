@@ -33,10 +33,24 @@ const plainName = value => {
   return name && [...name].length <= 120 && !/[\u0000-\u001f\u007f<>@]/.test(name) ? name : 'An Unlinked member'
 }
 
-export function createNotifications({ store, now = Date.now, keep = NOTIFICATIONS_PER_ACCOUNT } = {}) {
+export function createNotifications({ store, now = Date.now, keep = NOTIFICATIONS_PER_ACCOUNT, resolveActorProfile } = {}) {
   if (!store || ['insertOnce', 'list', 'counts', 'markSeen', 'markRead', 'markAllRead', 'markReadByKey', 'deleteByKey', 'deleteOwner', 'prune'].some(name => typeof store[name] !== 'function')) throw new Error('notification_store_required')
   const view = record => ({ id: record.id, kind: record.kind, actorName: record.actorName, ...(record.actorProfileId ? { actorProfileId: record.actorProfileId } : {}),
     ...(record.subjectId ? { subjectId: record.subjectId } : {}), createdAt: record.createdAt, seen: record.seenAt != null, read: record.readAt != null })
+  // Invitations can arrive before the actor creates a public profile. Resolve
+  // those old events from their stored account identity, never from a name.
+  // Read-time enrichment keeps the original event intact and lets later reads
+  // recover after a temporarily unavailable profile lookup.
+  const resolvedView = async record => {
+    const item = view(record)
+    if (!item.actorProfileId && resolveActorProfile && record.actorOwnerId && record.actorUserId) {
+      try {
+        const id = await resolveActorProfile({ ownerId: record.actorOwnerId, userId: record.actorUserId })
+        if (typeof id === 'string' && id && id.length <= 160) item.actorProfileId = id
+      } catch { /* The notification remains readable when profile lookup fails. */ }
+    }
+    return item
+  }
   return {
     // Returns true when this event is new for the recipient.
     async notify({ recipient, kind, actor, actorName, actorProfileId, subjectId, dedupeKey }) {
@@ -55,7 +69,9 @@ export function createNotifications({ store, now = Date.now, keep = NOTIFICATION
     },
     async list(member, { limit = 50 } = {}) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new Error('notification_limit_invalid')
-      return (await store.list(owner(member), limit)).map(view)
+      const records = await store.list(owner(member), limit), items = []
+      for (let i = 0; i < records.length; i += 8) items.push(...await Promise.all(records.slice(i, i + 8).map(resolvedView)))
+      return items
     },
     async counts(member) { return store.counts(owner(member)) },
     async markSeen(member) { await store.markSeen(owner(member), now()) },
@@ -64,7 +80,7 @@ export function createNotifications({ store, now = Date.now, keep = NOTIFICATION
       owner(member)
       if (typeof id !== 'string' || !NOTIFICATION_ID.test(id)) return null
       const record = await store.markRead(member, id, now())
-      return record ? view(record) : null
+      return record ? resolvedView(record) : null
     },
     async markAllRead(member) { await store.markAllRead(owner(member), now()) },
     async markReadByKey(member, dedupeKey) { await store.markReadByKey(owner(member), dedupeKey, now()) },

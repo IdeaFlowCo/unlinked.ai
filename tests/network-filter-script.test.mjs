@@ -35,7 +35,7 @@ function browser(initial='https://unlinked.invalid/network') {
     }
     for (const id of ['network-query', 'network-sort', 'network-filters']) {
       elements.set('#' + id, {
-        id, closest: () => null, value: id === 'network-sort' ? (url.searchParams.get('sort') || 'best') : id === 'network-query' ? (url.searchParams.get('q') || '') : '', action: 'https://unlinked.invalid/network', selectionStart: 0, selectionEnd: 0,
+        id, closest: () => null, value: id === 'network-sort' ? (url.searchParams.get('sort') || (url.searchParams.get('connected') === '1' ? 'connected' : 'best')) : id === 'network-query' ? (url.searchParams.get('q') || '') : '', action: 'https://unlinked.invalid/network', selectionStart: 0, selectionEnd: 0,
         focus: () => { document.activeElement = elements.get('#' + id) },
         replaceWith: element => elements.set('#' + id, element),
         setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end },
@@ -340,7 +340,7 @@ for (const clear of ['clear-search', 'clear-filters']) {
     b.dispatch('click', b.root().querySelector('#' + clear))
     assert.deepEqual(Object.fromEntries(b.pending.at(-1).url.searchParams), clear === 'clear-search' ? { sort: 'imported', connected: '1', presence: 'member' } : { connected: '1' })
     assert.equal(b.root().querySelector('#network-query').value, '')
-    assert.equal(b.root().querySelector('#network-sort').value, clear === 'clear-search' ? 'imported' : 'best')
+    assert.equal(b.root().querySelector('#network-sort').value, clear === 'clear-search' ? 'imported' : 'connected')
   })
 
   test(`${clear} preserves pending Everyone scope over rendered connections`, () => {

@@ -117,6 +117,8 @@ Focused removal regressions run with `node --test tests/connection-removal-races
 
 ## Browser feedback and badge refresh
 
+Notification names and avatars open the actor's public profile and mark that notification read. Events created before the actor had a profile resolve missing profile IDs at read time from the stored actor account, never by matching names. Existing event data is not rewritten; absent profiles and failed lookups leave the notification readable, and later reads retry. Profile lookups run in batches of at most eight. Account identifiers stay server-side.
+
 Connect remains a normal form POST, including when JavaScript is disabled.
 The redirect shows a “Request sent” confirmation and the next server-rendered
 profile or People row shows “Request sent · Pending” with Withdraw. Requests
