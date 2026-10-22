@@ -67,6 +67,19 @@ export function createMessagingSession({ secret, identityForOwner, fetchImpl = f
   }
 }
 
+// A live contact-card capability identifies an owner even without a public
+// profile. Reuse the trusted identity exchange to provision their inbox, but
+// discard its credential: conversation operations always use the VIEWER's.
+export function createMessagingRecipient(options) {
+  const exchange = createMessagingSession(options)
+  return async (owner, name) => {
+    const value = await exchange({ owner, displayName: name })
+    const id = value?.user?.userId
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw Error('messaging_unavailable')
+    return { id, name: String(name || 'Unlinked member').slice(0, 160) }
+  }
+}
+
 // "View on Unlinked" for a member's conversation partners: OpenChat answers,
 // for this member's own visible conversation partners only, which have a
 // shared Ideaflow identity (docs/openchat-message.md). Confidential server call.

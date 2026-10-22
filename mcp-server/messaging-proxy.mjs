@@ -119,7 +119,7 @@ const invalid = () => new MessagingError(400, 'invalid_input')
 // `blockedUsers(session)` (optional) returns the OpenChat user ids this member
 // blocked (member-blocks.mjs): their direct conversations are hidden, their
 // messages are not delivered, and no message is sent to them from here.
-export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, blockedUsers = null } = {}) {
+export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, blockedUsers = null, resolveOwnerRecipient = null } = {}) {
   const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map(), blockCache = new Map(), peers = new Map()
   // The member's blocked OpenChat users, read at most every 30 seconds (and again after a change).
   async function blockedFor(session) {
@@ -389,6 +389,21 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const conversation = projectConversation(created.value)
     if (!conversation) return { status: 'unavailable' }
     return { status: 'ready', conversationId: conversation.id, recipient: { id: value.recipient.id, name: text(value.recipient.name, 160) } }
+  }
+
+  // Only the browser handler's live card lookup may supply this owner. Never
+  // accept an owner/identity from browser fields, a name or an imported email.
+  async function openOwner(session, owner, name) {
+    spend(session, 'write')
+    if (typeof resolveOwnerRecipient !== 'function') return { status: 'unavailable' }
+    const recipient = await resolveOwnerRecipient(owner, name)
+    if (!validId(recipient?.id)) return { status: 'unavailable' }
+    if ((await blockedFor(session)).has(recipient.id)) return { status: 'blocked' }
+    const viewer = await credentialFor(session)
+    if (viewer.userId === recipient.id) return { status: 'self' }
+    const created = await upstream(session, 'POST', '/api/chat/conversations', { participantIds: [recipient.id], type: 'direct' })
+    const conversation = projectConversation(created.value)
+    return conversation ? { status: 'ready', conversationId: conversation.id } : { status: 'unavailable' }
   }
 
   // ── Header badge ──────────────────────────────────────────────────────────
@@ -682,5 +697,5 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
 
   function close() { for (const link of [...links.values()]) closeLink(link) }
-  return { handle, openProfile, unreadTotal, close, conversationPeer, recipientFor, blockUser, evidence, forwardReport, invalidateBlocks, _links: links }
+  return { handle, openProfile, openOwner, unreadTotal, close, conversationPeer, recipientFor, blockUser, evidence, forwardReport, invalidateBlocks, _links: links }
 }

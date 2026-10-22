@@ -161,3 +161,11 @@ People results (public search, your contacts, AI picks and connected people) off
 
 For accepted member requests, see
 [OpenChat acceptance delivery and reconciliation](openchat-accepted-connections.md).
+
+Contact cards also offer **Message [first name]** after sign-in, including for
+members without a published profile. The browser-only, CSRF-protected card action
+resolves a current card capability to its active owner and uses the existing
+confidential session exchange to obtain the inbox id. The recipient credential
+is discarded; direct-conversation creation always uses the viewer credential.
+This does not extend the public-profile resolver or agent grants. See
+[Message after a scan](contact-card.md#message-after-a-scan).

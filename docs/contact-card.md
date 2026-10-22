@@ -99,3 +99,18 @@ Existing connections and own-card scans are harmless; pending requests settle th
   `returnPath` accepts `/c/<token>`, `/people/lookup`, `/scan`
   (`?tab=scan|card`) and `/meet`, and those pages' header **Sign in** carries it.
 
+
+## Message after a scan
+
+After Join & connect returns to a card, **Message [first name]** appears above
+“Here’s your card, share it back.” Returning signed-in viewers also see the
+button on the card. Guests sign in or join first; self cards omit the action.
+
+The CSRF-protected `POST /c/:token/message` reopens the live card and resolves
+its current owner server-side. Hidden, reset or removed cards cannot open an
+inbox. The trusted Ideaflow exchange provisions the owner’s OpenChat inbox even
+without a published profile; its credential is discarded, and only the viewer’s
+credential is used to open/reuse the direct conversation. No identity, email or
+recipient id is accepted from browser fields. Blocks apply. The card capability
+never leaves Unlinked or enters the conversation URL. Opening does not send a
+message; unavailable messaging leaves a retry action on the card.

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { createMessagingHandler, createMessagingIdentities, createMessagingResolver, IDEAFLOW_ISSUER, MESSAGING_PATH } from '../mcp-server/messaging.mjs'
+import { createMessagingRecipient, createMessagingHandler, createMessagingIdentities, createMessagingResolver, IDEAFLOW_ISSUER, MESSAGING_PATH } from '../mcp-server/messaging.mjs'
 
 const owner = { ownerId:'private-owner', userId:'private-user' }
 const identity = { issuer:IDEAFLOW_ISSUER, subject:'private-subject' }
@@ -52,4 +52,16 @@ test('partner identity lookup sends only the member identity and valid ids, and 
   assert.deepEqual(JSON.parse(sent.options.body), { issuer: IDEAFLOW_ISSUER, subject: 'private-subject', userIds: ['oc-a', 'oc-b'] })
   assert.deepEqual(await createMessagingIdentities({ secret: 's'.repeat(40), identityForOwner: async () => identity, fetchImpl: async () => { throw Error('must not call') } })({ owner }, ['../bad']), [])
   await assert.rejects(createMessagingIdentities({ identityForOwner: async () => identity })({ owner }, ['oc-a']))
+})
+
+test('card recipient exchange returns only an inbox id and name, never the recipient credential', async () => {
+  let calls = 0
+  const resolve = createMessagingRecipient({ secret: 's'.repeat(40), identityForOwner: async value => { assert.deepEqual(value, owner); return identity }, fetchImpl: async (_url, options) => {
+    calls++
+    assert.deepEqual(JSON.parse(options.body), { ...identity, name: 'Card owner' })
+    return Response.json({ token: 'recipient-private-credential', user: { userId: 'oc-owner', email: 'private@example.test' } })
+  } })
+  assert.deepEqual(await resolve(owner, 'Card owner'), { id: 'oc-owner', name: 'Card owner' })
+  assert.equal(calls, 1)
+  await assert.rejects(createMessagingRecipient({ secret: 's'.repeat(40), identityForOwner: async () => null, fetchImpl: async () => { throw Error('must not call') } })(owner, 'Inactive'))
 })

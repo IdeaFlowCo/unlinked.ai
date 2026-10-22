@@ -46,7 +46,7 @@ test('a new member’s card is their name alone, shared from day one; nothing pr
   assert.equal(projectContactCard({ token: 't', name: 'A B', email: 'a@b.co', showEmail: true }).email, 'a@b.co')
 })
 
-async function site(t, { visitorName = 'Grace Hopper', visitorEmail = 'grace@example.test' } = {}) {
+async function site(t, { visitorName = 'Grace Hopper', visitorEmail = 'grace@example.test', messaging = false, blocked = false, failMessaging = false } = {}) {
   const store = createMemoryContactCardStore(), cards = createContactCards({ store })
   const connectionStore = createMemoryConnectionStore(), connections = createConnectionRequests({ store: connectionStore })
   const ada = member('ada'), grace = member('grace')
@@ -59,7 +59,19 @@ async function site(t, { visitorName = 'Grace Hopper', visitorEmail = 'grace@exa
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
   const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
   const accounts = { ada, grace }, names = { ada: 'Ada Lovelace', grace: visitorName }, emails = { ada: 'ada@example.test', grace: visitorEmail }
-  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'private_live', readPublishedSnapshot,
+  const messageCalls = [], resolvedOwners = []
+  handler = createPrivateBrowserHandler({ ...(messaging ? {
+    createMessagingSession: async session => ({ token: `viewer-${session.owner.ownerId}`, user: { userId: `oc-${session.owner.ownerId}` } }),
+    resolveCardMessagingRecipient: async (owner, name) => { resolvedOwners.push(owner); if (failMessaging) throw Error('offline'); return { id: `oc-${owner.ownerId}`, name } },
+    messagingOptions: { blockedUsers: async () => blocked ? ['oc-ada'] : [], fetchImpl: async (url, options) => {
+      messageCalls.push({ url, ...options })
+      if (url.endsWith('/api/chat/unread-total')) return Response.json({ unreadTotal: 0 })
+      assert.ok(url.endsWith('/api/chat/conversations'))
+      assert.equal(options.headers.Authorization, 'Bearer viewer-grace', 'only the viewer credential opens the conversation')
+      assert.deepEqual(JSON.parse(options.body), { participantIds: ['oc-ada'], type: 'direct' })
+      return Response.json({ id: 'direct-grace-ada', type: 'direct', participants: [] })
+    } },
+  } : {}), baseUrl, dataMode: 'private_live', readPublishedSnapshot,
     login: { begin: async () => ({ location: 'https://id.example.invalid/authorize', transaction: { state: 's' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: current, displayName: names[current], verifiedEmail: emails[current] }) },
     resolveOwner: async identity => registered.has(identity.subject) ? accounts[identity.subject] : null,
     signup: async () => { registered.add(current); signups++; return accounts[current] },
@@ -76,7 +88,7 @@ async function site(t, { visitorName = 'Grace Hopper', visitorEmail = 'grace@exa
     return { callback, cookie: callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session='))?.split(';')[0] }
   }
   const signIn = async (who, next) => (await finish(who, await request(`/login${next ? `?next=${encodeURIComponent(next)}` : ''}`)))
-  return { cards, connections, connectionStore, store, saved, ada, grace, request, post, finish, signIn, signups: () => signups, baseUrl }
+  return { messageCalls, resolvedOwners, cards, connections, connectionStore, store, saved, ada, grace, request, post, finish, signIn, signups: () => signups, baseUrl }
 }
 
 test('a non-member scans a contact card: save it, or join and land connected with their own card to share back', async t => {
@@ -214,4 +226,63 @@ test('scanner: camera failure opens the paste box with how to allow it; Scan fro
   assert.equal(await decodeImageFile({ size: 1000 }), null)
   assert.equal(await decodeImageFile({ size: 0 }), null)
   assert.equal(closed, 2)
+})
+
+for (const newMember of [true, false]) test(`card Message opens the right inbox after ${newMember ? 'joining' : 'signing in'}, without a public profile or an automatic send`, async t => {
+  const s = await site(t, { messaging: true })
+  // Day-one card: the action must not depend on having a profile.
+  await s.cards.syncIdentity(s.ada, { name: 'Ada Lovelace', profilePath: null })
+  const path = `/c/${s.saved.token}`
+  const guest = await (await s.request(path)).text()
+  assert.doesNotMatch(guest, /class="cc-message"/)
+  const { callback, cookie } = newMember
+    ? await s.finish('grace', await s.post(`${path}/add`))
+    : await s.signIn('grace', path)
+  assert.equal(callback.headers.get('location'), newMember ? `${path}?added=1` : path)
+  const landed = await (await s.request(callback.headers.get('location'), { cookie })).text()
+  assert.match(landed, /Message Ada<\/button>/)
+  assert.doesNotMatch(landed, /href="\/people\/ada">View profile<|oc-ada|viewer-grace/)
+  if (newMember) assert.ok(landed.indexOf('class="cc-message"') < landed.indexOf('class="share-back"'))
+  assert.equal(s.resolvedOwners.length, 0, 'viewing the card does not provision or open an inbox')
+  const csrf = /name="csrf" value="([^"]+)"/.exec(landed)[1]
+  for (let click = 0; click < 2; click++) {
+    const opened = await s.post(`${path}/message`, { csrf }, { cookie })
+    assert.equal(opened.headers.get('location'), '/messages/c/direct-grace-ada')
+  }
+  assert.deepEqual(s.resolvedOwners, [s.ada, s.ada])
+  assert.equal(s.messageCalls.filter(call => call.method === 'POST').length, 2)
+  assert.ok(s.messageCalls.every(call => !call.url.includes('/messages')), 'no Send endpoint called')
+})
+
+test('card Message checks session, CSRF, live card capability and self before resolving a recipient', async t => {
+  const s = await site(t, { messaging: true }), path = `/c/${s.saved.token}`
+  assert.equal((await s.post(`${path}/message`)).headers.get('location'), `/login?next=${encodeURIComponent(path)}`)
+  const { cookie } = await s.signIn('grace')
+  const markup = await (await s.request(path, { cookie })).text(), csrf = /name="csrf" value="([^"]+)"/.exec(markup)[1]
+  assert.equal((await s.post(`${path}/message`, {}, { cookie })).status, 400)
+  assert.equal((await s.post(`${path}/message`, { csrf, ownerId: 'forged' }, { cookie })).status, 400)
+  assert.equal((await s.post(`${path}/message`, { csrf }, { cookie, origin: 'https://evil.test' })).status, 403)
+  await s.cards.save(s.ada, { shareCard: false })
+  assert.equal((await s.post(`${path}/message`, { csrf }, { cookie })).status, 404)
+  await s.cards.save(s.ada, { shareCard: true })
+  const rotated = await s.cards.rotate(s.ada)
+  assert.equal((await s.post(`${path}/message`, { csrf }, { cookie })).status, 404)
+  const self = await s.signIn('ada'), ownPath = `/c/${rotated.token}`
+  const own = await (await s.request(ownPath, { cookie: self.cookie })).text()
+  assert.doesNotMatch(own, /class="cc-message"/)
+  const selfCsrf = /name="csrf" value="([^"]+)"/.exec(own)[1]
+  assert.equal((await s.post(`${ownPath}/message`, { csrf: selfCsrf }, { cookie: self.cookie })).headers.get('location'), ownPath)
+  assert.equal(s.resolvedOwners.length, 0)
+})
+
+for (const blocked of [true, false]) test(`card Message ${blocked ? 'respects blocks' : 'offers retry after an outage'}`, async t => {
+  const s = await site(t, { messaging: true, blocked, failMessaging: !blocked }), path = `/c/${s.saved.token}`
+  const { cookie } = await s.signIn('grace')
+  const markup = await (await s.request(path, { cookie })).text(), csrf = /name="csrf" value="([^"]+)"/.exec(markup)[1]
+  const opened = await s.post(`${path}/message`, { csrf }, { cookie })
+  assert.equal(opened.headers.get('location'), `${path}?message=${blocked ? 'blocked' : 'failed'}`)
+  const result = await (await s.request(opened.headers.get('location'), { cookie })).text()
+  assert.match(result, blocked ? /You’ve blocked this person/ : /We couldn’t open the conversation/)
+  assert.match(result, /Message Ada/)
+  assert.equal(s.messageCalls.filter(call => call.method === 'POST').length, 0)
 })
