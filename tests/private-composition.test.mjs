@@ -334,3 +334,43 @@ test('opt-in composition writes only agent-route diagnostics; off leaves no requ
   const rows = (await readFile(join(directory, files[0]), 'utf8')).trim().split('\n').map(JSON.parse)
   assert.equal(rows.length, 1); assert.equal(rows[0].request_id, requestId); assert.equal(rows[0].account_id, undefined)
 })
+
+
+test('production dispatcher keeps profile recipient resolution separate from card messaging', async t => {
+  const { options } = await fixture(t)
+  const dependencies = await createPrivatePilotDependencies(options)
+  const { port } = await fixture(t)
+  t.after(dependencies.close)
+  assert.equal(typeof dependencies.resolveMessagingRecipient, 'function')
+  assert.equal(typeof dependencies.resolveCardMessagingRecipient, 'function')
+  assert.notEqual(dependencies.resolveMessagingRecipient, dependencies.resolveCardMessagingRecipient)
+  const { createContactCards, createMemoryContactCardStore } = await import('../mcp-server/contact-card.mjs')
+  const cards = createContactCards({ store: createMemoryContactCardStore() })
+  const viewer = { ownerId: 'viewer', userId: 'viewer-user' }, target = { ownerId: 'card-owner', userId: 'card-user' }
+  const saved = await cards.ensure(target, { name: 'Card owner' })
+  let cardCalls = 0, profileCalls = 0
+  const origin = `https://127.0.0.1:${port}`, secret = 's'.repeat(40)
+  const pilot = await startPrivatePilot({ ...dependencies, baseUrl: origin, port,
+    accountGrantKey: new Uint8Array(32).fill(7), signup: async () => viewer,
+    contactCards: cards, resolveOwner: async () => viewer,
+    login: { begin: async () => ({ location: 'https://identity.invalid', transaction: { state: 's' } }), finish: async () => ({ subject: 'viewer', displayName: 'Viewer' }) },
+    getBackend: async () => ({ listImportIds: async () => [], listImportJobIds: async () => [] }),
+    createMessagingSession: async () => { throw Error('no_external_service') },
+    resolveCardMessagingRecipient: async owner => { assert.deepEqual(owner, target); cardCalls++; throw Error('test_outage') },
+    messagingSecret: secret, resolveMessagingRecipient: async id => { assert.equal(id, 'public-profile'); profileCalls++; return { status: 'unclaimed', name: 'Public profile' } },
+  })
+  t.after(pilot.stop)
+  const request = (path, options = {}) => fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual', ...options })
+  const started = await request('/login'), login = started.headers.getSetCookie().find(v => v.startsWith('__Host-ul-login=')).split(';')[0]
+  const finished = await request('/auth/callback/ideaflow?state=s&code=c', { headers: { Cookie: login } })
+  const cookie = finished.headers.getSetCookie().find(v => v.startsWith('__Host-ul-session=')).split(';')[0]
+  const path = `/c/${saved.token}`, markup = await (await request(path, { headers: { Cookie: cookie } })).text()
+  assert.match(markup, /Message Card/)
+  const csrf = /name="csrf" value="([^"]+)"/.exec(markup)[1]
+  const opened = await request(`${path}/message`, { method: 'POST', headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf }) })
+  assert.equal(opened.headers.get('location'), `${path}?message=failed`)
+  assert.equal(cardCalls, 1); assert.equal(profileCalls, 0)
+  const profile = await request('/api/messaging/v1/recipient', { method: 'POST', headers: { Authorization: `Bearer ${secret}` }, body: JSON.stringify({ profileId: 'public-profile' }) })
+  assert.deepEqual(await profile.json(), { status: 'unclaimed', name: 'Public profile' })
+  assert.equal(cardCalls, 1); assert.equal(profileCalls, 1)
+})

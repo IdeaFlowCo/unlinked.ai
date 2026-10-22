@@ -163,7 +163,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -195,7 +195,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map(), pickerBudgets = new Map()
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
-  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users } : {}), ...messagingOptions }) : null
+  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users } : {}), ...messagingOptions }) : null
   // "View on Unlinked" for conversation partners (docs/openchat-message.md):
   // OpenChat names which of the member's own partners have a shared Ideaflow
   // identity; that identity's owner links only if they claimed a published
@@ -1123,6 +1123,23 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
         redirect(response, started.location); return
       }
+      const cardMessage = url.pathname.match(/^\/c\/([0-9A-Za-z]{24})\/message$/)
+      if (request.method === 'POST' && cardMessage && contactCards && signup) {
+        response.setHeader('Referrer-Policy', 'no-referrer')
+        const back = `/c/${cardMessage[1]}`
+        if (!viewer) { redirect(response, `/login?next=${encodeURIComponent(back)}`); return }
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== viewer.csrf || [...input.keys()].some(key => key !== 'csrf')) throw Error('private_browser_csrf')
+        const card = await contactCards.open(cardMessage[1])
+        const target = card ? await contactCards.ownerForToken(cardMessage[1]) : null
+        if (!card || !target) { journey(response, renderContactCard({ ...chrome, card: null }), null, '', 404); return }
+        if (target.ownerId === viewer.owner.ownerId && target.userId === viewer.owner.userId) { redirect(response, back); return }
+        try {
+          const result = messaging ? await messaging.openOwner(viewer, target, card.name) : { status: 'unavailable' }
+          if (result.status === 'ready') { redirect(response, `/messages/c/${encodeURIComponent(result.conversationId)}`); return }
+          redirect(response, `${back}?message=${result.status === 'blocked' ? 'blocked' : 'failed'}`); return
+        } catch { redirect(response, `${back}?message=failed`); return }
+      }
       const contactLink = url.pathname.match(/^\/c\/([0-9A-Za-z]{24})(\/contact\.vcf)?$/)
       if (request.method === 'GET' && contactLink && contactCards && signup) {
         if (Date.now() - contactWindow >= 60000) { contactWindow = Date.now(); contactRequests = 0 }
@@ -1145,7 +1162,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         // Right after joining or adding from a card: the new connection's own card to share back.
         const added = url.searchParams.get('added') === '1' && relation?.state === 'connected'
         const own = added ? await ensureOwnCard(viewer.owner, { name: viewer.displayName }) : null
-        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, relation: relation?.state, addError: url.searchParams.get('add') === 'failed', added, own }), null, '', card ? 200 : 404); return
+        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, canMessage: Boolean(viewer && target && messaging && resolveCardMessagingRecipient), messageError: url.searchParams.get('message'), relation: relation?.state, addError: url.searchParams.get('add') === 'failed', added, own }), null, '', card ? 200 : 404); return
       }
       // Native header/directory searches accept LinkedIn URLs as well as names.
       // Navigating never spends a provider request; the lookup form does that.
