@@ -113,7 +113,7 @@ test('a member whose only import is recovered from their original Unlinked accou
   const names = [...body.matchAll(/<strong>([^<]+)<\/strong>/g)].map(match => match[1])
   assert.deepEqual(names.slice(0, 3), ['Blake Newest', 'Casey Middle', 'Avery Older'])
   assert.match(body, /3 people in your network/)
-  assert.match(body, /href="\/network\?sort=connected">See everyone by date connected/)
+  assert.match(body, /href="\/network\?connected=1&amp;sort=connected">See everyone by date connected/)
   assert.match(body, /method="get" action="\/network" role="search"/)
   assert.match(body, /href="\/card"><b>My card<\/b>/)
   // The import page offers a newer export instead of the getting-started steps.

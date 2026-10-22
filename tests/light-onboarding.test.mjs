@@ -130,7 +130,7 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   for (const view of [renderJoin({ ...account, signedIn: true }), archive, own, people, renderSettings(account), renderImporting(account)]) {
     const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
     assert.match(header, /href="https:\/\/www\.unlinked\.ai\/"/)
-    assert.match(header, /href="\/network">People/)
+    assert.match(header, /href="\/network\?connected=1">People/)
     assert.match(header, /<details class="me">/)
     assert.match(header, /role="menuitem" href="\/profile">View profile/)
     assert.match(header, /role="menuitem" href="\/settings">/)

@@ -169,6 +169,44 @@ test('notifications dedupe, never notify the actor, and track seen and read sepa
   await assert.rejects(feed.list(ada, { limit: 1000 }), /notification_limit_invalid/)
 })
 
+test('notifications created before a profile exists gain a link from account identity, without rewriting events', async t => {
+  const store = createMemoryNotificationStore()
+  let profileId = null, unavailable = false, calls = 0
+  const feed = createNotifications({ store, resolveActorProfile: async actor => {
+    calls++; assert.deepEqual(actor, ada)
+    if (unavailable) throw Error('lookup unavailable')
+    return profileId
+  } })
+  await feed.notify({ recipient: jacob, kind: 'invite_accepted', actor: ada, actorName: 'Ada Lovelace', dedupeKey: 'early-invite' })
+  const [early] = await feed.list(jacob)
+  assert.equal(early.actorProfileId, undefined)
+  profileId = 'ada-profile'
+  const [linked] = await feed.list(jacob)
+  assert.equal(linked.actorProfileId, profileId)
+  assert.equal(linked.read, false)
+  assert.equal(store.records.get(early.id).actorProfileId, undefined)
+  assert.equal(linked.actorOwnerId, undefined); assert.equal(linked.actorUserId, undefined)
+  const beforeForeignRead = calls
+  assert.equal(await feed.open(grace, early.id), null)
+  assert.equal(calls, beforeForeignRead)
+  const { signIn, get } = await site(t, { notifications: feed })
+  const member = await signIn('jacob-subject')
+  assert.match((await get('/notifications', member)).text, new RegExp(`class="note-person" href="/notifications/${early.id}\\?to=profile"`))
+  assert.equal((await get(`/notifications/${early.id}?to=profile`, member)).location, '/people/ada-profile')
+  assert.equal((await feed.list(jacob))[0].read, true)
+  unavailable = true
+  assert.equal((await feed.list(jacob))[0].actorProfileId, undefined)
+  unavailable = false
+  assert.equal((await feed.list(jacob))[0].actorProfileId, profileId)
+  await feed.notify({ recipient: grace, kind: 'invite_accepted', actor: ada, actorName: 'Ada', actorProfileId: 'original-profile', dedupeKey: 'known-profile' })
+  await feed.notify({ recipient: grace, kind: 'invite_accepted', actorName: 'Ada Lovelace', dedupeKey: 'name-only' })
+  const beforeKnownRead = calls
+  const others = await feed.list(grace)
+  assert.equal(others.find(item => item.actorName === 'Ada').actorProfileId, 'original-profile')
+  assert.equal(others.find(item => item.actorName === 'Ada Lovelace').actorProfileId, undefined)
+  assert.equal(calls, beforeKnownRead)
+})
+
 test('an accepted off-platform invite notifies the inviter once, with the name the invitee joined with', async () => {
   const feed = createNotifications({ store: createMemoryNotificationStore() })
   const invites = createMemberInvitations({ store: createMemoryInvitationStore(), onAccepted: value => feed.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName, subjectId: value.invitationId, dedupeKey: `invite-accepted:${value.invitationId}` }) })

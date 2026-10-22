@@ -9,7 +9,7 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
   let timer,controller,version=0,composing=false,typingEntry=false,enhanced=true;
   const ready=()=>{root.setAttribute('data-network-enhanced','');const help=root.querySelector('#network-search-help');if(help)help.textContent='Results update as you type.'};ready();
   const cancel=()=>{clearTimeout(timer);controller?.abort();version++};
-  const value=(u,key)=>u.searchParams.get(key)||(['sort','mode'].includes(key)?'best':'');
+  const value=(u,key)=>u.searchParams.get(key)||(key==='sort'&&u.searchParams.get('connected')==='1'?'connected':['sort','mode'].includes(key)?'best':'');
   const formURL=()=>{const form=root.querySelector('#network-filters'),fields=new URLSearchParams(new FormData(form)),url=new URL(form.action);url.search=pendingURL.search;for(const key of ['q','sort']){const live=fields.get(key)||value(new URL(form.action),key);if(live)url.searchParams.set(key,live);else url.searchParams.delete(key)}url.searchParams.delete('page');url.searchParams.delete('cursor');return url};
   const syncControls=()=>{const sort=root.querySelector('#network-sort'),wantedSort=value(pendingURL,'sort');for(const [key,label] of [['connected','Recently connected'],['imported','Recently imported']]){const option=[...sort.options].find(option=>option.value===key);if(pendingURL.searchParams.get('connected')==='1'){if(!option){const added=document.createElement('option');added.value=key;added.textContent=label;sort.append(added)}}else option?.remove()}sort.value=wantedSort;const query=root.querySelector('#network-query'),wantedQuery=value(pendingURL,'q');if(query.value!==wantedQuery)query.value=wantedQuery};
   const focusables='a,button,input:not([type="hidden"]),select,textarea,summary,[tabindex],[contenteditable="true"]';
@@ -63,6 +63,7 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
       for(const key of intentKeys){
         if(destination.searchParams.has(key))url.searchParams.set(key,destination.searchParams.get(key));else url.searchParams.delete(key);
       }
+      if(link.closest('.network-scopes')&&url.searchParams.get('connected')==='1'&&url.searchParams.get('sort')==='best')url.searchParams.delete('sort');
       if(!url.searchParams.has('connected')&&['connected','imported'].includes(url.searchParams.get('sort')))url.searchParams.delete('sort');
       if(!changed)for(const key of ['page','cursor'])if(destination.searchParams.has(key))url.searchParams.set(key,destination.searchParams.get(key));
     }

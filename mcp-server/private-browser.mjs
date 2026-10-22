@@ -2055,7 +2055,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, baseUrl, l
         const connectedValues = url.searchParams.getAll('connected')
         if (connectedValues.length > 1 || (connectedValues.length && connectedValues[0] !== '1')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
         const connectedOnly = connectedValues[0] === '1'
-        const sort = url.searchParams.get('sort') ?? 'best'
+        const sort = url.searchParams.get('sort') ?? (connectedOnly ? 'connected' : 'best')
         if (url.searchParams.getAll('sort').length > 1 || !(connectedOnly ? NETWORK_SORTS : PUBLIC_NETWORK_SORTS).includes(sort)) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
         // The same matching as the public list: every word in any form, else the closest people.
         const matcher = typed ? createQueryMatcher(typed, mode) : null

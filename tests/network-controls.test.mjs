@@ -67,6 +67,16 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   const start = await go('/login'), loginCookie = start.headers.getSetCookie()[0].split(';')[0]
   const callback = await go('/auth/callback/ideaflow?state=test&code=test', loginCookie)
   const cookie = callback.headers.getSetCookie().find(c => c.startsWith('__Host-ul-session=')).split(';')[0]
+  const defaultConnections = await (await go('/network?connected=1', cookie)).text()
+  assert.match(defaultConnections, /value="connected" selected>Recently connected/)
+  assert.ok(defaultConnections.indexOf('href="/people/p0"') < defaultConnections.indexOf('href="/people/p119"'))
+  assert.match(defaultConnections, /<a href="\/network\?connected=1">People<\/a>/)
+  const tabs = defaultConnections.match(/<nav class="network-scopes"[^>]*>(.*?)<\/nav>/)[1]
+  assert.ok(tabs.indexOf('My connections') < tabs.indexOf('Everyone'))
+  const everyonePage = await (await go('/network', cookie)).text()
+  assert.match(everyonePage, /value="best" selected>Default order/)
+  const alphabetical = await (await go('/network?connected=1&sort=name-desc', cookie)).text()
+  assert.ok(alphabetical.indexOf('href="/people/p119"') < alphabetical.indexOf('href="/people/p0"'))
   const page = await (await go('/network?connected=1&presence=member&sort=connected', cookie)).text()
   assert.ok(page.indexOf('href="/people/p0"') < page.indexOf('href="/people/p119"'), page.replace(/<style>[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/g, ''))
   assert.match(page, /Connected <time datetime="2014-01-01"/)
