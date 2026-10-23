@@ -1,4 +1,4 @@
-// Take your data with you (docs/data-liberation.md): a public page of official
+// Data liberation (docs/data-liberation.md): a public page of official
 // export links for LinkedIn, Facebook, Instagram and other big platforms,
 // linked from every footer, Settings → Your data and the LinkedIn import guide.
 import test from 'node:test'
@@ -35,7 +35,8 @@ test('the page answers without a session and links each service’s own export p
   const app = await site(t)
   for (const method of ['GET', 'HEAD']) assert.equal((await app.request('/data-liberation', { method })).status, 200, method)
   const body = await (await app.request('/data-liberation')).text()
-  assert.match(body, /<h1 class="hq">Take your data with you<\/h1>/)
+  assert.match(body, /<h1 class="hq">Data liberation<\/h1>/)
+  assert.match(body, /<title>Data liberation · Unlinked<\/title>/)
   const links = Object.fromEntries(DATA_EXPORTS.map(value => [value.id, value.url]))
   assert.equal(links.linkedin, 'https://www.linkedin.com/mypreferences/d/download-my-data')
   assert.equal(links.facebook, 'https://accountscenter.facebook.com/info_and_permissions/dyi')
@@ -60,11 +61,11 @@ test('the page answers without a session and links each service’s own export p
 
 test('every footer links the page; Settings and the import guide mention it once, quietly', async t => {
   const app = await site(t)
-  for (const path of ['/', '/join', '/agents', '/support', '/data-liberation']) assert.ok(footerOf(await (await app.request(path)).text()).includes('<a href="/data-liberation">Export your data</a>'), path)
+  for (const path of ['/', '/join', '/agents', '/support', '/data-liberation']) assert.ok(footerOf(await (await app.request(path)).text()).includes('<a href="/data-liberation">Data liberation</a>'), path)
   const session = await app.signIn()
   const settings = await (await app.request('/settings', { headers: { Cookie: session } })).text()
   const yourData = settings.slice(settings.indexOf('<h2 id="your-data">'))
-  assert.match(yourData.slice(0, 1500), /<a href="\/data-liberation">Take your data with you →<\/a>/)
+  assert.match(yourData.slice(0, 1500), /<a href="\/data-liberation">Data liberation →<\/a>/)
   assert.equal((renderImportGuide().content.match(/href="\/data-liberation"/g) ?? []).length, 2) // the note and the footer
   // Signed in, the page points at Settings directly.
   assert.ok((await (await app.request('/data-liberation', { headers: { Cookie: session } })).text()).includes('href="/settings#your-data"'))
