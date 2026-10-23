@@ -6,6 +6,7 @@ import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { SEARCH_MODES } from '../src/utils/public-people/text-match.mjs'
+import { UNLINKED_PROFILE_ORIGIN } from '../src/utils/openchat-profile-context.mjs'
 import { ConnectionError } from './member-connections.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
 import { PRIVATE_NOTES_TOOLS, scopeAllowsConnectionActions, scopeAllowsPrivateNotes, scopeCoversPublic } from './account-grants.mjs'
@@ -96,7 +97,7 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_whoami: 'Return the authenticated grant owner: the stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy-profile anchor if any. Linkage is the grant itself — never email matching. No contact email/phone is returned.',
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=legacy keeps recovered accounts awaiting claim, presence=shadow keeps imported profiles without a recovered account. sort: best (default: relevance with q, else stored name order), name (A–Z by first letter or number, ignoring leading emoji/punctuation, accents and case), name-desc, raw (Unicode code-point order of the name as written). Paginated with an opaque cursor bound to the query and sort, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Degree 1 groups one entry per person (grouping "person", default) when records share exact identity evidence — the same published profile (merges followed) or the same LinkedIn address, never a name — with sources[] listing every underlying record (provenance, visibility) and top-level fields from the owner import; total counts people. grouping "none" returns one row per source record. sort: name (default; A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case — names are shown exactly as written), raw (Unicode code-point order), name-desc, connected (most recently connected first), imported (most recently imported first), company. Paginated, at most 50 per page; the cursor is bound to q, sort and grouping.',
-  unlinked_get_profile: 'Read one published public profile by id with its public connections page. Returns typed not_found when no published profile has that id.',
+  unlinked_get_profile: 'Read one published public profile by id (or a member handle) with its public connections page. Member profiles include their handle and public url. Returns typed not_found when no published profile has that id.',
   unlinked_list_connection_requests: 'Read-only: list the owner’s open member-to-member connection requests. direction "received" (default) lists requests waiting for the owner’s answer; "sent" lists requests the owner sent that are still pending. Names, public profile ids, optional notes and times only. Grants with the opt-in connections scope can answer and send requests with the connection-request write tools.',
   unlinked_list_notifications: 'Read-only: list the owner’s newest in-app notifications (connection requests received or accepted, invites accepted, people they know joining) with unseen/unread counts. Reading here does not mark anything seen or read.',
   unlinked_send_connection_request: 'Opt-in write tool. Send a connection request, as the owner, to the member behind a published profile id (presence member; imported shadows cannot be asked). Same rules and limits as pressing Connect on the site: one open request per pair, 50 new requests per day, a 21-day wait after withdrawing; asking someone who already asked the owner accepts their request. Optional note up to 300 characters. Returns status sent or accepted.',
@@ -153,7 +154,7 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 // `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
 // people overlay client (private-context.mjs) and the owner identity bridge.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, overlay, identityFor, limits = {} }) {
+export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, overlay, identityFor, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // Write tools use the same rules as the site's Connect button.
@@ -193,6 +194,12 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     return () => { value.aiBusy--; aiBusyTotal-- }
   }
 
+  // A member profile carries its handle and public address; others keep ids only.
+  const handleOf = profile => profile?.presence === 'member' ? profileHandles?.handleFor(profile.id) ?? null : null
+  const withHandle = (profile, address = false) => {
+    const handle = handleOf(profile)
+    return handle ? { ...profile, handle, ...(address ? { url: `${UNLINKED_PROFILE_ORIGIN}/people/${encodeURIComponent(handle)}` } : {}) } : profile
+  }
   const publicReader = pageSize => {
     if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
     const captured = { revision: null, total: null }
@@ -319,24 +326,26 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         legacyProfile: legacy ? { profileId: legacy.profileId, name: legacy.profile?.name ?? null, revision: legacy.revision } : null,
         publicIndexAvailable: typeof readPublishedSnapshot === 'function' }
     },
+    // Members' public addresses use their handle (docs/profile-handles.md).
     async unlinked_list_people(grant, { q = '', mode = 'best', presence, sort = 'best', cursor, limit = 50 }, signal) {
       const { reader, captured } = publicReader(limit)
       let result
       try { result = await reader.list({ query: q, mode, presence, sort, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
       return { kind: 'unlinked_list_people', revision: captured.revision, ...(sort !== 'best' ? { sort } : {}), total: result.total ?? captured.total ?? result.profiles.length,
-        ...(result.match ? { match: result.match } : {}), profiles: result.profiles,
+        ...(result.match ? { match: result.match } : {}), profiles: result.profiles.map(withHandle),
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), visibility: 'public' }
     },
     async unlinked_get_profile(grant, { id, connectionsCursor }, signal) {
       const { reader, captured } = publicReader(50)
       let result
       try {
-        result = await reader.profile({ id, cursor: connectionsCursor, signal })
+        result = await reader.profile({ id: profileHandles?.resolve(id)?.profileId ?? id, cursor: connectionsCursor, signal })
         // A merged profile answers with the profile it was merged into.
         if (result?.moved) result = { ...(await reader.profile({ id: result.moved, signal })), movedFrom: id }
       } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured) }
-      if (!result?.profile) throw new AccountToolError('not_found', 'No published public profile has that id.')
-      return { kind: 'unlinked_get_profile', revision: captured.revision, profile: result.profile, ...(result.movedFrom ? { movedFrom: result.movedFrom } : {}), visibility: 'public' }
+      // A handle names only a member's profile.
+      if (!result?.profile || (profileHandles?.resolve(id) && !handleOf(result.profile))) throw new AccountToolError('not_found', 'No published public profile has that id.')
+      return { kind: 'unlinked_get_profile', revision: captured.revision, profile: withHandle(result.profile, true), ...(result.movedFrom ? { movedFrom: result.movedFrom } : {}), visibility: 'public' }
     },
     async unlinked_list_connections(grant, { degree = 1, q = '', sort = 'name', grouping = 'person', cursor, limit = 50 }, signal) {
       const owner = { ownerId: grant.ownerId, userId: grant.userId }

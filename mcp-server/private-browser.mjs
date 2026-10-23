@@ -26,6 +26,7 @@ import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/privat
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { normalizeSocialLinks, SOCIAL_LINK_LIMITS } from '../src/utils/public-people/profile-links.mjs'
+import { profilePath, setProfileHandleLookup } from '../src/utils/public-people/profile-handles.mjs'
 import { stageArchive, importJobStatus, importErrorMessage, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
@@ -37,7 +38,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
@@ -158,13 +159,13 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
   if (item.kind === 'connection_request_received') return '/invitations'
   const profile = messaging && item.kind === 'connection_request_accepted' ? unlinkedProfileContext(item.actorProfileId) : null
   if (profile) return `/messages?profile=${encodeURIComponent(profile)}`
-  return item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : item.kind === 'invite_accepted' ? '/invites' : '/network'
+  return item.actorProfileId ? profilePath(item.actorProfileId) : item.kind === 'invite_accepted' ? '/invites' : '/network'
 }
 
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -177,6 +178,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   if (contactCards !== undefined && ['read', 'save', 'rotate', 'syncIdentity', 'open', 'exportOwner', 'removeOwner'].some(key => typeof contactCards[key] !== 'function')) throw new Error('contact_card_configuration_required')
   if (homePreferences !== undefined && ['get', 'set', 'removeOwner'].some(key => typeof homePreferences?.[key] !== 'function')) throw new Error('home_preference_configuration_required')
   if (profileSocialLinks !== undefined && ['get', 'set', 'forProfile', 'removeOwner'].some(key => typeof profileSocialLinks?.[key] !== 'function')) throw new Error('profile_links_configuration_required')
+  if (profileHandles !== undefined && ['resolve', 'handleFor', 'ensure', 'availability', 'rename', 'removeProfile'].some(key => typeof profileHandles?.[key] !== 'function')) throw new Error('profile_handles_configuration_required')
+  // Every emitted /people/ link prefers the member's handle (docs/profile-handles.md).
+  setProfileHandleLookup(profileHandles ? id => profileHandles.handleFor(id) : null)
+  // The profile id a /people/ segment names: a handle (any case) or the id itself.
+  const handleTarget = segment => profileHandles?.resolve(segment)?.profileId ?? segment
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
   if (oauth !== undefined && (typeof signup !== 'function' || typeof oauth.readAuthorization !== 'function' || typeof oauth.approve !== 'function' || typeof oauth.deny !== 'function')) throw new Error('oauth_connector_configuration_required')
@@ -491,7 +497,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   const dropAccountNetwork = owner => { if (owner?.ownerId) networkCache.delete(`${owner.ownerId}\u0000${owner.userId}`) }
   const linkedinPersonDestination = async (owner, address, reader = publicReader) => {
     const published = await reader.lookupLinkedin({ address })
-    if (published) return `/people/${encodeURIComponent(published.id)}`
+    if (published) return profilePath(published.id)
     if (!owner) return null
     const slug = parseLinkedinProfileUrl(address)?.slug
     const network = await accountNetwork(owner)
@@ -655,7 +661,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     if (connectProfileId && connectionActions) {
       let code = 'connection_unavailable'
       try { code = (await connectionActions.send(owner, { profileId: connectProfileId, fallbackName: displayName })).code } catch (failure) { if (failure instanceof ConnectionError) code = failure.code === 'connection_profile_not_found' ? 'connection_not_available' : failure.code }
-      redirect(response, `/people/${encodeURIComponent(connectProfileId)}?connect=${encodeURIComponent(connectNoticeCodes.includes(code) ? code : 'connection_unavailable')}&joined=1`); return 'signed_in'
+      redirect(response, `${profilePath(connectProfileId)}?connect=${encodeURIComponent(connectNoticeCodes.includes(code) ? code : 'connection_unavailable')}&joined=1`); return 'signed_in'
     }
     // An invitation link someone signed in to answer comes first; its page then
     // continues to the old-account or find-me step when there is one.
@@ -828,13 +834,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   async function removalRequest(request, response, rawId, viewer, chrome) {
     response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
     let id
-    try { id = decodeURIComponent(rawId) } catch { response.writeHead(404).end(); return }
+    try { id = handleTarget(decodeURIComponent(rawId)) } catch { response.writeHead(404).end(); return }
     let found
     // The whole directory, on every client: the request is about the person, wherever they were seen.
     try { found = typeof readPublishedSnapshot === 'function' ? await publicReader.profile({ id }) : null }
     catch { journey(response, renderPeopleUnavailable(chrome), null, '', 503); return }
     if (!found) { response.writeHead(404).end(); return }
-    if (found.moved) { redirect(response, `/people/${encodeURIComponent(found.moved)}/removal`); return }
+    if (found.moved) { redirect(response, `${profilePath(found.moved)}/removal`); return }
     const profile = found.profile
     const view = (extra, status = 200) => journey(response, renderRemovalRequest({ ...chrome, profile, ...extra }), null, '', status)
     if (profile.presence === 'member') { view({ state: 'member' }); return }
@@ -906,8 +912,33 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     return record
   }
   const blockFor = async (owner, profileId) => memberBlocks && profileId ? (await bounded(() => memberBlocks.list(owner), [])).find(value => value.blockedProfileId === profileId) ?? null : null
+  // Members get their default handle without waiting for a page view; the
+  // reload keeps handles another process wrote in step. LinkedIn vanity
+  // handles go first, so a name never takes a member's own slug.
+  const backfillHandles = async () => {
+    if (!profileHandles || typeof readPublishedSnapshot !== 'function') return 0
+    if (typeof profileHandles.reload === 'function') await profileHandles.reload()
+    const members = []
+    let cursor
+    do { const page = await publicReader.list({ presence: 'member', cursor }); members.push(...page.profiles); cursor = page.nextCursor } while (cursor && members.length < 20000)
+    const missing = []
+    for (const member of members) {
+      if (profileHandles.handleFor(member.id)) continue
+      const found = await publicReader.profile({ id: member.id }).catch(() => null)
+      if (found?.profile?.presence === 'member') missing.push(found.profile)
+    }
+    missing.sort((a, b) => Number(Boolean(b.linkedinUrl)) - Number(Boolean(a.linkedinUrl)))
+    let assigned = 0
+    for (const profile of missing) if (await profileHandles.ensure(profile).catch(() => null)) assigned++
+    return assigned
+  }
+  if (profileHandles && handleBackfillMs > 0) {
+    const run = () => backfillHandles().catch(() => process.stderr.write('unlinked_handle_backfill_failed\n'))
+    setTimeout(run, Math.min(handleBackfillMs, 5000)).unref?.()
+    setInterval(run, handleBackfillMs).unref?.()
+  }
   let lastPrune = Date.now()
-  return async (request, response) => {
+  const serve = async (request, response) => {
     // GET page navigations allow the browser's back/forward cache, so Back
     // from a profile restores the search results instantly without a request.
     // `private, no-cache` still forces revalidation on normal navigations, and
@@ -953,6 +984,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           if (query === '') readerFor(request).warm()
           const groups = viewer ? viewerGroups(viewer.owner) : null
           const result = query === '' ? { people: [], companies: [] } : await readerFor(request).suggest({ query, ...(known ? { known } : {}), ...(groups ? { unlistedGroups: groups } : {}) })
+          if (profileHandles && Array.isArray(result.people)) result.people = result.people.map(row => { const handle = row.presence === 'member' ? profileHandles.handleFor(row.id) : null; return handle ? { ...row, handle } : row })
           response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify(result))
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
@@ -971,11 +1003,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         try {
           if ([...url.searchParams.keys()].length) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
           let id
-          try { id = decodeURIComponent(hoverCard[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
+          try { id = handleTarget(decodeURIComponent(hoverCard[1])) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
           const viewer = sessionFor(request), known = viewer ? knownPeople(viewer.owner) : null
           const result = await readerFor(request).card({ id, ...(known ? { known } : {}) })
           if (!result) { response.writeHead(404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'not_found' })); return }
           const card = { ...result.card }
+          const cardHandle = card.presence === 'member' ? profileHandles?.handleFor(card.id) : null
+          if (cardHandle) card.handle = cardHandle
           if (viewer && card.presence === 'member') {
             if (memberConnections && signup) { const relation = await bounded(() => connectionActions.relationTo(viewer.owner, card.id), undefined); if (relation?.state) card.relation = relation.state }
             if (messaging && card.relation !== 'self') { const context = unlinkedProfileContext(card.id); if (context) card.message = `/messages?profile=${encodeURIComponent(context)}` }
@@ -1242,12 +1276,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
         if ([...input.keys()].length) throw new Error('private_browser_csrf')
         let id
-        try { id = decodeURIComponent(profileJoin[1]) } catch { response.writeHead(404).end(); return }
+        try { id = handleTarget(decodeURIComponent(profileJoin[1])) } catch { response.writeHead(404).end(); return }
         let found = await publicReader.profile({ id }).catch(() => null)
         if (found?.moved) found = await publicReader.profile({ id: found.moved }).catch(() => null)
         const target = found?.profile?.presence === 'member' ? found.profile.id : null
         if (!target) { response.writeHead(404).end(); return }
-        const path = `/people/${encodeURIComponent(target)}`
+        const path = profilePath(target)
         if (viewer) { redirect(response, path); return }
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
@@ -1261,13 +1295,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       const profileSafety = url.pathname.match(/^\/people\/([^/]{1,480})\/(report|block)$/)
       if (profileSafety && ['GET', 'POST'].includes(request.method)) {
         let id
-        try { id = decodeURIComponent(profileSafety[1]) } catch { response.writeHead(404).end(); return }
+        try { id = handleTarget(decodeURIComponent(profileSafety[1])) } catch { response.writeHead(404).end(); return }
         let found
         try { found = typeof readPublishedSnapshot === 'function' ? await publicReader.profile({ id }) : null }
         catch { journey(response, renderPeopleUnavailable(chrome), null, '', 503); return }
         if (!found) { response.writeHead(404).end(); return }
-        if (found.moved) { redirect(response, `/people/${encodeURIComponent(found.moved)}/${profileSafety[2]}`); return }
-        const profile = found.profile, path = `/people/${encodeURIComponent(profile.id)}`
+        if (found.moved) { redirect(response, `${profilePath(found.moved)}/${profileSafety[2]}`); return }
+        const profile = found.profile, path = profilePath(profile.id)
         if (profileSafety[2] === 'report') {
           const canBlock = Boolean(viewer && memberBlocks && profile.presence === 'member' && !(await blockFor(viewer.owner, profile.id)))
           await reportRoute(request, response, { viewer, chrome, kind: 'profile', targetType: 'profile', targetId: profile.id, target: { name: profile.name, presence: profile.presence, profile }, action: `${path}/report`, back: path, blockHref: canBlock ? `${path}/block` : null }); return
@@ -1313,8 +1347,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             journey(response, renderCompany({ ...chrome, ...result, name, facts })); return
           }
           if (publicDetail || publicProfile) {
-            let id
-            try { id = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
+            let id, requested
+            try { requested = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
+            // A handle names a member's profile id; ids keep working (docs/profile-handles.md).
+            const named = profileHandles?.resolve(requested) ?? null
+            id = named?.profileId ?? requested
             const connectionQuery = publicProfile ? url.searchParams.get('q') ?? '' : ''
             const connectionSort = publicProfile ? url.searchParams.get('sort') ?? 'detail' : 'name'
             // "You both know" needs the viewer's own people; signed out, or
@@ -1332,7 +1369,16 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
               response.writeHead(404).end(); return
             }
             // A merged profile's old address moves to the profile it was merged into.
-            if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? '/api/people/' : '/people/'}${encodeURIComponent(result.moved)}${publicProfile?.[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
+            if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? `/api/people/${encodeURIComponent(result.moved)}` : profilePath(result.moved)}${publicProfile?.[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
+            // Handles belong to members only: a handle never opens anyone else's
+            // page, and a member's id or earlier handle moves to the current one.
+            let handle = null
+            if (profileHandles && result.profile.presence === 'member') {
+              handle = profileHandles.handleFor(result.profile.id) ?? await bounded(() => profileHandles.ensure(result.profile), null)
+            }
+            if (named && !handle) { response.writeHead(404).end(); return }
+            if (publicProfile && handle && requested !== handle) { response.writeHead(301, { Location: `/people/${encodeURIComponent(handle)}${publicProfile[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
+            if (handle) result.profile.handle = handle
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
             // Connect: only members (an account stands behind the profile) can be asked.
             let connect
@@ -1827,13 +1873,16 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // Full RFC 3986 escaping so the target always matches the card grammar
         // that /meet scanning accepts (encodeURIComponent leaves !'()* alone).
         const profileHref = id => `/people/${encodeURIComponent(id).replace(/[!'()*]/g, character => '%' + character.charCodeAt(0).toString(16).toUpperCase())}`
-        let cardUrl = null, indexRead = true
+        let cardUrl = null, cardId = null, indexRead = true
         if (typeof readPublishedSnapshot === 'function') {
           for (const id of candidates.slice(0, 8)) {
             try {
               const found = await publicReader.profile({ id })
               if (found) {
-                cardUrl = new URL(profileHref(found.moved ?? id), base).href
+                cardId = found.moved ?? id
+                // The card and its QR code carry the member's handle address.
+                if (profileHandles && found.profile?.presence === 'member' && !profileHandles.handleFor(cardId)) await bounded(() => profileHandles.ensure(found.profile), null)
+                cardUrl = new URL(profileHref(profileHandles?.handleFor(cardId) ?? cardId), base).href
                 // The card shows the public profile's published photo, if any.
                 const photo = profilePhotos?.urlFor(found.moved ?? id)
                 if (photo) profile.photo = photo
@@ -1844,9 +1893,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           }
         }
         session.headline = profile.headline
-        return { profile, hasStoredProfile, cardUrl, publicProfileUrl: cardUrl ? unlinkedProfileContext(decodeURIComponent(new URL(cardUrl).pathname.slice('/people/'.length))) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(profile.linkedinUrl ? { linkedinUrl: profile.linkedinUrl } : {}), ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
+        return { profile, hasStoredProfile, cardUrl, publicProfileUrl: cardId ? unlinkedProfileContext(cardId) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(profile.linkedinUrl ? { linkedinUrl: profile.linkedinUrl } : {}), ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
       }
-      if (signup && ((request.method === 'GET' && ['/profile', '/card', '/scan'].includes(url.pathname)) || (request.method === 'POST' && ['/profile/links', '/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname)))) {
+      if (signup && ((request.method === 'GET' && ['/profile', '/card', '/scan'].includes(url.pathname)) || ((request.method === 'GET' && url.pathname === '/profile/handle/check') || (request.method === 'POST' && ['/profile/links', '/profile/handle', '/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname))))) {
         let hidden
         try { hidden = await ownSuspended(session.owner, backend) } catch { render(response, 'Profile unavailable', '<p>Your Unlinked profile is unavailable right now. Please try again in a minute.</p>', 503); return }
         if (hidden) { render(response, 'Profile unavailable', '<p>Your Unlinked profile is temporarily unavailable. Your account and sign-in are unaffected. Questions: <a href="mailto:support@ideaflow.app">support@ideaflow.app</a>.</p>', 404); return }
@@ -1874,12 +1923,18 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         } catch { /* The profile stands on its own while the network is still being read. */ }
         await warming
         // The photo published for this member's public profile, when there is one.
-        let mine = null
+        let mine = null, profileHandleView = null
         if (typeof ownProfileId === 'function') {
           mine = await ownProfileId(session.owner).catch(() => null)
           const photo = mine ? profilePhotos?.urlFor(mine) : null
           if (photo) profile.photo = photo
           const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
+          // The member's handle (docs/profile-handles.md): given on first view, editable here.
+          if (profileHandles && published?.profile?.presence === 'member') {
+            const current = profileHandles.handleFor(published.profile.id) ?? await bounded(() => profileHandles.ensure(published.profile), null)
+            const notice = url.searchParams.get('handle')
+            if (current) profileHandleView = { handle: current, ...(['saved', 'taken', 'invalid', 'length', 'reserved', 'limit', 'unavailable'].includes(notice) ? { notice } : {}) }
+          }
           for (const key of ['linkedinUrl', 'website', 'company', 'industry', 'location']) if (!profile[key] && published?.profile?.[key] && (key !== 'company' || !profile.positions?.length)) profile[key] = published.profile[key]
         }
         // The member's own public links (unlinked-8dm): saved choice, header
@@ -1895,7 +1950,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           const line = Number.parseInt(url.searchParams.get('line') ?? '', 10)
           socialLinks = { links: saved?.links ?? [], canPublish: Boolean(mine), ...(['saved', 'invalid', 'limit'].includes(notice) ? { notice } : {}), ...(Number.isSafeInteger(line) && line > 0 && line <= 99 ? { line } : {}) }
         }
-        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), summary, socialLinks, ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob); return
+        journey(response, renderOwnProfile({ ...props, profile, publicProfileUrl, contacts, connectionCount, imports: summaries(jobs), summary, socialLinks, ...(profileHandleView ? { profileHandle: profileHandleView } : {}), ...(testClaim ? { testClaim } : {}), ...(offerLookup ? { linkedinLookup: { action: '/find-me' } } : {}) }), props.importJob, profileHandleView ? PROFILE_HANDLE_SCRIPT : ''); return
       }
       // Saving the member's own public links (unlinked-8dm): one address per
       // line, validated by the shared grammar; an empty list removes them.
@@ -1911,6 +1966,29 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const mine = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
         await profileSocialLinks.set(session.owner, { profileId: mine, links: normalized.links.map(link => link.url) })
         redirect(response, '/profile?links=saved#public-links'); return
+      }
+      // A member's handle (docs/profile-handles.md): the availability check the
+      // edit field calls as you type, and the save. Only the account behind a
+      // published member profile can change that profile's handle.
+      if (signup && profileHandles && ((request.method === 'GET' && url.pathname === '/profile/handle/check') || (request.method === 'POST' && url.pathname === '/profile/handle'))) {
+        const checking = request.method === 'GET'
+        const input = checking ? url.searchParams : new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        const fields = checking ? ['handle'] : ['csrf', 'handle']
+        if ([...input.keys()].some(key => !fields.includes(key) || input.getAll(key).length !== 1) || input.getAll('handle').length !== 1 || (!checking && input.get('csrf') !== session.csrf)) {
+          if (checking) { response.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error: 'invalid_request' })); return }
+          throw new Error('private_browser_csrf')
+        }
+        const mine = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
+        const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
+        const own = published?.profile?.presence === 'member' ? published.profile.id : null
+        if (checking) {
+          const answer = own ? profileHandles.availability(input.get('handle'), own) : { code: 'unavailable' }
+          response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private' })
+          response.end(JSON.stringify(answer.handle && answer.available ? { available: true, handle: answer.handle, current: profileHandles.handleFor(own) === answer.handle } : { available: false, code: answer.code })); return
+        }
+        if (!own) { redirect(response, '/profile?handle=unavailable#profile-handle'); return }
+        const result = await profileHandles.rename(own, input.get('handle')).catch(() => ({ code: 'unavailable' }))
+        redirect(response, `/profile?handle=${result.handle ? 'saved' : encodeURIComponent(result.code ?? 'unavailable')}#profile-handle`); return
       }
       if (signup && request.method === 'GET' && (url.pathname === '/card' || url.pathname === '/scan')) {
         const jobs = await jobResources(), props = jobProps(jobs)
@@ -1979,7 +2057,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // Check again: another user may have published the same person while
         // this preview was open. A lookup never fabricates a member or claim.
         const existing = await readerFor(request).lookupLinkedin({ address: candidate.result.address })
-        if (existing) { redirect(response, `/people/${encodeURIComponent(existing.id)}`); return }
+        if (existing) { redirect(response, profilePath(existing.id)); return }
         if (!candidate.saved) {
           const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
           const slug = parseLinkedinProfileUrl(candidate.result.address).slug
@@ -2054,7 +2132,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           catch (failure) { if (failure instanceof ConnectionError && failure.code === 'connection_profile_not_found') { connectionFailure(response, 'That profile is no longer available. Return to People to find them again.', 404); return } throw failure }
           // A Connect button on a People row returns to that listing; the profile's own button to the profile.
           const listing = networkReturn(input.get('next'))
-          redirect(response, afterConnection(listing ? input.get('next') : `/people/${encodeURIComponent(outcome.profileId)}`, outcome.code)); return
+          redirect(response, afterConnection(listing ? input.get('next') : profilePath(outcome.profileId), outcome.code)); return
         }
         if (input.getAll('id').length !== 1) throw new Error('private_browser_csrf')
         let code
@@ -2092,7 +2170,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const toProfile = url.search === '?to=profile'
         const item = await notifications.open(session.owner, notificationItem[1])
         const contact = item && toProfile && !item.actorProfileId ? await notificationContact(session.owner, item).catch(() => null) : null
-        redirect(response, !item ? '/notifications' : toProfile && item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : contact ?? notificationTarget(item)); return
+        redirect(response, !item ? '/notifications' : toProfile && item.actorProfileId ? profilePath(item.actorProfileId) : contact ?? notificationTarget(item)); return
       }
       if (signup && notifications && request.method === 'POST' && url.pathname === '/notifications/read-all') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
@@ -2284,6 +2362,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (personLookup) await personLookup.removeOwner(session.owner)
         // Member-published public links go with the account.
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
+        // So do the member's handles, current and earlier.
+        if (profileHandles && typeof ownProfileId === 'function') { const mine = await ownProfileId(session.owner).catch(() => null); if (mine) await profileHandles.removeProfile(mine) }
         // Reports this member sent stay for review, without who sent them.
         if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
         // Blocks this member made, and blocks of this member.
@@ -2451,4 +2531,6 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (!response.headersSent) render(response, recovery ? 'Account recovery required' : 'We could not finish that', recovery ? '<p>Your Ideaflow identity could not be safely mapped to an existing or newly provisioned Unlinked owner. No archive was accepted. Complete the trusted account recovery/provisioning step.</p>' : '<p>Try again, or sign in and return to your files in Settings. Your account and files have not been moved to another account.</p><a href="/settings">Open Settings</a>', limited ? 413 : recovery ? 409 : 400)
     }
   }
+  serve.backfillHandles = backfillHandles
+  return serve
 }

@@ -23,6 +23,7 @@ import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
 import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
 import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
+import { createNeo4jProfileHandleStore, createProfileHandles } from './profile-handles.mjs'
 import { createNeo4jSafetyReportStore, createSafetyReports } from './safety-reports.mjs'
 import { createNeo4jBlockStore, createMemberBlocks } from './member-blocks.mjs'
 import { createProfilePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
@@ -88,7 +89,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -203,6 +204,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // Member-published public profile links (docs/profile-social-links.md).
     const profileSocialLinks = typeof dependencies.createProfileLinkStore === 'function' ? dependencies.createProfileLinkStore(driver, 'neo4j') : undefined
     await profileSocialLinks?.initialize()
+    // Member handles: readable /people/<handle> addresses (docs/profile-handles.md).
+    const profileHandles = typeof dependencies.createProfileHandleStore === 'function' ? createProfileHandles({ store: dependencies.createProfileHandleStore(driver, 'neo4j') }) : undefined
+    await profileHandles?.initialize()
     // Operator-published company facts (docs/company-facts.md), merged over the
     // static list with a 60 s cache; a failed read serves the static list.
     const companyFactsStore = typeof dependencies.createCompanyFactsStore === 'function' ? dependencies.createCompanyFactsStore(driver, 'neo4j') : null
@@ -613,6 +617,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       contactCards,
       homePreferences,
       profileSocialLinks,
+      profileHandles,
       safetyReports,
       memberBlocks,
       lookupCompanyFacts,

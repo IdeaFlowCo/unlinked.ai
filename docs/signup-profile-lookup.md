@@ -130,7 +130,8 @@ count. Source readers stay available while the feature is off.
 
 Only confirmed sources with an active exact owner/user binding enter the live
 shared People projection. They count as members and appear right away at the
-stable `/people/member-signup-<account-hash>` address. They are separate from
+stable `/people/member-signup-<account-hash>` id, which redirects to the
+member's readable handle address (docs/profile-handles.md). They are separate from
 recovered legacy claim evidence and from operator `curated-enrichment-v1` data.
 Server-side account resolution recognizes confirmed legacy profiles, active
 signup sources and public-consent member imports. An account's public identity

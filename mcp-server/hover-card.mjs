@@ -25,7 +25,7 @@ export const HOVER_CARD_SCRIPT = `(()=>{
   function render(link,d){
     card?.remove();
     card=el('div','hovercard');card.setAttribute('role','dialog');card.setAttribute('aria-label',d.name||'Person');
-    const href='/people/'+encodeURIComponent(d.id);
+    const href='/people/'+encodeURIComponent(d.handle||d.id);
     const top=el('div','hc-top');
     let face;if(d.photo){face=el('img','hc-photo');face.src=d.photo;face.alt=''}else face=el('span','hc-photo hc-initials',initials(d.name));
     const who=el('div','hc-who'),name=el('a','hc-name',d.name);name.href=href;who.append(name);
