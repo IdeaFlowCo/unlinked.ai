@@ -136,7 +136,15 @@ const jobStatus = job => {
   return `<aside class="import-status" role="status" aria-live="polite"><strong>${label}</strong>${!finished ? `${progress(job)}<p>Keeps running even if you leave this page.</p>${job.profileReady ? '<p>Your profile is ready; connections are still coming in.</p>' : ''}` : ''}${job.status === 'partial' ? `<p><a href="/settings">${rowsSkipped(job) ? 'Details' : 'Review in Settings'}</a></p>` : ''}${job.errorMessage ? `<p>${html(job.errorMessage)}</p>` : ''}</aside>`
 }
 const jobPill = job => { if (!knownJob(job) || terminalJob(job)) return ''; const value = jobProgress(job); return `<a class="pill" href="/profile" title="Importing keeps running even if you leave">${value ? `Importing · ${value.percent}%` : 'Importing…'}</a>` }
-const footer = ({ csrf, accountLabel }) => `<footer><span>unlinked · an open professional network · <span class="app-version">v${html(APP_VERSION)}</span></span><span><a href="https://www.unlinked.ai/meet" target="_blank" rel="noopener noreferrer">Meet someone in person ↗</a><a href="${FEEDBACK_URL}" target="_blank" rel="noopener noreferrer">Feedback ↗</a><a href="/support">Support</a><a href="${PRIVACY_URL}" target="_blank" rel="noopener noreferrer">Privacy</a><a href="${TERMS_URL}" target="_blank" rel="noopener noreferrer">Terms</a><a href="/agents">For agents</a><a href="/llms.txt">llms.txt</a></span><span>Not affiliated with LinkedIn.</span>${csrf ? `<span class="account">${accountLabel ? `Signed in as ${html(accountLabel)} · ` : ''}<form class="sign-out" method="post" action="/logout">${csrfInput(csrf)}<button class="link-button">Sign out</button></form></span>` : ''}</footer>`
+// world-issue-tracker-uonq (design review Option A): the footer used to
+// link "Feedback ↗" straight out to the public WIT board. That's now the
+// WIT feedback widget's own mount point — feedback-widget.mjs's
+// feedbackWidgetTag() points data-mount-selector at #wit-feedback-slot, so
+// the widget renders its inline text-link trigger here (opening the
+// embedded capture panel in place) instead of a position:fixed floating
+// bubble. One feedback entry point in the footer, not two. Renders empty
+// (zero layout footprint) until the widget script attaches.
+const footer = ({ csrf, accountLabel }) => `<footer><span>unlinked · an open professional network · <span class="app-version">v${html(APP_VERSION)}</span></span><span><a href="https://www.unlinked.ai/meet" target="_blank" rel="noopener noreferrer">Meet someone in person ↗</a><span id="wit-feedback-slot"></span><a href="/support">Support</a><a href="${PRIVACY_URL}" target="_blank" rel="noopener noreferrer">Privacy</a><a href="${TERMS_URL}" target="_blank" rel="noopener noreferrer">Terms</a><a href="/agents">For agents</a><a href="/llms.txt">llms.txt</a></span><span>Not affiliated with LinkedIn.</span>${csrf ? `<span class="account">${accountLabel ? `Signed in as ${html(accountLabel)} · ` : ''}<form class="sign-out" method="post" action="/logout">${csrfInput(csrf)}<button class="link-button">Sign out</button></form></span>` : ''}</footer>`
 // My Network and the notification bell. The runtime fills the slot per request
 // (fillNavAlerts) with live counts, and only when those features are configured;
 // an unfilled slot is an empty comment.
