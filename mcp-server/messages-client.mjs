@@ -43,6 +43,11 @@ function messagesClient(config) {
   const $ = id => document.getElementById(id)
   const listEl = $('msg-list'), threadEl = $('msg-thread'), statusEl = $('msg-status'), filterEl = $('msg-filter')
   const FIVE_MINUTES = 5 * 60000, REACTIONS = config.reactions
+  // Mirrors messaging-proxy.mjs's MAX_CONTENT. A native <textarea maxlength> would
+  // silently clip a paste over this limit with no feedback — the exact "truncating
+  // long messages" bug report — so composers stay unbounded and this check runs at
+  // submit time instead, where it can tell the member what happened.
+  const MAX_CONTENT = 8000
   // Dock mode: the same client in a small panel on other pages (no URL changes,
   // no page title, keyboard shortcuts only inside the panel, stream only while open).
   const docked = config.dock === true, dock = docked ? document.getElementById('msg-dock') : null
@@ -494,7 +499,7 @@ function messagesClient(config) {
     renderReply(); renderMessages()
   }
   function editBox(message) {
-    const input = h('textarea', { id: 'msg-edit', class: 'msg-edit', rows: String(Math.min(8, message.content.split('\n').length + 1)), maxlength: '8000', 'aria-label': 'Edit message' })
+    const input = h('textarea', { id: 'msg-edit', class: 'msg-edit', rows: String(Math.min(8, message.content.split('\n').length + 1)), 'aria-label': 'Edit message' })
     // The in-progress text survives redraws caused by incoming events.
     input.value = state.editText
     const remember = () => { state.editText = input.value; state.editCaret = input.selectionStart }
@@ -503,6 +508,7 @@ function messagesClient(config) {
     const save = async () => {
       const content = input.value.trim()
       if (!content || content === message.content) { cancel(); return }
+      if (content.length > MAX_CONTENT) { alert(`That message is too long to send (${content.length} of ${MAX_CONTENT} characters max). Shorten it and try again.`); return }
       const before = { content: message.content, editedAt: message.editedAt }
       message.content = content; message.editedAt = new Date().toISOString(); state.editing = null; renderMessages()
       try { const value = await api(`/messages/${encodeURIComponent(message.id)}/edit`, { content }); Object.assign(message, value.message, { reactions: message.reactions }) }
@@ -533,7 +539,7 @@ function messagesClient(config) {
   }
   function updateComposerHint() { const hint = $('msg-hint'); if (hint) hint.textContent = prefs.enterSends ? 'Enter to send · Shift+Enter for a new line' : 'Ctrl+Enter or ⌘+Enter to send' }
   function composer() {
-    const input = h('textarea', { id: 'msg-input', rows: '1', maxlength: '8000', placeholder: 'Write a message…', 'aria-label': 'Message', 'aria-describedby': 'msg-hint', enterkeyhint: prefs.enterSends ? 'send' : 'enter' })
+    const input = h('textarea', { id: 'msg-input', rows: '1', placeholder: 'Write a message…', 'aria-label': 'Message', 'aria-describedby': 'msg-hint', enterkeyhint: prefs.enterSends ? 'send' : 'enter' })
     input.value = drafts[state.open] || ''
     const grow = () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 8 * 24 + 20)}px` }
     let draftTimer = null
@@ -555,6 +561,7 @@ function messagesClient(config) {
       event.preventDefault()
       const content = input.value.trim(), ready = state.uploads.filter(item => item.key)
       if ((!content && !ready.length) || state.uploads.some(item => !item.key && !item.error) || !state.threads.has(state.open)) return
+      if (content.length > MAX_CONTENT) { alert(`That message is too long to send (${content.length} of ${MAX_CONTENT} characters max). Shorten it and try again.`); return }
       input.value = ''; grow(); saveDraft(state.open, ''); stopTyping()
       const replyToId = state.replyTo?.id; state.replyTo = null; renderReply()
       state.uploads = []; renderUploads()
@@ -901,9 +908,14 @@ function messagesClient(config) {
   function buildWindow(id) {
     const head = h('div', { class: 'msg-win-head' })
     const log = h('div', { class: 'msg-log', role: 'log', 'aria-live': 'off', 'aria-label': 'Messages', tabindex: '0' }, h('p', { class: 'msg-loading' }, 'Loading…'))
-    const input = h('textarea', { class: 'msg-win-input', rows: '1', maxlength: '8000', placeholder: 'Write a message…', 'aria-label': 'Write a message' })
+    const input = h('textarea', { class: 'msg-win-input', rows: '1', placeholder: 'Write a message…', 'aria-label': 'Write a message' })
     input.value = drafts[id] || ''
-    const submit = () => { const text = input.value.trim(); if (!text) return; input.value = ''; saveDraft(id, ''); send(id, text) }
+    const submit = () => {
+      const text = input.value.trim()
+      if (!text) return
+      if (text.length > MAX_CONTENT) { alert(`That message is too long to send (${text.length} of ${MAX_CONTENT} characters max). Shorten it and try again.`); return }
+      input.value = ''; saveDraft(id, ''); send(id, text)
+    }
     input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing && (prefs.enterSends ? !event.shiftKey : event.metaKey || event.ctrlKey)) { event.preventDefault(); submit() } })
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(120, input.scrollHeight)}px`; saveDraft(id, input.value.trim()) })
     input.addEventListener('focus', () => markWindowRead(id))
