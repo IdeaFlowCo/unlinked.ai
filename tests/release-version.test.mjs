@@ -31,7 +31,10 @@ test('anonymous runtime pages expose the app release in their shared footer with
     const markup = await response.text()
     const footer = markup.match(/<footer>(.*?)<\/footer>/s)?.[1]
     assert.ok(footer?.includes(`class="app-version">v${appPackage.version}</span>`), path)
-    assert.ok(footer.includes('https://worldissuetracker.com/tracker/unlinked-ai'))
+    // world-issue-tracker-uonq: the footer's static link straight to the WIT
+    // board was replaced by the WIT widget's own inline text-link trigger,
+    // mounted into this slot instead of linking out directly.
+    assert.ok(footer.includes('id="wit-feedback-slot"'))
     assert.ok(footer.includes('Not affiliated with LinkedIn.'))
   }
   assert.equal(ownerReads, 0)
