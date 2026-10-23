@@ -150,10 +150,18 @@ dialog.msg-picker::backdrop{background:#16181d55}
 /* A tiny image (e.g. 2x2) still gets a visible, clickable tile. */
 .unlinked-onboarding .msg-image img{display:block;min-width:96px;min-height:96px;max-width:min(320px,60vw);max-height:320px;object-fit:contain;background:var(--page)}
 .unlinked-onboarding .msg-audio{max-width:min(320px,60vw);height:40px}
+/* A non-image/audio attachment card: icon, filename, size, download link. */
+.unlinked-onboarding .msg-file{display:flex;align-items:center;gap:10px;max-width:min(320px,80vw);padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--fg);text-decoration:none}
+.unlinked-onboarding .msg-file:hover{border-color:var(--line2);text-decoration:none}
+.unlinked-onboarding .msg-file-icon{flex:0 0 auto;font-size:22px;line-height:1}
+.unlinked-onboarding .msg-file-body{display:flex;flex-direction:column;min-width:0;gap:1px}
+.unlinked-onboarding .msg-file-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.unlinked-onboarding .msg-file-size{color:var(--muted)}
 .unlinked-onboarding .msg-uploads{display:flex;flex-wrap:wrap;gap:8px;padding:0 76px 0 16px}
 .unlinked-onboarding .msg-uploads:not(:empty){padding-top:10px}
 .unlinked-onboarding .msg-upload{display:flex;align-items:center;gap:8px;padding:4px 4px 4px 4px;border:1px solid var(--line);border-radius:10px;background:var(--page);max-width:240px}
 .unlinked-onboarding .msg-upload img{width:40px;height:40px;object-fit:cover;border-radius:6px}
+.unlinked-onboarding .msg-upload-icon{display:grid;place-items:center;width:40px;height:40px;font-size:20px;border-radius:6px;background:#fff;border:1px solid var(--line)}
 .unlinked-onboarding .msg-upload .small{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
 .unlinked-onboarding .msg-upload.failed{border-color:#e5b4b2;background:#fdf3f2}
 .unlinked-onboarding .msg-upload.failed .small{color:#9c2f2b}

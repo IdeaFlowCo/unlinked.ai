@@ -104,18 +104,29 @@ Notifications for accepted connection requests open the direct conversation.
 
 ## Attachments, search and the dock
 
-- **Attachments.** Images and voice notes in OpenChat messages are public
-  capability URLs in one bucket. The proxy only shows URLs that match the exact
+- **Attachments.** Images, voice notes and documents (PDF and common office
+  formats, unlinked-9r1.11) in OpenChat messages are public capability URLs in
+  one bucket. The proxy only shows URLs that match the exact
   `https://storage.googleapis.com/openchat-attachments/attachments/<user>/<id>/<file>`
   grammar, and only through `/messages/api/file?u=` on this origin (CSP
   `img-src 'self'` is unchanged). That route requires the session, fetches with
-  `redirect: 'error'`, allows image/audio types only, caps files at 20 MB,
-  passes byte ranges through, and responds with `nosniff` and a sandbox CSP.
-- **Uploads.** Images up to 10 MB, 4 per message, by picker or paste. Each one
-  is posted raw to `/messages/api/attachments` with the CSRF header. OpenChat
-  presigns the upload as the member, the server PUTs the bytes to the bucket
-  host, and returns an opaque key. A message can attach only keys this proxy
-  issued to the same member. Uploads are budgeted at 20 per minute.
+  `redirect: 'error'`, allows only image/audio/document types on its own
+  allowlist (never executables or scripts), caps files at 20 MB, passes byte
+  ranges through, and responds with `nosniff` and a sandbox CSP. A document
+  attachment renders client-side as a file card (icon, name, size) that links
+  to the same sandboxed route with a `download` attribute, instead of the
+  inline `<img>`/`<audio>` used for images and voice notes.
+- **Uploads.** Images up to 10 MB or documents (PDF, Word, Excel, PowerPoint,
+  CSV, plain text, RTF, zip) up to 20 MB, 4 per message, by picker (images
+  also by paste). Each one is posted raw to `/messages/api/attachments` with
+  the CSRF header. The proxy's own `DOCUMENT_TYPES`/`UPLOAD_TYPES` allowlist in
+  `mcp-server/messaging-proxy.mjs` is the real gate — client-side type/size
+  checks are only fast feedback. OpenChat presigns the upload as the member
+  against its own `/api/chat/attachments/presign` allowlist (which already
+  accepts the same document types, up to 50 MB, since OpenChat-85q.1), the
+  server PUTs the bytes to the bucket host, and returns an opaque key. A
+  message can attach only keys this proxy issued to the same member. Uploads
+  are budgeted at 20 per minute.
 - **Search.** Press Enter in the filter box to search messages in every
   conversation (OpenChat keyword search). Choosing a result opens its thread
   and loads up to ten earlier pages to reach and highlight the message.
