@@ -6,6 +6,7 @@ import { createNotifications, createMemoryNotificationStore, createNeo4jNotifica
 import { createMemberInvitations, createMemoryInvitationStore } from '../mcp-server/member-invitations.mjs'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
+import { privateId } from '../src/utils/private-import/job.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { renderInvitations, renderNotifications, renderPerson, fillNavAlerts, NAV_ALERTS_SLOT } from '../mcp-server/private-onboarding-views.mjs'
 
@@ -279,7 +280,7 @@ test('views: escaped names, inline answers, header badges only for configured fe
   assert.doesNotMatch(renderNotifications({ csrf: 'tok', items: [] }).content, /Mark all as read|pending invitation/)
   // An answered request that became a connection says so instead of still asking.
   const answered = renderNotifications({ csrf: 'tok', now, items: [{ id: 'n4', kind: 'connection_request_received', actorName: 'Lin', subjectId: 'r9', createdAt: now - 1000, read: true }], connected: new Set(['r9']) }).content
-  assert.match(answered, /<b>Lin<\/b> is now connected with you/); assert.match(answered, /class="note-state">Connected</)
+  assert.match(answered, /<a class="note-person" href="\/notifications\/n4\?to=profile"><b>Lin<\/b><\/a> is now connected with you/); assert.match(answered, /class="note-state">Connected</)
   assert.doesNotMatch(answered, /wants to connect|action="\/connections\/respond"/)
   assert.match(feed, /<b>Old<\/b> wants to connect with you/); assert.doesNotMatch(feed, /class="note-state"/)
   // The header slot is filled per request; an unconfigured feature shows nothing.
@@ -400,6 +401,26 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   assert.equal((await get(`/notifications/${acceptedItem}?to=profile`, me)).location, '/people/ada-profile')
   assert.equal((await post('/notifications/read-all', me, {})).headers.get('location'), '/notifications')
   assert.doesNotMatch((await get('/notifications', me)).text, /Mark all as read/)
+})
+
+test('end to end: a connection with no public profile (joined from a card scan) opens their contact page from the feed', async t => {
+  let accepted = []
+  const backend = { adapter: {}, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => [], readResource: async () => null,
+    readMemberConnections: async () => accepted }
+  const { signIn, get, memberConnections } = await site(t, { getBackend: async () => backend })
+  const me = await signIn('jacob-subject')
+  const cecilia = { ownerId: 'cecilia-owner', userId: 'cecilia-user' }
+  const sent = await memberConnections.send({ sender: cecilia, senderName: 'Cecilia Sanchez', recipient: jacob, recipientName: 'Jacob Cole' })
+  // Still pending: the name is plain text (there is nowhere to open yet).
+  assert.match((await get('/notifications', me)).text, /<b>Cecilia Sanchez<\/b> wants to connect with you/)
+  await memberConnections.respond(jacob, sent.request.id, 'accept')
+  accepted = [{ requestId: sent.request.id, name: 'Cecilia Sanchez', connectedAt: Date.UTC(2026, 9, 22) }]
+  const feed = (await get('/notifications', me)).text
+  const itemId = feed.match(/class="note-person" href="\/notifications\/([0-9a-f-]{36})\?to=profile"><b>Cecilia Sanchez<\/b><\/a> is now connected with you/)[1]
+  const contact = `/network/contacts/${privateId(jacob.ownerId, 'member-connection', sent.request.id)}`
+  assert.equal((await get(`/notifications/${itemId}?to=profile`, me)).location, contact)
+  const page = await get(contact, me)
+  assert.equal(page.status, 200); assert.match(page.text, /Cecilia Sanchez/)
 })
 
 test('end to end: withdraw from Sent, ignore privately, and account deletion clears everything', async t => {
