@@ -62,10 +62,10 @@ async function harness(t, { upstream = {}, sockets = [], signup = false, extra =
     const key = `${options.method} ${parsed.pathname}`
     const handler = upstream[key]
     if (!handler) return new Response(JSON.stringify({ error: 'not mocked' }), { status: 500 })
-    const [status, body] = await handler({ url: parsed, body: json ? JSON.parse(options.body) : undefined, auth: options.headers?.Authorization, calls })
-    if (typeof body === 'string') return new Response(body, { status, headers: { 'Content-Type': 'image/png', 'Content-Length': String(body.length) } })
+    const [status, body, contentType = 'image/png'] = await handler({ url: parsed, body: json ? JSON.parse(options.body) : undefined, auth: options.headers?.Authorization, calls })
+    if (typeof body === 'string') return new Response(body, { status, headers: { 'Content-Type': contentType, 'Content-Length': String(body.length) } })
     // A chunked body: no Content-Length from upstream.
-    if (body?.chunked) return new Response(new ReadableStream({ start(controller) { for (const part of body.chunked) controller.enqueue(new TextEncoder().encode(part)); controller.close() } }), { status, headers: { 'Content-Type': 'image/png' } })
+    if (body?.chunked) return new Response(new ReadableStream({ start(controller) { for (const part of body.chunked) controller.enqueue(new TextEncoder().encode(part)); controller.close() } }), { status, headers: { 'Content-Type': contentType } })
     return new Response(body === undefined ? '' : JSON.stringify(body), { status })
   }
   const connectSocket = async options => {
@@ -353,6 +353,39 @@ test('image upload: presigned as the member, PUT by the server, attachable only 
   assert.equal((await h.get(`/messages/api/file?u=${encodeURIComponent(getUrl + '?x=1')}`)).status, 400)
 })
 
+test('document upload: PDF presigns, uploads and downloads through this origin; oversized docs and executables are rejected (unlinked-9r1.11)', async t => {
+  const putUrl = 'https://storage.googleapis.com/openchat-attachments/attachments/oc-me/abc123/report.pdf?X-Goog-Signature=fixture'
+  const getUrl = 'https://storage.googleapis.com/openchat-attachments/attachments/oc-me/abc123/report.pdf'
+  const h = await harness(t, { upstream: {
+    'POST /api/chat/attachments/presign': ({ body }) => { assert.deepEqual(body, { filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 4 }); return [200, { putUrl, getUrl, key: 'k' }] },
+    'PUT /openchat-attachments/attachments/oc-me/abc123/report.pdf': () => [200],
+    'GET /openchat-attachments/attachments/oc-me/abc123/report.pdf': () => [200, '%PDF', 'application/pdf'],
+    [`POST /api/chat/conversations/${CONV}/messages`]: ({ body }) => [201, { ...message(body.id, body.content, '2026-10-10T10:05:00Z', ME), attachments: body.attachments }],
+  } })
+  const upload = (headers, body = new Uint8Array([1, 2, 3, 4])) => h.request('/messages/api/attachments', { method: 'POST', headers: { Cookie: h.cookie, Origin: h.origin, 'X-Unlinked-CSRF': h.csrf, 'Content-Type': 'application/pdf', 'X-Filename': 'report.pdf', ...headers }, body })
+  // An executable (not in the allowlist) is rejected before it ever reaches OpenChat.
+  assert.equal((await upload({ 'Content-Type': 'application/x-msdownload' })).status, 400)
+  assert.equal((await upload({ 'Content-Type': 'application/octet-stream' })).status, 400)
+  // A document over the 20 MB cap is rejected without being presigned or stored.
+  const oversized = new Uint8Array(20 * 1024 * 1024 + 1)
+  assert.equal((await upload({}, oversized)).status, 400)
+  assert.equal(h.calls.some(call => call.path === '/api/chat/attachments/presign'), false, 'the oversized upload never reached OpenChat')
+  const uploaded = await upload({})
+  assert.equal(uploaded.status, 201)
+  const { attachment } = await uploaded.json()
+  assert.match(attachment.key, /^[A-Za-z0-9_-]{24}$/); assert.equal(attachment.mimeType, 'application/pdf'); assert.equal(attachment.src, `/messages/api/file?u=${encodeURIComponent(getUrl)}`)
+  const clientId = '1a5c2c51-6f7e-4b8a-9d3c-1f2e3d4c5b6d'
+  const sent = await h.post(`/messages/api/conversations/${CONV}/messages`, { content: '', clientId, attachments: [attachment.key] })
+  assert.equal(sent.status, 201)
+  const sentAttachment = (await sent.json()).message.attachments[0]
+  assert.equal(sentAttachment.mimeType, 'application/pdf'); assert.equal(sentAttachment.src, attachment.src)
+  // The document is served inline through the sandboxed same-origin route, same as images/audio.
+  const file = await h.get(`/messages/api/file?u=${encodeURIComponent(getUrl)}`)
+  assert.equal(file.status, 200); assert.equal(file.headers.get('content-type'), 'application/pdf')
+  assert.equal(file.headers.get('content-security-policy'), "default-src 'none'; sandbox")
+  assert.equal(await file.text(), '%PDF')
+})
+
 test('other signed-in pages carry the Messages dock (static client, dock config, no token); /messages itself does not', async t => {
   const h = await harness(t, { signup: true, upstream: { 'GET /api/chat/unread-total': () => [200, { unreadTotal: 2 }] } })
   const home = await (await h.get('/')).text()
@@ -435,4 +468,14 @@ test('tiny images get a visible tile, the dock clears the feedback button, and g
   const right = Number(/\.msg-dock\{position:fixed;right:(\d+)px/.exec(ONBOARDING_STYLE)[1])
   assert.ok(right >= 196, 'the floating feedback button and its label reach about 180 px from the right edge')
   assert.match(MESSAGES_CLIENT_SOURCE, /=== 1 \? 'person' : 'people'/)
+})
+
+test('file picker accepts documents, and a non-image/audio attachment renders a downloadable file card (unlinked-9r1.11)', () => {
+  assert.match(MESSAGES_CLIENT_SOURCE, /accept:\s*\[.*\.\.\.DOCUMENT_TYPES.*\]\.join\(','\)/)
+  assert.match(MESSAGES_CLIENT_SOURCE, /DOCUMENT_TYPES\s*=\s*new Set\(\[[^\]]*application\/pdf/)
+  assert.match(MESSAGES_CLIENT_SOURCE, /class: 'msg-file'/)
+  assert.match(MESSAGES_CLIENT_SOURCE, /msg-file-icon/)
+  assert.match(MESSAGES_CLIENT_SOURCE, /msg-file-size/)
+  assert.match(ONBOARDING_STYLE, /\.msg-file\{/)
+  assert.match(ONBOARDING_STYLE, /\.msg-upload-icon\{/)
 })

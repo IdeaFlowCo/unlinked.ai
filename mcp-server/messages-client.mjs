@@ -55,6 +55,19 @@ function messagesClient(config) {
   const hue = seed => { let hash = 0; for (const character of String(seed || '')) hash = (hash * 31 + character.codePointAt(0)) >>> 0; return HUES[hash % HUES.length] }
   const initials = name => String(name || '').trim().split(/\s+/).slice(0, 2).map(word => [...word][0] || '').join('').toUpperCase()
   const avatar = (name, seed, presence) => h('span', { class: 'msg-avatar', style: `background:${hue(seed)}`, 'aria-hidden': 'true' }, initials(name) || '·', presence === 'available' || presence === 'away' ? h('span', { class: `msg-dot ${presence}` }) : null)
+  // Document attachments mirror the server's allowlist (messaging-proxy.mjs
+  // DOCUMENT_TYPES); this is only for the file-picker icon and client-side
+  // feedback, the proxy is the real gate.
+  const DOCUMENT_TYPES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/csv', 'text/plain', 'application/rtf', 'application/zip', 'application/x-zip-compressed'])
+  const FILE_ICONS = { 'application/pdf': '📕', 'application/msword': '📄', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '📄', 'application/vnd.ms-excel': '📊', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '📊', 'application/vnd.ms-powerpoint': '📑', 'application/vnd.openxmlformats-officedocument.presentationml.presentation': '📑', 'text/csv': '📊', 'text/plain': '📄', 'application/rtf': '📄', 'application/zip': '🗜', 'application/x-zip-compressed': '🗜' }
+  const fileIcon = mimeType => FILE_ICONS[mimeType] || '📎'
+  const fileSizeLabel = bytes => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return ''
+    const units = ['B', 'KB', 'MB', 'GB']
+    let value = bytes, index = 0
+    while (value >= 1024 && index < units.length - 1) { value /= 1024; index++ }
+    return `${index === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[index]}`
+  }
   // Links become anchors; everything else stays text.
   function linkify(text) {
     const parts = [], pattern = /\bhttps?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g
@@ -330,11 +343,19 @@ function messagesClient(config) {
       message.pending === 'failed' ? h('span', { class: 'msg-meta failed' }, 'Not sent · ', h('button', { class: 'link-button', type: 'button', onclick: () => retry(message) }, 'Retry')) : status ? h('span', { class: 'msg-meta' }, status) : null)
   }
 
-  // Images and voice notes come through the same-origin file route; anything else stays in OpenChat.
+  // Images, voice notes and allowlisted documents come through the same-origin
+  // file route (docs/openchat-message.md); anything else stays in OpenChat.
   function attachmentsNode(attachments) {
     return h('span', { class: 'msg-attachments' }, attachments.map(item => {
       if (item.src && item.mimeType.startsWith('image/')) return h('a', { class: 'msg-image', href: item.src, target: '_blank', rel: 'noopener' }, h('img', { src: item.src, alt: item.name || 'Image', loading: 'lazy', decoding: 'async' }))
       if (item.src && item.mimeType.startsWith('audio/')) return h('audio', { class: 'msg-audio', controls: true, preload: 'none', src: item.src, 'aria-label': item.name || 'Voice note' })
+      // A non-image/audio attachment with a same-origin src is a document: show a
+      // file card (icon, name, size) that downloads through the sandboxed file route.
+      if (item.src) return h('a', { class: 'msg-file', href: item.src, download: item.name || 'file', target: '_blank', rel: 'noopener' },
+        h('span', { class: 'msg-file-icon', 'aria-hidden': 'true' }, fileIcon(item.mimeType)),
+        h('span', { class: 'msg-file-body' },
+          h('span', { class: 'msg-file-name' }, item.name || 'Attachment'),
+          h('span', { class: 'msg-file-size small' }, fileSizeLabel(item.size) || 'File')))
       return h('span', { class: 'msg-attachment' }, `📎 ${item.name || 'Attachment'} · open in OpenChat`)
     }))
   }
@@ -495,7 +516,7 @@ function messagesClient(config) {
         if (last) { event.preventDefault(); startEdit(last) }
       }
     })
-    const file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/gif,image/webp', multiple: true, hidden: true, onchange: () => { for (const item of file.files) upload(item); file.value = '' } })
+    const file = h('input', { type: 'file', accept: [...'image/jpeg,image/png,image/gif,image/webp'.split(','), ...DOCUMENT_TYPES, '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.txt', '.rtf', '.zip'].join(','), multiple: true, hidden: true, onchange: () => { for (const item of file.files) upload(item); file.value = '' } })
     input.addEventListener('paste', event => { const images = [...(event.clipboardData?.files || [])].filter(item => item.type.startsWith('image/')); if (images.length) { event.preventDefault(); images.forEach(upload) } })
     const form = h('form', { class: 'msg-composer', onsubmit: event => {
       event.preventDefault()
@@ -505,23 +526,28 @@ function messagesClient(config) {
       const replyToId = state.replyTo?.id; state.replyTo = null; renderReply()
       state.uploads = []; renderUploads()
       send(state.open, content, uuid(), replyToId, ready)
-    } }, h('button', { type: 'button', class: 'msg-attach msg-act', 'aria-label': 'Attach an image', title: 'Attach an image', onclick: () => file.click() }, '📎'), file, input, h('button', { type: 'submit', class: 'msg-send' }, 'Send'))
+    } }, h('button', { type: 'button', class: 'msg-attach msg-act', 'aria-label': 'Attach a file', title: 'Attach a file', onclick: () => file.click() }, '📎'), file, input, h('button', { type: 'submit', class: 'msg-send' }, 'Send'))
     setTimeout(() => { grow(); updateComposerHint() })
     return h('div', { class: 'msg-compose-wrap' }, h('div', { id: 'msg-reply' }), h('div', { id: 'msg-uploads', class: 'msg-uploads' }), form, h('p', { class: 'msg-hint', id: 'msg-hint' }))
   }
 
-  // ── Image uploads (≤ 10 MB, sent through this origin) ─────────────────────
+  // ── Uploads (images ≤ 10 MB, documents ≤ 20 MB; sent through this origin) ──
+  // The server (messaging-proxy.mjs) is the real gate on type and size; this is
+  // just fast client-side feedback before a doomed request goes over the wire.
   async function upload(item) {
-    const entry = { id: uuid(), name: item.name || 'image', preview: URL.createObjectURL(item), key: null, error: null }
-    if (!/^image\/(jpeg|png|gif|webp)$/.test(item.type) || item.size > 10 * 1024 * 1024) entry.error = item.size > 10 * 1024 * 1024 ? 'Too large (10 MB max)' : 'Images only'
-    if (state.uploads.length >= 4) { announce('Up to 4 images per message'); return }
+    const isImage = /^image\/(jpeg|png|gif|webp)$/.test(item.type), isDocument = !isImage && DOCUMENT_TYPES.has(item.type)
+    const maxBytes = isDocument ? 20 * 1024 * 1024 : 10 * 1024 * 1024
+    const entry = { id: uuid(), name: item.name || (isImage ? 'image' : 'file'), mimeType: item.type, preview: isImage ? URL.createObjectURL(item) : null, key: null, error: null }
+    if (!isImage && !isDocument) entry.error = 'Unsupported file type'
+    else if (item.size > maxBytes) entry.error = `Too large (${isDocument ? '20' : '10'} MB max)`
+    if (state.uploads.length >= 4) { announce('Up to 4 files per message'); return }
     state.uploads.push(entry); renderUploads()
     if (entry.error) return
     try {
       const response = await fetch('/messages/api/attachments', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': item.type, 'X-Unlinked-CSRF': config.csrf, 'X-Filename': entry.name.replace(/[^\x20-\x7e]/g, '_').slice(0, 100) }, body: item })
       if (!response.ok) throw Error('upload_failed')
       const value = await response.json()
-      Object.assign(entry, { key: value.attachment.key, src: value.attachment.src, mimeType: value.attachment.mimeType })
+      Object.assign(entry, { key: value.attachment.key, src: value.attachment.src, mimeType: value.attachment.mimeType, size: item.size })
     } catch { entry.error = 'Upload failed' }
     renderUploads()
   }
@@ -529,9 +555,9 @@ function messagesClient(config) {
     const slot = $('msg-uploads')
     if (!slot) return
     slot.replaceChildren(...state.uploads.map(entry => h('span', { class: `msg-upload${entry.error ? ' failed' : ''}` },
-      h('img', { src: entry.preview, alt: '' }),
+      entry.preview ? h('img', { src: entry.preview, alt: '' }) : h('span', { class: 'msg-upload-icon', 'aria-hidden': 'true' }, fileIcon(entry.mimeType)),
       h('span', { class: 'small' }, entry.error || (entry.key ? entry.name : 'Uploading…')),
-      h('button', { type: 'button', class: 'msg-act', 'aria-label': `Remove ${entry.name}`, onclick: () => { URL.revokeObjectURL(entry.preview); state.uploads = state.uploads.filter(other => other !== entry); renderUploads() } }, '×'))))
+      h('button', { type: 'button', class: 'msg-act', 'aria-label': `Remove ${entry.name}`, onclick: () => { if (entry.preview) URL.revokeObjectURL(entry.preview); state.uploads = state.uploads.filter(other => other !== entry); renderUploads() } }, '×'))))
   }
 
   function upsert(message) {
@@ -551,7 +577,7 @@ function messagesClient(config) {
   async function send(conversationId, content, clientId = uuid(), replyToId = null, uploads = []) {
     const thread = state.threads.get(conversationId)
     const reply = replyToId ? thread?.items.find(item => item.id === replyToId) : null
-    const optimistic = { id: `pending-${clientId}`, clientId, conversationId, senderId: state.me, content, createdAt: new Date().toISOString(), reactions: [], pending: 'sending', uploads, attachments: uploads.map(entry => ({ mimeType: entry.mimeType, name: entry.name, src: entry.src })), replyToId, replyTo: reply ? { id: reply.id, senderId: reply.senderId, senderName: reply.sender?.name, content: reply.content.slice(0, 200) } : null }
+    const optimistic = { id: `pending-${clientId}`, clientId, conversationId, senderId: state.me, content, createdAt: new Date().toISOString(), reactions: [], pending: 'sending', uploads, attachments: uploads.map(entry => ({ mimeType: entry.mimeType, name: entry.name, src: entry.src, size: entry.size })), replyToId, replyTo: reply ? { id: reply.id, senderId: reply.senderId, senderName: reply.sender?.name, content: reply.content.slice(0, 200) } : null }
     if (thread) { thread.items = thread.items.filter(item => item.clientId !== clientId); thread.items.push(optimistic) }
     renderMessages({ scroll: 'bottom' }); renderWindowLog(conversationId, { scroll: 'bottom' })
     try {

@@ -19,9 +19,18 @@ export const MAX_CONTENT = 8000
 // OpenChat attachments are capability URLs in one public bucket (DECISIONS.md 16).
 // Only this exact grammar is ever fetched or shown, through /messages/api/file.
 export const ATTACHMENT_URL = /^https:\/\/storage\.googleapis\.com\/openchat-attachments\/attachments\/[A-Za-z0-9_-]{1,80}\/[A-Za-z0-9_-]{1,40}\/[A-Za-z0-9._-]{1,128}$/
-const FILE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'audio/m4a', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/webm', 'audio/ogg'])
-const UPLOAD_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
-const FILE_MAX_BYTES = 20 * 1024 * 1024, UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+const AUDIO_TYPES = new Set(['audio/m4a', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/webm', 'audio/ogg'])
+// Document/file types for general attachments (unlinked-9r1.11). Allowlist, not a
+// blocklist: executables/scripts are excluded by construction, mirroring OpenChat's
+// own DOCUMENT_MIME_TYPES (apps/server/src/routes/chat.ts, OpenChat-85q.1).
+const DOCUMENT_TYPES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/csv', 'text/plain', 'application/rtf', 'application/zip', 'application/x-zip-compressed'])
+const FILE_TYPES = new Set([...IMAGE_TYPES, ...AUDIO_TYPES, ...DOCUMENT_TYPES])
+const UPLOAD_TYPES = new Set([...IMAGE_TYPES, ...DOCUMENT_TYPES])
+// Images stay at this proxy's existing 10 MB cap (stricter than OpenChat's own 20 MB).
+// Documents share the download/serve ceiling below (well under OpenChat's 50 MB cap),
+// so one FILE_MAX_BYTES also bounds what serveFile will ever stream back.
+const FILE_MAX_BYTES = 20 * 1024 * 1024, UPLOAD_MAX_BYTES = 10 * 1024 * 1024, DOCUMENT_MAX_BYTES = FILE_MAX_BYTES
 export const fileSrc = url => typeof url === 'string' && ATTACHMENT_URL.test(url) ? `/messages/api/file?u=${encodeURIComponent(url)}` : null
 const ID = /^[A-Za-z0-9_-]{1,80}$/
 const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -318,10 +327,12 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   async function storeUpload(request, session) {
     const mimeType = String(request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
     const declared = Number(request.headers['content-length'])
-    if (!UPLOAD_TYPES.has(mimeType) || !Number.isSafeInteger(declared) || declared <= 0 || declared > UPLOAD_MAX_BYTES) throw invalid()
+    // Documents get the larger (but still bounded) cap; images keep the existing stricter one.
+    const maxBytes = DOCUMENT_TYPES.has(mimeType) ? DOCUMENT_MAX_BYTES : UPLOAD_MAX_BYTES
+    if (!UPLOAD_TYPES.has(mimeType) || !Number.isSafeInteger(declared) || declared <= 0 || declared > maxBytes) throw invalid()
     const filename = (String(request.headers['x-filename'] ?? 'image').normalize('NFKC').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100) || 'image')
     const parts = []; let length = 0
-    for await (const part of request) { length += part.length; if (length > UPLOAD_MAX_BYTES) throw new MessagingError(413, 'body_too_large'); parts.push(part) }
+    for await (const part of request) { length += part.length; if (length > maxBytes) throw new MessagingError(413, 'body_too_large'); parts.push(part) }
     const bytes = Buffer.concat(parts)
     if (bytes.length !== declared) throw invalid()
     const { value } = await upstream(session, 'POST', '/api/chat/attachments/presign', { filename, mimeType, sizeBytes: bytes.length })
@@ -340,7 +351,9 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
 
   // Attachment bytes, same origin (CSP img-src 'self' stays). Only the exact
-  // bucket grammar is fetched; images and audio only; size-capped; sandboxed.
+  // bucket grammar is fetched; images, audio and allowlisted documents only;
+  // size-capped; sandboxed (a PDF is served with the same sandbox CSP, so it
+  // never executes as this origin even if a browser would otherwise render it).
   async function serveFile(request, response, url) {
     const target = url.searchParams.get('u')
     if ([...url.searchParams.keys()].some(key => key !== 'u') || url.searchParams.getAll('u').length !== 1 || !ATTACHMENT_URL.test(target ?? '')) throw invalid()
