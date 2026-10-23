@@ -24,6 +24,11 @@ built (`src/utils/public-people/profile-decisions.mjs`, wired through
 - **unlist** `{profileId, group?}`: keeps the profile published but out of
   listings, optionally still listed for one group
   ([unlisted-profiles.md](unlisted-profiles.md)).
+- **suspend** `{profileId, linkedinRefHash?, reason}`: the reversible
+  whole-profile soft delete. Hides any profile, members included, from
+  everyone and from its own account, together with every published profile
+  carrying the same LinkedIn address ([profile-suspension.md](profile-suspension.md)).
+  Restore with `restore`.
 - Inputs are never changed. A decision is **revoked**, not deleted, and the next
   snapshot is exactly what it would have been without it.
 
@@ -42,6 +47,8 @@ docker exec -i unlinked-private-guest-pilot-20261001-runtime node \
 #   rename <profileId> "<name>" <decidedBy> "<reason>"
 #   remove <profileId> <decidedBy> "<reason>"
 #   unlist <profileId> <group|-> <decidedBy> "<reason>"
+#   suspend <profileId> <decidedBy> "<reason>" [linkedinUrl]
+#   restore <suspendDecisionId> <decidedBy> "<reason>"
 #   revoke <decisionId> <decidedBy>
 #   list
 ```

@@ -10,9 +10,10 @@ import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
+import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
-import { normalizeLinkedinSlug, urlIdentityMerges } from '../src/utils/public-people/url-identity.mjs'
+import { normalizeLinkedinSlug, urlIdentityMerges, urlIdentitySuspensions } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
 import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
@@ -373,7 +374,40 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listAccountGrantIds: () => store.listAccountGrantIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
+        readSuppressions,
       }
+    }
+    // Suspended people for owner-private rows (docs/profile-suspension.md):
+    // the stored decisions are authoritative and read directly, so this works
+    // while the public index is warming; the index adds profiles hidden by a
+    // matching LinkedIn address. A failed decision read fails closed.
+    let suppressionReader = null
+    const readSuppressions = async () => {
+      const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
+      let rows
+      try {
+        rows = (await session.executeRead(tx => tx.run(`MATCH (d:UnlinkedProfileDecision) WHERE d.kind = 'suspend' AND coalesce(d.revoked, false) = false
+          RETURN d.profileId AS id, d.linkedinRefHash AS ref LIMIT 5001`))).records
+      } finally { await session.close() }
+      const ids = new Set(), refs = new Set()
+      for (const record of rows) {
+        if (typeof record.get('id') === 'string') ids.add(record.get('id'))
+        if (typeof record.get('ref') === 'string' && /^[a-f0-9]{64}$/.test(record.get('ref'))) refs.add(record.get('ref'))
+      }
+      // Nothing suspended: authoritatively nobody is.
+      if (!ids.size) return null
+      // `complete` is false when the index could not add profiles hidden by a
+      // matching LinkedIn address; callers that must prove a profile is not
+      // suspended then answer unavailable.
+      let complete = false
+      try {
+        suppressionReader ??= createPublicPeopleReader({ readPublishedSnapshot })
+        const index = await suppressionReader.suspensions()
+        for (const id of index.ids) ids.add(id)
+        for (const ref of index.refs) refs.add(ref)
+        complete = true
+      } catch { /* the stored decisions alone still apply */ }
+      return { ids, refs, complete }
     }
     let requestDiagnostics
     if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {
@@ -482,12 +516,16 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         const session = driver.session({ database: 'neo4j', defaultAccessMode: 'READ' })
         try {
           const result = await session.executeRead(tx => tx.run(`MATCH (d:UnlinkedProfileDecision) WHERE coalesce(d.revoked, false) = false
-            RETURN d.id AS id, d.kind AS kind, d.profileId AS profileId, d.survivorId AS survivorId, d.name AS name, d.group AS group ORDER BY d.decidedAt, d.id LIMIT 5001`))
-          const explicit = result.records.map(record => Object.fromEntries(['id', 'kind', 'profileId', 'survivorId', 'name', 'group'].filter(key => record.get(key) !== null).map(key => [key, record.get(key)])))
+            RETURN d.id AS id, d.kind AS kind, d.profileId AS profileId, d.survivorId AS survivorId, d.name AS name, d.group AS group, d.linkedinRefHash AS linkedinRefHash ORDER BY d.decidedAt, d.id LIMIT 5001`))
+          const explicit = result.records.map(record => Object.fromEntries(['id', 'kind', 'profileId', 'survivorId', 'name', 'group', 'linkedinRefHash'].filter(key => record.get(key) !== null).map(key => [key, record.get(key)])))
           // Imported copies of legacy people, matched by LinkedIn address only.
-          let automatic = []
-          try { automatic = urlIdentityMerges({ rows: await readImportRows(session), slugIndex: await slugIndex(), explicit }) } catch { automatic = [] }
-          return [...explicit, ...automatic]
+          let automatic = [], rows = null
+          try { rows = await readImportRows(session); automatic = urlIdentityMerges({ rows, slugIndex: await slugIndex(), explicit }) } catch { automatic = [] }
+          // Imported copies of suspended people. Unlike merges this must not
+          // fail open: without the import rows the snapshot does not build.
+          const suspensions = explicit.some(value => value.kind === 'suspend' && value.linkedinRefHash) ? urlIdentitySuspensions({ rows: rows ?? await readImportRows(session), explicit }) : []
+          // Suspensions before automatic merges: a long list is truncated from the end (usableProfileDecisions).
+          return [...explicit, ...suspensions, ...automatic]
         } finally { await session.close() }
       },
       // Historical membership is display evidence, never an owner/login binding.

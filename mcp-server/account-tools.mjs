@@ -159,6 +159,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   // Write tools use the same rules as the site's Connect button.
   const connectionActions = memberConnections && typeof accountForProfile === 'function' && typeof readPublishedSnapshot === 'function'
     ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
+  // Suspended profile ids (docs/profile-suspension.md), from the owner's backend; fails closed.
+  const suspendedIds = async grant => { const backend = await getBackend({ ownerId: grant.ownerId, userId: grant.userId }); return (typeof backend.readSuppressions === 'function' ? (await backend.readSuppressions())?.ids : null) ?? new Set() }
   // Budgets are per grant owner, so one agent cannot starve other accounts;
   // a shared in-flight ceiling still bounds total concurrent provider spend.
   const budgets = new Map()
@@ -285,13 +287,16 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     async unlinked_withdraw_connection_request(grant, { id }) { return answer(grant, id, (member, value) => memberConnections.withdraw(member, value), 'withdrawn') },
     async unlinked_list_connection_requests(grant, { direction = 'received' }) {
       if (!memberConnections) throw new AccountToolError('upstream_unavailable', 'Connection requests are not available on this runtime.')
-      const rows = direction === 'sent' ? await memberConnections.sent(owner(grant)) : await memberConnections.received(owner(grant))
+      const suspended = await suspendedIds(grant)
+      const rows = (direction === 'sent' ? await memberConnections.sent(owner(grant)) : await memberConnections.received(owner(grant))).filter(row => !suspended.has(row.profileId))
       return { kind: 'unlinked_connection_requests', direction, total: rows.length, visibility: 'owner_private',
         requests: rows.slice(0, 200).map(value => ({ id: value.id, direction: value.direction, status: value.status, name: value.name, ...(value.profileId ? { profileId: value.profileId } : {}), ...(value.note ? { note: value.note } : {}), createdAt: iso(value.createdAt) })) }
     },
     async unlinked_list_notifications(grant, { limit = 20 }) {
       if (!notifications) throw new AccountToolError('upstream_unavailable', 'Notifications are not available on this runtime.')
-      const [items, counts] = await Promise.all([notifications.list(owner(grant), { limit }), notifications.counts(owner(grant))])
+      const suspended = await suspendedIds(grant)
+      const [all, counts] = await Promise.all([notifications.list(owner(grant), { limit }), notifications.counts(owner(grant))])
+      const items = all.filter(value => !suspended.has(value.actorProfileId))
       return { kind: 'unlinked_notifications', unseen: counts.unseen, unread: counts.unread, visibility: 'owner_private',
         notifications: items.map(value => ({ id: value.id, kind: value.kind, actorName: value.actorName, ...(value.actorProfileId ? { actorProfileId: value.actorProfileId } : {}), createdAt: iso(value.createdAt), read: value.read })) }
     },
@@ -304,6 +309,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       if (typeof backend.readLegacyFiles === 'function') { try { recoveredArchive = Boolean(await backend.readLegacyFiles()) } catch { recoveredArchive = false } }
       let legacy = null
       if (typeof backend.readLegacyProfile === 'function') { try { legacy = await backend.readLegacyProfile() } catch { legacy = null } }
+      // A suspended profile is hidden from its own account too (docs/profile-suspension.md); fail closed.
+      if (legacy && typeof readPublishedSnapshot === 'function') { try { if (await createPublicPeopleReader({ readPublishedSnapshot }).suspended({ id: legacy.profileId })) legacy = null } catch { legacy = null } }
       return { kind: 'unlinked_whoami', ownerId: grant.ownerId,
         grant: { scope: grant.scope, version: grant.version ?? 1, tools: [...grant.tools],
           toolRefresh: 'New tools within enabled permissions use this same key: refresh tools/list if your client caches tools; never replace the key for this. Switch “Send and manage connection requests” and “Private people notes & relations” for this API key in Settings; OAuth apps reconnect to consent to additional permissions. Messaging is not part of Unlinked keys: use the shared Ideaflow connector (https://id.ideaflow.app/mcp) with OpenChat permission.' },

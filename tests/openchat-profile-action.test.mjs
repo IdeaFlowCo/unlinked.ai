@@ -45,7 +45,7 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
     signupLookup: { read: async () => { if (signupSourceUnavailable) throw new Error('synthetic signup source unavailable'); return null } },
     issueAccountGrant: async () => ({ accessToken: 'synthetic-fixture' }), revokeAccountGrant: async () => {},
     ownProfileId: async () => 'seed-person',
-    getBackend: async () => { ownerReads++; return { adapter: {}, readLegacyProfile: async () => ({ profileId: 'seed-person', profile: { name: 'Seed Owner' } }), listImportIds: async () => [], listImportJobIds: async () => [], readResource: async () => null, writeResource: async () => { writes++ } } },
+    getBackend: async () => { ownerReads++; return { adapter: {}, readSuppressions: async () => null, readLegacyProfile: async () => ({ profileId: 'seed-person', profile: { name: 'Seed Owner' } }), listImportIds: async () => [], listImportJobIds: async () => [], readResource: async () => null, writeResource: async () => { writes++ } } },
     readPublishedSnapshot: async () => { if (snapshotUnavailable) throw new Error('synthetic unavailable index'); return snapshot },
   })
   const request = (path, cookie) => fetch(endpoint + path, { redirect: 'manual', headers: cookie ? { Cookie: cookie } : {} })

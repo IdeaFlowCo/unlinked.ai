@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import { UNLISTED_GROUP } from './unlisted.mjs'
+import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
+import { linkedinRefHash } from './url-identity.mjs'
 
 // Operator decisions about published people, applied when the shared snapshot
 // is built. Inputs are never changed: a merge drops the merged profile from the
@@ -9,15 +11,20 @@ import { UNLISTED_GROUP } from './unlisted.mjs'
 // Revoking a decision restores the projection exactly.
 // Claimed (member) profiles are never merged away or removed. An `unlist`
 // keeps a profile (member or not) published but out of listings, optionally
-// visible to one named group (docs/unlisted-profiles.md).
+// visible to one named group (docs/unlisted-profiles.md). A `suspend` is the
+// reversible whole-profile soft delete (docs/profile-suspension.md): it hides
+// any profile, member or not, from everyone including its own account, along
+// with every published profile carrying the same LinkedIn address, so an edit,
+// claim or new import cannot bring the person back while it is active.
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const id = value => typeof value === 'string' && value.length > 0 && value.length <= 160
+const refHash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
 const name = value => typeof value === 'string' && value.trim() && [...value].length <= 200 && !/[\u0000-\u001f\u007f]/.test(value)
 
 export function validateProfileDecisions(decisions) {
   if (!Array.isArray(decisions) || decisions.length > 5000) throw Error('profile_decisions_invalid')
-  const merged = new Set(), renamed = new Set(), removed = new Set(), unlisted = new Set(), ids = new Set()
+  const merged = new Set(), renamed = new Set(), removed = new Set(), unlisted = new Set(), suspended = new Set(), ids = new Set()
   for (const decision of decisions) {
     if (!decision || !id(decision.id) || ids.has(decision.id)) throw Error('profile_decisions_invalid')
     ids.add(decision.id)
@@ -33,6 +40,9 @@ export function validateProfileDecisions(decisions) {
     } else if (decision.kind === 'unlist') {
       if (!id(decision.profileId) || unlisted.has(decision.profileId) || (decision.group !== undefined && decision.group !== null && (typeof decision.group !== 'string' || !UNLISTED_GROUP.test(decision.group)))) throw Error('profile_decisions_invalid')
       unlisted.add(decision.profileId)
+    } else if (decision.kind === 'suspend') {
+      if (!id(decision.profileId) || suspended.has(decision.profileId) || (decision.linkedinRefHash !== undefined && decision.linkedinRefHash !== null && !refHash(decision.linkedinRefHash))) throw Error('profile_decisions_invalid')
+      suspended.add(decision.profileId)
     } else throw Error('profile_decisions_invalid')
   }
   // No chains: a survivor is never itself merged away.
@@ -68,7 +78,16 @@ export function applyProfileDecisions(snapshot, stored) {
   // A removal names a published profile (or an address merged into one) that
   // nobody has claimed; it removes the profile it resolves to.
   const removals = new Map(decisions.filter(value => value.kind === 'remove' && known.has(value.profileId) && !members.has(point(value.profileId))).map(value => [value.profileId, point(value.profileId)]))
-  const removed = new Set(removals.values())
+  // A suspension hides the profile it resolves to (members included) and every
+  // published profile with the same LinkedIn address: the one stored on the
+  // decision, and the suspended profile's own while it is still published.
+  const suspensions = decisions.filter(value => value.kind === 'suspend')
+  const suspendedRefs = new Set(suspensions.map(value => value.linkedinRefHash).filter(refHash))
+  const profileRef = profile => { const slug = parseLinkedinProfileUrl(profile?.linkedinUrl)?.slug; return slug ? linkedinRefHash(slug) : null }
+  for (const value of suspensions) { const ref = known.has(value.profileId) ? profileRef(known.get(point(value.profileId))) : null; if (ref) suspendedRefs.add(ref) }
+  const suspended = new Set(suspensions.filter(value => known.has(value.profileId)).map(value => point(value.profileId)))
+  if (suspendedRefs.size) for (const profile of snapshot.profiles) if (suspendedRefs.has(profileRef(profile))) suspended.add(point(profile.id))
+  const removed = new Set([...removals.values(), ...suspended])
   // Unlisting follows merges to the profile shown; a removed profile has nothing to unlist.
   const unlists = new Map(decisions.filter(value => value.kind === 'unlist' && known.has(value.profileId) && !removed.has(point(value.profileId))).map(value => [value.profileId, { id: point(value.profileId), group: typeof value.group === 'string' ? value.group : null }]))
   const fill = (survivor, merged) => {
@@ -88,8 +107,9 @@ export function applyProfileDecisions(snapshot, stored) {
     const fromId = point(edge.fromId), toId = point(edge.toId)
     if (fromId !== toId && !removed.has(fromId) && !removed.has(toId)) pairs.set(JSON.stringify([fromId, toId]), { fromId, toId })
   }
-  const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : value.kind === 'remove' ? removals.has(value.profileId) : value.kind === 'unlist' ? unlists.has(value.profileId) : renames.has(value.profileId))
-    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.kind === 'unlist' ? `${unlists.get(value.profileId).id}#${unlists.get(value.profileId).group ?? ''}` : value.name.trim()])
+  const suspendedList = [...suspended].sort()
+  const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : value.kind === 'remove' ? removals.has(value.profileId) : value.kind === 'unlist' ? unlists.has(value.profileId) : value.kind === 'suspend' ? true : renames.has(value.profileId))
+    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.kind === 'unlist' ? `${unlists.get(value.profileId).id}#${unlists.get(value.profileId).group ?? ''}` : value.kind === 'suspend' ? `${value.linkedinRefHash ?? ''}#${suspendedList.join(',')}` : value.name.trim()])
   // One entry per shown profile; the first decision about it wins.
   const unlisted = [...new Map([...unlists.values()].reverse().map(value => [value.id, value])).values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   return {
@@ -97,10 +117,16 @@ export function applyProfileDecisions(snapshot, stored) {
     revision: `${snapshot.revision}+decisions:${hash(JSON.stringify(applied)).slice(0, 16)}`,
     profiles,
     connections: [...pairs.values()],
-    ...(snapshot.members ? { members: [...new Set(snapshot.members.map(point))].sort() } : {}),
+    ...(snapshot.members ? { members: [...new Set(snapshot.members.map(point))].filter(value => !removed.has(value)).sort() } : {}),
     ...(snapshot.legacyMembers ? { legacyMembers: [...new Set(snapshot.legacyMembers.map(point))].filter(value => !removed.has(value)).sort() } : {}),
     // An address merged into a removed profile no longer resolves.
     aliases: Object.fromEntries([...merges].filter(([, survivor]) => !removed.has(survivor)).sort()),
     ...(unlisted.length ? { unlisted } : {}),
+    // Every id that must answer as suspended: hidden profiles, addresses merged
+    // into them, and every suspension's own id as a tombstone even while that
+    // profile is not published, so the account's own pages, photos and
+    // owner-private rows stay hidden too. Never published, only named.
+    ...(suspensions.length ? { suspended: [...new Set([...suspended, ...[...merges].filter(([, survivor]) => suspended.has(survivor)).map(([mergedId]) => mergedId), ...suspensions.map(value => value.profileId).filter(value => !merges.has(value) || suspended.has(point(value)))])].filter(value => !profiles.some(profile => profile.id === value)).sort() } : {}),
+    ...(suspendedRefs.size ? { suspendedRefs: [...suspendedRefs].sort() } : {}),
   }
 }

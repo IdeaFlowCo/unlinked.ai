@@ -203,7 +203,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       // Published but left out of listings (docs/unlisted-profiles.md).
       const unlisted = unlistedProfiles(value)
-      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, unlisted, companyList: [...companies.values()] }
+      // Suspended (soft-deleted) ids are never published; they are only named
+      // so an account's own pages and photos can stay hidden too
+      // (docs/profile-suspension.md).
+      const suspended = new Set()
+      if (value.suspended !== undefined) for (const id of array(value.suspended, maxProfiles)) { if (!idValid(id) || summaries.has(id) || aliases.has(id)) unavailable(); suspended.add(id) }
+      // SHA-256 LinkedIn slug references of suspended people, for owner-private rows.
+      const suspendedRefs = new Set()
+      if (value.suspendedRefs !== undefined) for (const ref of array(value.suspendedRefs, maxProfiles)) { if (typeof ref !== 'string' || !/^[a-f0-9]{64}$/.test(ref)) unavailable(); suspendedRefs.add(ref) }
+      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, unlisted, suspended, suspendedRefs, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
@@ -338,6 +346,18 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const data = await snapshot(signal)
       const resolved = data.aliases.get(id) ?? id
       return data.unlisted.has(resolved) ? data.unlisted.get(resolved) : undefined
+    },
+    // Whether an id names a suspended profile (docs/profile-suspension.md).
+    async suspended(request = {}) {
+      const { id, signal } = requestValue(request)
+      if (!idValid(id)) invalid()
+      return (await snapshot(signal)).suspended.has(id)
+    },
+    // Every suspended id and LinkedIn reference, as fresh sets.
+    async suspensions(request = {}) {
+      const { signal } = requestValue(request)
+      const data = await snapshot(signal)
+      return { ids: new Set(data.suspended), refs: new Set(data.suspendedRefs) }
     },
     // Exact URL evidence only; names never establish a person match.
     async lookupLinkedin(request = {}) {
