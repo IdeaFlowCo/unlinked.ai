@@ -300,6 +300,16 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding progress{display:block;width:100%;height:9px;accent-color:var(--brand);margin:10px 0}
 .unlinked-onboarding .journey{overflow-wrap:anywhere}
 .unlinked-onboarding .narrow{max-width:560px;margin:0 auto;padding-top:34px}
+.unlinked-onboarding .liberate-jump{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 18px;font-size:14px}
+.unlinked-onboarding .liberate-jump a{color:var(--brand-d)}
+.unlinked-onboarding .liberate-list h2{margin-bottom:4px}
+.unlinked-onboarding .liberate-item{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:16px 0;border-top:1px solid var(--line);scroll-margin-top:24px}
+.unlinked-onboarding .liberate-item:first-of-type{border-top:0}
+.unlinked-onboarding .liberate-item h3{margin:0 0 4px;font-size:16px}
+.unlinked-onboarding .liberate-item p{margin:0 0 4px}
+.unlinked-onboarding .liberate-item .button{flex:none;white-space:nowrap}
+.unlinked-onboarding .liberate .card{scroll-margin-top:24px}
+@media(max-width:600px){.unlinked-onboarding .liberate-item{flex-direction:column;gap:10px}.unlinked-onboarding .liberate-item .button{white-space:normal}}
 .unlinked-onboarding .narrow.wide{max-width:780px}
 .unlinked-onboarding .dir{max-width:860px;margin:0 auto;padding-top:30px}
 .unlinked-onboarding .hq{font:600 clamp(26px,3.2vw,36px)/1.1 "Public Sans",system-ui,sans-serif;letter-spacing:-.03em;margin:0 0 18px}

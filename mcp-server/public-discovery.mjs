@@ -2,7 +2,7 @@ import { CONNECTION_FEEDBACK_SRC } from './connection-feedback.mjs'
 import { readFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { renderAgents, renderImportGuide, renderMeet, renderSupport, fillMeHeadline, fillNavAlerts, iosAppView, TOP_BAR_SCRIPT, PRIVACY_URL, TERMS_URL } from './private-onboarding-views.mjs'
+import { renderAgents, renderDataLiberation, renderImportGuide, renderMeet, renderSupport, fillMeHeadline, fillNavAlerts, iosAppView, TOP_BAR_SCRIPT, PRIVACY_URL, TERMS_URL } from './private-onboarding-views.mjs'
 import { iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
@@ -44,10 +44,10 @@ const assets = new Map([
   ['/.well-known/agent.json', ['public/.well-known/unlinked.json', 'application/json']],
   ['/.well-known/mcp/server-card.json', ['public/.well-known/mcp/server-card.json', 'application/json']],
 ])
-const pages = new Set(['/agents', '/meet', '/import-linkedin', '/support'])
+const pages = new Set(['/agents', '/meet', '/import-linkedin', '/support', '/data-liberation'])
 // Policy addresses people and reviewers type by hand. Unlinked follows the
 // Ideaflow policies, so these redirect there (docs/support-and-legal.md).
-const redirects = new Map([['/privacy', PRIVACY_URL], ['/privacy-policy', PRIVACY_URL], ['/terms', TERMS_URL], ['/terms-of-service', TERMS_URL], ['/contact', '/support'], ['/help', '/support']])
+const redirects = new Map([['/privacy', PRIVACY_URL], ['/privacy-policy', PRIVACY_URL], ['/terms', TERMS_URL], ['/terms-of-service', TERMS_URL], ['/contact', '/support'], ['/help', '/support'], ['/export-your-data', '/data-liberation'], ['/data-export', '/data-liberation']])
 export const isPublicDiscoveryPath = pathname => pages.has(pathname) || assets.has(pathname) || redirects.has(pathname) || pathname === '/public-assets/jsqr-module.mjs'
 // Every scanned or pasted value goes through classifyMeetCode and then a visible
 // confirm step; nothing navigates, adds a contact or grants access on scan alone.
@@ -88,6 +88,7 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     if (pathname === '/agents') content = document(renderAgents(chrome), page)
     if (pathname === '/import-linkedin') content = document(renderImportGuide(chrome), page)
     if (pathname === '/support') content = document(renderSupport(chrome), page)
+    if (pathname === '/data-liberation') content = document(renderDataLiberation(chrome), page)
     if (pathname === '/meet') {
       response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
       response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
