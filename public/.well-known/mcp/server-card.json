@@ -184,7 +184,7 @@
     },
     {
       "name": "unlinked_get_profile",
-      "description": "Read one published public profile by id with its public connections page; typed not_found otherwise.",
+      "description": "Read one published public profile by id or member handle with its public connections page (member profiles include handle and url); typed not_found otherwise.",
       "inputSchema": {
         "type": "object",
         "properties": {
