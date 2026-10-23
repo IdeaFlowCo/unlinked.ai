@@ -524,7 +524,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           // Imported copies of suspended people. Unlike merges this must not
           // fail open: without the import rows the snapshot does not build.
           const suspensions = explicit.some(value => value.kind === 'suspend' && value.linkedinRefHash) ? urlIdentitySuspensions({ rows: rows ?? await readImportRows(session), explicit }) : []
-          return [...explicit, ...automatic, ...suspensions]
+          // Suspensions before automatic merges: a long list is truncated from the end (usableProfileDecisions).
+          return [...explicit, ...suspensions, ...automatic]
         } finally { await session.close() }
       },
       // Historical membership is display evidence, never an owner/login binding.
