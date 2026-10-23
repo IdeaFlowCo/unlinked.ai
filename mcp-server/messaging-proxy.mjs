@@ -41,6 +41,14 @@ const UPSTREAM_TIMEOUT_MS = 8000, UPSTREAM_MAX_BYTES = 4 * 1024 * 1024, BODY_MAX
 
 export const validId = value => typeof value === 'string' && ID.test(value)
 const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : ''
+// Full message content, unlike preview/name/title fields above, is never
+// silently shortened: OpenChat enforces no length cap on what a member can
+// send (this proxy's own MAX_CONTENT only bounds sends made *through* this
+// proxy), so slicing it here would quietly cut off a longer message sent
+// from OpenChat's own apps the moment it round-trips through Unlinked —
+// exactly the silent "truncating long messages" bug. The whole upstream
+// response is already bounded by UPSTREAM_MAX_BYTES above.
+const fullText = value => typeof value === 'string' ? value : ''
 const bool = value => value === true
 export const iso = value => {
   if (typeof value !== 'string' || value.length > 64) return null
@@ -94,7 +102,7 @@ export function projectMessage(value) {
     conversationId: value.conversationId,
     senderId: validId(value.senderId) ? value.senderId : sender?.id ?? null,
     sender,
-    content: deletedAt ? '' : text(value.content, 20000),
+    content: deletedAt ? '' : fullText(value.content),
     messageType: value.messageType === 'text' || !value.messageType ? 'text' : 'other',
     createdAt: iso(value.createdAt),
     editedAt: iso(value.editedAt),
