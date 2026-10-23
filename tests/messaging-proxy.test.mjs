@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { createPrivateBrowserHandler, notificationTargetFor } from '../mcp-server/private-browser.mjs'
 import { projectConversation, projectMessage, REACTION_EMOJI } from '../mcp-server/messaging-proxy.mjs'
 import { ONBOARDING_STYLE } from '../mcp-server/private-onboarding-style.mjs'
-import { MESSAGES_CLIENT_SOURCE } from '../mcp-server/messages-client.mjs'
+import { MESSAGES_CLIENT_SOURCE, messageLinks } from '../mcp-server/messages-client.mjs'
 import { connectOpenChatSocket, encodeEvent, parseEventPacket } from '../mcp-server/openchat-socket.mjs'
 
 const TOKEN = 'fixture-embedded-openchat-jwt'
@@ -478,4 +478,18 @@ test('file picker accepts documents, and a non-image/audio attachment renders a 
   assert.match(MESSAGES_CLIENT_SOURCE, /msg-file-size/)
   assert.match(ONBOARDING_STYLE, /\.msg-file\{/)
   assert.match(ONBOARDING_STYLE, /\.msg-upload-icon\{/)
+})
+
+test('message text links http(s), www. and bare domains like unlinked.ai, but not emails or file names', () => {
+  const hrefs = text => messageLinks(text).map(link => link.href)
+  assert.deepEqual(hrefs('Try unlinked.ai, Chat.Ideaflow.App/x?y=1. (bbc.co.uk) foo.com:8080/a'), ['https://unlinked.ai', 'https://Chat.Ideaflow.App/x?y=1', 'https://bbc.co.uk', 'https://foo.com:8080/a'])
+  assert.deepEqual(hrefs('Visit (https://example.com/a(b)). Next www.example.org/path!,'), ['https://example.com/a(b)', 'https://www.example.org/path'])
+  assert.deepEqual(hrefs('notes.md app.py index.html Node.js e.g. 3.14 unlinked.ai.json jacob@unlinked.ai my_site.com javascript:foo.com https://user:pw@example.com'), [])
+  const text = 'see unlinked.ai.'
+  const [link] = messageLinks(text)
+  assert.equal(text.slice(link.start, link.end), 'unlinked.ai')
+  const started = Date.now(); messageLinks('a.'.repeat(50000)); assert.ok(Date.now() - started < 1000)
+  // The browser script carries the same function, scoped rather than global.
+  assert.match(MESSAGES_CLIENT_SOURCE, /^\(\(\) => \{\nfunction messageLinks\(value\)/)
+  assert.doesNotThrow(() => new Function(MESSAGES_CLIENT_SOURCE))
 })

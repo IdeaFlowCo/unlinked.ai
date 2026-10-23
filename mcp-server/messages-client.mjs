@@ -4,6 +4,39 @@
 // nothing here holds an OpenChat credential. All text is rendered with
 // textContent, never as HTML.
 
+// Links in message text: http(s) URLs, www. and bare domains such as unlinked.ai.
+// Bare domains link only for a fixed list of common TLDs, so file names
+// (notes.md, app.py), Node.js and the domain of an email stay text. Same rule as
+// OpenChat's apps/mobile/src/utils/messageLinks.ts. Self-contained: it is shipped
+// to the browser by source.
+export function messageLinks(value) {
+  const text = String(value ?? '')
+  const tlds = 'com|net|org|edu|gov|io|ai|app|dev|co|me|us|uk|ca|de|fr|es|it|nl|se|ch|eu|au|nz|jp|in|br|xyz|info|biz|tv|fm|gg|ly|so|to|cc|vc|tech|cloud|online|site|blog|wiki|studio|design|social'
+  // Bounded label count keeps matching linear on long dotted runs.
+  const bare = `(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.){1,8}(?:${tlds})(?![a-z0-9-]|\\.[a-z0-9])(?::\\d{1,5})?(?:[/?#][^\\s<>"“”‘’\`]*)?`
+  const pattern = new RegExp(`(?:https?:\\/\\/|www\\.)[^\\s<>"“”‘’\`]+|${bare}`, 'gi')
+  const links = []
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index
+    // Not the tail of javascript:..., an email address, or a longer word.
+    if (start && /[\w@/:=+.-]/.test(text[start - 1])) continue
+    let value = match[0], previous
+    do {
+      previous = value
+      value = value.replace(/[.,!?;:'…]+$/, '')
+      for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+        while (value.endsWith(close) && value.split(close).length > value.split(open).length) value = value.slice(0, -1)
+      }
+    } while (value !== previous)
+    const href = /^https?:\/\//i.test(value) ? value : `https://${value}`
+    let url
+    try { url = new URL(href) } catch { continue }
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password || /[\s\u0000-\u001f\u007f\\]/.test(value)) continue
+    links.push({ text: value, href, start, end: start + value.length })
+  }
+  return links
+}
+
 function messagesClient(config) {
   const root = document.getElementById('msg-app')
   if (!root) return
@@ -70,12 +103,12 @@ function messagesClient(config) {
   }
   // Links become anchors; everything else stays text.
   function linkify(text) {
-    const parts = [], pattern = /\bhttps?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g
-    let last = 0, match
-    while ((match = pattern.exec(text))) {
-      if (match.index > last) parts.push(text.slice(last, match.index))
-      parts.push(h('a', { href: match[0], target: '_blank', rel: 'noopener noreferrer' }, match[0]))
-      last = match.index + match[0].length
+    const parts = []
+    let last = 0
+    for (const link of messageLinks(text)) {
+      if (link.start > last) parts.push(text.slice(last, link.start))
+      parts.push(h('a', { href: link.href, target: '_blank', rel: 'noopener noreferrer' }, link.text))
+      last = link.end
     }
     if (last < text.length) parts.push(text.slice(last))
     return parts
@@ -979,7 +1012,7 @@ function messagesClient(config) {
 }
 
 /** The client as a static, cacheable script; it reads its configuration from #msg-config. */
-export const MESSAGES_CLIENT_SOURCE = `(${messagesClient.toString()})(JSON.parse(document.getElementById('msg-config').textContent));`
+export const MESSAGES_CLIENT_SOURCE = `(() => {\n${messageLinks.toString().replace(/^export /, '')}\n(${messagesClient.toString()})(JSON.parse(document.getElementById('msg-config').textContent));\n})();`
 
 /** The per-page configuration: CSRF token, open conversation, emoji allowlist, dock mode. Not executable. */
 export function messagesConfig({ csrf, conversationId = null, reactions, dock = false }) {
