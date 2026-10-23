@@ -24,7 +24,8 @@ The first that is free of:
 2. a slug of their public name (`Zoë O’Brien` → `zoe-obrien`);
 3. that slug numbered: `ada-fictional-2`, `-3`, …
 
-Handles are assigned on the first view of the member's page, `/profile` or
+Handles are assigned, only while an active account still stands behind the
+profile (`accountForProfile`), on the first view of the member's page, `/profile` or
 `/card`, and by a backfill that runs 5 s after start and every 10 minutes
 (`handleBackfillMs`). The backfill gives LinkedIn slugs precedence, so a name
 never takes another member's own slug.

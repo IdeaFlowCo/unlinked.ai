@@ -92,18 +92,24 @@ export function createNeo4jProfileHandleStore(driver, database = 'neo4j') {
 }
 
 export function createProfileHandles({ store, perProfile = HANDLE_LIMITS.perProfile }) {
-  let byHandle = new Map(), currentFor = new Map()
+  // `writes` counts local changes, so a reload that read before one finished never overwrites it.
+  let byHandle = new Map(), currentFor = new Map(), writes = 0
   const remember = (handle, profileId, current) => {
+    writes++
     byHandle.set(handle, profileId)
     if (current) currentFor.set(profileId, handle)
   }
   const registry = {
     async initialize() { await store.initialize(); await registry.reload() },
     async reload() {
-      const rows = await store.all()
-      const handles = new Map(), current = new Map()
-      for (const row of rows) { handles.set(row.handle, row.profileId); if (row.current) current.set(row.profileId, row.handle) }
-      byHandle = handles; currentFor = current
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const seen = writes, rows = await store.all()
+        if (seen !== writes) continue
+        const handles = new Map(), current = new Map()
+        for (const row of rows) { handles.set(row.handle, row.profileId); if (row.current) current.set(row.profileId, row.handle) }
+        byHandle = handles; currentFor = current
+        return
+      }
     },
     // The profile a path segment names as a handle (any case), or null.
     resolve(segment) {
@@ -138,6 +144,7 @@ export function createProfileHandles({ store, perProfile = HANDLE_LIMITS.perProf
     async removeProfile(profileId) {
       if (!profileIdValid(profileId)) return
       await store.removeProfile(profileId)
+      writes++
       for (const [handle, holder] of byHandle) if (holder === profileId) byHandle.delete(handle)
       currentFor.delete(profileId)
     },

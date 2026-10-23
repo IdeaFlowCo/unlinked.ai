@@ -183,6 +183,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   setProfileHandleLookup(profileHandles ? id => profileHandles.handleFor(id) : null)
   // The profile id a /people/ segment names: a handle (any case) or the id itself.
   const handleTarget = segment => profileHandles?.resolve(segment)?.profileId ?? segment
+  // A default handle only for a profile an active account still stands behind,
+  // so a just-deleted account (still in the published index) never gets one back.
+  const ensureHandle = async profile => {
+    if (typeof accountForProfile === 'function' && !await accountForProfile(profile.id)) return null
+    return profileHandles.ensure(profile)
+  }
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
   if (oauth !== undefined && (typeof signup !== 'function' || typeof oauth.readAuthorization !== 'function' || typeof oauth.approve !== 'function' || typeof oauth.deny !== 'function')) throw new Error('oauth_connector_configuration_required')
@@ -705,7 +711,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const sent = await memberConnections.send({ sender: owner, senderName: displayName,
       senderProfileId: typeof ownProfileId === 'function' ? await ownProfileId(owner) : null,
       recipient: target, recipientName: card.name,
-      recipientProfileId: card.profilePath ? decodeURIComponent(card.profilePath.slice('/people/'.length)) : null })
+      // A card's path may carry the member's handle; the request stores the profile id.
+      recipientProfileId: card.profilePath ? handleTarget(decodeURIComponent(card.profilePath.slice('/people/'.length))) : null })
     if (sent.status !== 'accepted') await memberConnections.respond(target, sent.request.id, 'accept')
   }
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
@@ -929,7 +936,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     }
     missing.sort((a, b) => Number(Boolean(b.linkedinUrl)) - Number(Boolean(a.linkedinUrl)))
     let assigned = 0
-    for (const profile of missing) if (await profileHandles.ensure(profile).catch(() => null)) assigned++
+    for (const profile of missing) if (await ensureHandle(profile).catch(() => null)) assigned++
     return assigned
   }
   if (profileHandles && handleBackfillMs > 0) {
@@ -1374,7 +1381,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             // page, and a member's id or earlier handle moves to the current one.
             let handle = null
             if (profileHandles && result.profile.presence === 'member') {
-              handle = profileHandles.handleFor(result.profile.id) ?? await bounded(() => profileHandles.ensure(result.profile), null)
+              handle = profileHandles.handleFor(result.profile.id) ?? await bounded(() => ensureHandle(result.profile), null)
             }
             if (named && !handle) { response.writeHead(404).end(); return }
             if (publicProfile && handle && requested !== handle) { response.writeHead(301, { Location: `/people/${encodeURIComponent(handle)}${publicProfile[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
@@ -1881,7 +1888,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
               if (found) {
                 cardId = found.moved ?? id
                 // The card and its QR code carry the member's handle address.
-                if (profileHandles && found.profile?.presence === 'member' && !profileHandles.handleFor(cardId)) await bounded(() => profileHandles.ensure(found.profile), null)
+                if (profileHandles && found.profile?.presence === 'member' && !profileHandles.handleFor(cardId)) await bounded(() => ensureHandle(found.profile), null)
                 cardUrl = new URL(profileHref(profileHandles?.handleFor(cardId) ?? cardId), base).href
                 // The card shows the public profile's published photo, if any.
                 const photo = profilePhotos?.urlFor(found.moved ?? id)
@@ -1931,7 +1938,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
           // The member's handle (docs/profile-handles.md): given on first view, editable here.
           if (profileHandles && published?.profile?.presence === 'member') {
-            const current = profileHandles.handleFor(published.profile.id) ?? await bounded(() => profileHandles.ensure(published.profile), null)
+            const current = profileHandles.handleFor(published.profile.id) ?? await bounded(() => ensureHandle(published.profile), null)
             const notice = url.searchParams.get('handle')
             if (current) profileHandleView = { handle: current, ...(['saved', 'taken', 'invalid', 'length', 'reserved', 'limit', 'unavailable'].includes(notice) ? { notice } : {}) }
           }
@@ -2362,13 +2369,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (personLookup) await personLookup.removeOwner(session.owner)
         // Member-published public links go with the account.
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
-        // So do the member's handles, current and earlier.
-        if (profileHandles && typeof ownProfileId === 'function') { const mine = await ownProfileId(session.owner).catch(() => null); if (mine) await profileHandles.removeProfile(mine) }
+        // So do the member's handles, current and earlier (released once the data is gone).
+        const handleProfile = profileHandles && typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
         // Reports this member sent stay for review, without who sent them.
         if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
         // Blocks this member made, and blocks of this member.
         if (memberBlocks) await memberBlocks.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
+        if (handleProfile) await profileHandles.removeProfile(handleProfile)
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)

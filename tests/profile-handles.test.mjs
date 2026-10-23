@@ -82,7 +82,7 @@ test('emitted links prefer the handle once the lookup is registered', () => {
 const person = (id, name, extra = {}) => ({ id, name, positions: [], education: [], skills: [], ...extra })
 const peterOwner = { ownerId: 'peter-owner', userId: 'peter-user' }
 
-async function site(t, { handles = createProfileHandles({ store: createMemoryProfileHandleStore() }) } = {}) {
+async function site(t, { handles = createProfileHandles({ store: createMemoryProfileHandleStore() }), extra = {} } = {}) {
   await handles.initialize()
   const state = {
     snapshot: { state: 'published', complete: true, revision: 'handles-1', connections: [{ fromId: SIGNUP_ID, toId: 'public-shadow' }, { fromId: SIGNUP_ID, toId: 'twin-a' }],
@@ -90,7 +90,7 @@ async function site(t, { handles = createProfileHandles({ store: createMemoryPro
       members: [SIGNUP_ID, 'twin-a', 'twin-b'] },
   }
   const owners = { 'peter-subject': peterOwner, 'ada-subject': { ownerId: 'ada-owner', userId: 'ada-user' } }
-  const accounts = { [SIGNUP_ID]: peterOwner, 'twin-a': owners['ada-subject'] }
+  const accounts = { [SIGNUP_ID]: peterOwner, 'twin-a': owners['ada-subject'], 'twin-b': { ownerId: 'ada2-owner', userId: 'ada2-user' } }
   let next = 'peter-subject', handler
   const server = createServer((req, res) => void handler(req, res))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
@@ -104,7 +104,7 @@ async function site(t, { handles = createProfileHandles({ store: createMemoryPro
     readPublishedSnapshot: async () => state.snapshot,
     login: { begin: async () => ({ location: 'https://identity.invalid/login', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://identity.invalid', subject: next, verifiedEmail: `${next}@example.invalid`, displayName: next }) },
     resolveOwner: async identity => owners[identity.subject], signup: async identity => owners[identity.subject], issueAccountGrant: async () => ({ accessToken: 'g' }), revokeAccountGrant: async () => {},
-    getBackend: async () => backend })
+    getBackend: async () => backend, ...extra })
   const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
   const signIn = async subject => {
     next = subject
@@ -206,6 +206,44 @@ test('suspension and loss of membership hide the page at every address', async t
   state.snapshot = { ...state.snapshot, revision: 'handles-3', members: ['twin-b'] }
   assert.equal((await get('/people/ada-fictional')).status, 404)
   assert.equal((await get('/people/twin-a')).status, 200, 'its id still names the imported page')
+})
+
+test('adding a member from a contact card whose path carries a handle stores the profile id', async t => {
+  const sent = [], token = 'A'.repeat(24)
+  const contactCards = { read: async () => null, save: async () => null, rotate: async () => null, syncIdentity: async () => {}, exportOwner: async () => null, removeOwner: async () => {},
+    open: async value => value === token ? { name: 'Peter Fictional', profilePath: '/people/peterfictional300' } : null, ownerForToken: async value => value === token ? peterOwner : null }
+  const memberConnections = { send: async value => { sent.push(value); return { status: 'accepted', request: { id: 'r' } } }, respond: async () => {}, withdraw: async () => {}, received: async () => [], sent: async () => [], pendingCount: async () => 0, between: async () => ({ state: 'none' }), removeOwner: async () => {} }
+  const { signIn, post, handler } = await site(t, { extra: { contactCards, memberConnections } })
+  await handler.backfillHandles()
+  const ada = await signIn('ada-subject')
+  const added = await post(`/c/${token}/add`, ada, {})
+  assert.equal(added.headers.get('location'), `/c/${token}?added=1`)
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].recipientProfileId, SIGNUP_ID)
+})
+
+test('a just-deleted account in the still-published index never gets a handle back', async t => {
+  const handles = createProfileHandles({ store: createMemoryProfileHandleStore() })
+  const { handler, get } = await site(t, { handles, extra: { accountForProfile: async id => id === 'twin-a' ? { ownerId: 'ada-owner', userId: 'ada-user' } : null } })
+  assert.equal(await handler.backfillHandles(), 1, 'only the profile an account still stands behind')
+  assert.equal(handles.handleFor('twin-b'), null)
+  assert.equal((await get('/people/twin-b')).status, 200, 'its page stays at its id')
+})
+
+test('a reload that read before a local write never overwrites it', async () => {
+  const store = createMemoryProfileHandleStore()
+  const handles = createProfileHandles({ store })
+  await handles.initialize()
+  let release
+  const all = store.all.bind(store)
+  store.all = async () => { const rows = await all(); await new Promise(resolve => { release = resolve }); return rows }
+  const reloading = handles.reload()
+  await new Promise(resolve => setImmediate(resolve))
+  await handles.ensure({ id: 'p1', name: 'Late Fictional' })
+  store.all = all
+  release()
+  await reloading
+  assert.equal(handles.handleFor('p1'), 'late-fictional')
 })
 
 test('agent tools accept a handle and return it with the public address', async () => {
