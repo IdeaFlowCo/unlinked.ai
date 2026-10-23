@@ -20,6 +20,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import * as oidc from 'openid-client'
 import { ingestArchive, privateId } from '../src/utils/private-import/job.mjs'
 import { createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
+import { withoutSuspendedRows } from '../src/utils/public-people/suspension-filter.mjs'
 import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/private-import/scoped-setup.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
@@ -261,6 +262,40 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // while one background read refreshes it, so a keystroke never waits on the
   // graph (docs/omni-search.md). Every other public read checks the source.
   const publicReader = createPublicPeopleReader({ readPublishedSnapshot, photoFor, suggestFreshMs: 10000, suggestStaleMs: 60000 })
+  // A suspended (soft-deleted) profile is hidden from its own account too
+  // (docs/profile-suspension.md): its photo, the member's /profile, /card and
+  // /scan and their edits, and contact-card links answer as unavailable. Every
+  // check fails closed: when suspension cannot be established the page is
+  // unavailable, never the profile.
+  const suspendedProfile = async id => typeof readPublishedSnapshot === 'function' && typeof id === 'string' && id ? publicReader.suspended({ id }) : false
+  // Authoritative: the stored decisions via the owner's backend. Proves "not
+  // suspended" only when nothing is suspended or the index confirmed it.
+  // Throws when it cannot tell.
+  const ownSuspended = async (owner, ownerBackend) => {
+    if (typeof ownProfileId !== 'function' || !owner?.ownerId) return false
+    const backendValue = ownerBackend ?? await getBackend(owner)
+    if (typeof backendValue?.readSuppressions !== 'function') {
+      if (typeof readPublishedSnapshot !== 'function') return false
+      const mine = await ownProfileId(owner)
+      return mine ? suspendedProfile(mine) : false
+    }
+    const suppressions = await backendValue.readSuppressions()
+    if (!suppressions) return false
+    const mine = await ownProfileId(owner)
+    if (mine && suppressions.ids.has(mine)) return true
+    if (!suppressions.complete) throw Error('suspension_status_unavailable')
+    return false
+  }
+  // The card for a token, or null when it is unknown, hidden, its owner's
+  // profile is suspended, or that cannot be established.
+  const openCard = async cardToken => {
+    const card = await contactCards.open(cardToken)
+    if (!card || typeof contactCards.ownerForToken !== 'function') return card
+    const owner = await contactCards.ownerForToken(cardToken)
+    try { return owner && await ownSuspended(owner) ? null : card } catch { return null }
+  }
+  // Suspended profile ids for owner-private lists (fails closed).
+  const suspendedIdsFor = async backend => (typeof backend?.readSuppressions === 'function' ? (await backend.readSuppressions())?.ids : null) ?? new Set()
   // The Unlinked iOS app (user agent `UnlinkediOS/`) lists only people who
   // joined Unlinked: search, browse, company pages, suggestions, hover cards
   // and profiles read a members-only index. A member's own imported people
@@ -653,7 +688,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   const canAddCard = Boolean(memberConnections && contactCards?.ownerForToken)
   async function addCard(owner, cardToken, displayName) {
     const target = await contactCards.ownerForToken(cardToken)
-    const card = await contactCards.open(cardToken)
+    const card = await openCard(cardToken)
     if (!target || !card) throw new Error('contact_card_not_found')
     // Both accounts must still be active. No identity comes from form fields.
     await getBackend(owner); await getBackend(target)
@@ -973,7 +1008,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (++photoRequests > PHOTO_PER_MINUTE || photoBusy >= PHOTO_IN_FLIGHT) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         photoBusy++
         try {
-          const found = PHOTO_ID.test(photo[1]) ? await profilePhotos.read(photo[1]) : null
+          let hidden
+          try { hidden = PHOTO_ID.test(photo[1]) && await suspendedProfile(photo[1]) } catch { response.writeHead(503, { 'Retry-After': '10' }).end(); return }
+          const found = PHOTO_ID.test(photo[1]) && !hidden ? await profilePhotos.read(photo[1]) : null
           if (!found) { response.writeHead(404).end(); return }
           const etag = `"${found.sha256}"`
           // The page links carry ?v=<content hash>, so that exact URL never changes.
@@ -1121,7 +1158,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         response.setHeader('Referrer-Policy', 'no-referrer')
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
         if (viewer ? input.getAll('csrf').length !== 1 || input.get('csrf') !== viewer.csrf || [...input.keys()].some(key => key !== 'csrf') : [...input.keys()].length > 0) throw new Error('private_browser_csrf')
-        if (!await contactCards.open(cardAdd[1])) { journey(response, renderContactCard({ ...chrome, card: null }), null, '', 404); return }
+        if (!await openCard(cardAdd[1])) { journey(response, renderContactCard({ ...chrome, card: null }), null, '', 404); return }
         if (viewer) {
           let added = false
           try { await addCard(viewer.owner, cardAdd[1], viewer.displayName); added = true } catch { /* Retry remains available. */ }
@@ -1141,7 +1178,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (!viewer) { redirect(response, `/login?next=${encodeURIComponent(back)}`); return }
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== viewer.csrf || [...input.keys()].some(key => key !== 'csrf')) throw Error('private_browser_csrf')
-        const card = await contactCards.open(cardMessage[1])
+        const card = await openCard(cardMessage[1])
         const target = card ? await contactCards.ownerForToken(cardMessage[1]) : null
         if (!card || !target) { journey(response, renderContactCard({ ...chrome, card: null }), null, '', 404); return }
         if (target.ownerId === viewer.owner.ownerId && target.userId === viewer.owner.userId) { redirect(response, back); return }
@@ -1160,7 +1197,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // which the same-origin POST check refuses (WebKit and Chromium).
         response.setHeader('Referrer-Policy', 'same-origin')
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
-        const card = await contactCards.open(contactLink[1])
+        const card = await openCard(contactLink[1])
         if (contactLink[2]) {
           if (!card) { response.writeHead(404).end(); return }
           response.writeHead(200, { 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': vcardContentDisposition(card) })
@@ -1613,6 +1650,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             if (profileId) evidence = 'self-asserted-display-name-v1'
           }
         }
+        // A suspended profile is never offered (docs/profile-suspension.md).
+        if (profileId && await suspendedProfile(profileId).catch(() => true)) { page({ status: 'none', notice: signupLookupNotice('not_found') }); return }
         if (profileId && await selfClaims.claimable(profileId)) {
           // A test profile has its own card; no public reader knows it.
           let detail = typeof selfClaims.preview === 'function' ? await selfClaims.preview(profileId) : null
@@ -1806,6 +1845,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         }
         session.headline = profile.headline
         return { profile, hasStoredProfile, cardUrl, publicProfileUrl: cardUrl ? unlinkedProfileContext(decodeURIComponent(new URL(cardUrl).pathname.slice('/people/'.length))) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(profile.linkedinUrl ? { linkedinUrl: profile.linkedinUrl } : {}), ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
+      }
+      if (signup && ((request.method === 'GET' && ['/profile', '/card', '/scan'].includes(url.pathname)) || (request.method === 'POST' && ['/profile/links', '/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname)))) {
+        let hidden
+        try { hidden = await ownSuspended(session.owner, backend) } catch { render(response, 'Profile unavailable', '<p>Your Unlinked profile is unavailable right now. Please try again in a minute.</p>', 503); return }
+        if (hidden) { render(response, 'Profile unavailable', '<p>Your Unlinked profile is temporarily unavailable. Your account and sign-in are unaffected. Questions: <a href="mailto:support@ideaflow.app">support@ideaflow.app</a>.</p>', 404); return }
       }
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
         const jobs = await jobResources(), props = jobProps(jobs)
@@ -2024,15 +2068,18 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (signup && memberConnections && request.method === 'GET' && url.pathname === '/invitations') {
         if ([...url.searchParams.keys()].some(key => !['tab', 'notice'].includes(key))) { redirect(response, '/invitations'); return }
         const props = jobProps(await jobResources())
-        const [received, sent] = await Promise.all([memberConnections.received(session.owner), memberConnections.sent(session.owner)])
+        const suspended = await suspendedIdsFor(backend)
+        const [received, sent] = (await Promise.all([memberConnections.received(session.owner), memberConnections.sent(session.owner)])).map(rows => rows.filter(row => !suspended.has(row.profileId)))
         journey(response, renderInvitations({ ...props, tab: url.searchParams.get('tab') === 'sent' ? 'sent' : 'received', received, sent, notice: url.searchParams.get('notice') ?? undefined }), props.importJob); return
       }
       if (signup && notifications && request.method === 'GET' && url.pathname === '/notifications') {
         const props = jobProps(await jobResources())
         // Nothing from people this member blocked.
         const hiddenProfiles = memberBlocks ? (await bounded(() => memberBlocks.hidden(session.owner), { profiles: new Set() })).profiles : new Set()
-        const items = (await notifications.list(session.owner)).filter(item => !item.actorProfileId || !hiddenProfiles.has(item.actorProfileId))
-        const [received, connections] = memberConnections ? await Promise.all([memberConnections.received(session.owner), memberConnections.connections(session.owner)]) : [[], []]
+        // Nor from suspended people (docs/profile-suspension.md).
+        const suspended = await suspendedIdsFor(backend)
+        const items = (await notifications.list(session.owner)).filter(item => !item.actorProfileId || (!hiddenProfiles.has(item.actorProfileId) && !suspended.has(item.actorProfileId)))
+        const [received, connections] = memberConnections ? await Promise.all([memberConnections.received(session.owner).then(rows => rows.filter(row => !suspended.has(row.profileId))), memberConnections.connections(session.owner)]) : [[], []]
         // Opening the feed clears the bell; each item stays highlighted until opened.
         await notifications.markSeen(session.owner)
         const alerts = await settleAlerts(response)
@@ -2365,7 +2412,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         }
         const id = input.get('importId')
         if (input.getAll('importId').length !== 1 || !/^[a-f0-9]{64}$/.test(id)) throw new Error('private_import_not_found')
-        const reader = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: session.owner.ownerId, importIds: [id] } })
+        const scoped = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: session.owner.ownerId, importIds: [id] } })
+        // Suspended people are hidden from the importing owner too (docs/profile-suspension.md).
+        const reader = async (importId, options) => {
+          const value = await scoped(importId, options)
+          const suppressions = typeof backend.readSuppressions === 'function' ? await backend.readSuppressions(options) : null
+          return { ...value, assertions: withoutSuspendedRows(value.assertions, suppressions) }
+        }
         if (url.pathname === '/search') {
           if (input.getAll('query').length !== 1 || typeof complete !== 'function') throw new Error('private_search_consent_required')
           const controller = new AbortController()

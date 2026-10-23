@@ -53,3 +53,21 @@ export function linkedinRefHash(slug) {
   if (typeof slug !== 'string' || !slug) return null
   return createHash('sha256').update(slug, 'utf8').digest('hex')
 }
+
+// Imported copies of a suspended person (docs/profile-suspension.md): every
+// minted `public-<row>` whose LinkedIn address matches a suspension's stored
+// address is suspended with it, so a new import cannot re-list the person.
+export function urlIdentitySuspensions({ rows, explicit = [] }) {
+  const refs = new Set(explicit.filter(value => value.kind === 'suspend' && typeof value.linkedinRefHash === 'string').map(value => value.linkedinRefHash))
+  const decided = new Set(explicit.filter(value => value.kind === 'suspend').map(value => value.profileId))
+  if (!refs.size) return []
+  const suspensions = []
+  for (const row of rows) {
+    if (typeof row?.publicId !== 'string' || !row.publicId.startsWith('public-') || decided.has(row.publicId)) continue
+    const ref = linkedinRefHash(linkedinSlug(row.subject))
+    if (!ref || !refs.has(ref)) continue
+    decided.add(row.publicId)
+    suspensions.push({ id: `suspend-url:${row.publicId}`, kind: 'suspend', profileId: row.publicId })
+  }
+  return suspensions
+}

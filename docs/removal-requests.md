@@ -45,7 +45,9 @@ sudo -n docker exec $RT node $R/runtime/unlinked/mcp-server/safety-reports-opera
 A `remove` profile decision ([profile-decisions.md](profile-decisions.md))
 drops the profile, its edges and any address merged into it from the shared
 index on the next build; it applies to every client and to agents. Revoke the
-decision to restore it. An operator-published photo for the same id is
+decision to restore it. To hide the person everywhere, including any later
+import or sign-up with the same LinkedIn address, or to hide a member's
+profile, use `suspend` instead ([profile-suspension.md](profile-suspension.md)). An operator-published photo for the same id is
 separate: revoke it with the photo publisher if needed.
 
 Tests: `tests/removal-requests.test.mjs`.

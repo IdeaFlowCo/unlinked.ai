@@ -4,6 +4,7 @@ import { createScopedImportReader } from './noos-adapter.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from './consent.mjs'
 import { createPrivateSearch } from './ai-search.mjs'
 import { matchNetworkText } from './network-text-search.mjs'
+import { withoutSuspendedRows } from '../public-people/suspension-filter.mjs'
 
 // unlinked_search_network answers literal queries from text alone; only a
 // query with no literal match pays for AI ranking. One deadline covers the
@@ -77,7 +78,11 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
       const recovered=await backend.readLegacyObservations({signal,limit:observationLimit-assertions.length})
       if(recovered){assertions.push(...recovered.assertions.map(row => ({ ...row, ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })));indexed+=recovered.assertions.length}
     }
-    return { legacyProfileId: legacy?.profileId, id: networkId, ownerId: owner.ownerId, imports, indexed, assertions, consent: COMBINED_UPLOAD_CONSENT }
+    // Suspended (soft-deleted) people are hidden even from the owner whose
+    // own export listed them (docs/profile-suspension.md); fails closed.
+    const suppressions = typeof backend.readSuppressions === 'function' ? await backend.readSuppressions({ signal }) : null
+    const visible = withoutSuspendedRows(assertions, suppressions)
+    return { legacyProfileId: legacy?.profileId, id: networkId, ownerId: owner.ownerId, imports, indexed: Math.max(0, indexed - (assertions.length - visible.length)), assertions: visible, consent: COMBINED_UPLOAD_CONSENT }
   }
   const search = typeof complete === 'function' ? async ({ query, signal, stopSignal, readFirst = readNetwork, concurrency }) => {
     const result = await createPrivateSearch({ readImport: readFirst, complete, ...(concurrency ? { concurrency } : {}) })({ importId: networkId, query, signal, stopSignal })

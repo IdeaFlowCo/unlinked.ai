@@ -1,5 +1,6 @@
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
+import { withoutSuspendedRows } from '../public-people/suspension-filter.mjs'
 
 const SHA = /^[a-f0-9]{64}$/
 const TOMBSTONE_BATCH = 400
@@ -8,6 +9,9 @@ const RECEIPT_PROBE_LIMIT = 600
 // The whole account in one reviewable JSON document. Reads use the same
 // owner-fenced readers as the pages; nothing bypasses tombstones or consent.
 export async function exportAccountData({ owner, backend, jobs, grants = [], signupLookup, signal }) {
+  // Suspended people are left out of parsed rows (docs/profile-suspension.md);
+  // the original uploaded files are the owner's own and stay as uploaded.
+  const suppressions = typeof backend.readSuppressions === 'function' ? await backend.readSuppressions({ signal }) : null
   const imports = []
   for (const resource of jobs) {
     signal?.throwIfAborted()
@@ -17,7 +21,7 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
     if (['indexed', 'partial'].includes(job.status)) {
       try {
         const read = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [job.id] } })
-        entry.observations = (await read(job.id, { signal })).assertions
+        entry.observations = withoutSuspendedRows((await read(job.id, { signal })).assertions, suppressions)
       } catch { entry.observations = null; entry.observationsError = 'import_observations_unreadable' }
     }
     imports.push(entry)
@@ -26,7 +30,7 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
   try {
     if (typeof backend.readLegacyProfile === 'function') {
       const link = await backend.readLegacyProfile()
-      if (link) legacy = { profileId: link.profileId, profile: link.profile ?? null, connections: link.connections ?? [] }
+      if (link) legacy = { profileId: link.profileId, profile: link.profile ?? null, connections: (link.connections ?? []).filter(edge => !suppressions?.ids?.has(edge?.toId)) }
     }
     if (typeof backend.readLegacyFiles === 'function') {
       const files = await backend.readLegacyFiles()
@@ -34,7 +38,7 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
     }
     if (typeof backend.readLegacyObservations === 'function') {
       const recovered = await backend.readLegacyObservations({ signal })
-      if (recovered?.assertions?.length) legacy = { ...(legacy ?? {}), recoveredObservations: recovered.assertions }
+      if (recovered?.assertions?.length) legacy = { ...(legacy ?? {}), recoveredObservations: withoutSuspendedRows(recovered.assertions, suppressions) }
     }
   } catch { legacy = { ...(legacy ?? {}), error: 'legacy_records_unavailable' } }
   const confirmed = signupLookup ? await (typeof signupLookup.readForExport === 'function' ? signupLookup.readForExport(owner) : signupLookup.read(owner)) : null

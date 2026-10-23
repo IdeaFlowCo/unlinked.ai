@@ -191,7 +191,7 @@ test('the search bar QR button opens a scan sheet: Scan for visitors, My card fi
 
 test('owner profiles retain upload facts before publication and use older addresses only as fallback', async t => {
   let confirmed = null, fallbackUnavailable = false
-  const fixture = harness(t, { ownProfileId: async () => 'confirmed-person', backend: { readLegacyProfile: async () => { if (fallbackUnavailable) throw Error('legacy_profile_source_unavailable'); return confirmed } },
+  const fixture = harness(t, { ownProfileId: async () => 'confirmed-person', backend: { readSuppressions: async () => null, readLegacyProfile: async () => { if (fallbackUnavailable) throw Error('legacy_profile_source_unavailable'); return confirmed } },
     signupLookup: { read: async () => { if (fallbackUnavailable) throw Error('signup_source_unavailable'); return null } } })
   const signed = await fixture.start(), { owner, resources } = fixture
   const id = 'a'.repeat(64), sourceId = 'b'.repeat(64), rowId = 'profile-row'
