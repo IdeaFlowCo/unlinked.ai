@@ -18,7 +18,7 @@ import { isPublicDiscoveryPath, servePublicDiscovery } from './public-discovery.
 import { COMBINED_UPLOAD_CONSENT, PUBLIC_UPLOAD_CONSENT, requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import * as oidc from 'openid-client'
-import { ingestArchive } from '../src/utils/private-import/job.mjs'
+import { ingestArchive, privateId } from '../src/utils/private-import/job.mjs'
 import { createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
 import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/private-import/scoped-setup.mjs'
@@ -441,6 +441,17 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     networkCache.delete(key); networkCache.set(key, entry)
     while (networkCache.size > NETWORK_CACHE_CAPACITY) networkCache.delete(networkCache.keys().next().value)
     return entry.pending
+  }
+  // A notification from someone with no public profile (they joined from a
+  // card scan and never published one) names a connection in this member's
+  // own network: the accepted request or invitation it came from.
+  const notificationContact = async (owner, item) => {
+    if (typeof item.subjectId !== 'string' || !item.subjectId) return null
+    const kind = item.kind === 'invite_accepted' ? 'invite-connection' : ['connection_request_received', 'connection_request_accepted'].includes(item.kind) ? 'member-connection' : null
+    if (!kind) return null
+    const id = privateId(owner.ownerId, kind, item.subjectId)
+    const network = await accountNetwork(owner)
+    return network.assertions.some(row => row.category === 'connections' && row.id === id) ? `/network/contacts/${encodeURIComponent(id)}` : null
   }
   const dropAccountNetwork = owner => { if (owner?.ownerId) networkCache.delete(`${owner.ownerId}\u0000${owner.userId}`) }
   const linkedinPersonDestination = async (owner, address, reader = publicReader) => {
@@ -2033,7 +2044,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // `?to=profile` (the name and photo on the feed) opens the person's profile instead.
         const toProfile = url.search === '?to=profile'
         const item = await notifications.open(session.owner, notificationItem[1])
-        redirect(response, !item ? '/notifications' : toProfile && item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : notificationTarget(item)); return
+        const contact = item && toProfile && !item.actorProfileId ? await notificationContact(session.owner, item).catch(() => null) : null
+        redirect(response, !item ? '/notifications' : toProfile && item.actorProfileId ? `/people/${encodeURIComponent(item.actorProfileId)}` : contact ?? notificationTarget(item)); return
       }
       if (signup && notifications && request.method === 'POST' && url.pathname === '/notifications/read-all') {
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))

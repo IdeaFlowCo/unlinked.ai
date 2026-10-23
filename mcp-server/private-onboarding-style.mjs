@@ -212,6 +212,8 @@ dialog.msg-picker::backdrop{background:#16181d55}
 @media(hover:none){.unlinked-onboarding .msg-act{min-height:40px;min-width:40px}}
 @media(prefers-reduced-motion:reduce){.unlinked-onboarding .msg-row.flash .msg-bubble{animation:none;box-shadow:0 0 0 3px var(--brand)}.unlinked-onboarding .msg-actions{transition:none}}
 @media(max-width:759px){body:has(.msg) .unlinked-onboarding{padding:0 0 0;height:100dvh}body:has(.msg) header{padding:12px 16px}.unlinked-onboarding .msg{padding-top:0}.unlinked-onboarding .msg-app{grid-template-columns:1fr;border:0;border-radius:0;border-top:1px solid var(--line)}.unlinked-onboarding .msg-side{border-right:0}.unlinked-onboarding .msg-app[data-open] .msg-side{display:none}.unlinked-onboarding .msg-app:not([data-open]) .msg-thread{display:none}.unlinked-onboarding .msg-back{display:inline-flex}.unlinked-onboarding .msg-head-link{display:none}.unlinked-onboarding .msg-row{max-width:85%}.unlinked-onboarding .msg-log{padding:12px}.unlinked-onboarding .msg-hint{display:none}.unlinked-onboarding .msg-toggle{padding:6px 8px}}
+@media(max-width:900px),(pointer:coarse){.unlinked-onboarding .msg-search input,.unlinked-onboarding .msg-composer textarea{font-size:16px}}
+@media(max-width:759px){.unlinked-onboarding .msg-log{overflow-x:hidden}}
 
 body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17px/1.55 "Public Sans",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .unlinked-onboarding{--brand:#4349c4;--brand-d:#32379c;--tint:#eceefc;--page:#f5f6fc;--fg:#16181d;--muted:#667085;--line:#e6e8ec;--line2:#c4c9d2;--r:8px;max-width:1180px;margin:0 auto;padding:0 28px 30px;color:var(--fg)}
@@ -429,6 +431,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .me-who{min-width:0;line-height:1.3}
 .unlinked-onboarding .me-who b{display:block;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unlinked-onboarding .me-hl{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;color:var(--muted);white-space:normal}
+.unlinked-onboarding .me:not([open]) .me-panel{display:none}
 .unlinked-onboarding nav .me .me-view{grid-column:1/-1;margin-top:10px;min-height:34px;border-color:var(--brand);border-radius:99px;color:var(--brand-d)}
 .unlinked-onboarding nav .me .me-view:hover{background:var(--tint);text-decoration:none}
 .unlinked-onboarding .me-panel>a,.unlinked-onboarding .me .me-out{display:flex;align-items:center;gap:12px;width:100%;min-height:0;padding:10px 16px;border:0;border-radius:0;background:none;color:var(--fg);font:inherit;text-align:left;justify-content:flex-start;text-decoration:none;cursor:pointer}
@@ -605,7 +608,10 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .pconn[aria-busy=true] .crow,.unlinked-onboarding .pconn[aria-busy=true] .pconn-status{opacity:.55}
 .unlinked-onboarding .pconn-all{margin:10px 0 0}
 @media(max-width:900px),(pointer:coarse){.unlinked-onboarding .pconn-filter input[type=search]{font-size:16px}}
-@media(max-width:600px){.unlinked-onboarding .network-toolbar{padding:14px}.unlinked-onboarding .network-query{min-width:100%}.unlinked-onboarding .network-sort{flex:1}.unlinked-onboarding .network-segments{width:100%;font-size:13px}.unlinked-onboarding .network-segments a{flex:1;text-align:center;padding:9px 5px}.unlinked-onboarding .network-reset{margin-left:0}}
+@media(max-width:600px){.unlinked-onboarding .network-toolbar{padding:4px 14px 14px}.unlinked-onboarding .network-query{min-width:100%}.unlinked-onboarding .network-sort{flex:1}.unlinked-onboarding .network-segments{width:100%;font-size:13px}.unlinked-onboarding .network-segments a{flex:1;text-align:center;padding:9px 5px}.unlinked-onboarding .network-reset{margin-left:0}}
+/* Phones: the list, not the filters, fills the first screen. Field labels stay
+   for screen readers; sort sits inline and membership is a 2×2 grid. */
+@media(max-width:600px){.unlinked-onboarding .dir>h1.hq{margin-bottom:12px}.unlinked-onboarding .network-scopes{margin:0 0 12px;gap:20px}.unlinked-onboarding .network-fields{gap:10px}.unlinked-onboarding .network-query{gap:0}.unlinked-onboarding .network-query-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.unlinked-onboarding .network-fields label.network-sort{flex-direction:row;align-items:center;gap:10px;font-weight:500;color:var(--muted)}.unlinked-onboarding .network-sort select{flex:1;min-height:40px;padding-top:6px;padding-bottom:6px}.unlinked-onboarding #network-search-help,.unlinked-onboarding .network-filter-label,.unlinked-onboarding .network-note{display:none}.unlinked-onboarding .network-filter-row{margin-top:10px}.unlinked-onboarding .network-segments{display:grid;grid-template-columns:1fr 1fr}.unlinked-onboarding .network-segments a{display:flex;align-items:center;justify-content:center;min-height:36px;padding:6px 4px;white-space:nowrap}.unlinked-onboarding .network-count{margin:10px 0}}
 .unlinked-onboarding .private-context{margin-top:16px;border-left:3px solid var(--brand)}
 .unlinked-onboarding .private-context .pc-head{display:flex;align-items:center;gap:10px}
 .unlinked-onboarding .private-context h3{margin:0}

@@ -97,7 +97,20 @@ test('the header field is at least 16px on phones so iOS does not zoom on focus'
   const content = renderLanding().content
   assert.match(content, /@media\(max-width:900px\),\(pointer:coarse\)\{\.unlinked-onboarding \.header-search input\[type=search\]\{font-size:16px\}\}/)
   // The phone rule must come after the 15px desktop rule to win the cascade.
-  assert.ok(content.indexOf('font-size:16px}}') > content.indexOf('border-radius:99px;font-size:15px'))
+  assert.ok(content.indexOf('.header-search input[type=search]{font-size:16px}}') > content.indexOf('border-radius:99px;font-size:15px'))
+})
+
+test('phones: Messages fields do not trigger iOS zoom, the closed Me menu has no box, and People keeps the list on the first screen', () => {
+  const content = renderLanding().content
+  const phone = content.indexOf('.unlinked-onboarding .msg-search input,.unlinked-onboarding .msg-composer textarea{font-size:16px}}')
+  assert.ok(phone > content.indexOf('.unlinked-onboarding .msg-composer textarea{flex:1'))
+  assert.ok(phone > content.indexOf('.unlinked-onboarding .msg-search input{width:100%'))
+  assert.match(content, /\.unlinked-onboarding \.msg-log\{overflow-x:hidden\}/)
+  assert.match(content, /\.unlinked-onboarding \.me:not\(\[open\]\) \.me-panel\{display:none\}/)
+  const people = renderPeople({ csrf: 'x', connectedView: { rows: [], total: 0 }, connectedCounts: { all: 0 } }).content
+  assert.match(people, /<span class="network-query-label">Filter my connections<\/span>/)
+  assert.match(people, /class="small network-note">Newest connection dates first/)
+  assert.doesNotMatch(people, /ready to search/)
 })
 
 test('suggestions reuse a recent verified index, refresh it in the background and fail closed', async () => {
