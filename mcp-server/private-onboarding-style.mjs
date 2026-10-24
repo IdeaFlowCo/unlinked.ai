@@ -356,7 +356,9 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .tag,.unlinked-onboarding .skills span{display:inline-block;background:var(--tint);color:var(--brand-d);border-radius:99px;padding:5px 12px;font-size:14px}
 .unlinked-onboarding .profile{display:grid;grid-template-columns:1fr 350px;gap:20px;padding-top:22px;align-items:start}
 .unlinked-onboarding .profile .card{margin:0 0 16px}
-.unlinked-onboarding .phead{padding:0 0 22px;overflow:hidden}
+.unlinked-onboarding .phead{padding:0 0 22px;overflow:hidden;position:relative}
+.unlinked-onboarding .phead .li-top{position:absolute;top:120px;right:24px;gap:6px;color:var(--fg);text-decoration:none}
+.unlinked-onboarding .phead .li-top svg{color:#0a66c2;flex:none}
 .unlinked-onboarding .banner{height:108px;background:linear-gradient(115deg,var(--h,var(--brand)),color-mix(in srgb,var(--h,var(--brand)) 30%,#fff))}
 .unlinked-onboarding .pav{width:96px;height:96px;border-radius:50%;border:4px solid #fff;margin:-48px 0 0 24px;display:grid;place-items:center;background:var(--h,var(--brand));color:#fff;font-weight:600;font-size:30px}
 .unlinked-onboarding .phead h1{font:600 28px/1.15 "Public Sans",system-ui,sans-serif;letter-spacing:-.01em;margin:12px 24px 2px}

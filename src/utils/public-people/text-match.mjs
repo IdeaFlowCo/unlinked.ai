@@ -4,6 +4,8 @@ const STOP = new Set(['a', 'an', 'the', 'is', 'are', 'who', 'what', 'where', 'do
 export const SEARCH_MODES = Object.freeze(['best', 'exact'])
 
 export const words = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter(Boolean) : []
+// The names reader.company() accepts: 1–12 words within 200 characters.
+export const companyPageName = value => { const name = typeof value === 'string' ? value.trim() : ''; const count = words(name).length; return name.length > 0 && name.length <= 200 && count > 0 && count <= 12 }
 
 // A small set of word forms, so “investors” finds “investor” and “investing”,
 // and “games” finds “game” and “gaming”. Deliberately not a full stemmer.
