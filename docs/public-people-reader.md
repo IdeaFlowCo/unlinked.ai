@@ -78,5 +78,5 @@ per-person reads in `curated-enrichment-v1` win.
 Publish a shard with `publish-enrichment-people.mjs <rows> <root> --dataset=curated-enrichment-exa-N [--execute]`.
 Roll it back with `UnlinkedPublicPeopleStore.revoke(<dataset>, <revision>)`.
 Imported profiles without a legacy id are enriched by LinkedIn address instead, from
-`curated-enrichment-li-1` through `-li-8`, filling empty fields only; see
+the LinkedIn-keyed datasets, filling empty fields only; see
 [imported profile enrichment](imported-profile-enrichment.md).

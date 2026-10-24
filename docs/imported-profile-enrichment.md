@@ -32,10 +32,12 @@ never filled in (not even through an absorbed copy), removed and suspended
 profiles stay gone, and unlisting is unchanged. Enrichment never adds people or
 edges. The rows may add at most 64 MiB of serialized data in all
 (`LINKEDIN_ENRICHMENT_TEXT_BUDGET`); a row that would exceed the remaining
-budget is skipped, leaving room for smaller rows. The reader's whole-index
-text budget is 96 MiB (`PUBLIC_INDEX_MAX_TEXT_BYTES`); per-field and per-shard
-limits stay unchanged. Hosts can lower the enrichment budget with the
-in-process `linkedinEnrichmentTextBudget` option. Rows carry only the standard public profile fields the
+budget is skipped, leaving room for smaller rows. The reader's separate
+[whole-index and field limits](public-people-reader.md) and the store's
+[per-shard limit](public-people-reader.md) still apply.
+Hosts can lower the enrichment budget with the in-process
+`linkedinEnrichmentTextBudget` option (a safe integer from zero through the
+default; zero disables filling). Rows carry only the standard public profile fields the
 store accepts (`name`, `headline`, `location`, `about`, `company`, `positions`,
 `education`, `skills`); nothing connection-level (dates connected, emails,
 notes) exists in the row grammar.
