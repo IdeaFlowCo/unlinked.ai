@@ -13,7 +13,7 @@ Unknown, unpublished, unavailable, incomplete, malformed or over-limit snapshots
 Provider exceptions are replaced with data-free errors.
 Requests time out and receive an abort signal; adapters must honor that signal to stop their own work.
 
-Default maxima are 20,000 profiles, 100,000 directed public edges, 16 MiB accepted DTO text and 8 seconds per snapshot call.
+Default maxima are 100,000 profiles, 500,000 directed public edges, 96 MiB accepted DTO text and 8 seconds per snapshot call. Text remains bounded to 20,000 characters per field; the higher whole-index cap accommodates published profile histories across member connection uploads.
 The standalone runtime warms the process-local public index before opening its HTTP listener only when the source sets `revisionIdentifiesContent: true`; absent or non-content-addressed sources are skipped. It uses an anonymous reader with the default size limits and an eight-second snapshot-read timeout, moving cold compilation to startup without a synthetic viewer or model call. Warmup is best effort: unavailable publication does not prevent account routes from starting. Every subsequent request still reads the live source and validates publication and owner visibility; warmup never authorizes stale rows. Startup ordering and compilation reuse are covered by `tests/public-people-warmup.test.mjs`.
 The provider must bound its own fetch/serialization before returning; these maxima are not permission to read private operational rows.
 All entity arrays must have their own data entries at every index. On compilation, the factory validates all rows before computing counts/order, never truncates an oversized snapshot, and rejects duplicate IDs/edges or dangling endpoints. Reusing a compiled index relies on the trusted source's content-addressed revision guarantee below.
@@ -78,5 +78,5 @@ per-person reads in `curated-enrichment-v1` win.
 Publish a shard with `publish-enrichment-people.mjs <rows> <root> --dataset=curated-enrichment-exa-N [--execute]`.
 Roll it back with `UnlinkedPublicPeopleStore.revoke(<dataset>, <revision>)`.
 Imported profiles without a legacy id are enriched by LinkedIn address instead, from
-`curated-enrichment-li-1` through `-li-4`, filling empty fields only; see
+`curated-enrichment-li-1` through `-li-8`, filling empty fields only; see
 [imported profile enrichment](imported-profile-enrichment.md).

@@ -1,7 +1,7 @@
 import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { createHash } from 'node:crypto'
-import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES, PUBLIC_INDEX_MAX_TEXT_BYTES } from './limits.mjs'
 import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, companyPageName, createQueryMatcher, rankMatches, words } from './text-match.mjs'
@@ -77,8 +77,8 @@ const deepFreeze = value => {
 // source) let `suggest` reuse the last verified index: as-is while younger than
 // the fresh window, and while younger than the stale bound with one background
 // refresh. A failed refresh drops it, so a revoked publication fails closed.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor, suggestFreshMs = 0, suggestStaleMs = 0, now = Date.now } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean' || !Number.isSafeInteger(suggestFreshMs) || suggestFreshMs < 0 || !Number.isSafeInteger(suggestStaleMs) || suggestStaleMs < suggestFreshMs || suggestStaleMs > 300000 || typeof now !== 'function') throw new TypeError('public_people_configuration_invalid')
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = PUBLIC_INDEX_MAX_TEXT_BYTES, timeoutMs = 8000, reuse = false, photoFor, suggestFreshMs = 0, suggestStaleMs = 0, now = Date.now } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, PUBLIC_INDEX_MAX_TEXT_BYTES) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean' || !Number.isSafeInteger(suggestFreshMs) || suggestFreshMs < 0 || !Number.isSafeInteger(suggestStaleMs) || suggestStaleMs < suggestFreshMs || suggestStaleMs > 300000 || typeof now !== 'function') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
   // once, and building it is slow. With the default `reuse: false`, each new

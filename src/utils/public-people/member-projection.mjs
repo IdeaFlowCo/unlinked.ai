@@ -55,10 +55,11 @@ export const ENRICHMENT_DATASETS = Object.freeze([...ENRICHMENT_SHARD_DATASETS, 
 // member imports mint (`public-<row>`), including imports made later. It only
 // fills fields a profile leaves empty, never touches members or historical
 // members, and never adds people or edges.
-export const LINKEDIN_ENRICHMENT_DATASETS = Object.freeze(['curated-enrichment-li-1', 'curated-enrichment-li-2', 'curated-enrichment-li-3', 'curated-enrichment-li-4'])
+export const LINKEDIN_ENRICHMENT_DATASETS = Object.freeze(Array.from({ length: 8 }, (_, index) => `curated-enrichment-li-${index + 1}`))
 export const LINKEDIN_ENRICHMENT_ID = /^li-[a-f0-9]{64}$/
-// Text the LinkedIn rows may add to the index (the reader's whole budget is 16 MiB).
-export const LINKEDIN_ENRICHMENT_TEXT_BUDGET = 4 * 1024 * 1024
+// Bounded below the reader's 96 MiB whole-index cap, leaving room for the
+// recovered and member-authored profiles. Each Noos shard remains <= 8 MiB.
+export const LINKEDIN_ENRICHMENT_TEXT_BUDGET = 64 * 1024 * 1024
 export const linkedinEnrichmentId = slug => { const ref = linkedinRefHash(slug); return ref ? 'li-' + ref : null }
 const refCache = new Map()
 // The LinkedIn reference of a published profile's address, or null.
@@ -100,9 +101,10 @@ const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.
 // `mergeSameLinkedin` folds published profiles that share one LinkedIn address
 // into one (linkedinIdentityMerges); `preferSurvivor(ids)` names the copy that
 // already holds the person's address so the survivor stays stable.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!validEnrichmentDatasets(enrichmentDatasets)) throw Error('public_enrichment_datasets_invalid')
   if (!Array.isArray(linkedinEnrichmentDatasets) || !linkedinEnrichmentDatasets.every((value, index) => LINKEDIN_ENRICHMENT_DATASETS.includes(value) && linkedinEnrichmentDatasets.indexOf(value) === index) || typeof mergeSameLinkedin !== 'boolean' || typeof preferSurvivor !== 'function') throw Error('public_enrichment_datasets_invalid')
+  if (!Number.isSafeInteger(linkedinEnrichmentTextBudget) || linkedinEnrichmentTextBudget < 0 || linkedinEnrichmentTextBudget > LINKEDIN_ENRICHMENT_TEXT_BUDGET) throw Error('public_enrichment_text_budget_invalid')
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
   if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
   let work = null, kept = null
@@ -243,13 +245,17 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       // never members' or historical members' own words. Bounded, so a large
       // publication cannot push the reader past its text budget.
       const own = new Set([...(decided.members ?? members), ...(decided.legacyMembers ?? [])])
-      let budget = LINKEDIN_ENRICHMENT_TEXT_BUDGET
+      let budget = linkedinEnrichmentTextBudget
       const result = byLinkedin.size ? { ...decided, profiles: decided.profiles.map(profile => {
         if (own.has(profile.id) || budget <= 0) return profile
         const ref = profileLinkedinRef(profile), row = ref ? byLinkedin.get(ref) : undefined
         if (!row) return profile
         const value = fillFromLinkedinEnrichment(profile, row)
-        if (value !== profile) budget -= Buffer.byteLength(JSON.stringify(value)) - Buffer.byteLength(JSON.stringify(profile))
+        if (value !== profile) {
+          const added = Buffer.byteLength(JSON.stringify(value)) - Buffer.byteLength(JSON.stringify(profile))
+          if (added > budget) return profile
+          budget -= Math.max(0, added)
+        }
         return value
       }) } : decided
       if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')

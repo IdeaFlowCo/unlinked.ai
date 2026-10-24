@@ -9,7 +9,7 @@ person's LinkedIn profile: headline, location, about, experience and education
 
 ## LinkedIn-keyed datasets
 
-`curated-enrichment-li-1` through `-li-4` (`LINKEDIN_ENRICHMENT_DATASETS` in
+`curated-enrichment-li-1` through `-li-8` (`LINKEDIN_ENRICHMENT_DATASETS` in
 `src/utils/public-people/member-projection.mjs`) are Noos public datasets like
 the id-keyed `curated-enrichment-*` sets (docs/public-people-reader.md), except
 that a row's id names a LinkedIn address, not a profile:
@@ -30,8 +30,12 @@ operator row) always wins. The name is never replaced. It runs on the profiles
 shown, after every merge and decision, so members and historical members are
 never filled in (not even through an absorbed copy), removed and suspended
 profiles stay gone, and unlisting is unchanged. Enrichment never adds people or
-edges. The rows may add at most 4 MiB of text in all
-(`LINKEDIN_ENRICHMENT_TEXT_BUDGET`); the reader's whole index budget is 16 MiB. Rows carry only the standard public profile fields the
+edges. The rows may add at most 64 MiB of serialized data in all
+(`LINKEDIN_ENRICHMENT_TEXT_BUDGET`); a row that would exceed the remaining
+budget is skipped, leaving room for smaller rows. The reader's whole-index
+text budget is 96 MiB (`PUBLIC_INDEX_MAX_TEXT_BYTES`); per-field and per-shard
+limits stay unchanged. Hosts can lower the enrichment budget with the
+in-process `linkedinEnrichmentTextBudget` option. Rows carry only the standard public profile fields the
 store accepts (`name`, `headline`, `location`, `about`, `company`, `positions`,
 `education`, `skills`); nothing connection-level (dates connected, emails,
 notes) exists in the row grammar.
