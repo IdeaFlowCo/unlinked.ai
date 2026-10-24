@@ -118,18 +118,26 @@ test('same-address merges: a member absorbs its imported copies; copies fold int
   assert.ok(snapshot.profiles.some(value => value.id === 'public-e1'))
 })
 
-test('an unverified member absorbs only copies whose names agree', () => {
+test('an unverified member absorbs nothing, even under the same name', () => {
   const U = 'member-signup-' + 'c'.repeat(64)
-  const profiles = [person(U, 'Mallory Fictional', { linkedinUrl: li('victim-fictional') }), person('public-v', 'Victor Victim', { linkedinUrl: li('victim-fictional') }),
-    person('member-signup-' + 'd'.repeat(64), 'Dana Q. Fictional', { linkedinUrl: li('dana') }), person('public-d', 'Dana Fictional', { linkedinUrl: li('dana') })]
-  const result = linkedinIdentityMerges({ profiles, members: [U, 'member-signup-' + 'd'.repeat(64)], absorbers: [], refFor: ref })
-  assert.deepEqual(result.merges.map(value => [value.profileId, value.survivorId]), [['public-d', 'member-signup-' + 'd'.repeat(64)]])
+  const profiles = [person(U, 'Victor Victim', { linkedinUrl: li('victim-fictional') }), person('public-v', 'Victor Victim', { linkedinUrl: li('victim-fictional') }), person('0f8845b4-7def-487a-a404-c67e6aa811b8', 'Victor Victim', { linkedinUrl: li('victim-fictional') })]
+  assert.deepEqual(linkedinIdentityMerges({ profiles, members: [U], absorbers: [], refFor: ref }).merges, [])
 })
 
-test('a verified member absorbs its copies without taking their fields; an unverified one only with an agreeing name', async () => {
+test('earlier merges re-pointed at an absorbing member keep only the member\'s fields', () => {
+  const M = 'member-signup-' + 'm'.repeat(64), L = '0f8845b4-7def-487a-a404-c67e6aa811b8'
+  const profiles = [person(M, 'Ada', { linkedinUrl: li('ada') }), person(L, 'Ada', { linkedinUrl: li('ada') }), person('public-x', 'Ada', { about: 'From an import', linkedinUrl: li('ada') })]
+  const decisions = [{ id: 'url:public-x', kind: 'merge', profileId: 'public-x', survivorId: L }]
+  const result = linkedinIdentityMerges({ profiles, members: [M], absorbers: [M], decisions, refFor: ref })
+  assert.deepEqual(result.decisions[0], { ...decisions[0], survivorId: M, fill: false })
+  const snapshot = applyProfileDecisions({ state: 'published', complete: true, revision: 'r', profiles, connections: [], members: [M] }, [...result.decisions, ...result.merges], { limit: 100000 })
+  assert.deepEqual(snapshot.profiles, [profiles[0]])
+})
+
+test('a verified member absorbs its copies without taking their fields; an unverified one absorbs nothing', async () => {
   const L = '0f8845b4-7def-487a-a404-c67e6aa811b8'
   const profiles = [person(L, 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person('public-a', 'Ada Fictional', { headline: 'Analyst at Importco', company: 'Importco', linkedinUrl: li('ada-fictional') }),
-    person('member-signup-' + 'b'.repeat(64), 'Bo Fictional', { linkedinUrl: li('bo-fictional') }), person('public-b', 'Robert Other', { linkedinUrl: li('bo-fictional') })]
+    person('member-signup-' + 'b'.repeat(64), 'Bo Fictional', { linkedinUrl: li('bo-fictional') }), person('public-b', 'Bo Fictional', { linkedinUrl: li('bo-fictional') })]
   const rows = [liRow('ada-fictional', { about: 'Row about' }), liRow('bo-fictional', { about: 'Bo row' })]
   // L is a confirmed recovered account now claimed (verified); Bo typed his address at signup.
   const value = await index({ profiles, rows, members: [L, 'member-signup-' + 'b'.repeat(64)], legacyMembers: [L] })()
@@ -137,7 +145,7 @@ test('a verified member absorbs its copies without taking their fields; an unver
   assert.equal(value.aliases['public-a'], L)
   assert.equal(ada.headline, undefined, "another importer's CSV row never fills a member")
   assert.equal(ada.about, undefined, 'enrichment never reaches a member through a merge')
-  assert.equal(value.aliases['public-b'], undefined, 'an unverified address folds in no copy under another name')
+  assert.equal(value.aliases['public-b'], undefined, 'an unverified address folds nothing in')
   assert.equal(value.profiles.find(profile => profile.id === 'public-b').about, 'Bo row')
 })
 

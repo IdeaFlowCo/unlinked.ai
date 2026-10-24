@@ -46,10 +46,11 @@ the index folds them into one (`linkedinIdentityMerges` in
 decision):
 
 - A member's profile absorbs every imported copy of itself and keeps only its
-  own fields. When the member's address is not verified (it is verified when
-  it comes from their own uploaded archive or a confirmed recovered account; a
-  URL typed at signup is not), a copy is absorbed only if its name also agrees
-  (`namesAgree`), so a typed address cannot take over someone else's page.
+  own fields, when the member's address is verified: it comes from their own
+  uploaded archive or a confirmed recovered account. A URL typed at signup, or
+  a self-asserted claim, absorbs nothing, so typing someone's URL can never
+  take over their page; those members' imported copies stay separate pages
+  until the address is verified (for example by uploading their archive).
 - The copies several imports mint fold into one survivor: a copy an operator
   removed (so the person stays removed), else the copy that already holds the
   person's address, else the smallest id.

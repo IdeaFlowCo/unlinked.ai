@@ -74,12 +74,12 @@ export function urlIdentitySuspensions({ rows, explicit = [] }) {
 
 // One person, one page (docs/profile-handles.md): published profiles that carry
 // the same LinkedIn address are the same person, so they fold into one.
-// - A member absorbs every imported copy of itself, keeping only its own
-//   fields (`fill: false`). When the member's address is not verified
-//   (`absorbers`: from their own archive or a confirmed recovered account; a
-//   URL typed at signup is not), each copy must also carry an agreeing name
-//   (`namesAgree`), a veto that keeps a typed address from taking over someone
-//   else's page; it never matches anyone by itself. An address shared by two
+// - A member whose address is verified (`absorbers`: it comes from their own
+//   uploaded archive or a confirmed recovered account; a URL typed at signup,
+//   or a self-asserted claim, is not) absorbs every imported copy of itself,
+//   keeping only its own fields (`fill: false`, carried onto earlier merges
+//   re-pointed at it). An unverified address absorbs nothing, so typing
+//   someone's URL can never take over their page. An address shared by two
 //   members is left alone.
 // - Copies minted by several imports (`public-<row>`) fold into one survivor:
 //   a copy an operator removed (so the person stays removed), else the copy
@@ -90,7 +90,6 @@ export function urlIdentitySuspensions({ rows, explicit = [] }) {
 // merges plus every earlier merge whose survivor folded away, re-pointed at the
 // new survivor so no chain is left.
 export function linkedinIdentityMerges({ profiles, members = [], absorbers = members, decisions = [], refFor, prefer = () => null }) {
-  const byId = new Map(profiles.map(profile => [profile.id, profile]))
   const memberSet = new Set(members), absorbing = new Set(absorbers)
   const named = new Set(), mergedAway = new Set(), removed = new Set()
   for (const decision of decisions) {
@@ -114,8 +113,8 @@ export function linkedinIdentityMerges({ profiles, members = [], absorbers = mem
     const membersHere = ids.filter(id => memberSet.has(id))
     if (membersHere.length) {
       if (membersHere.length > 1) continue
-      const verified = absorbing.has(membersHere[0]), member = byId.get(membersHere[0])
-      const movable = ids.filter(id => id !== membersHere[0] && !named.has(id) && (verified || namesAgree(member?.name, byId.get(id)?.name)))
+      if (!absorbing.has(membersHere[0])) continue
+      const movable = ids.filter(id => id !== membersHere[0] && !named.has(id))
       if (movable.length) fold(membersHere[0], movable, { fill: false })
       continue
     }
@@ -128,17 +127,12 @@ export function linkedinIdentityMerges({ profiles, members = [], absorbers = mem
     const survivorId = movable.includes(preferred) ? preferred : [...movable].sort()[0]
     fold(survivorId, movable.filter(id => id !== survivorId))
   }
-  const rewritten = decisions.map(decision => decision?.kind === 'merge' && survivorFor.has(decision.survivorId) ? { ...decision, survivorId: survivorFor.get(decision.survivorId) } : decision)
+  const keepOwn = new Set(merges.filter(value => value.fill === false).map(value => value.survivorId))
+  const rewritten = decisions.map(decision => {
+    if (decision?.kind !== 'merge' || !survivorFor.has(decision.survivorId)) return decision
+    const survivorId = survivorFor.get(decision.survivorId)
+    return { ...decision, survivorId, ...(keepOwn.has(survivorId) ? { fill: false } : {}) }
+  })
   return { merges, decisions: rewritten }
 }
 
-const nameTokens = value => new Set((typeof value === 'string' ? value : '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(token => token.length > 1))
-// Whether two display names plausibly name one person (shared surname, two
-// shared words, or one name's words inside the other's). Only ever a veto.
-export function namesAgree(a, b) {
-  const left = nameTokens(a), right = nameTokens(b)
-  if (!left.size || !right.size) return false
-  const shared = [...left].filter(token => right.has(token)).length
-  const surname = [...nameTokens((typeof a === 'string' ? a : '').trim().split(/\s+/).at(-1))][0]
-  return shared >= 2 || (surname !== undefined && right.has(surname)) || shared === left.size || shared === right.size
-}
