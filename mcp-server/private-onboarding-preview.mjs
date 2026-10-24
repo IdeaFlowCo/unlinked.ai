@@ -1,3 +1,4 @@
+import { APPEARANCE_INIT, APPEARANCE_SCRIPT } from './appearance.mjs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -40,7 +41,7 @@ const agentConfiguration = {
 }
 const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 // The same document the controller writes: the view is the whole body.
-const page = ({ title, content }) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}"></head><body>${content}</body></html>\n`
+const page = ({ title, content }) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script>${APPEARANCE_INIT}</script><title>${escape(title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}"></head><body>${content}<script>${APPEARANCE_SCRIPT}</script></body></html>\n`
 const person = {
   id: '00000000-0000-4000-8000-000000000001', name: 'Maya Chen', headline: 'Climate partnerships lead, Harbor Energy', location: 'Portland, Oregon',
   about: 'I build partnerships between utilities and the companies that help them decarbonise.',

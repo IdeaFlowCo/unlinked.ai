@@ -148,6 +148,8 @@ Every published profile's public address is a handle, `/people/<handle>` (Linked
 
 The optional operator-configured signup profile lookup (default off; a private host adapter behind the contract in `mcp-server/signup-profile-lookup.mjs`), its durable quota/cache/confirmed source store and later export precedence are documented in `docs/signup-profile-lookup.md`; keep find-me provenance separate from recovered legacy claims and keep adapter specifics out of this repository.
 
+Appearance defaults to the system with a device-local System/Light/Dark header control. Tokens and pre-paint initialization: `mcp-server/appearance.mjs`; contract: [docs/appearance.md](docs/appearance.md). Use semantic tokens for new surfaces; preserve white QR canvases.
+
 ## Connection browsing and page depth
 
 Public People summaries expose detailLevel (basic or detailed), derived from visible content independently of membership. Profile pages link to /people/{id}/connections for search and richer-first or alphabetical browsing of published connections. See docs/connection-browsing.md in source.

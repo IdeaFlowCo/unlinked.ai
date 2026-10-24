@@ -1,3 +1,4 @@
+import { APPEARANCE_INIT, APPEARANCE_SCRIPT, APPEARANCE_CONTROL } from '../mcp-server/appearance.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
@@ -456,7 +457,7 @@ test('agent copy enhancement is nonce-ready, copies exact setup and selects it o
   assert.doesNotMatch(view.content, /<script|onclick=/)
 })
 
-test('fixture previews cover every requested screen and are reproducible without scripts', async () => {
+test('fixture previews cover every requested screen and are reproducible with only appearance enhancement', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'unlinked-onboarding-test-'))
   try {
     const files = await buildPreviews(directory)
@@ -465,7 +466,8 @@ test('fixture previews cover every requested screen and are reproducible without
     await buildPreviews(directory)
     const second = await Promise.all(files.map(file => readFile(file, 'utf8')))
     assert.deepEqual(second, first)
-    for (const content of first) {
+    for (const source of first) {
+      const content = source.replace(`<script>${APPEARANCE_INIT}</script>`, '').replace(`<script>${APPEARANCE_SCRIPT}</script>`, '')
       assert.match(content, /^<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>/)
       assert.match(content, /<body><style>/)
       assert.equal([...content.matchAll(/<h1\b/g)].length >= 1, true)
@@ -515,7 +517,7 @@ test('anonymous Everyone has one native GET search and only public navigation wi
   assert.match(view.content, /name="q"/)
   assert.match(view.content, /A&amp;B/)
   // One sign-in control: Ideaflow ID handles sign-up too.
-  assert.match(view.content, /href="\/agents">For agents<\/a><a class="button sm" href="\/login">Sign in<\/a><\/nav>/)
+  assert.match(view.content.replace(APPEARANCE_CONTROL, ''), /href="\/agents">For agents<\/a><a class="button sm" href="\/login">Sign in<\/a><\/nav>/)
   assert.equal(view.content.match(/href="\/login[?"]/g).length, 1)
   assert.doesNotMatch(view.content, /name="csrf"|name="scope"|\/search-account|\/logout|\/settings|Signed in as/)
 })

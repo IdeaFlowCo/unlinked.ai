@@ -1,3 +1,4 @@
+import { APPEARANCE_SCRIPT } from '../mcp-server/appearance.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -181,7 +182,7 @@ test('the search bar QR button opens a scan sheet: Scan for visitors, My card fi
     const nonce = response.headers.get('content-security-policy').match(/'nonce-([^']+)'/)[1]
     const body = await response.text()
     assert.match(body, /<details class="me">/, path)
-    assert.ok(body.includes(`<script nonce="${nonce}">(()=>{const me=document.querySelector('details.me')`), path)
+    assert.ok(body.includes(`<script nonce="${nonce}">${APPEARANCE_SCRIPT}(()=>{const me=document.querySelector('details.me')`), path)
     assert.ok(!body.includes('<!--me-headline-->'), path)
   }
   // The card page's own scan link now leads to the scan sheet.
