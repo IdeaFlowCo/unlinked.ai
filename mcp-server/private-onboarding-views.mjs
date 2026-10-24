@@ -899,6 +899,20 @@ export function renderPeopleUnavailable({ accountLabel, displayName, csrf, impor
   return base('People are unavailable', `<section class="narrow"><h1 class="hq">People are unavailable right now</h1><p class="lead">We could not load profiles on Unlinked this time. Nothing about your account or files has changed.</p><p><a class="button" href="">Try again</a> <a class="button sec" href="${csrf ? '/network' : '/'}">${csrf ? 'Back to your people' : 'Back to the home page'}</a></p></section>`, { accountLabel, displayName, csrf, importJob })
 }
 
+// Public directory failures keep the normal navigation and explain how to recover.
+export function renderPeopleError({ accountLabel, displayName, csrf, importJob, status = 503, kind = 'profile', retryAfter = 10, retry = '' } = {}) {
+  const missing = kind === 'company' ? 'Company page not found' : 'Profile not found'
+  const title = status === 429 ? 'Unlinked is busy right now' : status === 404 ? missing : status === 400 ? 'We couldn’t open this page' : 'People are unavailable right now'
+  const message = status === 429 ? `Many people are browsing Unlinked at once. Please wait ${retryAfter} seconds, then try again.`
+    : status === 404 ? 'This page may have moved or is no longer available. Search People to find the current page.'
+    : status === 400 ? 'This link or its filters could not be read. Open People and search again.'
+    : 'We could not load profiles on Unlinked this time. Please try again shortly.'
+  const temporary = status === 429 || status === 503
+  // Retry only a relative same-origin address. Never echo unescaped URL input.
+  const href = typeof retry === 'string' && /^\/(?![\/\\])/.test(retry) && !/[\\\x00-\x20]/.test(retry) ? retry : ''
+  return base(title, `<section class="narrow"><p class="small">${status === 429 ? 'Temporarily busy' : `Error ${status}`}</p><h1 class="hq">${title}</h1><p class="lead">${message}</p>${temporary ? '<p>Nothing about your account or files has changed.</p>' : ''}<div class="actions">${temporary ? `<a class="button" href="${html(href)}">Try again</a>` : ''}<a class="button${temporary ? ' sec' : ''}" href="${csrf ? '/network' : '/people'}">${csrf ? 'Back to your people' : 'Search People'}</a></div><p class="small">Still having trouble? <a href="/support">Help &amp; support</a></p></section>`, { accountLabel, displayName, csrf, importJob })
+}
+
 // Safety forms (removal requests, reports): one short form, a reason, optional
 // details and an optional reply address. `values` re-fill the form after an error.
 const SAFETY_STYLE = '<style>.unlinked-onboarding .safety-form fieldset{border:0;padding:0;margin:18px 0}.unlinked-onboarding .safety-form legend{font-size:14px;font-weight:600;margin-bottom:6px}.unlinked-onboarding .safety-form .choice{display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-weight:400;font-size:16px}.unlinked-onboarding .safety-form .choice input{margin-top:5px;flex-shrink:0;width:18px;height:18px}.unlinked-onboarding .safety-form textarea{font:16px/1.5 inherit;font-family:inherit}.unlinked-onboarding .safety-form input[type=email]{display:block;width:100%;min-width:0;padding:12px 14px;margin-top:7px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;color:var(--fg);font:inherit;font-size:16px}.unlinked-onboarding .safety-form .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}.unlinked-onboarding .safety-target{display:flex;gap:12px;align-items:center;margin:8px 0 4px}.unlinked-onboarding .safety-target .pav{width:44px;height:44px;font-size:16px;margin:0;border-width:0}</style>'
