@@ -85,6 +85,12 @@ test('small fetch bursts share a snapshot read and remain bounded', async t => {
   try {
     assert.equal(ninth.status, 429)
     assert.equal(ninth.headers.get('retry-after'), '10')
+    assert.deepEqual(await ninth.json(), { error: 'public_people_rate_limited' })
+    const browser = await request('/people/p0')
+    assert.equal(browser.status, 429)
+    assert.equal(browser.headers.get('retry-after'), '10')
+    assert.match(browser.headers.get('content-type'), /text\/html/)
+    assert.match(await browser.text(), /Unlinked is busy right now/)
   } finally { release() }
   assert.deepEqual((await Promise.all(burst)).map(response => response.status), Array(8).fill(200))
   assert.equal(reads, 1)

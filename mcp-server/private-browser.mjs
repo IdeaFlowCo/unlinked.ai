@@ -52,6 +52,7 @@ import { publicSearchDocument } from './public-web-search.mjs'
 import { createMembersOnlySnapshotReader, iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 import { BlockError } from './member-blocks.mjs'
+import { renderPeopleError } from './private-onboarding-views.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -1395,8 +1396,23 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       const publicCompany = url.pathname.match(/^\/companies\/([^/]+)$/)
       if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/people' && viewer) { redirect(response, `/network${url.search}`); return }
       if (['GET', 'HEAD'].includes(request.method) && (url.pathname === '/search-public' || url.pathname === '/api/people' || publicDetail || publicProfile || publicCompanyApi || publicCompany || url.pathname === '/people' || (url.pathname === '/network' && !viewer))) {
+        const api = url.pathname.startsWith('/api/')
+        const directoryError = (status, retryAfter) => {
+          if (retryAfter) response.setHeader('Retry-After', String(retryAfter))
+          // The connector-free search transport never carries member chrome or scripts.
+          if (api || url.pathname === '/search-public') {
+            const error = status === 429 ? 'public_people_rate_limited' : status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable'
+            response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+            response.end(JSON.stringify({ error })); return
+          }
+          return journey(response, renderPeopleError({ ...chrome, status, kind: publicCompany ? 'company' : 'profile', retryAfter, retry: `${url.pathname}${url.search}` }), null, '', status)
+        }
         if (Date.now() - publicWindow >= 60000) { publicWindow = Date.now(); publicRequests = 0 }
-        if (++publicRequests > 120 || publicBusy >= PUBLIC_IN_FLIGHT) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (++publicRequests > 120 || publicBusy >= PUBLIC_IN_FLIGHT) {
+          // A full minute budget cannot reliably recover after a fixed ten seconds.
+          const retryAfter = publicRequests > 120 ? Math.max(1, Math.ceil((publicWindow + 60000 - Date.now()) / 1000)) : 10
+          await directoryError(429, retryAfter); return
+        }
         publicBusy++
         try {
           if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1 || url.searchParams.getAll('presence').length > 1 || url.searchParams.getAll('sort').length > 1 || url.searchParams.getAll('show').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
@@ -1411,7 +1427,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
               bounded(() => lookupCompanyFacts(name), null).then(value => { mark(response, 'facts', begun); return value }),
             ])
             // A name nobody lists and we know nothing about is not a page.
-            if (!result.total && !facts) { response.writeHead(404).end(); return }
+            if (!result.total && !facts) { if (publicCompany) await directoryError(404); else response.writeHead(404).end(); return }
             if (publicCompanyApi) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ company: { ...result, ...(facts ? { facts } : {}) } })); return }
             journey(response, renderCompany({ ...chrome, ...result, name, facts })); return
           }
@@ -1435,6 +1451,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             if (!result) {
               // In the app, a profile it does not list is a page, not a blank 404.
               if (publicProfile && iosApp(request) && request.method === 'GET') { journey(response, renderProfileUnavailable(chrome), null, '', 404); return }
+              if (publicProfile) { await directoryError(404); return }
               response.writeHead(404).end(); return
             }
             // A merged profile's old address moves to the profile it was merged into.
@@ -1447,7 +1464,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
               handle = profileHandles.handleFor(result.profile.id)
               if (!handle && result.profile.presence === 'member') handle = await bounded(() => ensureHandle(result.profile), null)
             }
-            if (named && !handle) { response.writeHead(404).end(); return }
+            if (named && !handle) { if (publicProfile) await directoryError(404); else response.writeHead(404).end(); return }
             if (publicProfile && handle && requested !== handle) { response.writeHead(301, { Location: `/people/${encodeURIComponent(handle)}${publicProfile[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
             if (handle) result.profile.handle = handle
             if (publicDetail) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
@@ -1492,9 +1509,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           journey(response, view); return
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
-          // People and company pages answer people with a page; the APIs keep JSON.
-          if (status === 503 && !url.pathname.startsWith('/api/') && url.pathname !== '/search-public') { journey(response, renderPeopleUnavailable(chrome), null, '', 503); return }
-          response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error: status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable' })); return
+          // Browsers get recovery guidance; APIs keep their data-free JSON errors.
+          await directoryError(status, status === 503 ? 10 : undefined); return
         } finally { publicBusy-- }
       }
       if (request.method === 'POST' && url.pathname === '/ask' && !viewer) {

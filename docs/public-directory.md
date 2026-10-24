@@ -1,6 +1,8 @@
 # Public directory reader integration
 
 `/people` and `/people/[id]` are UI-ready public routes. In the standalone runtime, they are backed by the published professional People reader; in the historical Next.js source app they still show an unavailable state rather than fictional results.
+
+Standalone People, profile, connection-list and company pages keep the normal navigation on errors: 400 explains an invalid link/filter, 404 explains an unavailable page without disclosing hidden profiles, 429 explains temporary traffic pressure, and 503 explains directory unavailability. Temporary errors offer Try again, People and support links; no automatic retry loop is used. The shared 120-request minute budget and eight in-flight requests remain unchanged. A minute-budget 429 reports the time until that window resets; an in-flight 429 and unavailable 503 use ten seconds. `Retry-After` agrees with the browser message. API 400/503 errors retain their data-free JSON codes; rate-limited API reads now return `{ "error": "public_people_rate_limited" }` with status 429. HEAD keeps the corresponding status/headers and no body.
 The paused legacy Supabase `/profiles` routes are unchanged.
 
 `src/components/public-directory/contract.ts` owns the runtime-validated DTO and injectable `PublicDirectoryReader` interface.
