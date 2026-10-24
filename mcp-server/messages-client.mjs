@@ -73,7 +73,7 @@ function messagesClient(config) {
   const drafts = store.get('unlinked.messages.drafts', {})
   const profiles = store.get('unlinked.messages.profiles', {})
   const saveDraft = (id, text) => { if (!id) return; if (text) drafts[id] = text.slice(0, 8000); else delete drafts[id]; store.set('unlinked.messages.drafts', drafts) }
-  // A profile Message link opens /messages/c/<id>#profile=<public id>: remember it for "View on Unlinked".
+  // A profile Message link opens /messages/c/<id>#profile=<public id>: remember it for the header profile link.
   const hashProfile = /^#profile=([A-Za-z0-9._~%-]{1,480})$/.exec(location.hash)
   if (hashProfile && config.conversationId) { try { profiles[config.conversationId] = decodeURIComponent(hashProfile[1]); store.set('unlinked.messages.profiles', profiles) } catch { /* Ignore a malformed hash. */ } history.replaceState(history.state, '', location.pathname) }
 
@@ -152,6 +152,11 @@ function messagesClient(config) {
 
   // ── Conversations ──────────────────────────────────────────────────────────
   const others = conversation => conversation.participants.filter(person => person.id !== state.me)
+  // Where someone's Unlinked profile is: the server's path (their handle) for a
+  // partner who claimed a published member profile, else the public id the
+  // Message link or picker named for this conversation. Nothing otherwise, so
+  // a name without a profile stays plain text rather than a dead link.
+  const profileHref = (person, conversationId) => person?.profilePath || (person?.profileId ? `/people/${encodeURIComponent(person.profileId)}` : conversationId && profiles[conversationId] ? `/people/${encodeURIComponent(profiles[conversationId])}` : null)
   const titleOf = conversation => conversation.title || others(conversation).map(person => person.name).join(', ') || 'Just you'
   const peerOf = conversation => conversation.type === 'direct' ? others(conversation)[0] : null
   const muted = conversation => conversation.mutedUntil === 'always' || (conversation.mutedUntil && Date.parse(conversation.mutedUntil) > Date.now())
@@ -300,15 +305,14 @@ function messagesClient(config) {
     ;(listEl.querySelector(`[data-id="${CSS.escape(previous || '')}"]`) || listEl.querySelector('a'))?.focus()
   }
 
-  // The header: who, presence, View on Unlinked, and the overflow menu.
+  // The header: who (linked to their Unlinked profile when they have one), presence, and the overflow menu.
   function renderThreadHeader() {
     const head = $('msg-thread-head'), conversation = state.conversations.get(state.open)
     // An open options menu is not redrawn under the pointer.
     if (!head || head.querySelector('details[open]')) return
     const peer = conversation && peerOf(conversation), title = conversation ? titleOf(conversation) : 'Conversation'
     const presence = peer ? (peer.isBot ? 'Bot' : peer.presence === 'available' ? 'Active now' : peer.presence === 'away' ? 'Away' : peer.lastSeenAt ? `Seen ${ago(peer.lastSeenAt)} ago` : '') : conversation ? `${conversation.participants.length} ${conversation.participants.length === 1 ? 'person' : 'people'}` : ''
-    // The server links partners who claimed a published profile; a profile Message link is the fallback.
-    const profile = peer?.profileId || profiles[state.open]
+    const href = conversation ? profileHref(peer, state.open) : null
     const item = (label, onclick, extra = {}) => h('button', { type: 'button', onclick: event => { const details = event.currentTarget.closest('details'); details.open = false; details.querySelector('summary').focus(); onclick() }, ...extra }, label)
     const menu = conversation ? h('details', { class: 'msg-menu' },
       h('summary', { 'aria-label': 'Conversation options', title: 'Options' }, '⋯'),
@@ -320,11 +324,11 @@ function messagesClient(config) {
         h('a', { href: `/messages/report?conversation=${encodeURIComponent(conversation.id)}` }, 'Report conversation'),
         peer && !peer.isBot ? h('a', { href: `/messages/block?conversation=${encodeURIComponent(conversation.id)}` }, `Block ${peer.name || 'this person'}`) : null,
         h('a', { href: 'https://chat.ideaflow.app/app/', target: '_blank', rel: 'noopener noreferrer' }, 'Open in OpenChat ↗'))) : null
+    // Name and avatar are one link to the person's profile; a group, or someone without a profile, is plain.
+    const who = () => [avatar(title, peer?.id || state.open, peer?.presence), h('div', { class: 'msg-thread-who' }, h('h2', {}, title), presence ? h('span', { class: 'small' }, presence) : null)]
     head.replaceChildren(...[
       h('button', { class: 'msg-back', type: 'button', 'aria-label': 'Back to conversations', onclick: () => closeConversation() }, '←'),
-      avatar(title, peer?.id || state.open, peer?.presence),
-      h('div', { class: 'msg-thread-who' }, h('h2', {}, title), presence ? h('span', { class: 'small' }, presence) : null),
-      profile ? h('a', { class: 'msg-head-link small', href: `/people/${encodeURIComponent(profile)}` }, 'View on Unlinked') : null,
+      href ? h('a', { class: 'msg-thread-person', href, title: `View ${title}’s Unlinked profile` }, ...who()) : h('div', { class: 'msg-thread-person' }, ...who()),
       menu].filter(Boolean))
   }
   async function setMute(mutedUntil) {
@@ -366,6 +370,12 @@ function messagesClient(config) {
       !own ? act('Report', '⚑', () => { location.href = `/messages/report?conversation=${encodeURIComponent(message.conversationId)}&message=${encodeURIComponent(message.id)}` }) : null)
   }
 
+  // In a group, a sender's name links to their Unlinked profile when they have one.
+  function senderLabel(message) {
+    const name = message.sender?.name || 'Someone', sender = state.conversations.get(message.conversationId)?.participants.find(person => person.id === message.sender?.id)
+    const href = sender ? profileHref(sender) : null
+    return h('span', { class: 'msg-sender' }, href ? h('a', { href }, name) : name)
+  }
   function messageNode(message, { own, grouped, group, status, bare = false }) {
     const editing = !bare && state.editing === message.id
     const bubble = editing ? editBox(message) : h('div', { class: `msg-bubble${message.deletedAt ? ' deleted' : ''}`, title: time(message.createdAt) },
@@ -374,7 +384,7 @@ function messagesClient(config) {
       message.attachments?.length && !message.deletedAt ? attachmentsNode(message.attachments) : null,
       message.editedAt && !message.deletedAt ? h('span', { class: 'msg-edited' }, ' (edited)') : null)
     return h('div', { class: `msg-row${own ? ' own' : ''}${grouped ? ' grouped' : ''}`, id: `m-${message.id}`, 'data-id': message.id },
-      !own && group && !grouped ? h('span', { class: 'msg-sender' }, message.sender?.name || 'Someone') : null,
+      !own && group && !grouped ? senderLabel(message) : null,
       h('div', { class: 'msg-line' }, bubble, editing || bare ? null : messageActions(message, own)),
       ...(message.deletedAt ? [] : message.linkPreviews || []).map(preview => h('a', { class: 'msg-preview', href: preview.url, target: '_blank', rel: 'noopener noreferrer' }, h('b', {}, preview.title || preview.url), preview.description ? h('span', {}, preview.description) : null, h('span', { class: 'small' }, preview.siteName || new URL(preview.url).hostname))),
       message.reactions?.length && !message.deletedAt ? h('div', { class: 'msg-reactions' }, message.reactions.map(reaction => h('button', { type: 'button', class: `msg-reaction${reaction.byMe ? ' mine' : ''}`, 'data-key': `react:${reaction.emoji}`, 'aria-pressed': String(Boolean(reaction.byMe)), 'aria-label': `${reaction.emoji} ${reaction.count}${reaction.byMe ? ', including you' : ''}`, onclick: () => react(message, reaction.emoji, !reaction.byMe) }, reaction.emoji, ' ', reaction.count))) : null,
@@ -850,7 +860,7 @@ function messagesClient(config) {
       const value = await api('/conversations', { profile })
       if (value.status !== 'ready') { location.href = href; return }
       const id = /^https:\/\/www\.unlinked\.ai\/people\/([A-Za-z0-9._~%-]+)$/.exec(profile)?.[1]
-      if (id) { try { profiles[value.conversationId] = decodeURIComponent(id); store.set('unlinked.messages.profiles', profiles) } catch { /* Keep going without View on Unlinked. */ } }
+      if (id) { try { profiles[value.conversationId] = decodeURIComponent(id); store.set('unlinked.messages.profiles', profiles) } catch { /* Keep going without the profile link. */ } }
       await openWindow(value.conversationId)
     } catch { location.href = href }
   }
@@ -930,13 +940,13 @@ function messagesClient(config) {
     if (!node || !entry) return
     const conversation = state.conversations.get(id), peer = conversation ? peerOf(conversation) : null, title = conversation ? titleOf(conversation) : 'Conversation'
     const typing = typingIn(id), unread = entry.minimized && conversation ? unreadOf(conversation) : 0
-    const profileId = profiles[id]
+    const href = profileHref(peer, id)
     const button = (label, symbol, onclick) => h('button', { type: 'button', class: 'msg-act', 'aria-label': `${label}: ${title}`, title: label, onclick: event => { event.stopPropagation(); onclick() } }, symbol)
     node.root.setAttribute('aria-label', `Conversation with ${title}`)
     node.head.replaceChildren(...[
       avatar(title, peer?.id || id, peer?.presence),
       h('span', { class: 'msg-win-title' },
-        profileId ? h('a', { href: `/people/${encodeURIComponent(profileId)}`, onclick: event => event.stopPropagation() }, title) : h('b', {}, title),
+        href ? h('a', { href, title: `View ${title}’s Unlinked profile`, onclick: event => event.stopPropagation() }, title) : h('b', {}, title),
         h('span', { class: 'msg-win-sub' }, typing.length ? 'typing…' : peer?.presence === 'online' ? 'Active now' : '')),
       unread ? h('span', { class: 'msg-pill', 'aria-label': `${unread} unread` }, unread > 99 ? '99+' : unread) : null,
       button(entry.minimized ? 'Expand' : 'Minimise', entry.minimized ? '⌃' : '⌄', () => toggleWindow(id)),

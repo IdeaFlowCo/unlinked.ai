@@ -136,7 +136,7 @@ const invalid = () => new MessagingError(400, 'invalid_input')
 // `blockedUsers(session)` (optional) returns the OpenChat user ids this member
 // blocked (member-blocks.mjs): their direct conversations are hidden, their
 // messages are not delivered, and no message is sent to them from here.
-export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, blockedUsers = null, resolveOwnerRecipient = null } = {}) {
+export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, profilePathFor = null, blockedUsers = null, resolveOwnerRecipient = null } = {}) {
   const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map(), blockCache = new Map(), peers = new Map()
   // The member's blocked OpenChat users, read at most every 30 seconds (and again after a change).
   async function blockedFor(session) {
@@ -234,12 +234,21 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     // Conversations with someone this member blocked are hidden from the inbox.
     const blocked = await blockedFor(session)
     const conversations = blocked.size ? all.filter(conversation => !(conversation.type === 'direct' && conversation.participants.some(person => person.id !== credential.userId && blocked.has(person.id)))) : all
-    // "View on Unlinked": public profile ids of partners who claimed a published
-    // Unlinked profile. Bounded; a slow or failed lookup only omits the links.
+    // Profile links: public profile ids of partners who claimed a published
+    // Unlinked profile (the header name, dock window title and group sender
+    // names link there), plus the page path when handles are known
+    // (`profilePathFor`). Bounded; a slow or failed lookup only omits the links.
     if (typeof profilesForParticipants === 'function') {
       const others = [...new Set(conversations.flatMap(conversation => conversation.participants.map(person => person.id)).filter(id => id !== credential.userId))]
       const profiles = others.length ? await Promise.race([profilesForParticipants(session, others).catch(() => null), new Promise(resolve => { const timer = setTimeout(resolve, 2500, null); timer.unref?.() })]) : null
-      if (profiles instanceof Map) for (const conversation of conversations) for (const person of conversation.participants) { const profileId = profiles.get(person.id); if (typeof profileId === 'string' && profileId) person.profileId = profileId }
+      if (profiles instanceof Map) for (const conversation of conversations) for (const person of conversation.participants) {
+        const profileId = profiles.get(person.id)
+        if (typeof profileId !== 'string' || !profileId) continue
+        person.profileId = profileId
+        let path = null
+        try { path = typeof profilePathFor === 'function' ? profilePathFor(profileId) : null } catch { path = null }
+        if (typeof path === 'string' && path.startsWith('/people/') && path.length <= 600) person.profilePath = path
+      }
     }
     return { me: { id: credential.userId }, conversations }
   }
