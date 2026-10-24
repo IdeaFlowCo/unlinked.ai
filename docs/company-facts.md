@@ -34,7 +34,7 @@ rows have their own small labels in the pilot graph
 |---|---|---|
 | `UnlinkedCompanyDataset` | `id` | Pointer to the live revision |
 | `UnlinkedCompanyRevision` | `(dataset, revision)` | `staging`, `published` or `deleted`, plus a digest |
-| `UnlinkedCompanyChunk` | `(dataset, revision, ordinal)` | Immutable JSON row chunks of up to 128 KiB each, with a SHA-256 |
+| `UnlinkedCompanyChunk` | `(dataset, revision, ordinal)` | Immutable JSON row chunks of up to 200 rows and 128 KiB each (at most 256 per revision), with a SHA-256 |
 
 A revision is `curated-companies-v1:<sha256 of the validated rows>`. Chunks
 are written while the revision is in `staging`. One final transaction then
@@ -45,7 +45,7 @@ hash, the revision digest and the row whitelist again.
 
 ## Row schema
 
-The rows file is a JSON array of 1 to 5000 objects. Only these fields are
+The rows file (at most 32 MiB) is a JSON array of 1 to 50,000 objects. Only these fields are
 allowed:
 
 | Field | Rule |
