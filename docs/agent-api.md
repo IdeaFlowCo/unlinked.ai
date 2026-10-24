@@ -301,11 +301,11 @@ Response: `{ kind, revision, visibility: "public", profile }`. The profile DTO
 fields and bounds are owned by `detailSchema` in
 `src/components/public-directory/contract.ts`; professional link sourcing and
 privacy are owned by [profile details](profile-details.md).
-`{id}` may also be a member handle; a member profile adds `handle` and its
-public `url` (`https://www.unlinked.ai/people/<handle>`), and
-`unlinked_list_people` rows for members add `handle`
-([profile handles](profile-handles.md)).
-Unknown id, or a handle that names no member profile → `not_found`.
+`{id}` may also be a profile handle; a profile with a readable address adds
+`handle` and its public `url` (`https://www.unlinked.ai/people/<handle>`), and
+`unlinked_list_people` rows add `handle` too. Members and imported profiles
+both have handles ([profile handles](profile-handles.md)).
+Unknown id, or a handle that names no published profile → `not_found`.
 
 ### `GET /api/agent/v1/connections?degree&q&sort&grouping&cursor&limit` ⇄ `unlinked_list_connections`
 Deterministic owner-connections listing; see **Degree semantics**.

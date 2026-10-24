@@ -4,6 +4,8 @@ import { PUBLIC_UPLOAD_CONSENT } from '../private-import/consent.mjs'
 import { createScopedImportReader } from '../private-import/noos-adapter.mjs'
 import { publicLinkedinUrl } from './profile-links.mjs'
 import { applyProfileDecisions } from './profile-decisions.mjs'
+import { linkedinIdentityMerges, linkedinRefHash } from './url-identity.mjs'
+import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
 const permitted = job => job?.consent?.version === PUBLIC_UPLOAD_CONSENT.version && job.consent.publicProfessionalSearch === true && job.consent.privateRetention === true && job.consent.boundedOpenAIProcessing === true
 const profile = (id, name) => ({ id, name, positions: [], education: [], skills: [] })
@@ -46,6 +48,39 @@ export const ENRICHMENT_DATASET = 'curated-enrichment-v1'
 // dataset (fresher per-person reads) last, so on the same id the primary wins.
 export const ENRICHMENT_SHARD_DATASETS = Object.freeze(['curated-enrichment-exa-1', 'curated-enrichment-exa-2', 'curated-enrichment-exa-3', 'curated-enrichment-exa-4'])
 export const ENRICHMENT_DATASETS = Object.freeze([...ENRICHMENT_SHARD_DATASETS, ENRICHMENT_DATASET])
+// Operator enrichment keyed by LinkedIn address instead of profile id
+// (docs/imported-profile-enrichment.md). A row's id is `li-<sha256 of the
+// canonical slug>`, the same reference suspensions use, so one row reaches
+// every published profile with that address: legacy rows and the copies
+// member imports mint (`public-<row>`), including imports made later. It only
+// fills fields a profile leaves empty, never touches members or historical
+// members, and never adds people or edges.
+export const LINKEDIN_ENRICHMENT_DATASETS = Object.freeze(['curated-enrichment-li-1', 'curated-enrichment-li-2', 'curated-enrichment-li-3', 'curated-enrichment-li-4'])
+export const LINKEDIN_ENRICHMENT_ID = /^li-[a-f0-9]{64}$/
+// Text the LinkedIn rows may add to the index (the reader's whole budget is 16 MiB).
+export const LINKEDIN_ENRICHMENT_TEXT_BUDGET = 4 * 1024 * 1024
+export const linkedinEnrichmentId = slug => { const ref = linkedinRefHash(slug); return ref ? 'li-' + ref : null }
+const refCache = new Map()
+// The LinkedIn reference of a published profile's address, or null.
+export function profileLinkedinRef(profile) {
+  const url = profile?.linkedinUrl
+  if (typeof url !== 'string') return null
+  if (refCache.has(url)) return refCache.get(url)
+  const slug = parseLinkedinProfileUrl(url)?.slug, ref = slug ? linkedinRefHash(slug) : null
+  if (refCache.size >= 200000) refCache.clear()
+  refCache.set(url, ref)
+  return ref
+}
+const filled = value => typeof value === 'string' ? Boolean(value.trim()) : Array.isArray(value) && value.length > 0
+// Gaps only: a field the profile already shows (from its own source, an
+// operator read or a member) always wins over the enrichment row.
+export function fillFromLinkedinEnrichment(profile, row) {
+  let result = null
+  for (const key of ['headline', 'location', 'about', 'company', 'positions', 'education', 'skills']) {
+    if (!filled(profile[key]) && filled(row?.[key])) (result ??= { ...profile })[key] = row[key]
+  }
+  return result ?? profile
+}
 const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.length > 0 && datasets.every((value, index) => ENRICHMENT_DATASETS.includes(value) && datasets.indexOf(value) === index) && datasets.at(-1) === ENRICHMENT_DATASET
 
 // Private-process-only bridge. Discovery returns bound IDs, then each source
@@ -62,15 +97,25 @@ const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.
 // refresh runs behind it, so no page view pays the rebuild in-band. A failed
 // refresh drops the kept build (fail closed, like the suggest reader). 0
 // disables it; past `staleMs` a read waits for the rebuild.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], freshMs = 0, staleMs = 0, now = Date.now }) {
+// `mergeSameLinkedin` folds published profiles that share one LinkedIn address
+// into one (linkedinIdentityMerges); `preferSurvivor(ids)` names the copy that
+// already holds the person's address so the survivor stays stable.
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!validEnrichmentDatasets(enrichmentDatasets)) throw Error('public_enrichment_datasets_invalid')
+  if (!Array.isArray(linkedinEnrichmentDatasets) || !linkedinEnrichmentDatasets.every((value, index) => LINKEDIN_ENRICHMENT_DATASETS.includes(value) && linkedinEnrichmentDatasets.indexOf(value) === index) || typeof mergeSameLinkedin !== 'boolean' || typeof preferSurvivor !== 'function') throw Error('public_enrichment_datasets_invalid')
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
   if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
   let work = null, kept = null
   const detailCache = new Map()
   // Operator merges and renames apply last, over the complete union.
   // Operator and automatic decisions; the index's own merges come first.
-  const decide = async (snapshot, own = []) => applyProfileDecisions(snapshot, [...own, ...(typeof readDecisions === 'function' ? await readDecisions() : [])])
+  // Same-address merges come last: explicit and earlier automatic decisions win.
+  const decide = async (snapshot, own = [], members = new Set(), verified = new Set()) => {
+    const stored = [...own, ...(typeof readDecisions === 'function' ? await readDecisions() : [])]
+    if (!mergeSameLinkedin) return applyProfileDecisions(snapshot, stored)
+    const identity = linkedinIdentityMerges({ profiles: snapshot.profiles, members: [...members], absorbers: [...verified], decisions: stored, refFor: profileLinkedinRef, prefer: preferSurvivor })
+    return applyProfileDecisions(snapshot, [...identity.decisions, ...identity.merges], { limit: PUBLIC_INDEX_MAX_PROFILES })
+  }
   const build = async () => {
     const legacy = await readLegacy()
     if (!legacy) return null
@@ -78,6 +123,9 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
     if (!Array.isArray(items) || items.length > 1000) throw Error('public_member_import_limit')
     const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision, ...(includeDetails ? ['profile-details-v1', hash(JSON.stringify(legacy.profiles))] : [])], linkedChecks = [], overlays = new Map(), members = new Set(), ownerImports = new Map()
+    // Members whose LinkedIn address comes from their own uploaded archive or a
+    // confirmed recovered account, never from a URL typed at signup.
+    const verified = new Set()
     const positions = new Map(profiles.map((value, index) => [value.id, index]))
     for (const dataset of enrichmentDatasets) {
       const enrichment = await publicPeople.read(dataset)
@@ -91,6 +139,14 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
           profiles[index] = { ...row, ...supplemental }
         }
       }
+      revisions.push(enrichment.revision)
+    }
+    const byLinkedin = new Map()
+    for (const dataset of linkedinEnrichmentDatasets) {
+      const enrichment = await publicPeople.read(dataset)
+      if (!enrichment) continue
+      if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(dataset + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length || !enrichment.profiles.every(row => LINKEDIN_ENRICHMENT_ID.test(row?.id))) throw Error('public_enrichment_invalid')
+      for (const row of enrichment.profiles) if (!byLinkedin.has(row.id.slice(3))) byLinkedin.set(row.id.slice(3), row)
       revisions.push(enrichment.revision)
     }
     const signupSources = typeof readSignupProfiles === 'function' ? await readSignupProfiles() : []
@@ -152,6 +208,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
           signupMerges.push({ id: `signup:${ownId}`, kind: 'merge', profileId: ownId, survivorId: signupId })
         } else {
           profiles.push(...snapshot.profiles); connections.push(...snapshot.connections); members.add(ownId)
+          if (snapshot.profiles.find(row => row.id === ownId)?.linkedinUrl) verified.add(ownId)
         }
         const owner = `${item.owner.ownerId}\u0000${item.owner.userId}`
         if (!signupId) ownerImports.set(owner, [...(ownerImports.get(owner) ?? []), { id: 'member-import-' + item.id, key: [resource.payload.createdAt ?? 0, item.id] }])
@@ -171,7 +228,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       for (const older of ordered.slice(1)) { members.delete(older.id); ownerMerges.push({ id: `owner:${older.id}`, kind: 'merge', profileId: older.id, survivorId: ordered[0].id }) }
     }
     for (const check of linkedChecks) await check()
-    for (const [id, value] of overlays) { const index = profiles.findIndex(profile => profile.id === id); const previous = profiles[index]; profiles[index] = { ...value.profile, ...(!value.profile.linkedinUrl && previous.linkedinUrl ? {linkedinUrl:previous.linkedinUrl} : {}) } }
+    for (const [id, value] of overlays) { const index = profiles.findIndex(profile => profile.id === id); const previous = profiles[index]; profiles[index] = { ...value.profile, ...(!value.profile.linkedinUrl && previous.linkedinUrl ? {linkedinUrl:previous.linkedinUrl} : {}) }; if (value.profile.linkedinUrl) verified.add(id) }
     if (typeof readInviteEdges === 'function') {
       const known = new Set(profiles.map(value => value.id)), edges = (await readInviteEdges()).filter(edge => known.has(edge.fromId) && known.has(edge.toId))
       connections.push(...edges)
@@ -180,7 +237,21 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     // Replayed source edges are canonicalized without changing their receipts.
     const uniqueConnections = [...new Map(connections.map(edge => [JSON.stringify([edge.fromId, edge.toId]), edge])).values()]
     const finalize = async snapshot => {
-      const result = await decide(snapshot, ownerMerges)
+      for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
+      const decided = await decide(snapshot, ownerMerges, members, verified)
+      // Enrichment fills the profiles shown, after every merge and removal, and
+      // never members' or historical members' own words. Bounded, so a large
+      // publication cannot push the reader past its text budget.
+      const own = new Set([...(decided.members ?? members), ...(decided.legacyMembers ?? [])])
+      let budget = LINKEDIN_ENRICHMENT_TEXT_BUDGET
+      const result = byLinkedin.size ? { ...decided, profiles: decided.profiles.map(profile => {
+        if (own.has(profile.id) || budget <= 0) return profile
+        const ref = profileLinkedinRef(profile), row = ref ? byLinkedin.get(ref) : undefined
+        if (!row) return profile
+        const value = fillFromLinkedinEnrichment(profile, row)
+        if (value !== profile) budget -= Buffer.byteLength(JSON.stringify(value)) - Buffer.byteLength(JSON.stringify(profile))
+        return value
+      }) } : decided
       if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
       return result
     }

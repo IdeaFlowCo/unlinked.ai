@@ -211,7 +211,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // SHA-256 LinkedIn slug references of suspended people, for owner-private rows.
       const suspendedRefs = new Set()
       if (value.suspendedRefs !== undefined) for (const ref of array(value.suspendedRefs, maxProfiles)) { if (typeof ref !== 'string' || !/^[a-f0-9]{64}$/.test(ref)) unavailable(); suspendedRefs.add(ref) }
-      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, unlisted, suspended, suspendedRefs, companyList: [...companies.values()] }
+      // Addresses an operator removal took out; never published, only named.
+      const removed = new Set()
+      if (Array.isArray(value.removed)) for (const id of value.removed) if (idValid(id) && !summaries.has(id)) removed.add(id)
+      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
@@ -358,6 +361,19 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { signal } = requestValue(request)
       const data = await snapshot(signal)
       return { ids: new Set(data.suspended), refs: new Set(data.suspendedRefs) }
+    },
+    // What an address registry needs (docs/profile-handles.md): every
+    // published profile's id, name, presence and LinkedIn address, the merged
+    // addresses and the ids a removal or suspension took out.
+    async addresses(request = {}) {
+      const { signal } = requestValue(request)
+      const data = await snapshot(signal)
+      return {
+        revision: data.revision,
+        profiles: data.ordered.map(summary => { const url = data.details.get(summary.id).linkedinUrl; return { id: summary.id, name: summary.name, presence: summary.presence ?? 'shadow', ...(url ? { linkedinUrl: url } : {}) } }),
+        aliases: new Map(data.aliases),
+        hidden: new Set([...data.suspended, ...data.removed]),
+      }
     },
     // Exact URL evidence only; names never establish a person match.
     async lookupLinkedin(request = {}) {

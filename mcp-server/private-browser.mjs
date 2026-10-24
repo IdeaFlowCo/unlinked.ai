@@ -26,7 +26,7 @@ import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/privat
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { normalizeSocialLinks, SOCIAL_LINK_LIMITS } from '../src/utils/public-people/profile-links.mjs'
-import { profilePath, setProfileHandleLookup } from '../src/utils/public-people/profile-handles.mjs'
+import { handleCandidates, linkedinHandle, nameHandleBase, profilePath, setProfileHandleLookup, validateHandle } from '../src/utils/public-people/profile-handles.mjs'
 import { stageArchive, importJobStatus, importErrorMessage, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
@@ -919,25 +919,65 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     return record
   }
   const blockFor = async (owner, profileId) => memberBlocks && profileId ? (await bounded(() => memberBlocks.list(owner), [])).find(value => value.blockedProfileId === profileId) ?? null : null
-  // Members get their default handle without waiting for a page view; the
-  // reload keeps handles another process wrote in step. LinkedIn vanity
-  // handles go first, so a name never takes a member's own slug.
-  const backfillHandles = async () => {
+  // Every published profile gets a readable address without waiting for a page
+  // view (docs/profile-handles.md); the reload keeps handles another process
+  // wrote in step. LinkedIn vanity handles go first, members before imported
+  // profiles, so a name never takes someone's own slug and a member's slug
+  // outranks an imported copy's. A LinkedIn handle follows the person: when an
+  // imported copy folds into a member (or into another copy) or its import is
+  // gone, its addresses move to the profile now carrying that address.
+  // Removed and suspended addresses never move.
+  const backfillHandles = async ({ batchSize = 500, pauseMs = 25 } = {}) => {
     if (!profileHandles || typeof readPublishedSnapshot !== 'function') return 0
     if (typeof profileHandles.reload === 'function') await profileHandles.reload()
-    const members = []
-    let cursor
-    do { const page = await publicReader.list({ presence: 'member', cursor }); members.push(...page.profiles); cursor = page.nextCursor } while (cursor && members.length < 20000)
-    const missing = []
-    for (const member of members) {
-      if (profileHandles.handleFor(member.id)) continue
-      const found = await publicReader.profile({ id: member.id }).catch(() => null)
-      if (found?.profile?.presence === 'member') missing.push(found.profile)
+    const { profiles, aliases, hidden } = await publicReader.addresses()
+    const published = new Set(profiles.map(value => value.id)), members = new Set(profiles.filter(value => value.presence === 'member').map(value => value.id))
+    const ordered = [...profiles.filter(value => members.has(value.id)), ...profiles.filter(value => !members.has(value.id))]
+    // A default handle only for a member an active account still stands behind.
+    const standing = new Map()
+    const eligible = async profile => {
+      if (!members.has(profile.id) || typeof accountForProfile !== 'function') return true
+      if (!standing.has(profile.id)) standing.set(profile.id, Boolean(await accountForProfile(profile.id).catch(() => null)))
+      return standing.get(profile.id)
     }
-    missing.sort((a, b) => Number(Boolean(b.linkedinUrl)) - Number(Boolean(a.linkedinUrl)))
-    let assigned = 0
-    for (const profile of missing) if (await ensureHandle(profile).catch(() => null)) assigned++
-    return assigned
+    let changed = 0
+    const queue = [], queuedIds = new Set(), queuedHandles = new Set()
+    const flush = async () => {
+      if (!queue.length) return
+      changed += await profileHandles.assignMany(queue.splice(0))
+      if (pauseMs > 0) await new Promise(resolve => setTimeout(resolve, pauseMs))
+    }
+    const enqueue = async (id, handle, kind) => { queue.push({ id, handle, kind }); queuedIds.add(id); queuedHandles.add(handle); if (queue.length >= batchSize) await flush() }
+    for (const profile of ordered) {
+      const slug = linkedinHandle(profile.linkedinUrl)
+      if (!slug || queuedHandles.has(slug)) continue
+      const holder = profileHandles.resolve(slug)?.profileId
+      if (holder === profile.id || !(await eligible(profile))) continue
+      const own = profileHandles.handleFor(profile.id)
+      if (!holder) { if (!own) await enqueue(profile.id, slug, 'linkedin'); continue }
+      if (members.has(holder) || hidden.has(holder)) continue
+      // Same person: the holder folded into this profile (a member absorbing
+      // its copies only when its address is verified), or the holder was an
+      // imported copy whose import is gone and the handle is its own LinkedIn
+      // slug. A name handle that happens to match never moves, and a typed
+      // address alone never takes a live profile's handle.
+      const sameAddress = aliases.get(holder) === profile.id || (holder.startsWith('public-') && !published.has(holder) && !aliases.has(holder) && profileHandles.kindOf?.(slug) === 'linkedin')
+      if (!sameAddress || typeof profileHandles.transfer !== 'function') continue
+      // A default (name) handle gives way to the slug; a chosen one stays current.
+      const makeCurrent = !own || handleCandidates({ name: profile.name }).includes(own) ? slug : own
+      if (await profileHandles.transfer(holder, profile.id, { makeCurrent }).catch(() => null)) changed++
+    }
+    await flush()
+    for (const profile of ordered) {
+      if (queuedIds.has(profile.id) || profileHandles.handleFor(profile.id) || !(await eligible(profile))) continue
+      const free = value => !queuedHandles.has(value) && !profileHandles.resolve(value)
+      let handle = handleCandidates({ name: profile.name }).find(free)
+      // Past the numbered defaults (very common or non-Latin names), keep counting.
+      if (!handle) { const base = nameHandleBase(profile.name); for (let n = 61; n <= 100000 && !handle; n++) if (validateHandle(`${base}-${n}`).handle === `${base}-${n}` && free(`${base}-${n}`)) handle = `${base}-${n}` }
+      if (handle) await enqueue(profile.id, handle, 'name')
+    }
+    await flush()
+    return changed
   }
   if (profileHandles && handleBackfillMs > 0) {
     const run = () => backfillHandles().catch(() => process.stderr.write('unlinked_handle_backfill_failed\n'))
@@ -991,7 +1031,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           if (query === '') readerFor(request).warm()
           const groups = viewer ? viewerGroups(viewer.owner) : null
           const result = query === '' ? { people: [], companies: [] } : await readerFor(request).suggest({ query, ...(known ? { known } : {}), ...(groups ? { unlistedGroups: groups } : {}) })
-          if (profileHandles && Array.isArray(result.people)) result.people = result.people.map(row => { const handle = row.presence === 'member' ? profileHandles.handleFor(row.id) : null; return handle ? { ...row, handle } : row })
+          if (profileHandles && Array.isArray(result.people)) result.people = result.people.map(row => { const handle = profileHandles.handleFor(row.id); return handle ? { ...row, handle } : row })
           response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify(result))
         } catch (error) {
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
@@ -1015,7 +1055,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           const result = await readerFor(request).card({ id, ...(known ? { known } : {}) })
           if (!result) { response.writeHead(404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'not_found' })); return }
           const card = { ...result.card }
-          const cardHandle = card.presence === 'member' ? profileHandles?.handleFor(card.id) : null
+          const cardHandle = profileHandles?.handleFor(card.id) ?? null
           if (cardHandle) card.handle = cardHandle
           if (viewer && card.presence === 'member') {
             if (memberConnections && signup) { const relation = await bounded(() => connectionActions.relationTo(viewer.owner, card.id), undefined); if (relation?.state) card.relation = relation.state }
@@ -1356,7 +1396,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           if (publicDetail || publicProfile) {
             let id, requested
             try { requested = decodeURIComponent((publicDetail ?? publicProfile)[1]) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
-            // A handle names a member's profile id; ids keep working (docs/profile-handles.md).
+            // A handle names a profile id; ids keep working (docs/profile-handles.md).
             const named = profileHandles?.resolve(requested) ?? null
             id = named?.profileId ?? requested
             const connectionQuery = publicProfile ? url.searchParams.get('q') ?? '' : ''
@@ -1377,11 +1417,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             }
             // A merged profile's old address moves to the profile it was merged into.
             if (result.moved) { response.writeHead(301, { Location: `${publicDetail ? `/api/people/${encodeURIComponent(result.moved)}` : profilePath(result.moved)}${publicProfile?.[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }
-            // Handles belong to members only: a handle never opens anyone else's
-            // page, and a member's id or earlier handle moves to the current one.
+            // Every published profile answers at its current handle: its id or
+            // an earlier handle moves there. A member without one gets it now;
+            // an imported profile gets it from the backfill.
             let handle = null
-            if (profileHandles && result.profile.presence === 'member') {
-              handle = profileHandles.handleFor(result.profile.id) ?? await bounded(() => ensureHandle(result.profile), null)
+            if (profileHandles) {
+              handle = profileHandles.handleFor(result.profile.id)
+              if (!handle && result.profile.presence === 'member') handle = await bounded(() => ensureHandle(result.profile), null)
             }
             if (named && !handle) { response.writeHead(404).end(); return }
             if (publicProfile && handle && requested !== handle) { response.writeHead(301, { Location: `/people/${encodeURIComponent(handle)}${publicProfile[2] ?? ''}${url.search}`, 'Cache-Control': 'no-store' }).end(); return }

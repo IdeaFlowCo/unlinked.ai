@@ -1,8 +1,9 @@
-// Member handles (unlinked-qpud): the readable segment of a member's public
-// address, /people/<handle>. Internal profile ids never change; a handle is
+// Profile handles (unlinked-qpud, unlinked-3l8h): the readable segment of a
+// public profile's address, /people/<handle>, for members and imported
+// profiles alike. Internal profile ids never change; a handle is
 // only an address for one, so connections, requests and notifications keep
 // using ids while every emitted link prefers the handle. docs/profile-handles.md.
-import { linkedinSlug } from './url-identity.mjs'
+import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 
 export const HANDLE_LIMITS = Object.freeze({ min: 3, max: 60, perProfile: 10 })
 const GRAMMAR = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
@@ -40,12 +41,19 @@ export function nameHandleBase(name) {
   return base || 'someone'
 }
 
+// The LinkedIn vanity slug already shown on a public profile, when the handle
+// grammar can carry it as is; never mangled into something else.
+export function linkedinHandle(linkedinUrl) {
+  const slug = parseLinkedinProfileUrl(linkedinUrl)?.slug
+  return slug && validateHandle(slug).handle === slug ? slug : null
+}
+
 // Default handles in preference order: the LinkedIn vanity slug already shown
 // on the public profile, then the name, then the name with a number.
 export function handleCandidates({ name, linkedinUrl } = {}) {
   const candidates = []
-  const slug = linkedinSlug(linkedinUrl)
-  if (slug && validateHandle(slug).handle === slug) candidates.push(slug)
+  const slug = linkedinHandle(linkedinUrl)
+  if (slug) candidates.push(slug)
   const base = nameHandleBase(name)
   if (validateHandle(base).handle === base) candidates.push(base)
   for (let n = 2; n <= 60; n++) { const value = `${base}-${n}`; if (validateHandle(value).handle === value) candidates.push(value) }
