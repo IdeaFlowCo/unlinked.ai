@@ -907,44 +907,52 @@ export function renderSupport({ accountLabel, displayName, csrf, importJob } = {
 // "Data liberation": where to request a copy of your data from the
 // big platforms (docs/data-liberation.md). Public, with or without a session.
 // Every link is the vendor's own export page; Unlinked never sees those files.
+// "primary" are the networks most people start with; "more" follows, in
+// rough order of how much of someone's network lives there. WhatsApp has no
+// web export page (url: null), so it shows the in-app steps without a button.
 export const DATA_EXPORTS = [
-  { id: 'linkedin', name: 'LinkedIn', url: LINKEDIN_EXPORT, action: 'Request your LinkedIn export',
+  { tier: 'primary', id: 'linkedin', name: 'LinkedIn', url: LINKEDIN_EXPORT, action: 'Request your LinkedIn export',
     what: 'Your profile, positions, education, skills, connections and messages, as spreadsheet (CSV) files in a ZIP.',
     how: 'Choose “Download larger data archive”. The connections file usually comes within minutes and the full archive within about a day. Download it within 72 hours of LinkedIn’s email.' },
-  { id: 'facebook', name: 'Facebook', url: 'https://accountscenter.facebook.com/info_and_permissions/dyi', action: 'Download your Facebook information',
+  { tier: 'primary', id: 'facebook', name: 'Facebook', url: 'https://www.facebook.com/dyi', action: 'Export your Facebook information',
     what: 'Posts, photos and videos, comments, messages, friends and profile information.',
-    how: 'In Meta’s Accounts Center choose <b>Download your information</b>, then your account, <b>All time</b> and a format (HTML to read, JSON to reuse). Large accounts can take hours to a few days; the files stay available for a few days.' },
-  { id: 'instagram', name: 'Instagram and Threads', url: 'https://accountscenter.instagram.com/info_and_permissions/dyi/', action: 'Download your Instagram information',
+    how: 'In Meta’s Accounts Center choose <b>Export your information</b>, then your account, <b>All time</b> and a format (HTML to read, JSON to reuse). Large accounts can take hours to a few days; the files stay available for a few days.' },
+  { tier: 'primary', id: 'instagram', name: 'Instagram and Threads', url: 'https://accountscenter.instagram.com/info_and_permissions/dyi/', action: 'Export your Instagram information',
     what: 'Photos, videos, stories, comments, messages, followers and who you follow.',
     how: 'The same Accounts Center flow as Facebook; Threads is included there too. Choose <b>All time</b> so nothing is left out.' },
-  { id: 'google', name: 'Google', url: 'https://takeout.google.com/', action: 'Open Google Takeout',
+  { tier: 'more', id: 'whatsapp', name: 'WhatsApp', url: null, action: null,
+    what: 'Your account details, and chats one at a time.',
+    how: 'There is no export page. In the app or on WhatsApp Web, <b>Settings → Account → Request account info</b> gives a report of your account details in about 3 days; it does not include your messages (<a href="https://faq.whatsapp.com/526463418847093" target="_blank" rel="noopener noreferrer">WhatsApp’s steps ↗</a>). To keep a conversation, open it and choose <b>Export chat</b>, one chat at a time (<a href="https://faq.whatsapp.com/1180414079177245" target="_blank" rel="noopener noreferrer">steps ↗</a>).' },
+  { tier: 'more', id: 'apple', name: 'Apple (Contacts and iCloud)', url: 'https://privacy.apple.com/', action: 'Open Apple Data and Privacy',
+    what: 'Your contacts, iCloud photos, calendars and notes, plus App Store, Apple Music and other activity.',
+    how: 'Choose <b>Request a copy of your data</b>; Apple says it can take up to 7 days. For just your contacts, open Contacts on iCloud.com on a computer, select them all, then <b>Share → Export vCard</b> for a file right away (<a href="https://support.apple.com/guide/icloud/import-export-and-print-contacts-mmfba748b2/icloud" target="_blank" rel="noopener noreferrer">Apple’s steps ↗</a>).' },
+  { tier: 'more', id: 'google', name: 'Google', url: 'https://takeout.google.com/', action: 'Open Google Takeout',
     what: 'Gmail, Drive, Photos, Calendar, Contacts, YouTube, Maps history and more, product by product.',
     how: 'Large exports are split into several files and can take hours to days. Download links last a week. You can also schedule an export every two months for a year.' },
-  { id: 'x', name: 'X (Twitter)', url: 'https://x.com/settings/download_your_data', action: 'Request your X archive',
+  { tier: 'more', id: 'x', name: 'X (Twitter)', url: 'https://x.com/settings/download_your_data', action: 'Request your X archive',
     what: 'Your posts, direct messages, media, likes and account history, with a page to browse it offline.',
     how: 'X asks for your password and a verification code. It can take 24 hours or longer.' },
-  { id: 'apple', name: 'Apple', url: 'https://privacy.apple.com/', action: 'Open Apple Data and Privacy',
-    what: 'iCloud photos, contacts, calendars and notes, plus App Store, Apple Music and other activity.',
-    how: 'Choose <b>Request a copy of your data</b>. Apple says it can take up to 7 days.' },
-  { id: 'tiktok', name: 'TikTok', url: 'https://www.tiktok.com/setting/download-your-data', action: 'Download your TikTok data',
+  { tier: 'more', id: 'tiktok', name: 'TikTok', url: 'https://www.tiktok.com/setting/download-your-data', action: 'Download your TikTok data',
     what: 'Your profile, videos, comments, messages and activity.',
     how: 'Choose TXT to read or JSON to reuse. It is usually ready within a few days, and you have a few days to download it.' },
-  { id: 'amazon', name: 'Amazon', url: 'https://www.amazon.com/hz/privacy-central/data-requests/preview.html', action: 'Request your Amazon data',
+  { tier: 'more', id: 'amazon', name: 'Amazon', url: 'https://www.amazon.com/hz/privacy-central/data-requests/preview.html', action: 'Request your Amazon data',
     what: 'Order history, Alexa voice recordings, Kindle and other account activity.',
     how: 'Pick categories and confirm by email. Amazon says some requests take up to a month.' },
-  { id: 'microsoft', name: 'Microsoft', url: 'https://account.microsoft.com/privacy', action: 'Open the Microsoft privacy dashboard',
+  { tier: 'more', id: 'microsoft', name: 'Microsoft', url: 'https://account.microsoft.com/privacy/download-data', action: 'Download your Microsoft data',
     what: 'Search, browsing, location and voice activity linked to your Microsoft account.',
-    how: 'In the privacy dashboard, use <b>Download your data</b>. Outlook mail and OneDrive files are saved from those apps.' },
+    how: 'Sign in and choose what to download. Outlook mail and OneDrive files are saved from those apps.' },
 ]
 
 export function renderDataLiberation({ accountLabel, displayName, csrf, importJob } = {}) {
   const external = value => `data-export-link href="${html(value.url)}" target="_blank" rel="noopener noreferrer"`
-  const services = DATA_EXPORTS.map(value => `<article class="liberate-item" id="${value.id}"><div><h3>${html(value.name)}</h3><p>${value.what}</p><p class="small">${value.how}</p></div><a class="button sec sm" ${external(value)}>${html(value.action)} ↗</a></article>`).join('')
-  const jump = [...DATA_EXPORTS.map(value => [value.id, value.name.replace(/ \(.*\)$/, '').replace(/ and .*$/, '')]), ['whatsapp', 'WhatsApp']].map(([id, name]) => `<a href="#${id}">${html(name)}</a>`).join('')
+  const item = value => `<article class="liberate-item" id="${value.id}"><div><h3>${html(value.name)}</h3><p>${value.what}</p><p class="small">${value.how}</p></div>${value.url ? `<a class="button sec sm" ${external(value)}>${html(value.action)} ↗</a>` : ''}</article>`
+  const tier = name => DATA_EXPORTS.filter(value => value.tier === name).map(item).join('')
+  const jump = DATA_EXPORTS.map(value => `<a href="#${value.id}">${html(value.name.replace(/ \(.*\)$/, '').replace(/ and .*$/, ''))}</a>`).join('')
   const ownData = csrf ? '<a href="/settings#your-data">Settings → Your data → Download everything</a>' : '<b>Settings → Your data → Download everything</b> after you sign in'
   return base('Data liberation', `<section class="narrow wide liberate"><h1 class="hq">Data liberation</h1><p class="lead">Your profile, posts, photos and connections are yours. Every big platform will give you a copy if you ask. Here is where to ask, and what to expect.</p><nav class="liberate-jump" aria-label="Services on this page">${jump}</nav>
 <div class="card" id="before"><h2>Before you start</h2><ul><li>Exports can include private messages, photos and contacts. Download them on your own computer and keep them somewhere safe.</li><li>Most arrive as a ZIP by email, and the download link expires after a few days. The file you save doesn’t expire.</li><li>When there is a choice, JSON is easiest to move into another app; HTML is easiest to read.</li></ul></div>
-<div class="card liberate-list" id="services"><h2>Where to request your data</h2>${services}<article class="liberate-item" id="whatsapp"><div><h3>WhatsApp</h3><p>Your account details, and chats one at a time.</p><p class="small">There is no web page for this. In the app, <b>Settings → Account → Request account info</b> gives your account details in about 3 days. To keep a conversation, open it, tap the name, then <b>Export chat</b>.</p></div></article></div>
+<div class="card liberate-list" id="services"><h2>Start here</h2><p class="small">Most people’s professional and social network lives in these three.</p>${tier('primary')}</div>
+<div class="card liberate-list" id="more-services"><h2>More services</h2>${tier('more')}</div>
 <div class="card" id="no-export-button"><h2>No export button?</h2><p>Ask for it. In the EU and UK, data protection law (GDPR) gives you the right to a copy of your personal data, and to the data you provided in a reusable format. In California, the CCPA gives you the right to know what a company has collected about you.</p><p>Email the company’s privacy contact, usually listed in its privacy policy, and ask for “a copy of all personal data you hold about me, in a machine-readable format.” Under GDPR they generally have a month to answer; under the CCPA, 45 days.</p></div>
 <div class="card" id="bring-it-here"><h2>Bring LinkedIn to Unlinked</h2><p>Unlinked can import your LinkedIn export and rebuild your network here, with your connections searchable by you and your agents. <a href="/import-linkedin">How to import your LinkedIn export</a>.</p><p class="small">Your Unlinked data is yours too: ${ownData} gives you one file with everything.</p></div>
 <p class="small">These links go to each company’s own pages, and the files go straight to you; Unlinked never receives them. Steps change from time to time; if one of these is out of date, <a href="/support">tell us</a>.</p></section>`, csrf ? { accountLabel, displayName, csrf, importJob } : {})

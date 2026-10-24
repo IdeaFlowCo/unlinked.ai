@@ -6,6 +6,11 @@ TikTok, Amazon and Microsoft, plus WhatsApp's in-app steps. It also covers what
 to do when a service has no export button (GDPR/CCPA requests) and how to bring a
 LinkedIn export into Unlinked.
 
+- Two sections: **Start here** (LinkedIn, Facebook, Instagram — where most
+  people's network lives) and **More services**, led by WhatsApp and Apple
+  (contacts), then Google, X, TikTok, Amazon and Microsoft. The order is the
+  `tier` and array order in `DATA_EXPORTS`. WhatsApp has no web export page,
+  so its entry has `url: null` and shows in-app steps without a button.
 - Every link is the service's own export page (`DATA_EXPORTS` in
   `mcp-server/private-onboarding-views.mjs`). Unlinked never receives those
   files. Blurbs say what you get and roughly how long it takes; keep them short
