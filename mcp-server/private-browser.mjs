@@ -1,4 +1,5 @@
 import { createPublicReadAdmission } from './public-read-admission.mjs'
+import { recentContact, contactName } from './contact-enrichment.mjs'
 import { MESSAGES_CLIENT_SOURCE, messagesConfig } from './messages-client.mjs'
 import { createMessagingProxy, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
@@ -39,7 +40,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
@@ -170,7 +171,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission }) {
+export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -344,7 +345,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
-  const contactRow = row => ({ ...(typeof row.id === 'string' ? { sourceRowId: row.id, contactHref: `/network/contacts/${encodeURIComponent(row.id)}` } : {}), ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url })
+  const contactRow = row => ({ ...(typeof row.id === 'string' ? { sourceRowId: row.id, contactHref: `/network/contacts/${encodeURIComponent(row.id)}` } : {}), ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url, sourceLabel: rowSourceLabel(row) })
   const publicTarget = rowPublicTarget
   const usableTarget = id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
   async function contactRows(rows, reader = publicReader) {
@@ -2322,7 +2323,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           const ranked = matcher ? rankMatches(kept, matcher, value => ({ name: words(value.name), text: words([value.name, value.headline, value.location].filter(Boolean).join(' ')) })) : { rows: kept, match: 'none' }
           const ordered = orderNetwork(ranked.rows, sort)
           const rows = await withConnect(session.owner, ordered.slice(index * 100, (index + 1) * 100), reader)
-          const view = renderPeople({ ...props, membersOnly: iosApp(request), query: typed, mode, presence, sort, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
+          const enrichmentPreferences = contactEnrichment ? await contactEnrichment.preferences(session.owner).catch(() => null) : undefined
+        const view = renderPeople({ ...props, enrichmentPreferences, enrichmentAvailable: Boolean(contactEnrichment), membersOnly: iosApp(request), query: typed, mode, presence, sort, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts,
             connectedView: { rows, total: ranked.rows.length, ...(ranked.rows.length > (index + 1) * 100 ? { nextPage: index + 1 } : {}) } })
           journey(response, view, props.importJob); return
         }
@@ -2353,6 +2355,32 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         journey(response, view, props.importJob)
         return
       }
+      if (signup && contactEnrichment && request.method === 'GET' && url.pathname === '/network/enrichment') {
+        const network = await accountNetwork(session.owner), preferences = await contactEnrichment.preferences(session.owner)
+        const contacts = []
+        for (const row of network.assertions.filter(row => recentContact(row, Date.now())).slice(0, 1000)) {
+          const state = await contactEnrichment.inspect(session.owner, row)
+          contacts.push({ id: row.id, name: contactName(row), status: state.status })
+        }
+        const props = jobProps(await jobResources())
+        journey(response, renderContactEnrichment({ ...props, contacts, enabled: preferences?.enabled === true }), props.importJob); return
+      }
+      if (signup && contactEnrichment && request.method === 'POST' && url.pathname === '/network/enrichment') {
+        const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
+        if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || input.getAll('enabled').length !== 1 || !['on', 'off'].includes(input.get('enabled')) || [...input.keys()].some(key => !['csrf', 'enabled'].includes(key))) throw Error('private_browser_csrf')
+        await contactEnrichment.configure(session.owner, input.get('enabled') === 'on')
+        redirect(response, '/network'); return
+      }
+      const enrichContact = url.pathname.match(/^\/network\/contacts\/([^/]{1,480})\/enrichment$/)
+      if (signup && contactEnrichment && request.method === 'POST' && enrichContact) {
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || input.getAll('action').length !== 1 || input.getAll('address').length > 1 || [...input.keys()].some(key => !['csrf', 'action', 'address'].includes(key))) throw Error('private_browser_csrf')
+        const id = decodeURIComponent(enrichContact[1]), network = await accountNetwork(session.owner)
+        const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
+        if (!row) { response.writeHead(404).end(); return }
+        await contactEnrichment.review(session.owner, row, { action: input.get('action'), address: input.get('address') })
+        redirect(response, `/network/contacts/${encodeURIComponent(id)}`); return
+      }
       // One of the owner's own imported contacts, with their private context.
       const contactDetail = url.pathname.match(/^\/network\/contacts\/([^/]{1,480})$/)
       if (signup && request.method === 'GET' && contactDetail) {
@@ -2362,9 +2390,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
         if (!row) { response.writeHead(404).end(); return }
         const [contact] = await contactRows([row], pageReader(request))
+        const enrichment = contactEnrichment ? await contactEnrichment.inspect(session.owner, row).catch(() => ({ status: 'unavailable' })) : null
+        if (contact.id && !enrichment?.publishedProfile) {
+          try { contact.publishedProfile = await pageReader(request).profile({ id: contact.id }) } catch {}
+        }
         const props = jobProps(await jobResources())
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
-        journey(response, renderContactDetail({ ...props, contact, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
+        journey(response, renderContactDetail({ ...props, contact, enrichment, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // Settings shows the owner's live key, but a page view never creates
@@ -2424,6 +2456,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         data.account.displayName = session.displayName
         // The contact card's details belong to the export; its link does not.
         if (contactCards) data.contactCard = await contactCards.exportOwner(session.owner).catch(() => null)
+        if (contactEnrichment) data.contactEnrichment = await contactEnrichment.exportOwner(session.owner)
         if (memberEmail) data.email = await memberEmail.exportOwner(session.owner).catch(() => null)
         // Private notes and relations live in the owner's Ideaflow people overlay
         // (shared with OpenChat); the export includes the owner's copy.
@@ -2451,6 +2484,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (contactCards) await contactCards.removeOwner(session.owner)
         if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
         if (personLookup) await personLookup.removeOwner(session.owner)
+        if (contactEnrichment) await contactEnrichment.removeOwner(session.owner)
         // Member-published public links go with the account.
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
         // So do the member's handles, current and earlier (released once the data is gone).

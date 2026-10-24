@@ -2,6 +2,8 @@
 // ordinary type sizes, the accepted prototype's profile and directory layout.
 export const ONBOARDING_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap'
 export const ONBOARDING_STYLE = `
+.unlinked-onboarding .enrichment-row{padding:16px 20px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.unlinked-onboarding .enrichment-row:last-child{border-bottom:0}.unlinked-onboarding .enrichment-row h3{margin:0 0 4px}.unlinked-onboarding .profile.contact-detail{display:block;max-width:800px;margin-inline:auto}.unlinked-onboarding .contact-detail a{overflow-wrap:anywhere}
+
 html{-webkit-text-size-adjust:100%}
 .unlinked-onboarding #api-keys{scroll-margin-top:24px}
 .unlinked-onboarding .key-permissions{padding:12px 16px;margin:16px 0;border:1px solid var(--line);border-radius:var(--r);background:var(--page)}
