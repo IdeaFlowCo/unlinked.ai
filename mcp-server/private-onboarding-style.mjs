@@ -272,7 +272,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding nav a:hover{text-decoration:underline}
 .unlinked-onboarding nav a[aria-current=page]{color:var(--brand-d);font-weight:600}
 .unlinked-onboarding nav .nav-ico[aria-current=page]{color:var(--brand-d);background:var(--tint)}
-.unlinked-onboarding nav .nav-ico-lbl{width:auto;grid-auto-flow:column;gap:6px;padding:0 12px 0 8px;border-radius:99px}
+.unlinked-onboarding nav .nav-ico.nav-ico-lbl{width:auto;grid-auto-flow:column;gap:6px;padding:0 12px 0 8px;border-radius:99px}
 .unlinked-onboarding nav .chip{display:inline-block;border:1px solid var(--line2);border-radius:99px;padding:6px 13px;background:#fff;max-width:200px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .unlinked-onboarding nav a.button{color:#fff}
 .unlinked-onboarding nav a.button:hover{text-decoration:none}
@@ -718,6 +718,6 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 @media(max-width:600px){.unlinked-onboarding .bcard.qr-first .bc-side{order:-1;padding:16px 18px 12px}.unlinked-onboarding .bcard.qr-first .bc-side .qr{max-width:200px}}
 /* Phones: one header row of navigation (icons for My card), and room at the
    bottom so the floating feedback button never sits on the last actions. */
-@media(max-width:600px){.unlinked-onboarding header{gap:10px 8px}.unlinked-onboarding .logo strong{font-size:21px}.unlinked-onboarding nav{gap:2px;flex-wrap:nowrap;margin-left:auto}.unlinked-onboarding header:has(.me) nav{width:100%;justify-content:space-between;margin-left:0}.unlinked-onboarding nav .nav-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.unlinked-onboarding nav .my-card-link{width:40px;justify-content:center}.unlinked-onboarding nav>a:not(.button):not(.nav-ico):not(.my-card-link){padding:0 6px}.unlinked-onboarding nav .nav-ico{width:38px;height:38px}.unlinked-onboarding nav .nav-ico-lbl{width:38px;padding:0;gap:0}.unlinked-onboarding{padding-bottom:96px}}
+@media(max-width:600px){.unlinked-onboarding header{gap:10px 8px}.unlinked-onboarding .logo strong{font-size:21px}.unlinked-onboarding nav{gap:2px;flex-wrap:nowrap;margin-left:auto}.unlinked-onboarding header:has(.me) nav{width:100%;justify-content:space-between;margin-left:0}.unlinked-onboarding nav .nav-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.unlinked-onboarding nav .my-card-link{width:40px;justify-content:center}.unlinked-onboarding nav>a:not(.button):not(.nav-ico):not(.my-card-link){padding:0 6px}.unlinked-onboarding nav .nav-ico{width:38px;height:38px}.unlinked-onboarding nav .nav-ico.nav-ico-lbl{width:38px;padding:0;gap:0}.unlinked-onboarding{padding-bottom:96px}}
 @media(max-width:370px){.unlinked-onboarding nav{font-size:13px}.unlinked-onboarding nav .nav-ico{width:34px}}
 `
