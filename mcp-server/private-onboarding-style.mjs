@@ -430,7 +430,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .agentband pre{margin:0 0 8px}
 /* Footer: brand and one quiet row of links, then a hairline meta row
    (disclaimer, version, legal, account). Links are muted until hover. */
-.unlinked-onboarding footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 6px;font-size:14px;line-height:1.5;color:var(--muted)}
+.unlinked-onboarding footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 32px;font-size:14px;line-height:1.5;color:var(--muted)}
 .unlinked-onboarding footer a{color:var(--muted);text-decoration:none}
 .unlinked-onboarding footer a:hover{color:var(--fg);text-decoration:underline;text-underline-offset:3px}
 .unlinked-onboarding footer form{display:inline}
@@ -446,7 +446,9 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding #wit-feedback-slot:empty{display:none}
 .unlinked-onboarding .foot-meta{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 24px;margin-top:22px;padding-top:16px;border-top:1px solid var(--line);font-size:13px}
 .unlinked-onboarding .foot-legal{display:flex;flex-wrap:wrap;align-items:center;gap:6px 20px}
-@media(max-width:600px){.unlinked-onboarding footer{padding-top:24px}.unlinked-onboarding .foot-main{flex-direction:column;gap:14px}.unlinked-onboarding .foot-links{gap:10px 20px}.unlinked-onboarding .foot-meta{flex-direction:column;align-items:flex-start}}
+@media(max-width:600px){.unlinked-onboarding footer{padding:24px 0 28px}.unlinked-onboarding .foot-main{flex-direction:column;gap:6px}.unlinked-onboarding .foot-links{gap:0 20px}.unlinked-onboarding .foot-meta{flex-direction:column;align-items:flex-start;gap:4px;margin-top:12px}.unlinked-onboarding .foot-legal{gap:0 20px}}
+/* Touch screens: every footer link is a 44px tap target. */
+@media(pointer:coarse),(max-width:600px){.unlinked-onboarding footer :is(.foot-links,.foot-legal)>a,.unlinked-onboarding footer .link-button,.unlinked-onboarding footer #wit-feedback-slot{display:inline-flex;align-items:center;min-height:44px}}
 .unlinked-onboarding .account{margin:0}
 .unlinked-onboarding :is(a,button,input,textarea,summary):focus-visible{outline:3px solid var(--brand);outline-offset:3px}
 .unlinked-onboarding [hidden]{display:none!important}

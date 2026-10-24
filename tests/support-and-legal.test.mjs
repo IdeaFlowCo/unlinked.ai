@@ -118,12 +118,16 @@ test('the footer is two rows: brand and links, then a hairline meta row with fee
     assert.ok(main, path)
     assert.match(main, /<div class="foot-brand"><b>unlinked<\/b><span>An open professional network<\/span><\/div>/)
     const links = [...main.matchAll(/<a href="([^"]+)"/g)].map(match => match[1])
-    assert.deepEqual(links, ['/support', '/data-liberation', '/agents', 'https://www.unlinked.ai/meet', '/llms.txt'], path)
+    assert.deepEqual(links, ['/support', '/data-liberation', '/agents', 'https://www.unlinked.ai/meet'], path)
     const meta = footer.slice(footer.indexOf('<div class="foot-meta">'))
     assert.match(meta, /Not affiliated with LinkedIn\. · <span class="app-version">v/)
     assert.match(meta, /<span class="foot-legal"><span id="wit-feedback-slot"><\/span><a href="https:\/\/www\.ideaflow\.io\/privacy-policy"/)
     assert.doesNotMatch(footer, /<nav/) // header nav styles must not reach the footer links
   }
+  // Phones: footer links are 44px tap targets and the footer has bottom room.
+  const style = (await (await app.request('/support')).text())
+  assert.match(style, /\.unlinked-onboarding footer\{[^}]*padding:28px 0 32px/)
+  assert.match(style, /@media\(pointer:coarse\),\(max-width:600px\)\{\.unlinked-onboarding footer :is\(\.foot-links,\.foot-legal\)>a,[^}]*min-height:44px\}/)
   const session = await app.signIn()
   const footer = footerOf(await (await app.request('/support', { headers: { Cookie: session } })).text())
   assert.match(footer.slice(footer.indexOf('class="foot-legal"')), /<span class="account">Signed in as robin@example\.invalid · <form class="sign-out"/)
