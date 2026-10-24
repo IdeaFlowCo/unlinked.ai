@@ -6,23 +6,38 @@ import { renderPeople, renderLanding, renderScan, fillMeHeadline, ME_HEADLINE_SL
 const account = { accountLabel: 'sam@example.test', displayName: 'Sam Rivera', csrf: 'csrf-value' }
 const header = view => view.content.match(/<header>(.*?)<\/header>/s)[1]
 
-test('the header retains QR scanning when directory search moves into the list', () => {
+test('every header keeps the global search, People included, and no QR button inside the field', () => {
   for (const view of [renderLanding(), renderPeople({ ...account, state: 'ready' })]) {
     const search = header(view)
-    assert.match(search, /<a class="scan" href="\/scan" aria-label="Scan a QR code or show your card"/)
-    assert.doesNotMatch(search, /data:/)
+    assert.match(search, /<form class="header-search" method="get" action="\/network" role="search">/)
+    assert.doesNotMatch(search, /class="scan"|href="\/scan"[^>]*>(?!\s*<svg)|data:/)
   }
+  // The directory's own toolbar holds the filter; the header field stays empty there.
+  const people = header(renderPeople({ ...account, state: 'ready', query: 'designers', presence: 'member' }))
+  assert.match(people, /name="q" type="search"[^>]* value=""/)
+  assert.match(people, /<input type="hidden" name="presence" value="member">/)
+})
+
+test('the current page is marked in the main navigation, and My card is one QR entry point', () => {
+  const nav = view => header(view).match(/<nav[^>]*>(.*?)<\/nav>/s)[1]
+  const people = nav(renderPeople({ ...account, state: 'ready' }))
+  assert.match(people, /<a href="\/network\?connected=1" aria-current="page">People<\/a>/)
+  assert.equal(people.match(/aria-current="page"/g).length, 1)
+  assert.equal(people.match(/<a class="my-card-link" href="\/card" aria-label="My card">/g).length, 1)
+  assert.doesNotMatch(people.replace(/<details class="me">.*<\/details>/s, ''), /href="\/scan"/)
+  const scan = nav(renderScan({ ...account, tab: 'card', profile: { name: 'Sam Rivera' }, cardUrl: 'https://www.unlinked.ai/c/abc', qr: '<svg></svg>' }))
+  assert.doesNotMatch(scan, /aria-current/)
+  assert.doesNotMatch(nav(renderLanding()), /aria-current/)
 })
 
 test('signed-in members get one Me menu: profile header, card, settings, help, then switch account and sign-out last', () => {
   const nav = header(renderPeople({ ...account, state: 'ready' })).match(/<nav[^>]*>(.*?)<\/nav>/s)[1]
   // The bar itself carries no separate profile, name chip or sign-out.
   const outside = nav.replace(/<details class="me">.*<\/details>/s, '')
-  // The avatar is the one-click way to your own profile; nothing else outside the menu.
-  assert.match(nav, /<a class="me-face" href="\/profile" aria-label="Your profile" title="Your profile"><span class="initials avatar" aria-hidden="true">SR<\/span><\/a><details class="me">/)
-  assert.doesNotMatch(outside.replace(/<a class="me-face"[^>]*>.*?<\/a>/s, ''), /href="\/profile"|class="chip"|logout|Sign out/)
+  // The avatar is the menu trigger itself: no separate profile link outside the menu.
+  assert.doesNotMatch(outside, /href="\/profile"|class="chip"|class="me-face"|logout|Sign out/)
   const menu = nav.match(/<details class="me">(.*)<\/details>/s)[1]
-  assert.match(menu, /^<summary aria-haspopup="menu" aria-label="Me: account menu for Sam Rivera"><span class="me-l">Me/)
+  assert.match(menu, /^<summary aria-haspopup="menu" aria-label="Me: account menu for Sam Rivera"><span class="initials avatar" aria-hidden="true">SR<\/span><span class="me-l">Me/)
   assert.match(menu, /<div class="me-panel" role="menu" aria-label="Account">/)
   assert.match(menu, /<div class="me-who"><b>Sam Rivera<\/b><!--me-headline--><\/div><a class="button sec sm me-view" role="menuitem" href="\/profile">View profile<\/a>/)
   const items = [...menu.matchAll(/role="menuitem"[^>]*?(?:href="([^"]+)")?>([^<]*)/g)].map(match => match[1] ?? match[2])

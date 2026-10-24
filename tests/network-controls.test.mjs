@@ -36,9 +36,10 @@ test('date sorting distinguishes connected from imported, with unknown dates las
 test('one scoped native form preserves membership, personal scope, sort and exact mode; links preserve sorting', () => {
   const { content } = renderPeople({ query: 'Ada & co', presence: 'member', mode: 'exact', sort: 'connected', connectedCounts: { all: 5 }, connectedView: { rows: [], total: 0 } })
   const forms = [...content.matchAll(/<form[^>]*role="search"[^>]*>(.*?)<\/form>/gs)]
-  assert.equal(forms.length, 1)
-  for (const [name, value] of [['presence', 'member'], ['connected', '1'], ['mode', 'exact']]) assert.ok(forms[0][1].includes(`name="${name}" value="${value}"`))
-  assert.match(forms[0][1], /value="connected" selected>Recently connected/)
+  assert.equal(forms.length, 2) // The empty header search (which keeps the scope filters hidden), then the toolbar.
+  for (const form of forms) for (const [name, value] of [['presence', 'member'], ['connected', '1'], ['mode', 'exact']]) assert.ok(form[1].includes(`name="${name}" value="${value}"`))
+  assert.match(forms[0][1], /name="q" type="search"[^>]* value=""/)
+  assert.match(forms[1][1], /value="connected" selected>Recently connected/)
   assert.match(content, /q=Ada%20%26%20co&amp;mode=exact&amp;connected=1&amp;sort=connected&amp;presence=shadow/)
   assert.match(content, /Unknown dates appear last/)
   assert.doesNotMatch(renderPeople({ everyone: [], total: 0 }).content, /<option value="connected"|<option value="imported"/)
@@ -70,7 +71,7 @@ test('HTTP list preserves state and accepted-connection dates without exposing o
   const defaultConnections = await (await go('/network?connected=1', cookie)).text()
   assert.match(defaultConnections, /value="connected" selected>Recently connected/)
   assert.ok(defaultConnections.indexOf('href="/people/p0"') < defaultConnections.indexOf('href="/people/p119"'))
-  assert.match(defaultConnections, /<a href="\/network\?connected=1">People<\/a>/)
+  assert.match(defaultConnections, /<a href="\/network\?connected=1" aria-current="page">People<\/a>/)
   const tabs = defaultConnections.match(/<nav class="network-scopes"[^>]*>(.*?)<\/nav>/)[1]
   assert.ok(tabs.indexOf('My connections') < tabs.indexOf('Everyone'))
   const everyonePage = await (await go('/network', cookie)).text()

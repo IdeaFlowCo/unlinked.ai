@@ -86,7 +86,7 @@ test('a signed-in member stays signed in, reaches profile and people from every 
   for (const path of ['/', '/import', '/profile', '/network', '/settings', '/people/first']) {
     const { response, body } = await get(path); assert.equal(response.status, 200, path)
     const header = body.match(/<header>(.*?)<\/header>/s)[1]
-    assert.match(header, /href="\/network\?connected=1">People/); assert.match(header, /role="menuitem" href="\/profile">View profile/)
+    assert.match(header, /href="\/network\?connected=1"[^>]*>People/); assert.match(header, /role="menuitem" href="\/profile">View profile/)
     assert.match(header, /<div class="me-who"><b>Verified Person<\/b>/); assert.match(header, /role="menuitem" href="\/settings">/)
     assert.match(header, /action="\/logout" role="none">/)
     assert.match(body, /method="get" action="\/network" role="search"/)

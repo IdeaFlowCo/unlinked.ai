@@ -580,7 +580,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       ...(notifications ? { notifications: 0 } : {}),
       ...(messaging ? { messages: 0 } : {}),
     } : undefined)
-    view = { ...view, content: fillNavAlerts(iosResponses.has(response) ? iosAppView(view.content) : view.content, alerts) }
+    view = { ...view, content: fillNavAlerts(iosResponses.has(response) ? iosAppView(view.content) : view.content, alerts, view.active ?? null) }
     // Messages page or dock: the static client plus its non-executable configuration.
     const dockOn = responseDock.has(response) && readers.has(response) && view.content.includes('</main>')
     if (dockOn) view.content = view.content.replace('</main>', `</main>${renderMessagesDock()}`)

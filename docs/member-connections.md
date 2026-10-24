@@ -92,8 +92,9 @@ preferences, delivery timing, suppression and runtime configuration.
 | `POST /notifications/read-all` | Marks everything read |
 
 All POSTs check the session CSRF token and the same-origin `Origin` header.
-The header shows My Network (pending requests received) and a bell (unseen
-notifications) between the main links and the Me menu. They are filled per
+The header shows Invitations (icon with a visible label on wide screens;
+pending requests received) and a bell (unseen notifications) between the main
+links and the Me menu. They are filled per
 request through `NAV_ALERTS_SLOT` / `fillNavAlerts`; an unconfigured feature
 shows no icon. See [Browser feedback and badge refresh](#browser-feedback-and-badge-refresh)
 for updates on already-open pages.

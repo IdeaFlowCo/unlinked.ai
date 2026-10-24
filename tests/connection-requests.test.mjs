@@ -288,9 +288,9 @@ test('views: escaped names, inline answers, header badges only for configured fe
   assert.ok(page.includes(NAV_ALERTS_SLOT))
   assert.doesNotMatch(fillNavAlerts(page, null), /class="nav-ico"/)
   const filled = fillNavAlerts(page, { network: 2, notifications: 140 })
-  assert.match(filled, /<a class="nav-ico" href="\/invitations" title="My Network" aria-label="My Network, 2 pending">.*?<span class="badge" aria-hidden="true">2<\/span><\/a>/)
+  assert.match(filled, /<a class="nav-ico nav-ico-lbl" href="\/invitations" title="Invitations" aria-label="Invitations, 2 pending">.*?<span class="nav-lbl">Invitations<\/span><span class="badge" aria-hidden="true">2<\/span><\/a>/)
   assert.match(filled, /aria-label="Notifications, 99\+ new">.*?>99\+<\/span>/)
-  assert.match(fillNavAlerts(page, { notifications: 0 }), /aria-label="Notifications">/); assert.doesNotMatch(fillNavAlerts(page, { notifications: 0 }), /class="badge"|title="My Network"/)
+  assert.match(fillNavAlerts(page, { notifications: 0 }), /aria-label="Notifications">/); assert.doesNotMatch(fillNavAlerts(page, { notifications: 0 }), /class="badge"|title="Invitations"/)
   assert.doesNotMatch(renderInvitations({}).content, /nav-alerts/)
   // Profiles: each relation renders its control.
   const profile = { id: 'ada', name: 'Ada Lovelace', presence: 'member', positions: [], connections: [] }
@@ -349,7 +349,7 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   // Signed in: Connect on a member; an invite link on a shadow; already linked through an import; yourself.
   const adaPage = await get('/people/ada-profile', me)
   assert.match(adaPage.text, /action="\/connections\/request"/)
-  assert.match(adaPage.text, /class="nav-ico" href="\/invitations" title="My Network" aria-label="My Network"/)
+  assert.match(adaPage.text, /class="nav-ico nav-ico-lbl" href="\/invitations" title="Invitations" aria-label="Invitations"/)
   assert.match((await get('/people/shadow', me)).text, /Invite to Unlinked/)
   assert.match((await get('/people/grace-profile', me)).text, /✓ Connected/)
   assert.match((await get('/people/jacob-profile', me)).text, /This is you/)
@@ -366,7 +366,7 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   assert.equal((await post('/connections/request', me, { profileId: 'nobody' })).status, 404)
   // Ada's header counts the request and the notification.
   const home = await get('/invitations', her)
-  assert.match(home.text, /aria-label="My Network, 1 pending">.*?<span class="badge" aria-hidden="true">1<\/span>/)
+  assert.match(home.text, /aria-label="Invitations, 1 pending"[^>]*>.*?<span class="badge" aria-hidden="true">1<\/span>/)
   assert.match(home.text, /aria-label="Notifications, 1 new"/)
   // The sender is named by their public profile, never their sign-in email.
   assert.match(home.text, /<a href="\/people\/jacob-profile"><b>Jacob Cole<\/b><\/a> wants to connect/); assert.match(home.text, /<q>Loved your talk<\/q>/)
@@ -375,7 +375,7 @@ test('end to end: Connect with a note, badges, the feed, answering, and cross-ac
   assert.match(feed.text, /<li class="note unread">.*?<a class="note-person" href="\/notifications\/[0-9a-f-]{36}\?to=profile"><b>Jacob Cole<\/b><\/a> wants to connect with you/)
   const requestId = feed.text.match(/action="\/connections\/respond"><input type="hidden" name="csrf" value="[^"]+"><input type="hidden" name="id" value="([^"]+)"/)[1]
   assert.match(feed.text, /aria-label="Notifications"/) // opening the feed clears the bell for this view
-  assert.match((await get('/notifications', her)).text, /aria-label="Notifications">/)
+  assert.match((await get('/notifications', her)).text, /aria-label="Notifications" aria-current="page">/)
   // Nobody else can answer or withdraw it, or open Ada's items.
   assert.equal((await post('/connections/respond', third, { id: requestId, action: 'accept' })).headers.get('location'), '/invitations?notice=connection_not_found')
   assert.equal((await post('/connections/respond', me, { id: requestId, action: 'accept' })).headers.get('location'), '/invitations?notice=connection_not_found')
@@ -513,7 +513,7 @@ test('authenticated POST search pages retain configured navigation for later bad
     const response = await p.post('/search-account', recipient, { query: 'Jacob', scope })
     assert.equal(response.status, 200)
     const page = await response.text()
-    assert.match(page, /<a class="nav-ico" href="\/invitations"/)
+    assert.match(page, /<a class="nav-ico nav-ico-lbl" href="\/invitations"/)
     assert.match(page, /<a class="nav-ico" href="\/notifications"/)
     assert.match(page, /src="\/public-assets\/connection-feedback.js\?v=[0-9a-f]{16}" defer/)
   }
@@ -523,7 +523,7 @@ test('authenticated POST search pages retain configured navigation for later bad
   const disabled = await site(t, { memberConnections: undefined, notifications: undefined, complete: async () => ({ matches: [] }) })
   const response = await disabled.post('/search-account', await disabled.signIn('ada-subject'), { query: 'Jacob', scope: 'own' })
   assert.equal(response.status, 200)
-  assert.doesNotMatch(await response.text(), /<a class="nav-ico" href="\/(?:invitations|notifications)"/)
+  assert.doesNotMatch(await response.text(), /<a class="nav-ico[^"]*" href="\/(?:invitations|notifications)"/)
 })
 
 test('connection failures explain expired forms, sessions, missing profiles and server failures without claiming success', async t => {
