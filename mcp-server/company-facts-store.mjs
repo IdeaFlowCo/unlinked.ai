@@ -11,11 +11,13 @@ import { COMPANY_DATASET, validateCompanyRows } from './company-metadata.mjs'
 // query ever scans OperationalResource documents.
 const hash = value => createHash('sha256').update(value).digest('hex')
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(value)
-const CHUNK_BYTES = 128 * 1024, CHUNK_ROWS = 200, MAX_CHUNKS = 64
+// CHUNK_ROWS x MAX_CHUNKS covers COMPANY_ROW_LIMIT (50,000 rows); the byte cap
+// per chunk keeps a stored revision under 32 MiB.
+const CHUNK_BYTES = 128 * 1024, CHUNK_ROWS = 200, MAX_CHUNKS = 256
 
 export const companyRevision = companies => COMPANY_DATASET + ':' + hash(JSON.stringify(companies))
 
-function chunksOf(companies) {
+export function chunksOf(companies) {
   const chunks = []
   let group = []
   const flush = () => { if (!group.length) return; const json = JSON.stringify(group); chunks.push({ ordinal: chunks.length, json, sha256: hash(json), rows: group.length }); group = [] }

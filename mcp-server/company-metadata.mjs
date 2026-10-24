@@ -21,6 +21,9 @@ const COMPANIES = [
 ]
 
 export const COMPANY_DATASET = 'curated-companies-v1'
+// Rows one publication may hold. Sized for a facts row per company name that
+// published profiles link (about 40,000 names in October 2026).
+export const COMPANY_ROW_LIMIT = 50000
 export const COMPANY_FIELDS = ['name', 'tagline', 'description', 'industry', 'employeeCount', 'headquarters', 'founded', 'website', 'linkedinUrl', 'aliases']
 
 export const companyKey = value => (typeof value === 'string' ? value : '').normalize('NFKC').toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter(Boolean).join(' ')
@@ -43,7 +46,7 @@ const CHECKS = {
 // and the runtime reader all apply it, so a bad row can never reach a page.
 // Every name and alias must normalize to a non-empty key no other row claims.
 export function validateCompanyRows(rows) {
-  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 5000) throw new Error('company_rows_invalid')
+  if (!Array.isArray(rows) || rows.length < 1 || rows.length > COMPANY_ROW_LIMIT) throw new Error('company_rows_invalid')
   const claimed = new Set()
   return rows.map((row, index) => {
     if (!plain(row) || !short(row.name)) throw new Error(`company_row_invalid:${index}`)

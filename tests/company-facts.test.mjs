@@ -6,7 +6,7 @@ import { mkdtemp, writeFile, chmod, symlink, mkdir, readdir, stat, readFile, rm 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { COMPANY_DATASET, buildCompanyIndex, companyFacts, createCompanyFacts, validateCompanyRows } from '../mcp-server/company-metadata.mjs'
-import { companyRevision, createNeo4jCompanyFactsStore } from '../mcp-server/company-facts-store.mjs'
+import { chunksOf, companyRevision, createNeo4jCompanyFactsStore } from '../mcp-server/company-facts-store.mjs'
 import { prepareCompanyFacts, publishCompanyFacts, revokeCompanyFacts } from '../mcp-server/publish-company-facts.mjs'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 
@@ -32,10 +32,21 @@ test('company rows: anything outside the whitelist is rejected', () => {
     [{ ...row, linkedinUrl: 'https://evil.test/company/riot-games/' }], [{ ...row, linkedinUrl: 'https://www.linkedin.com/company/riot/games' }],
     [{ ...row, aliases: 'Riot' }], [{ ...row, aliases: [''] }], [{ ...row, aliases: [7] }],
     [row, { name: 'riot  games' }], [row, { name: 'Other', aliases: ['RIOT'] }], [{ ...row, aliases: [null] }],
-    Array.from({ length: 5001 }, (_, index) => ({ name: `Company ${index}` })),
+    Array.from({ length: 50001 }, (_, index) => ({ name: `Company ${index}` })),
   ]
   for (const rows of bad) assert.throws(() => validateCompanyRows(rows), /company_row/, JSON.stringify(rows).slice(0, 120))
   assert.throws(() => validateCompanyRows([Object.assign(Object.create({ inherited: true }), { name: 'Proto' })]), /company_row_invalid/)
+})
+
+test('one publication holds a facts row for every linked company name (50,000 rows)', () => {
+  // About the size of a free-dataset row: industry, headquarters, founded, website, LinkedIn page.
+  const rows = Array.from({ length: 50000 }, (_, index) => ({ name: `Company ${index}`, industry: 'Software Development', headquarters: 'Boston, Massachusetts, United States', founded: '2014', website: `https://company-${index}.example`, linkedinUrl: `https://www.linkedin.com/company/company-${index}/` }))
+  const valid = validateCompanyRows(rows), chunks = chunksOf(valid)
+  assert.equal(valid.length, 50000)
+  assert.ok(chunks.length <= 256, `${chunks.length} chunks`)
+  assert.equal(chunks.reduce((sum, chunk) => sum + chunk.rows, 0), 50000)
+  assert.ok(chunks.every(chunk => Buffer.byteLength(chunk.json) <= 128 * 1024))
+  assert.ok(Buffer.byteLength(JSON.stringify(valid, null, 1)) < 32 * 1024 * 1024)
 })
 
 test('prepareCompanyFacts derives a content-addressed revision and rejects bad files', () => {
