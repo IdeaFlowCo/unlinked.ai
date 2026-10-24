@@ -39,15 +39,27 @@ test('the page answers without a session and links each service’s own export p
   assert.match(body, /<title>Data liberation · Unlinked<\/title>/)
   const links = Object.fromEntries(DATA_EXPORTS.map(value => [value.id, value.url]))
   assert.equal(links.linkedin, 'https://www.linkedin.com/mypreferences/d/download-my-data')
-  assert.equal(links.facebook, 'https://accountscenter.facebook.com/info_and_permissions/dyi')
+  assert.equal(links.facebook, 'https://www.facebook.com/dyi')
   assert.equal(links.instagram, 'https://accountscenter.instagram.com/info_and_permissions/dyi/')
   assert.equal(links.google, 'https://takeout.google.com/')
-  for (const value of DATA_EXPORTS) {
+  // The big three first, then everything else; WhatsApp leads the rest and has no web page.
+  assert.deepEqual(DATA_EXPORTS.filter(value => value.tier === 'primary').map(value => value.id), ['linkedin', 'facebook', 'instagram'])
+  assert.deepEqual(DATA_EXPORTS.filter(value => value.tier === 'more').map(value => value.id).slice(0, 2), ['whatsapp', 'apple'])
+  assert.ok(DATA_EXPORTS.every(value => ['primary', 'more'].includes(value.tier)))
+  assert.ok(body.indexOf('id="services"') < body.indexOf('id="linkedin"') && body.indexOf('id="instagram"') < body.indexOf('id="more-services"') && body.indexOf('id="more-services"') < body.indexOf('id="whatsapp"'))
+  assert.equal(links.whatsapp, null)
+  // WhatsApp: no export button, only links to WhatsApp's own help steps.
+  const whatsapp = body.slice(body.indexOf('id="whatsapp"'), body.indexOf('</article>', body.indexOf('id="whatsapp"')))
+  assert.doesNotMatch(whatsapp, /class="button|data-export-link/)
+  assert.ok(whatsapp.includes('href="https://faq.whatsapp.com/526463418847093"') && whatsapp.includes('href="https://faq.whatsapp.com/1180414079177245"'))
+  assert.equal(links.microsoft, 'https://account.microsoft.com/privacy/download-data')
+  assert.match(body, /Export your information/); assert.doesNotMatch(body, /Download your information/)
+  for (const value of DATA_EXPORTS.filter(value => value.url)) {
     assert.match(value.url, /^https:\/\//, value.id)
     assert.ok(body.includes(`id="${value.id}"`), value.id)
     assert.ok(body.includes(`href="${value.url}" target="_blank" rel="noopener noreferrer"`), value.id)
   }
-  for (const id of ['before', 'whatsapp', 'no-export-button', 'bring-it-here']) assert.ok(body.includes(`id="${id}"`), id)
+  for (const id of ['before', 'services', 'more-services', 'whatsapp', 'no-export-button', 'bring-it-here']) assert.ok(body.includes(`id="${id}"`), id)
   assert.ok(body.includes('href="/import-linkedin"'))
   const csp = (await app.request('/data-liberation')).headers.get('content-security-policy')
   assert.match(csp, /default-src 'none'/)
@@ -73,6 +85,6 @@ test('every footer links the page; Settings and the import guide mention it once
 
 test('in the iOS app every export link opens in Safari, where people are signed in', () => {
   const app = iosAppView(renderDataLiberation().content)
-  for (const value of DATA_EXPORTS) assert.ok(app.includes(`x-safari-${value.url}`), value.id)
+  for (const value of DATA_EXPORTS.filter(value => value.url)) assert.ok(app.includes(`x-safari-${value.url}`), value.id)
   assert.doesNotMatch(app, /data-export-link href="https:/)
 })
