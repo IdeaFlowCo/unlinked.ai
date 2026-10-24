@@ -11,7 +11,7 @@ import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLo
 import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
-import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
+import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS, LINKEDIN_ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
 import { normalizeLinkedinSlug, urlIdentityMerges, urlIdentitySuspensions } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
@@ -490,7 +490,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // next-request rebuilds unless stale is set explicitly).
     const publicIndexStaleMs = publicIndexEnv.UNLINKED_PUBLIC_INDEX_STALE_MS === undefined ? (publicIndexFreshMs === 0 ? 0 : 90000) : Number(publicIndexEnv.UNLINKED_PUBLIC_INDEX_STALE_MS)
     if (!Number.isSafeInteger(publicIndexStaleMs) || publicIndexStaleMs < 0 || publicIndexStaleMs > 600000 || (publicIndexStaleMs > 0 && publicIndexStaleMs < publicIndexFreshMs)) throw new Error('private_composition_configuration_required')
-    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, getBackend, readSignupProfiles: signupLookup?.list,
+    // LinkedIn-keyed enrichment fills gaps on imported profiles, and profiles
+    // sharing one LinkedIn address fold into one page; the copy already holding
+    // the person's readable address survives (docs/profile-handles.md).
+    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true,
+      preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list,
       includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')

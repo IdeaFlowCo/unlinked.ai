@@ -1,7 +1,8 @@
-// Member handles (unlinked-qpud, docs/profile-handles.md): readable
-// /people/<handle> addresses for members, defaulting to the LinkedIn vanity
-// slug already on their public profile, else their name. Ids and earlier
-// handles redirect to the current handle; imported (shadow) profiles keep ids.
+// Profile handles (unlinked-qpud, unlinked-3l8h, docs/profile-handles.md):
+// readable /people/<handle> addresses, defaulting to the LinkedIn vanity slug
+// already on the public profile, else the name. Ids and earlier handles
+// redirect to the current handle. Members edit theirs; imported profiles get
+// theirs from the backfill (tests/imported-profile-addresses.test.mjs).
 // All people here are fictional.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -86,7 +87,7 @@ async function site(t, { handles = createProfileHandles({ store: createMemoryPro
   await handles.initialize()
   const state = {
     snapshot: { state: 'published', complete: true, revision: 'handles-1', connections: [{ fromId: SIGNUP_ID, toId: 'public-shadow' }, { fromId: SIGNUP_ID, toId: 'twin-a' }],
-      profiles: [person(SIGNUP_ID, 'Peter Fictional', { linkedinUrl: 'https://www.linkedin.com/in/peterfictional300' }), person('twin-a', 'Ada Fictional'), person('twin-b', 'Ada Fictional'), person('public-shadow', 'Shadow Fictional', { linkedinUrl: 'https://www.linkedin.com/in/shadow-fictional' })],
+      profiles: [person(SIGNUP_ID, 'Peter Fictional', { linkedinUrl: 'https://www.linkedin.com/in/peterfictional300' }), person('twin-a', 'Ada Fictional'), person('twin-b', 'Ada Fictional'), person('public-shadow', 'Sam Fictional', { linkedinUrl: 'https://www.linkedin.com/in/sam-fictional' })],
       members: [SIGNUP_ID, 'twin-a', 'twin-b'] },
   }
   const owners = { 'peter-subject': peterOwner, 'ada-subject': { ownerId: 'ada-owner', userId: 'ada-user' } }
@@ -121,7 +122,7 @@ async function site(t, { handles = createProfileHandles({ store: createMemoryPro
 
 test('end to end: the old hash address redirects to the LinkedIn handle, which serves the page', async t => {
   const { get, handles, handler } = await site(t)
-  await handler.backfillHandles()
+  await handler.backfillHandles({ pauseMs: 0 })
   const old = await get(`/people/${SIGNUP_ID}`)
   assert.equal(old.status, 301)
   assert.equal(old.location, '/people/peterfictional300')
@@ -144,27 +145,32 @@ test('end to end: the old hash address redirects to the LinkedIn handle, which s
   assert.equal(handles.handleFor(SIGNUP_ID), 'peterfictional300')
 })
 
-test('collisions number by name, and imported profiles never get a handle', async t => {
-  const { get, handles } = await site(t)
+test('collisions number by name; an imported profile gets its address from the backfill', async t => {
+  const { get, handles, handler } = await site(t)
   assert.equal((await get('/people/twin-a')).location, '/people/ada-fictional')
   assert.equal((await get('/people/twin-b')).location, '/people/ada-fictional-2')
   const shadow = await get('/people/public-shadow')
-  assert.equal(shadow.status, 200, 'an imported profile keeps its id address')
+  assert.equal(shadow.status, 200, 'until the backfill runs, an imported profile answers at its id')
   assert.equal(handles.handleFor('public-shadow'), null)
-  assert.equal((await get('/people/shadow-fictional')).status, 404, "a shadow's LinkedIn slug is not an address")
+  assert.equal((await get('/people/sam-fictional')).status, 404)
+  await handler.backfillHandles({ pauseMs: 0 })
+  assert.equal(handles.handleFor('public-shadow'), 'sam-fictional', "its LinkedIn slug becomes its address")
+  assert.equal((await get('/people/public-shadow')).location, '/people/sam-fictional')
+  assert.equal((await get('/people/sam-fictional')).status, 200)
 })
 
-test('backfill gives every listed member a handle, LinkedIn slugs first', async t => {
+test('backfill gives every published profile a handle, members and LinkedIn slugs first', async t => {
   const { handler, handles } = await site(t)
-  assert.equal(await handler.backfillHandles(), 3)
+  assert.equal(await handler.backfillHandles({ pauseMs: 0 }), 4)
   assert.equal(handles.handleFor(SIGNUP_ID), 'peterfictional300')
   assert.deepEqual([handles.handleFor('twin-a'), handles.handleFor('twin-b')].sort(), ['ada-fictional', 'ada-fictional-2'])
-  assert.equal(await handler.backfillHandles(), 0, 'already assigned handles are left alone')
+  assert.equal(handles.handleFor('public-shadow'), 'sam-fictional')
+  assert.equal(await handler.backfillHandles({ pauseMs: 0 }), 0, 'already assigned handles are left alone')
 })
 
 test('a member changes their handle on /profile; every earlier address follows', async t => {
   const { signIn, get, post, request, handler } = await site(t)
-  await handler.backfillHandles()
+  await handler.backfillHandles({ pauseMs: 0 })
   const peter = await signIn('peter-subject')
   const profile = await get('/profile', peter)
   assert.match(profile.text, /id="profile-handle"/)
@@ -195,17 +201,17 @@ test('a member changes their handle on /profile; every earlier address follows',
 
 test('suspension and loss of membership hide the page at every address', async t => {
   const { get, state, handler } = await site(t)
-  await handler.backfillHandles()
+  await handler.backfillHandles({ pauseMs: 0 })
   assert.equal((await get('/people/peterfictional300')).status, 200)
   // A suspended profile leaves the published index (docs/profile-suspension).
   state.snapshot = { ...state.snapshot, revision: 'handles-2', profiles: state.snapshot.profiles.filter(value => value.id !== SIGNUP_ID), connections: [], members: ['twin-a', 'twin-b'] }
   assert.equal((await get('/people/peterfictional300')).status, 404)
   assert.equal((await get(`/people/${SIGNUP_ID}`)).status, 404)
   assert.equal((await get('/api/people/peterfictional300')).status, 404)
-  // A handle never opens a profile that is no longer a member's.
+  // A profile that is no longer a member's stays at its address as an imported profile.
   state.snapshot = { ...state.snapshot, revision: 'handles-3', members: ['twin-b'] }
-  assert.equal((await get('/people/ada-fictional')).status, 404)
-  assert.equal((await get('/people/twin-a')).status, 200, 'its id still names the imported page')
+  assert.equal((await get('/people/ada-fictional')).status, 200)
+  assert.equal((await get('/people/twin-a')).location, '/people/ada-fictional')
 })
 
 test('adding a member from a contact card whose path carries a handle stores the profile id', async t => {
@@ -214,7 +220,7 @@ test('adding a member from a contact card whose path carries a handle stores the
     open: async value => value === token ? { name: 'Peter Fictional', profilePath: '/people/peterfictional300' } : null, ownerForToken: async value => value === token ? peterOwner : null }
   const memberConnections = { send: async value => { sent.push(value); return { status: 'accepted', request: { id: 'r' } } }, respond: async () => {}, withdraw: async () => {}, received: async () => [], sent: async () => [], pendingCount: async () => 0, between: async () => ({ state: 'none' }), removeOwner: async () => {} }
   const { signIn, post, handler } = await site(t, { extra: { contactCards, memberConnections } })
-  await handler.backfillHandles()
+  await handler.backfillHandles({ pauseMs: 0 })
   const ada = await signIn('ada-subject')
   const added = await post(`/c/${token}/add`, ada, {})
   assert.equal(added.headers.get('location'), `/c/${token}?added=1`)
@@ -225,8 +231,9 @@ test('adding a member from a contact card whose path carries a handle stores the
 test('a just-deleted account in the still-published index never gets a handle back', async t => {
   const handles = createProfileHandles({ store: createMemoryProfileHandleStore() })
   const { handler, get } = await site(t, { handles, extra: { accountForProfile: async id => id === 'twin-a' ? { ownerId: 'ada-owner', userId: 'ada-user' } : null } })
-  assert.equal(await handler.backfillHandles(), 1, 'only the profile an account still stands behind')
+  assert.equal(await handler.backfillHandles({ pauseMs: 0 }), 2, 'members only when an account still stands behind them; imported profiles always')
   assert.equal(handles.handleFor('twin-b'), null)
+  assert.equal(handles.handleFor('public-shadow'), 'sam-fictional')
   assert.equal((await get('/people/twin-b')).status, 200, 'its page stays at its id')
 })
 
@@ -250,8 +257,8 @@ test('agent tools accept a handle and return it with the public address', async 
   const handles = createProfileHandles({ store: createMemoryProfileHandleStore() })
   await handles.initialize()
   await handles.ensure({ id: SIGNUP_ID, name: 'Peter Fictional', linkedinUrl: 'https://www.linkedin.com/in/peterfictional300' })
-  await handles.ensure({ id: 'public-shadow', name: 'Shadow Fictional' })
-  const snapshot = { state: 'published', complete: true, revision: 'tools-1', connections: [], profiles: [person(SIGNUP_ID, 'Peter Fictional'), person('public-shadow', 'Shadow Fictional')], members: [SIGNUP_ID] }
+  await handles.ensure({ id: 'public-shadow', name: 'Sam Fictional' })
+  const snapshot = { state: 'published', complete: true, revision: 'tools-1', connections: [], profiles: [person(SIGNUP_ID, 'Peter Fictional'), person('public-shadow', 'Sam Fictional')], members: [SIGNUP_ID] }
   const service = createAccountToolService({ getBackend: async () => ({}), readPublishedSnapshot: async () => snapshot, profileHandles: handles })
   const grant = { ownerId: 'o', userId: 'u', grantId: 'x'.repeat(64), scope: 'owner_network_and_public', version: 2, tools: ['unlinked_get_profile', 'unlinked_list_people'] }
   const call = async (name, input) => (await service.call({ grant, name, input })).result
@@ -260,10 +267,13 @@ test('agent tools accept a handle and return it with the public address', async 
   assert.equal(byHandle.profile.handle, 'peterfictional300')
   assert.equal(byHandle.profile.url, 'https://www.unlinked.ai/people/peterfictional300')
   assert.equal((await call('unlinked_get_profile', { id: SIGNUP_ID })).profile.handle, 'peterfictional300')
-  await assert.rejects(call('unlinked_get_profile', { id: 'shadow-fictional' }), error => error.code === 'not_found', 'a handle never names a non-member profile')
+  const imported = await call('unlinked_get_profile', { id: 'sam-fictional' })
+  assert.equal(imported.profile.id, 'public-shadow', 'an imported profile answers at its handle too')
+  assert.equal(imported.profile.url, 'https://www.unlinked.ai/people/sam-fictional')
+  await assert.rejects(call('unlinked_get_profile', { id: 'no-such-fictional' }), error => error.code === 'not_found')
   const listed = await call('unlinked_list_people', {})
   assert.equal(listed.profiles.find(value => value.id === SIGNUP_ID).handle, 'peterfictional300')
-  assert.equal(listed.profiles.find(value => value.id === 'public-shadow').handle, undefined)
+  assert.equal(listed.profiles.find(value => value.id === 'public-shadow').handle, 'sam-fictional')
 })
 
 // Regression shape from 0.6.25: a store the composition creates must be
@@ -318,4 +328,31 @@ test('durable handles: unique across profiles, history kept, concurrent assignme
   await handles.removeProfile(ids[0])
   await other.reload()
   assert.equal(other.resolve(first), null)
+})
+
+test('durable handles: batch assignment skips taken rows and a transfer keeps history', { skip: !neo4jEnabled }, async t => {
+  const neo4j = createRequire(import.meta.url)(process.env.UNLINKED_TEST_NEO4J_DRIVER)
+  const driver = neo4j.driver(uri, neo4j.auth.basic('neo4j', process.env.UNLINKED_TEST_NEO4J_PASSWORD))
+  const tag = randomUUID().slice(0, 8), ids = ['a', 'b', 'c', 'member'].map(value => `batch-${value}-${tag}`)
+  t.after(async () => {
+    const session = driver.session()
+    try { await session.run('MATCH (n) WHERE (n:UnlinkedProfileHandle OR n:UnlinkedHandleProfile) AND n.profileId IN $ids DETACH DELETE n', { ids }) } finally { await session.close() }
+    await driver.close()
+  })
+  const handles = createProfileHandles({ store: createNeo4jProfileHandleStore(driver) })
+  await handles.initialize()
+  assert.equal(await handles.ensure({ id: ids[2], name: `Taken ${tag}` }), `taken-${tag}`)
+  assert.equal(await handles.assignMany([{ id: ids[0], handle: `alpha-${tag}`, kind: 'linkedin' }, { id: ids[1], handle: `beta-${tag}`, kind: 'name' }, { id: ids[2], handle: `gamma-${tag}`, kind: 'name' }]), 2, 'a profile that already has a handle is skipped')
+  const other = createProfileHandles({ store: createNeo4jProfileHandleStore(driver) })
+  await other.initialize()
+  assert.equal(other.handleFor(ids[0]), `alpha-${tag}`); assert.equal(other.kindOf(`alpha-${tag}`), 'linkedin'); assert.equal(other.kindOf(`taken-${tag}`), null)
+  // A stale registry racing another process: the constraint settles it and nothing is overwritten.
+  assert.equal(await other.assignMany([{ id: ids[3], handle: `beta-${tag}`, kind: 'name' }]), 0)
+  assert.equal(await handles.ensure({ id: ids[3], name: `Mia ${tag}` }), `mia-${tag}`)
+  const moved = await handles.transfer(ids[0], ids[3], { makeCurrent: `alpha-${tag}` })
+  assert.deepEqual(moved, { moved: [`alpha-${tag}`], current: `alpha-${tag}` })
+  await other.reload()
+  assert.equal(other.handleFor(ids[3]), `alpha-${tag}`)
+  assert.deepEqual(other.resolve(`mia-${tag}`), { profileId: ids[3], handle: `alpha-${tag}` })
+  assert.equal(other.handleFor(ids[0]), null)
 })

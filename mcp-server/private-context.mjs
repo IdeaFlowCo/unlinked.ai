@@ -1,4 +1,5 @@
 import { SignJWT } from 'jose'
+import { profilePath } from '../src/utils/public-people/profile-handles.mjs'
 
 // Read-only view of the Ideaflow people overlay (Noos `/api/overlay`, docs in
 // noos docs/PEOPLE_OVERLAY.md) for the signed-in owner: their own notes,
@@ -115,14 +116,14 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
     for (const end of ends) {
       const refs = Array.isArray(end.refs) ? end.refs : []
       const person = refs.map(ref => PERSON_REF.exec(ref)?.[1]).find(Boolean)
-      if (person) { hrefs.set(end.id, `/people/${encodeURIComponent(person)}`); continue }
+      if (person) { hrefs.set(end.id, profilePath(person)); continue }
       const hash = refs.map(ref => LINKEDIN_REF.exec(ref)?.[1]).find(Boolean)
       if (hash) hashes.set(hash, [...(hashes.get(hash) ?? []), end.id])
     }
     if (hashes.size) {
       const found = await contact(owner, { refHashes: [...hashes.keys()].slice(0, 100) })
       for (const value of Array.isArray(found?.contacts) ? found.contacts : []) {
-        const href = value.publishedProfileId ? `/people/${encodeURIComponent(value.publishedProfileId)}` : value.connectionId ? `/network/contacts/${encodeURIComponent(value.connectionId)}` : null
+        const href = value.publishedProfileId ? profilePath(value.publishedProfileId) : value.connectionId ? `/network/contacts/${encodeURIComponent(value.connectionId)}` : null
         for (const id of hashes.get(value.linkedinRefHash) ?? []) if (href) hrefs.set(id, href)
       }
     }

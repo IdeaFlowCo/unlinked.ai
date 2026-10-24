@@ -22,8 +22,11 @@ const id = value => typeof value === 'string' && value.length > 0 && value.lengt
 const refHash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
 const name = value => typeof value === 'string' && value.trim() && [...value].length <= 200 && !/[\u0000-\u001f\u007f]/.test(value)
 
-export function validateProfileDecisions(decisions) {
-  if (!Array.isArray(decisions) || decisions.length > 5000) throw Error('profile_decisions_invalid')
+// Stored operator decisions are capped at 5,000; the index's own automatic
+// merges (one per duplicate imported copy) may raise `limit` up to the index size.
+export const PROFILE_DECISION_LIMIT = 5000
+export function validateProfileDecisions(decisions, { limit = PROFILE_DECISION_LIMIT } = {}) {
+  if (!Array.isArray(decisions) || decisions.length > limit) throw Error('profile_decisions_invalid')
   const merged = new Set(), renamed = new Set(), removed = new Set(), unlisted = new Set(), suspended = new Set(), ids = new Set()
   for (const decision of decisions) {
     if (!decision || !id(decision.id) || ids.has(decision.id)) throw Error('profile_decisions_invalid')
@@ -53,9 +56,9 @@ export function validateProfileDecisions(decisions) {
 // The usable subset of stored decisions: the first valid decision per profile,
 // minus any merge whose survivor is itself merged. A stray or racing operator
 // write can only make a decision inert, never break the published index.
-export function usableProfileDecisions(decisions) {
+export function usableProfileDecisions(decisions, { limit = PROFILE_DECISION_LIMIT } = {}) {
   const usable = [], seen = new Set()
-  for (const decision of Array.isArray(decisions) ? decisions.slice(0, 5000) : []) {
+  for (const decision of Array.isArray(decisions) ? decisions.slice(0, limit) : []) {
     try { validateProfileDecisions([decision]) } catch { continue }
     const key = `${decision.kind}:${decision.profileId}`
     if (seen.has(key) || seen.has(`id:${decision.id}`)) continue
@@ -65,8 +68,8 @@ export function usableProfileDecisions(decisions) {
   return usable.filter(value => value.kind !== 'merge' || !merged.has(value.survivorId))
 }
 
-export function applyProfileDecisions(snapshot, stored) {
-  const decisions = usableProfileDecisions(stored)
+export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISION_LIMIT } = {}) {
+  const decisions = usableProfileDecisions(stored, { limit })
   if (!decisions.length) return snapshot
   const known = new Map(snapshot.profiles.map(profile => [profile.id, profile]))
   const members = new Set(snapshot.members ?? [])
@@ -87,7 +90,8 @@ export function applyProfileDecisions(snapshot, stored) {
   for (const value of suspensions) { const ref = known.has(value.profileId) ? profileRef(known.get(point(value.profileId))) : null; if (ref) suspendedRefs.add(ref) }
   const suspended = new Set(suspensions.filter(value => known.has(value.profileId)).map(value => point(value.profileId)))
   if (suspendedRefs.size) for (const profile of snapshot.profiles) if (suspendedRefs.has(profileRef(profile))) suspended.add(point(profile.id))
-  const removed = new Set([...removals.values(), ...suspended])
+  const removedByDecision = new Set(removals.values())
+  const removed = new Set([...removedByDecision, ...suspended])
   // Unlisting follows merges to the profile shown; a removed profile has nothing to unlist.
   const unlists = new Map(decisions.filter(value => value.kind === 'unlist' && known.has(value.profileId) && !removed.has(point(value.profileId))).map(value => [value.profileId, { id: point(value.profileId), group: typeof value.group === 'string' ? value.group : null }]))
   const fill = (survivor, merged) => {
@@ -128,5 +132,9 @@ export function applyProfileDecisions(snapshot, stored) {
     // owner-private rows stay hidden too. Never published, only named.
     ...(suspensions.length ? { suspended: [...new Set([...suspended, ...[...merges].filter(([, survivor]) => suspended.has(survivor)).map(([mergedId]) => mergedId), ...suspensions.map(value => value.profileId).filter(value => !merges.has(value) || suspended.has(point(value)))])].filter(value => !profiles.some(profile => profile.id === value)).sort() } : {}),
     ...(suspendedRefs.size ? { suspendedRefs: [...suspendedRefs].sort() } : {}),
+    // Every id a removal took out (the removed profile, the decision's own id
+    // and addresses merged into it). Never published, only named, so an
+    // address registry never hands such an address to someone else.
+    ...(removals.size ? { removed: [...new Set([...removals.keys(), ...removals.values(), ...[...merges].filter(([, survivor]) => removedByDecision.has(survivor)).map(([mergedId]) => mergedId)])].filter(value => !suspended.has(value)).sort() } : {}),
   }
 }
