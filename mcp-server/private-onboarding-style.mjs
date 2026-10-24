@@ -428,8 +428,9 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 @media(max-width:800px){.unlinked-onboarding .agent-demo{grid-template-columns:1fr}}
 .unlinked-onboarding .agentband{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center;background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:var(--r);padding:20px 24px;margin-top:44px}
 .unlinked-onboarding .agentband pre{margin:0 0 8px}
-/* Footer: brand and one quiet row of links, then a hairline meta row
-   (disclaimer, version, legal, account). Links are muted until hover. */
+/* Footer: brand and one quiet row of links, then a smaller meta row
+   (disclaimer, version, legal, account) set apart by spacing alone; the
+   footer's top hairline is its only rule. Links are muted until hover. */
 .unlinked-onboarding footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 32px;font-size:14px;line-height:1.5;color:var(--muted)}
 .unlinked-onboarding footer a{color:var(--muted);text-decoration:none}
 .unlinked-onboarding footer a:hover{color:var(--fg);text-decoration:underline;text-underline-offset:3px}
@@ -444,9 +445,9 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
    takes the footer's colors and type through the widget's own variables. */
 .unlinked-onboarding #wit-feedback-slot,.unlinked-onboarding #wit-feedback-widget{display:inline-flex;align-items:center;font-family:inherit;color:inherit;--wit-muted:var(--muted);--wit-text:var(--fg)}
 .unlinked-onboarding #wit-feedback-slot:empty{display:none}
-.unlinked-onboarding .foot-meta{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 24px;margin-top:22px;padding-top:16px;border-top:1px solid var(--line);font-size:13px}
+.unlinked-onboarding .foot-meta{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 24px;margin-top:24px;font-size:13px}
 .unlinked-onboarding .foot-legal{display:flex;flex-wrap:wrap;align-items:center;gap:6px 20px}
-@media(max-width:600px){.unlinked-onboarding footer{padding:24px 0 28px}.unlinked-onboarding .foot-main{flex-direction:column;gap:6px}.unlinked-onboarding .foot-links{gap:0 20px}.unlinked-onboarding .foot-meta{flex-direction:column;align-items:flex-start;gap:4px;margin-top:12px}.unlinked-onboarding .foot-legal{gap:0 20px}}
+@media(max-width:600px){.unlinked-onboarding footer{padding:24px 0 28px}.unlinked-onboarding .foot-main{flex-direction:column;gap:6px}.unlinked-onboarding .foot-links{gap:0 20px}.unlinked-onboarding .foot-meta{flex-direction:column;align-items:flex-start;gap:4px;margin-top:16px}.unlinked-onboarding .foot-legal{gap:0 20px}}
 /* Touch screens: every footer link is a 44px tap target. */
 @media(pointer:coarse),(max-width:600px){.unlinked-onboarding footer :is(.foot-links,.foot-legal)>a,.unlinked-onboarding footer .link-button,.unlinked-onboarding footer #wit-feedback-slot{display:inline-flex;align-items:center;min-height:44px}}
 .unlinked-onboarding .account{margin:0}
