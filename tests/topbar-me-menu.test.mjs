@@ -6,11 +6,12 @@ import { renderPeople, renderLanding, renderScan, fillMeHeadline, ME_HEADLINE_SL
 const account = { accountLabel: 'sam@example.test', displayName: 'Sam Rivera', csrf: 'csrf-value' }
 const header = view => view.content.match(/<header>(.*?)<\/header>/s)[1]
 
-test('every header keeps the global search, People included, and no QR button inside the field', () => {
+test('every header keeps the global search, People included, ending in the one QR button', () => {
   for (const view of [renderLanding(), renderPeople({ ...account, state: 'ready' })]) {
     const search = header(view)
     assert.match(search, /<form class="header-search" method="get" action="\/network" role="search">/)
-    assert.doesNotMatch(search, /class="scan"|href="\/scan"[^>]*>(?!\s*<svg)|data:/)
+    assert.match(search, /<a class="scan" href="\/scan" aria-label="Scan a QR code or show your card"/)
+    assert.doesNotMatch(search, /data:/)
   }
   // The directory's own toolbar holds the filter; the header field stays empty there.
   const people = header(renderPeople({ ...account, state: 'ready', query: 'designers', presence: 'member' }))
@@ -18,13 +19,14 @@ test('every header keeps the global search, People included, and no QR button in
   assert.match(people, /<input type="hidden" name="presence" value="member">/)
 })
 
-test('the current page is marked in the main navigation, and My card is one QR entry point', () => {
+test('the current page is marked in the main navigation, and the search field QR button is the only QR control outside the Me menu', () => {
   const nav = view => header(view).match(/<nav[^>]*>(.*?)<\/nav>/s)[1]
   const people = nav(renderPeople({ ...account, state: 'ready' }))
   assert.match(people, /<a href="\/network\?connected=1" aria-current="page">People<\/a>/)
   assert.equal(people.match(/aria-current="page"/g).length, 1)
-  assert.equal(people.match(/<a class="my-card-link" href="\/card" aria-label="My card">/g).length, 1)
-  assert.doesNotMatch(people.replace(/<details class="me">.*<\/details>/s, ''), /href="\/scan"/)
+  assert.doesNotMatch(people, /my-card-link/)
+  assert.doesNotMatch(people.replace(/<details class="me">.*<\/details>/s, ''), /href="\/scan"|href="\/card"/)
+  assert.equal(header(renderPeople({ ...account, state: 'ready' })).match(/href="\/scan"/g).length, 2) // field button + Me menu
   const scan = nav(renderScan({ ...account, tab: 'card', profile: { name: 'Sam Rivera' }, cardUrl: 'https://www.unlinked.ai/c/abc', qr: '<svg></svg>' }))
   assert.doesNotMatch(scan, /aria-current/)
   assert.doesNotMatch(nav(renderLanding()), /aria-current/)
