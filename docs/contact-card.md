@@ -1,6 +1,6 @@
 # Contact card
 
-A member's card comes in two versions, both at `/card`, directly accessible as **My card** in the main navigation:
+A member's card comes in two versions, both at `/card`, reached as **My card** in the Me menu, on Home, and as a tab of the Scan sheet behind the search field's QR button:
 
 - **Public** (`/card?share=public`) — name, headline, location, the member's LinkedIn address (when their profile has one) and a QR code that opens the member's public profile (`/people/<id>`). Unchanged: no contact details.
 - **With contact details** (default) — the business-card version. It carries the phone number, WhatsApp, email address and link the member switches on, and has its own QR code and link.

@@ -135,7 +135,7 @@ test('the accepted member journey uses light copy and the shared navigation', ()
     assert.match(header, /role="menuitem" href="\/profile">View profile/)
     assert.match(header, /role="menuitem" href="\/settings">/)
     assert.match(header, /<form class="header-search" method="get" action="\/network" role="search">/)
-    assert.doesNotMatch(header, /class="scan"/)
+    assert.match(header, /class="scan" href="\/scan"/)
     assert.match(header, /href="\/agents"[^>]*>For agents/)
     assert.match(view.content.match(/<footer>(.*?)<\/footer>/s)[1], /href="https:\/\/www\.unlinked\.ai\/meet" target="_blank" rel="noopener noreferrer"/)
   }
@@ -243,7 +243,7 @@ test('signed-out Join header keeps logo and Meet without member navigation or se
     const view = renderJoin(props)
     const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
     // The page body is the one sign-in control, so the header carries none.
-    assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/people', '/agents'])
+    assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents'])
     assert.doesNotMatch(header, /href="\/(?:network|profile|settings)"|name="csrf"/)
     assert.match(view.content.match(/<footer>(.*?)<\/footer>/s)[1], /href="https:\/\/www\.unlinked\.ai\/meet"/)
     assert.doesNotMatch(view.content, /action="\/logout"|Signed in as/)
@@ -535,7 +535,7 @@ test('controller-marked public uploads disclose member and visitor discovery; ol
 test('signed-out home shows the product: search, a way in, profiles to explore and agent setup, with no session authority', () => {
   const view = renderLanding()
   const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
-  assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/people', '/agents', '/login'])
+  assert.deepEqual([...header.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ['https://www.unlinked.ai/', '/scan', '/people', '/agents', '/login'])
   assert.match(header, /method="get" action="\/network" role="search"/)
   assert.match(view.content, /<h1>Your professional profile and network, in a place that’s yours\.<\/h1>/)
   assert.match(view.content, /class="button lg" href="\/join">Create my profile<\/a>/)

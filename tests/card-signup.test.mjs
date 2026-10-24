@@ -139,7 +139,8 @@ test('failed add keeps the signed-in session and offers a working retry', async 
 test('My card is one tap from the main navigation, defaults to details, and includes the full professional profile', () => {
   const view = renderCard({ csrf: 'test', profile: { name: 'Ada Example', about: 'Builds analytical engines', positions: [{ title: 'Engineer', company: 'Engine Works' }], education: [{ institution: 'Example University' }], skills: ['Mathematics'] }, contact: { settings: {}, card: null } })
   const header = view.content.match(/<header>(.*?)<\/header>/s)[1]
-  assert.match(header.split('<details class="me">')[0], /class="my-card-link" href="\/card"/)
+  assert.match(header.split('<details class="me">')[0], /class="scan" href="\/scan" aria-label="Scan a QR code or show your card"/)
+  assert.match(header, /role="menuitem" href="\/card">/)
   assert.match(view.content, /aria-current="page">Contact card/)
   for (const text of ['Builds analytical engines', 'Engine Works', 'Example University', 'Mathematics', 'name="phone"']) assert.ok(view.content.includes(text), text)
 })

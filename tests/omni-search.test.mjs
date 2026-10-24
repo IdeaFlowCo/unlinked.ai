@@ -75,7 +75,7 @@ test('every header keeps native search with progressively enhanced autocomplete'
     assert.match(view.content, /class="header-search" method="get" action="\/network" role="search"/)
     assert.match(view.content, /class="omni-panel" hidden/)
     assert.match(view.content, /id="omni-suggestions" role="listbox" aria-label="Search suggestions"/)
-    assert.doesNotMatch(view.content.match(/<header>(.*?)<\/header>/s)[1], /class="scan"/)
+    assert.match(view.content.match(/<header>(.*?)<\/header>/s)[1], /class="scan" href="\/scan"/)
   }
   // The People directory keeps the header search (empty: its toolbar holds the filter) with the same autocomplete.
   const people = renderPeople({ accountLabel: 'owner@example.test', state: 'ready', query: '<script>', mode: 'exact' }).content
