@@ -2,7 +2,7 @@
 
 Everyone browsing exposes only the published professional Noos projection, never raw private owner resources or synthetic fallbacks. The trusted runtime reconstructs professional details from eligible public-consent imports internally; the authorization and cache boundaries are owned by [profile details](profile-details.md).
 Anonymous People reads expose only safe profile DTOs and provenanced directed connection edges; public routes and GET/HEAD support are owned by [the public directory contract](public-directory.md#search-links-for-web-assistants).
-Public reads share a bound of eight concurrent requests and 120 requests per process per 60 seconds, with overlapping reads sharing the public reader’s snapshot build; capacity exhaustion returns 429 with `Retry-After: 10`; invalid input is 400, unavailable/incomplete publication is 503, and a missing profile in a complete publication is 404.
+Overlapping public reads share the public reader’s snapshot build. Public request limits, error statuses and recovery guidance are owned by [Public directory reader integration](public-directory.md).
 
 The offline publisher accepts only the checksummed recovered DB backup (16,296 profiles and 16,603 directed edges), retains a private provenance manifest, and never creates an account binding.
 Original auth/storage backup and 81-account email evidence remain separate; the recovered-account operator seeds only a hash-only 81-row manifest after the exact public source is published.
