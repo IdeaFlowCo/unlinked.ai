@@ -70,17 +70,17 @@ test('browser suggestions are public-only, uncached and reject malformed paramet
   assert.equal((await request('/api/people?q=ali')).status, 200)
 })
 
-test('every header keeps native search and QR navigation with progressively enhanced autocomplete', () => {
+test('every header keeps native search with progressively enhanced autocomplete', () => {
   for (const view of [renderLanding(), renderJoin({ signedIn: true, accountLabel: 'owner@example.test', displayName: 'Owner', csrf: 'csrf-token' })]) {
     assert.match(view.content, /class="header-search" method="get" action="\/network" role="search"/)
     assert.match(view.content, /class="omni-panel" hidden/)
     assert.match(view.content, /id="omni-suggestions" role="listbox" aria-label="Search suggestions"/)
-    assert.match(view.content, /class="scan" href="\/scan"/)
+    assert.doesNotMatch(view.content.match(/<header>(.*?)<\/header>/s)[1], /class="scan"/)
   }
-  // The People directory's own live search owns that page; its header keeps only the QR link.
+  // The People directory keeps the header search (empty: its toolbar holds the filter) with the same autocomplete.
   const people = renderPeople({ accountLabel: 'owner@example.test', state: 'ready', query: '<script>', mode: 'exact' }).content
-  assert.doesNotMatch(people, /class="omni-panel"/)
-  assert.match(people, /class="scan" href="\/scan"/)
+  assert.match(people, /class="header-search" method="get" action="\/network" role="search"/)
+  assert.match(people, /class="omni-panel" hidden/)
   assert.doesNotMatch(people, /value="<script>"/)
   assert.match(TOP_BAR_SCRIPT, /search-suggestions/)
   // Snappy and mobile-safe: short debounce, page-memory answers, focus warm-up,

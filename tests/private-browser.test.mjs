@@ -91,7 +91,7 @@ test('signup mode does not expose invitation confirmation or account switching r
   }
   const profile = await fetch(`${endpoint}/profile`, { headers: { Cookie: cookie } })
   assert.equal(profile.status, 200)
-  assert.ok((await profile.text()).includes('Your profile'))
+  assert.match(await profile.text(), /your profile/i)
   // The retired while-you-wait step sends members Home.
   const waiting = await fetch(`${endpoint}/while-you-wait`, { headers: { Cookie: cookie }, redirect: 'manual' })
   assert.equal(waiting.status, 303)

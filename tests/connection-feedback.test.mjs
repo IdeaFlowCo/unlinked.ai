@@ -49,7 +49,7 @@ test('live badge refresh uses the session, updates visible and accessible counts
   b.document.hidden = false; await b.events.visibilitychange()
   assert.equal(b.requests[0].url, '/api/nav-alerts'); assert.equal(b.requests[0].options.cache, 'no-store')
   assert.equal(b.requests[0].options.credentials, 'same-origin')
-  assert.equal(b.network.attributes['aria-label'], 'My Network, 2 pending')
+  assert.equal(b.network.attributes['aria-label'], 'Invitations, 2 pending')
   assert.equal(b.notifications.attributes['aria-label'], 'Notifications, 99+ new')
   assert.equal(b.notifications.children[0].textContent, '99+')
   await b.windowEvents.focus(); assert.equal(b.requests.length, 1) // Coalesce focus + visibility.

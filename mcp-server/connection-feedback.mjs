@@ -26,7 +26,7 @@ export function installConnectionFeedback() {
     pending.clear()
   })
   const links = [
-    { key: 'network', href: '/invitations', label: 'My Network', suffix: 'pending' },
+    { key: 'network', href: '/invitations', label: 'Invitations', suffix: 'pending' },
     { key: 'notifications', href: '/notifications', label: 'Notifications', suffix: 'new' },
   ].map(value => ({ ...value, node: document.querySelector('a.nav-ico[href="' + value.href + '"]') }))
   const messagesLink = document.querySelector('a[data-nav-messages]')

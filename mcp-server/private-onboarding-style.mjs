@@ -255,23 +255,24 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .omni-searching::before{content:"";width:12px;height:12px;flex:0 0 12px;border:2px solid var(--line2);border-top-color:var(--brand-d);border-radius:50%;animation:omni-search-spin .8s linear infinite}
 @keyframes omni-search-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.unlinked-onboarding .omni-searching::before{animation:none}}
-.unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 84px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
+.unlinked-onboarding .header-search input[type=search]{width:100%;min-width:0;margin:0;padding:10px 48px 10px 38px;border:1px solid var(--line2);border-radius:99px;font-size:15px;background:#fff}
 /* iOS Safari and WKWebView zoom into fields under 16px on focus. */
 @media(max-width:900px),(pointer:coarse){.unlinked-onboarding .header-search input[type=search]{font-size:16px}}
 /* The icon is an element, not a data: background, so the page's default-src 'none' policy allows it. */
 .unlinked-onboarding .header-search .search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
 .unlinked-onboarding .header-search input[type=search]:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--tint)}
-.unlinked-onboarding .header-search button{position:absolute;right:41px;top:50%;transform:translateY(-50%);width:34px;height:34px;min-height:0;padding:0;border:0;border-radius:50%;background:none;color:var(--brand-d);display:grid;place-items:center;cursor:pointer}
+.unlinked-onboarding .header-search button{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:34px;height:34px;min-height:0;padding:0;border:0;border-radius:50%;background:none;color:var(--brand-d);display:grid;place-items:center;cursor:pointer}
 .unlinked-onboarding .header-search button:hover{background:var(--tint)}
 /* The QR scan button sits at the right end of the field; the submit arrow appears beside it once there is text. */
-.unlinked-onboarding .header-search input[type=search]:placeholder-shown{padding-right:46px}
+.unlinked-onboarding .header-search input[type=search]:placeholder-shown{padding-right:16px}
 .unlinked-onboarding .header-search input:placeholder-shown~button{display:none}
-.unlinked-onboarding .header-search .scan{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:var(--brand-d);text-decoration:none}
-.unlinked-onboarding .header-search .scan:hover{background:var(--tint)}
 .unlinked-onboarding nav{display:flex;gap:18px;align-items:center;font-size:15px}
 .unlinked-onboarding nav a{color:var(--fg);text-decoration:none;white-space:nowrap}
-.unlinked-onboarding nav .my-card-link{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(--brand-d);font-weight:600}
+.unlinked-onboarding nav .my-card-link{display:inline-flex;align-items:center;gap:6px;min-height:44px}
 .unlinked-onboarding nav a:hover{text-decoration:underline}
+.unlinked-onboarding nav a[aria-current=page]{color:var(--brand-d);font-weight:600}
+.unlinked-onboarding nav .nav-ico[aria-current=page]{color:var(--brand-d);background:var(--tint)}
+.unlinked-onboarding nav .nav-ico-lbl{width:auto;grid-auto-flow:column;gap:6px;padding:0 12px 0 8px;border-radius:99px}
 .unlinked-onboarding nav .chip{display:inline-block;border:1px solid var(--line2);border-radius:99px;padding:6px 13px;background:#fff;max-width:200px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .unlinked-onboarding nav a.button{color:#fff}
 .unlinked-onboarding nav a.button:hover{text-decoration:none}
@@ -459,7 +460,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .me>summary::-webkit-details-marker{display:none}
 .unlinked-onboarding .me>summary:hover,.unlinked-onboarding .me[open]>summary{border-color:var(--brand)}
 .unlinked-onboarding .me .avatar{width:30px;height:30px;font-size:12px}
-.unlinked-onboarding .me-face{display:inline-flex;border-radius:50%;text-decoration:none}.unlinked-onboarding .me-face .avatar{width:32px;height:32px;font-size:12px}.unlinked-onboarding .me-face:hover .avatar,.unlinked-onboarding .me-face:focus-visible .avatar{box-shadow:0 0 0 2px var(--brand)}.unlinked-onboarding .me>summary{padding-left:11px}
+
 .unlinked-onboarding .me-l{display:inline-flex;align-items:center;gap:3px}
 .unlinked-onboarding .me[open]>summary::before{content:"";position:fixed;inset:0;z-index:40;cursor:default}
 .unlinked-onboarding .me-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:41;width:300px;padding:6px 0;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(16,24,40,.14);font-size:15px}
@@ -592,7 +593,6 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .connection-filters select{font:inherit;padding:11px;border:1px solid var(--line);border-radius:var(--r);background:#fff;color:var(--fg);min-height:44px}
 
 /* Directory controls share the product's Public Sans, indigo, and quiet borders. */
-.unlinked-onboarding:has([data-network]) header .header-search{display:none}
 .unlinked-onboarding:has([data-network]) header nav{margin-left:auto}
 .unlinked-onboarding .network-toolbar{background:#fff;border:1px solid var(--line2);border-radius:12px;padding:20px;margin:0 0 16px}
 .unlinked-onboarding .network-scopes{gap:24px;border-bottom:1px solid var(--line);margin:-4px 0 18px;flex-wrap:wrap}
@@ -718,6 +718,6 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 @media(max-width:600px){.unlinked-onboarding .bcard.qr-first .bc-side{order:-1;padding:16px 18px 12px}.unlinked-onboarding .bcard.qr-first .bc-side .qr{max-width:200px}}
 /* Phones: one header row of navigation (icons for My card), and room at the
    bottom so the floating feedback button never sits on the last actions. */
-@media(max-width:600px){.unlinked-onboarding header{gap:10px 8px}.unlinked-onboarding .logo strong{font-size:21px}.unlinked-onboarding nav{gap:2px;flex-wrap:nowrap;margin-left:auto}.unlinked-onboarding header:has(.me) nav{width:100%;justify-content:space-between;margin-left:0}.unlinked-onboarding nav .nav-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.unlinked-onboarding nav .my-card-link{width:40px;justify-content:center}.unlinked-onboarding nav>a:not(.button):not(.nav-ico):not(.my-card-link):not(.me-face){padding:0 6px}.unlinked-onboarding nav .me-face{display:none}.unlinked-onboarding nav .nav-ico{width:38px;height:38px}.unlinked-onboarding{padding-bottom:96px}}
+@media(max-width:600px){.unlinked-onboarding header{gap:10px 8px}.unlinked-onboarding .logo strong{font-size:21px}.unlinked-onboarding nav{gap:2px;flex-wrap:nowrap;margin-left:auto}.unlinked-onboarding header:has(.me) nav{width:100%;justify-content:space-between;margin-left:0}.unlinked-onboarding nav .nav-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.unlinked-onboarding nav .my-card-link{width:40px;justify-content:center}.unlinked-onboarding nav>a:not(.button):not(.nav-ico):not(.my-card-link){padding:0 6px}.unlinked-onboarding nav .nav-ico{width:38px;height:38px}.unlinked-onboarding nav .nav-ico-lbl{width:38px;padding:0;gap:0}.unlinked-onboarding{padding-bottom:96px}}
 @media(max-width:370px){.unlinked-onboarding nav{font-size:13px}.unlinked-onboarding nav .nav-ico{width:34px}}
 `

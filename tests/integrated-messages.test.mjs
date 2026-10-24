@@ -48,7 +48,7 @@ test('the inbox requires browser login; the shell carries no OpenChat credential
   assert.equal(page.status, 200); assert.doesNotMatch(page.headers.get('content-security-policy'), /frame-src/)
   assert.equal(page.headers.get('permissions-policy'), null)
   assert.doesNotMatch(markup, /fixture-private-token|<iframe/)
-  assert.match(markup, /data-nav-messages>Messages<span class="nav-count" aria-label="2 unread">2<\/span>/)
+  assert.match(markup, /data-nav-messages aria-current="page">Messages<span class="nav-count" aria-label="2 unread">2<\/span>/)
   assert.equal(calls, 1)
   // The old exchange that returned the OpenChat token to the browser no longer exists.
   const csrf = /name="csrf" value="([^"]+)"/.exec(markup)[1]
