@@ -428,9 +428,25 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 @media(max-width:800px){.unlinked-onboarding .agent-demo{grid-template-columns:1fr}}
 .unlinked-onboarding .agentband{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center;background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:var(--r);padding:20px 24px;margin-top:44px}
 .unlinked-onboarding .agentband pre{margin:0 0 8px}
-.unlinked-onboarding footer{display:flex;gap:10px 28px;flex-wrap:wrap;justify-content:space-between;align-items:center;border-top:1px solid var(--line);margin-top:56px;padding-top:20px;font-size:14px;color:var(--muted)}
-.unlinked-onboarding footer a{display:inline-block;margin-right:18px}
+/* Footer: brand and one quiet row of links, then a hairline meta row
+   (disclaimer, version, legal, account). Links are muted until hover. */
+.unlinked-onboarding footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 6px;font-size:14px;line-height:1.5;color:var(--muted)}
+.unlinked-onboarding footer a{color:var(--muted);text-decoration:none}
+.unlinked-onboarding footer a:hover{color:var(--fg);text-decoration:underline;text-underline-offset:3px}
 .unlinked-onboarding footer form{display:inline}
+.unlinked-onboarding footer .link-button{color:var(--muted);font:inherit;text-decoration:none}
+.unlinked-onboarding footer .link-button:hover{color:var(--fg);text-decoration:underline}
+.unlinked-onboarding .foot-main{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:16px 48px}
+.unlinked-onboarding .foot-brand{display:flex;flex-direction:column;gap:2px}
+.unlinked-onboarding .foot-brand b{color:var(--fg);font-size:15px;font-weight:700;letter-spacing:-.01em}
+.unlinked-onboarding .foot-links{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px}
+/* The WIT feedback widget's inline trigger lives in a shadow root; its host
+   takes the footer's colors and type through the widget's own variables. */
+.unlinked-onboarding #wit-feedback-slot,.unlinked-onboarding #wit-feedback-widget{display:inline-flex;align-items:center;font-family:inherit;color:inherit;--wit-muted:var(--muted);--wit-text:var(--fg)}
+.unlinked-onboarding #wit-feedback-slot:empty{display:none}
+.unlinked-onboarding .foot-meta{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 24px;margin-top:22px;padding-top:16px;border-top:1px solid var(--line);font-size:13px}
+.unlinked-onboarding .foot-legal{display:flex;flex-wrap:wrap;align-items:center;gap:6px 20px}
+@media(max-width:600px){.unlinked-onboarding footer{padding-top:24px}.unlinked-onboarding .foot-main{flex-direction:column;gap:14px}.unlinked-onboarding .foot-links{gap:10px 20px}.unlinked-onboarding .foot-meta{flex-direction:column;align-items:flex-start}}
 .unlinked-onboarding .account{margin:0}
 .unlinked-onboarding :is(a,button,input,textarea,summary):focus-visible{outline:3px solid var(--brand);outline-offset:3px}
 .unlinked-onboarding [hidden]{display:none!important}
