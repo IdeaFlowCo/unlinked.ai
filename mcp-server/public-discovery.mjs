@@ -56,7 +56,7 @@ const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '
 // Every page carries the header's Me-menu script under its own nonce.
 // Header counts (`alerts`) are display-only, like the rest of `chrome`.
 // In the iOS app (`UnlinkediOS/`), pages get iosAppView and no floating feedback bubble.
-const document = (view, { headline, nonce, alerts, ios = false }) => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? '' : feedbackWidgetTag(nonce)}</html>`
+const document = (view, { headline, nonce, alerts, ios = false }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? '' : feedbackWidgetTag(nonce)}<!--/email_off--></html>`
 const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
 
 // Exact, source-controlled anonymous discovery only. Never resolves an owner,

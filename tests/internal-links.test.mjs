@@ -63,3 +63,16 @@ test('every internal link on profile and company pages resolves (no 404 or 400)'
   const broken = [...seen].filter(([, status]) => status !== 200 && status !== 401)
   assert.deepEqual(broken, [])
 })
+
+test('pages opt out of Cloudflare email obfuscation, whose decoder the page CSP blocks', async t => {
+  let handler
+  const server = createServer((request, response) => void handler(request, response))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`
+  handler = createPrivateBrowserHandler({ baseUrl: endpoint.replace('http:', 'https:'), login: { begin: async () => ({ location: 'https://idp.invalid/login', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://idp.invalid', subject: 'subject-a' }) }, resolveOwner: async () => ({ ownerId: 'owner-a', userId: 'user-a' }), getBackend: async () => ({}), readPublishedSnapshot: async () => snapshot })
+  for (const path of ['/', '/support', '/people/imported']) {
+    const body = await (await fetch(endpoint + path)).text()
+    assert.match(body, /^<!doctype html><html lang="en"><!--email_off-->/, path)
+    assert.match(body, /<!--\/email_off--><\/html>$/, path)
+  }
+})

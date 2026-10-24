@@ -682,7 +682,16 @@ const profileMenu = ({ connect, csrf, id, name, canBlock = false, removable = fa
   return `<details class="more-actions profile-more"><summary aria-label="More actions for ${who}" title="More">${DOTS_ICON}</summary><div class="more-panel">${remove}<p class="more-links"><a href="${html(`${path}/report`)}">Report ${who}</a>${canBlock ? `<a href="${html(`${path}/block`)}">Block ${who}</a>` : ''}${removable ? `<a href="${html(`${path}/removal`)}">Request removal</a>` : ''}</p></div></details>`
 }
 
-export function renderPerson({ accountLabel, displayName, csrf, importJob, profile = {}, connect, connectNotice, connectionQuery = '', connectionSort = 'detail', connectionShow, connectionsView = false, privateContext = false, blocked = null, canBlock = false, shareBack = null } = {}) {
+// "Is this you?" on an imported profile, only with a path that can claim it
+// (private-browser.mjs claimRouteFor); signed in with no such path, no prompt.
+const CLAIM_PROMPTS = {
+  join: href => ` Is this you? <a href="${href}">Claim it</a>`,
+  claim: href => ` Is this you? <a href="${href}">Claim it</a>`,
+  import: href => ` Is this you? <a href="${href}">Bring your LinkedIn export</a> to claim it.`,
+  'link-copy': href => ` It has your LinkedIn address. <a href="${href}">Bring your LinkedIn export</a> to link it to your profile.`,
+}
+const claimPrompt = claim => claim && Object.hasOwn(CLAIM_PROMPTS, claim.kind) && /^\/(?:join|import|find-me|login\?next=%2Ffind-me)$/.test(raw(claim.href)) ? CLAIM_PROMPTS[claim.kind](html(claim.href)) : ''
+export function renderPerson({ accountLabel, displayName, csrf, importJob, profile = {}, connect, connectNotice, connectionQuery = '', connectionSort = 'detail', connectionShow, connectionsView = false, privateContext = false, blocked = null, canBlock = false, shareBack = null, claim } = {}) {
   const connections = list(profile.connections), id = raw(profile.id), tone = hue(id || profile.name)
   const connectionPath = `${profilePath(id)}/connections`
   const connectionParams = new URLSearchParams({ q: connectionQuery, sort: connectionSort, ...(connectionShow ? { show: connectionShow } : {}) })
@@ -690,7 +699,7 @@ export function renderPerson({ accountLabel, displayName, csrf, importJob, profi
   const total = Number.isSafeInteger(profile.connectionCount) ? profile.connectionCount : null
   const known = total ? `${count(total)} ${total === 1 ? 'connection' : 'connections'}` : connections.length ? `${count(connections.length)}${more ? '+' : ''} ${connections.length === 1 && !more ? 'connection' : 'connections'}` : ''
   const basicNote = (profile.detailLevel ?? profileDetailLevel(profile)) === 'basic' ? `<p class="small depth-note">${BASIC_PAGE_ICON} Basic profile · Additional details haven’t been listed yet.</p>` : ''
-  const shadowNote = profile.presence === 'legacy' ? `<p class="small shadow-note">${shadowBadge(profile)} · Your old profile is preserved. <a href="/legacy-account">Sign in to reclaim it</a>.</p>` : profile.presence === 'shadow' ? `<p class="small shadow-note">${shadowBadge(profile, { withCount: false })} · Imported profile. Is this you? <a href="${csrf ? '/find-me' : '/join'}">Claim it</a></p>` : ''
+  const shadowNote = profile.presence === 'legacy' ? `<p class="small shadow-note">${shadowBadge(profile)} · Your old profile is preserved. <a href="/legacy-account">Sign in to reclaim it</a>.</p>` : profile.presence === 'shadow' ? `<p class="small shadow-note">${shadowBadge(profile, { withCount: false })} · Imported profile.${claimPrompt(claim === undefined && !csrf ? { href: '/join', kind: 'join' } : claim)}</p>` : ''
   const facts = [raw(profile.location), raw(profile.industry), known].filter(Boolean).join(' · ')
   const owner = firstName(profile.name)
   const openChatContext = unlinkedProfileContext(profile.id)

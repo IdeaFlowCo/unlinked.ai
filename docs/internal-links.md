@@ -13,6 +13,22 @@ A link on an Unlinked page must lead to a page. Two rules keep that true:
   people without a public profile link to `/network/contacts/<privateId>` or
   render as text.
 
+- **Claim it.** "Is this you?" on an imported profile only links where this
+  viewer can claim it (`claimRouteFor` in `mcp-server/private-browser.mjs`):
+
+  | Viewer | Link |
+  |---|---|
+  | Signed out | `/join` |
+  | Signed in, no profile, recovered legacy row | `/find-me`, or `/login?next=/find-me` when the session was restored after a restart (it no longer holds the claim identity) |
+  | Signed in, no profile, other imported copy | `/import`: their own export verifies the address and folds the copy in |
+  | Member whose LinkedIn address the copy carries | `/import`, "link it to your profile" |
+  | Any other member, or profile unreadable | no prompt |
+
+- **Email addresses.** Every page is wrapped in `<!--email_off-->`. Cloudflare
+  (in front of www.unlinked.ai since 2026-10-24) would otherwise rewrite mailto
+  links into `/cdn-cgi/l/email-protection` links. Their decoder script is blocked
+  by the page CSP, so visitors would see "[email protected]".
+
 Members-only pages answer signed-out visitors with a sign-in page (401 HTML).
 That is a sign-in wall, not a dead link.
 
