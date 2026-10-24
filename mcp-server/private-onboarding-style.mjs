@@ -302,6 +302,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding progress{display:block;width:100%;height:9px;accent-color:var(--brand);margin:10px 0}
 .unlinked-onboarding .journey{overflow-wrap:anywhere}
 .unlinked-onboarding .narrow{max-width:560px;margin:0 auto;padding-top:34px}
+.unlinked-onboarding .liberate-why{margin:-4px 0 18px;max-width:640px;font-size:15px;font-weight:500;color:var(--brand-d)}
 .unlinked-onboarding .liberate-jump{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 18px;font-size:14px}
 .unlinked-onboarding .liberate-jump a{color:var(--brand-d)}
 .unlinked-onboarding .liberate-list h2{margin-bottom:4px}
