@@ -59,6 +59,10 @@ body:has(.msg) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
 .unlinked-onboarding .msg-thread-who h2{font-size:16px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .unlinked-onboarding .msg-thread-who .small{font-size:13px}
 .unlinked-onboarding .msg-head-link{white-space:nowrap}
+.unlinked-onboarding .msg-thread-person{display:flex;align-items:center;gap:12px;min-width:0;flex:1;color:inherit;text-decoration:none}
+.unlinked-onboarding a.msg-thread-person:hover h2{text-decoration:underline}
+.unlinked-onboarding a.msg-thread-person:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:8px}
+.unlinked-onboarding .msg-sender a{color:inherit}
 .unlinked-onboarding .msg-back{display:none;min-height:44px;min-width:44px;padding:0;background:#fff;color:var(--fg);border-color:var(--line2);font-size:18px}
 .unlinked-onboarding .msg-log{flex:1;min-height:0;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:2px;overscroll-behavior:contain}
 .unlinked-onboarding .msg-loading{margin:auto;color:var(--muted);font-size:14px}

@@ -94,9 +94,10 @@ chip that jumps to the original; edit (also ↑ in an empty composer) and
 delete your own messages; copy; typing indicators (expire after 6 s; sent
 only into a joined room); presence and last seen; Sent/Seen; drafts per
 conversation; a header menu with mute (1 h, 8 h, until unmuted), local
-**Mark as unread**, **Enter sends** and Open in OpenChat; **View on Unlinked**
-when the thread was opened from a profile (the profile id travels in the URL
-fragment, never to a server); a "↓ New messages" chip; offline banner with
+**Mark as unread**, **Enter sends** and Open in OpenChat; the partner's name
+and avatar in the header link to their Unlinked profile when they have one
+(also when the thread was opened from a profile: the profile id travels in the
+URL fragment, never to a server); a "↓ New messages" chip; offline banner with
 automatic retry of failed sends; and keyboard navigation (arrow keys in the
 list, Alt+↑/↓ between conversations, Esc to clear a reply or cancel an edit).
 Drafts, preferences and profile links stay in this browser's localStorage.
@@ -146,8 +147,13 @@ Notifications for accepted connection requests open the direct conversation.
   client is one static, content-hashed script
   (`/public-assets/messages-client.js?v=`) that reads a non-executable
   `#msg-config` block (CSRF token, thread id, emoji list, dock flag).
-- **View on Unlinked** for any partner who claimed a published Unlinked
-  profile. OpenChat's confidential `POST /api/unlinked/identities` (service
+- **Profile links** (the header name and avatar, the dock window title and,
+  in groups, sender names; Jacob, 2026-10-24) for any partner who claimed a
+  published Unlinked profile, at their handle (`profilePathFor`). Someone
+  without one stays plain text: never a dead link. A suspended or removed
+  profile is not published, so it is not linked (the per-member lookup cache
+  lasts up to 10 minutes). Only members are linked, so the iOS app's
+  members-only rule holds. OpenChat's confidential `POST /api/unlinked/identities` (service
   secret) names which of the member's own conversation partners have a shared
   Ideaflow identity. Unlinked maps each identity to its owner (read-only),
   then to that owner's own profile, and links it only if the published index
