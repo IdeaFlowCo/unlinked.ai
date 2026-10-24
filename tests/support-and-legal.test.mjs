@@ -110,7 +110,7 @@ test('Settings has a Your data anchor and Help & legal links; signed-in pages of
   assert.match(footerOf(support), /Sign out/)
 })
 
-test('the footer is two rows: brand and links, then a hairline meta row with feedback, legal and account', async t => {
+test('the footer is two rows under one hairline: brand and links, then a meta row with feedback, legal and account', async t => {
   const app = await site(t)
   for (const path of ['/', '/support', '/data-liberation']) {
     const footer = footerOf(await (await app.request(path)).text())
@@ -127,6 +127,9 @@ test('the footer is two rows: brand and links, then a hairline meta row with fee
   // Phones: footer links are 44px tap targets and the footer has bottom room.
   const style = (await (await app.request('/support')).text())
   assert.match(style, /\.unlinked-onboarding footer\{[^}]*padding:28px 0 32px/)
+  // One rule: the footer's top hairline. The meta row is set apart by spacing, not a second line.
+  assert.match(style, /\.unlinked-onboarding footer\{border-top:1px solid var\(--line\)/)
+  assert.doesNotMatch(style, /\.foot-meta\{[^}]*border/)
   assert.match(style, /@media\(pointer:coarse\),\(max-width:600px\)\{\.unlinked-onboarding footer :is\(\.foot-links,\.foot-legal\)>a,[^}]*min-height:44px\}/)
   const session = await app.signIn()
   const footer = footerOf(await (await app.request('/support', { headers: { Cookie: session } })).text())
