@@ -118,6 +118,47 @@ test('same-address merges: a member absorbs its imported copies; copies fold int
   assert.ok(snapshot.profiles.some(value => value.id === 'public-e1'))
 })
 
+test('an unverified member absorbs only copies whose names agree', () => {
+  const U = 'member-signup-' + 'c'.repeat(64)
+  const profiles = [person(U, 'Mallory Fictional', { linkedinUrl: li('victim-fictional') }), person('public-v', 'Victor Victim', { linkedinUrl: li('victim-fictional') }),
+    person('member-signup-' + 'd'.repeat(64), 'Dana Q. Fictional', { linkedinUrl: li('dana') }), person('public-d', 'Dana Fictional', { linkedinUrl: li('dana') })]
+  const result = linkedinIdentityMerges({ profiles, members: [U, 'member-signup-' + 'd'.repeat(64)], absorbers: [], refFor: ref })
+  assert.deepEqual(result.merges.map(value => [value.profileId, value.survivorId]), [['public-d', 'member-signup-' + 'd'.repeat(64)]])
+})
+
+test('a verified member absorbs its copies without taking their fields; an unverified one only with an agreeing name', async () => {
+  const L = '0f8845b4-7def-487a-a404-c67e6aa811b8'
+  const profiles = [person(L, 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person('public-a', 'Ada Fictional', { headline: 'Analyst at Importco', company: 'Importco', linkedinUrl: li('ada-fictional') }),
+    person('member-signup-' + 'b'.repeat(64), 'Bo Fictional', { linkedinUrl: li('bo-fictional') }), person('public-b', 'Robert Other', { linkedinUrl: li('bo-fictional') })]
+  const rows = [liRow('ada-fictional', { about: 'Row about' }), liRow('bo-fictional', { about: 'Bo row' })]
+  // L is a confirmed recovered account now claimed (verified); Bo typed his address at signup.
+  const value = await index({ profiles, rows, members: [L, 'member-signup-' + 'b'.repeat(64)], legacyMembers: [L] })()
+  const ada = value.profiles.find(profile => profile.id === L)
+  assert.equal(value.aliases['public-a'], L)
+  assert.equal(ada.headline, undefined, "another importer's CSV row never fills a member")
+  assert.equal(ada.about, undefined, 'enrichment never reaches a member through a merge')
+  assert.equal(value.aliases['public-b'], undefined, 'an unverified address folds in no copy under another name')
+  assert.equal(value.profiles.find(profile => profile.id === 'public-b').about, 'Bo row')
+})
+
+test('a removed copy keeps the person removed: the other copies fold into it', () => {
+  const profiles = [person('public-1', 'Ada', { linkedinUrl: li('ada') }), person('public-2', 'Ada', { linkedinUrl: li('ada') }), person('public-3', 'Ada', { linkedinUrl: li('ada') })]
+  const decisions = [{ id: 'r', kind: 'remove', profileId: 'public-2' }]
+  const result = linkedinIdentityMerges({ profiles, decisions, refFor: ref })
+  assert.deepEqual(Object.fromEntries(result.merges.map(value => [value.profileId, value.survivorId])), { 'public-1': 'public-2', 'public-3': 'public-2' })
+  const snapshot = applyProfileDecisions({ state: 'published', complete: true, revision: 'r', profiles, connections: [] }, [...result.decisions, ...result.merges], { limit: 100000 })
+  assert.deepEqual(snapshot.profiles, [])
+  assert.deepEqual(snapshot.removed, ['public-1', 'public-2', 'public-3'])
+})
+
+test('the LinkedIn rows stop filling at their text budget', async () => {
+  const profiles = Array.from({ length: 6 }, (_, n) => person(`public-${n}`, `P${n}`, { linkedinUrl: li(`p-${n}`) }))
+  const big = 'x'.repeat(1024 * 1024)
+  const value = await index({ profiles, rows: profiles.map((_, n) => liRow(`p-${n}`, { about: big })) })()
+  const filled = value.profiles.filter(profile => profile.about).length
+  assert.ok(filled >= 3 && filled <= 5, String(filled))
+})
+
 test('the composed index folds same-address profiles only when asked, and names stay apart', async () => {
   const profiles = [person('public-1', 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person('public-2', 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person('public-3', 'Ada Fictional')]
   assert.equal((await index({ profiles, mergeSameLinkedin: false })()).profiles.length, 3)
@@ -207,19 +248,28 @@ test('a member outranks an imported copy of themselves; the copy folding in move
   assert.equal((await get(`/people/${M}`)).location, '/people/ada-fictional')
 })
 
-test('a member whose slug an unmerged copy holds still takes it; a name handle that matches never moves', async t => {
+test('a typed address alone never takes a live profile\'s handle, and a name handle that matches never moves', async t => {
   const copy = 'public-' + 'a'.repeat(64)
   const { handler, handles, state } = await site(t, snap('s1', [person(copy, 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person('public-n', 'Peter Fictional')], { members: [] }))
   await handler.backfillHandles({ pauseMs: 0 })
   assert.equal(handles.handleFor('public-n'), 'peter-fictional')
+  // Two new members whose addresses did not fold anything in (typed at signup, unverified).
   state.snapshot = snap('s2', [person(copy, 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person('public-n', 'Peter Fictional'),
     person(M, 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person('member-signup-' + 'e'.repeat(64), 'Peter Member', { linkedinUrl: li('peter-fictional') })], { members: [M, 'member-signup-' + 'e'.repeat(64)] })
   state.accounts['member-signup-' + 'e'.repeat(64)] = { ownerId: 'p', userId: 'p' }
   await handler.backfillHandles({ pauseMs: 0 })
-  assert.equal(handles.handleFor(M), 'ada-fictional')
-  assert.equal(handles.handleFor(copy), 'ada-fictional-2', 'the copy gets the next free address')
+  assert.equal(handles.handleFor(copy), 'ada-fictional', 'the published copy keeps its address')
+  assert.equal(handles.handleFor(M), 'ada-fictional-2')
   assert.equal(handles.handleFor('public-n'), 'peter-fictional', 'a different person keeps a name handle that matches a slug')
   assert.equal(handles.handleFor('member-signup-' + 'e'.repeat(64)), 'peter-member')
+})
+
+test('past the numbered defaults, names keep counting', async t => {
+  const profiles = Array.from({ length: 63 }, (_, n) => person(`public-${String(n).padStart(3, '0')}`, '张伟'))
+  const { handler, handles } = await site(t, snap('s1', profiles, { members: [] }))
+  await handler.backfillHandles({ pauseMs: 0 })
+  assert.equal(profiles.filter(value => handles.handleFor(value.id)).length, 63)
+  assert.equal(handles.handleFor('public-062'), 'someone-63')
 })
 
 test('a LinkedIn address follows the person when the holding copy disappears, but never a removed one', async t => {

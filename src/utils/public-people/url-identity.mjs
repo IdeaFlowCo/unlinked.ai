@@ -73,23 +73,31 @@ export function urlIdentitySuspensions({ rows, explicit = [] }) {
 }
 
 // One person, one page (docs/profile-handles.md): published profiles that carry
-// the same LinkedIn address are the same person, so they fold into one. A
-// member's profile absorbs every imported copy of itself (exactly one member
-// per address; two members with one address are left alone), and copies minted
-// by several imports (`public-<row>`) fold into one survivor: `prefer(ids)`
-// names the copy that already holds the address (its handle), else the
-// smallest id. Copies already merged, members, and any profile an explicit
-// decision names (remove, suspend, rename, unlist, merge) are never moved, so
-// removals and suspensions answer exactly as before. Same address is the only
-// evidence; names never are. Returns the merges plus every earlier merge whose
-// survivor folded away, re-pointed at the new survivor so no chain is left.
-export function linkedinIdentityMerges({ profiles, members = [], decisions = [], refFor, prefer = () => null }) {
-  const memberSet = new Set(members)
-  const named = new Set(), mergedAway = new Set()
+// the same LinkedIn address are the same person, so they fold into one.
+// - A member absorbs every imported copy of itself, keeping only its own
+//   fields (`fill: false`). When the member's address is not verified
+//   (`absorbers`: from their own archive or a confirmed recovered account; a
+//   URL typed at signup is not), each copy must also carry an agreeing name
+//   (`namesAgree`), a veto that keeps a typed address from taking over someone
+//   else's page; it never matches anyone by itself. An address shared by two
+//   members is left alone.
+// - Copies minted by several imports (`public-<row>`) fold into one survivor:
+//   a copy an operator removed (so the person stays removed), else the copy
+//   `prefer(ids)` names (the one already holding the address), else the
+//   smallest id.
+// Copies already merged, members, and any profile another decision names are
+// never moved. Same address is the only evidence; names never are. Returns the
+// merges plus every earlier merge whose survivor folded away, re-pointed at the
+// new survivor so no chain is left.
+export function linkedinIdentityMerges({ profiles, members = [], absorbers = members, decisions = [], refFor, prefer = () => null }) {
+  const byId = new Map(profiles.map(profile => [profile.id, profile]))
+  const memberSet = new Set(members), absorbing = new Set(absorbers)
+  const named = new Set(), mergedAway = new Set(), removed = new Set()
   for (const decision of decisions) {
     if (typeof decision?.profileId !== 'string') continue
     named.add(decision.profileId)
     if (decision.kind === 'merge') mergedAway.add(decision.profileId)
+    if (decision.kind === 'remove') removed.add(decision.profileId)
   }
   const groups = new Map()
   for (const profile of profiles) {
@@ -100,19 +108,21 @@ export function linkedinIdentityMerges({ profiles, members = [], decisions = [],
     groups.get(ref).push(profile.id)
   }
   const merges = [], survivorFor = new Map()
-  const fold = (survivorId, ids) => { for (const id of ids) { merges.push({ id: `same-linkedin:${id}`, kind: 'merge', profileId: id, survivorId }); survivorFor.set(id, survivorId) } }
+  const fold = (survivorId, ids, extra = {}) => { for (const id of ids) { merges.push({ id: `same-linkedin:${id}`, kind: 'merge', profileId: id, survivorId, ...extra }); survivorFor.set(id, survivorId) } }
   for (const ids of groups.values()) {
     if (ids.length < 2) continue
     const membersHere = ids.filter(id => memberSet.has(id))
-    if (membersHere.length > 1) continue
-    if (membersHere.length === 1) {
-      const movable = ids.filter(id => id !== membersHere[0] && !named.has(id))
-      if (movable.length) fold(membersHere[0], movable)
+    if (membersHere.length) {
+      if (membersHere.length > 1) continue
+      const verified = absorbing.has(membersHere[0]), member = byId.get(membersHere[0])
+      const movable = ids.filter(id => id !== membersHere[0] && !named.has(id) && (verified || namesAgree(member?.name, byId.get(id)?.name)))
+      if (movable.length) fold(membersHere[0], movable, { fill: false })
       continue
     }
     // Imported copies only: a legacy profile already absorbs its copies by address.
     if (!ids.every(id => id.startsWith('public-'))) continue
-    const movable = ids.filter(id => !named.has(id))
+    const movable = ids.filter(id => !named.has(id)), removedHere = ids.filter(id => removed.has(id)).sort()
+    if (removedHere.length) { if (movable.length) fold(removedHere[0], movable); continue }
     if (movable.length < ids.length || movable.length < 2) continue
     const preferred = prefer(movable)
     const survivorId = movable.includes(preferred) ? preferred : [...movable].sort()[0]
@@ -120,4 +130,15 @@ export function linkedinIdentityMerges({ profiles, members = [], decisions = [],
   }
   const rewritten = decisions.map(decision => decision?.kind === 'merge' && survivorFor.has(decision.survivorId) ? { ...decision, survivorId: survivorFor.get(decision.survivorId) } : decision)
   return { merges, decisions: rewritten }
+}
+
+const nameTokens = value => new Set((typeof value === 'string' ? value : '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(token => token.length > 1))
+// Whether two display names plausibly name one person (shared surname, two
+// shared words, or one name's words inside the other's). Only ever a veto.
+export function namesAgree(a, b) {
+  const left = nameTokens(a), right = nameTokens(b)
+  if (!left.size || !right.size) return false
+  const shared = [...left].filter(token => right.has(token)).length
+  const surname = [...nameTokens((typeof a === 'string' ? a : '').trim().split(/\s+/).at(-1))][0]
+  return shared >= 2 || (surname !== undefined && right.has(surname)) || shared === left.size || shared === right.size
 }

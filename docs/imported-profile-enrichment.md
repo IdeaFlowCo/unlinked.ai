@@ -26,10 +26,12 @@ republishing.
 
 Gaps only (`fillFromLinkedinEnrichment`): a field is filled only while the
 profile leaves it empty, so its own source (a member's upload, an id-keyed
-operator row) always wins. The name is never replaced. Members and historical
-members are never filled in. Enrichment never adds people or edges, and
-decisions apply after it, so removals, suspensions and unlisting answer
-exactly as before. Rows carry only the standard public profile fields the
+operator row) always wins. The name is never replaced. It runs on the profiles
+shown, after every merge and decision, so members and historical members are
+never filled in (not even through an absorbed copy), removed and suspended
+profiles stay gone, and unlisting is unchanged. Enrichment never adds people or
+edges. The rows may add at most 4 MiB of text in all
+(`LINKEDIN_ENRICHMENT_TEXT_BUDGET`); the reader's whole index budget is 16 MiB. Rows carry only the standard public profile fields the
 store accepts (`name`, `headline`, `location`, `about`, `company`, `positions`,
 `education`, `skills`); nothing connection-level (dates connected, emails,
 notes) exists in the row grammar.

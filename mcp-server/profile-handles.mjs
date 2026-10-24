@@ -123,7 +123,12 @@ export function createNeo4jProfileHandleStore(driver, database = 'neo4j') {
       } catch (error) {
         if (!constraintFailure(error)) throw error
         const assigned = []
-        for (const row of rows) { const handle = await this.assign(row.profileId, [row.handle]); if (handle === row.handle) assigned.push(row) }
+        for (const row of rows) {
+          const handle = await this.assign(row.profileId, [row.handle])
+          if (handle !== row.handle) continue
+          if (row.kind) await tx('executeWrite', t => t.run('MATCH (h:UnlinkedProfileHandle {handle: $handle, profileId: $profileId}) SET h.kind = $kind', row))
+          assigned.push(row)
+        }
         return assigned
       }
     },

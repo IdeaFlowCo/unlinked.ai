@@ -43,12 +43,21 @@ how it was chosen (`kind`: `linkedin` or `name`).
 Published profiles carrying the same LinkedIn address are the same person, so
 the index folds them into one (`linkedinIdentityMerges` in
 `src/utils/public-people/url-identity.mjs`, applied after every stored
-decision): a member's profile absorbs every imported copy of itself, and the
-copies several imports mint fold into one survivor, the copy that already holds
-the person's address (else the smallest id). Legacy profiles already absorb
-their copies by address (docs/profile-decisions.md). Profiles named by an
-operator decision, and addresses shared by two members, are left alone. Names
-never merge anyone.
+decision):
+
+- A member's profile absorbs every imported copy of itself and keeps only its
+  own fields. When the member's address is not verified (it is verified when
+  it comes from their own uploaded archive or a confirmed recovered account; a
+  URL typed at signup is not), a copy is absorbed only if its name also agrees
+  (`namesAgree`), so a typed address cannot take over someone else's page.
+- The copies several imports mint fold into one survivor: a copy an operator
+  removed (so the person stays removed), else the copy that already holds the
+  person's address, else the smallest id.
+
+Legacy profiles already absorb their copies by address
+(docs/profile-decisions.md). Other profiles named by an operator decision, and
+addresses shared by two members, are left alone. Names alone never merge
+anyone.
 
 A LinkedIn handle follows the person. When an imported profile is claimed it
 becomes the member's profile under the same id, so its handle stays. When the
@@ -57,7 +66,10 @@ ids answer 301 to the member's page at once, and the next backfill moves the
 copies' handles to the member (`transfer`), making the slug current unless
 the member already chose another handle. The same happens when the copy
 holding a slug disappears (its import was deleted) while another copy remains.
-A name handle that happens to equal someone's slug never moves.
+A name handle that happens to equal someone's slug never moves, and an address
+alone never takes a handle from a live profile that did not fold in. Names
+past the numbered defaults keep counting (`-61`, `-62`, …), so every profile
+whose name or slug fits the grammar gets an address.
 
 ## Grammar
 

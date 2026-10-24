@@ -26,7 +26,7 @@ import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/privat
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { normalizeSocialLinks, SOCIAL_LINK_LIMITS } from '../src/utils/public-people/profile-links.mjs'
-import { handleCandidates, linkedinHandle, profilePath, setProfileHandleLookup } from '../src/utils/public-people/profile-handles.mjs'
+import { handleCandidates, linkedinHandle, nameHandleBase, profilePath, setProfileHandleLookup, validateHandle } from '../src/utils/public-people/profile-handles.mjs'
 import { stageArchive, importJobStatus, importErrorMessage, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
@@ -948,7 +948,6 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (pauseMs > 0) await new Promise(resolve => setTimeout(resolve, pauseMs))
     }
     const enqueue = async (id, handle, kind) => { queue.push({ id, handle, kind }); queuedIds.add(id); queuedHandles.add(handle); if (queue.length >= batchSize) await flush() }
-    const byId = new Map(profiles.map(value => [value.id, value]))
     for (const profile of ordered) {
       const slug = linkedinHandle(profile.linkedinUrl)
       if (!slug || queuedHandles.has(slug)) continue
@@ -957,10 +956,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       const own = profileHandles.handleFor(profile.id)
       if (!holder) { if (!own) await enqueue(profile.id, slug, 'linkedin'); continue }
       if (members.has(holder) || hidden.has(holder)) continue
-      // Same person: merged into this profile, or the holder's handle is its
-      // own LinkedIn slug (a name handle that happens to match never moves).
-      const holderSlug = published.has(holder) ? linkedinHandle(byId.get(holder)?.linkedinUrl) === slug : profileHandles.kindOf?.(slug) === 'linkedin'
-      const sameAddress = aliases.get(holder) === profile.id || (holderSlug && ((holder.startsWith('public-') && !published.has(holder) && !aliases.has(holder)) || (members.has(profile.id) && published.has(holder))))
+      // Same person: the holder folded into this profile (a member absorbing
+      // its copies only when its address is verified), or the holder was an
+      // imported copy whose import is gone and the handle is its own LinkedIn
+      // slug. A name handle that happens to match never moves, and a typed
+      // address alone never takes a live profile's handle.
+      const sameAddress = aliases.get(holder) === profile.id || (holder.startsWith('public-') && !published.has(holder) && !aliases.has(holder) && profileHandles.kindOf?.(slug) === 'linkedin')
       if (!sameAddress || typeof profileHandles.transfer !== 'function') continue
       // A default (name) handle gives way to the slug; a chosen one stays current.
       const makeCurrent = !own || handleCandidates({ name: profile.name }).includes(own) ? slug : own
@@ -969,7 +970,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     await flush()
     for (const profile of ordered) {
       if (queuedIds.has(profile.id) || profileHandles.handleFor(profile.id) || !(await eligible(profile))) continue
-      const handle = handleCandidates({ name: profile.name }).find(value => !queuedHandles.has(value) && !profileHandles.resolve(value))
+      const free = value => !queuedHandles.has(value) && !profileHandles.resolve(value)
+      let handle = handleCandidates({ name: profile.name }).find(free)
+      // Past the numbered defaults (very common or non-Latin names), keep counting.
+      if (!handle) { const base = nameHandleBase(profile.name); for (let n = 61; n <= 100000 && !handle; n++) if (validateHandle(`${base}-${n}`).handle === `${base}-${n}` && free(`${base}-${n}`)) handle = `${base}-${n}` }
       if (handle) await enqueue(profile.id, handle, 'name')
     }
     await flush()
