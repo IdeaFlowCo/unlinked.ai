@@ -26,7 +26,7 @@ New account grants include `unlinked_search_everyone` and `unlinked_search_netwo
 Stored grant and owner binding are checked before and after model work; revocation remains durable.
 No grant exposes raw archives, recovered original files or identity/provider credentials.
 
-The first complete shared-snapshot bound is 20,000 profiles/100,000 edges; the recovered seed uses 16,296 profiles.
+The complete shared snapshot follows the [public reader bounds](public-people-reader.md); the recovered seed uses 16,296 profiles.
 Exceeding the bound fails explicitly rather than truncating; this is a real scaling limit for subsequent member additions, separate from the owner-private parser/import limit of 100,000 records.
 The private source ZIP and all accepted owner observations remain intact.
 A scalable paged public projection is a follow-up before larger shared unions can be claimed complete.
