@@ -91,7 +91,9 @@ test('headers render member links compactly, escaped, deduplicated and re-valida
     ] }
   const page = renderPerson({ profile }).content
   assert.match(page, /class="small profile-links"/)
-  assert.match(page, /<a href="https:\/\/www\.linkedin\.com\/in\/ada" target="_blank" rel="noopener noreferrer">LinkedIn profile ↗<\/a>/)
+  // The professional LinkedIn address is the header's own button, not a line in the link row.
+  assert.match(page, /<a class="button sec sm li-top" href="https:\/\/www\.linkedin\.com\/in\/ada" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn profile \(opens in a new tab\)"/)
+  assert.doesNotMatch(page.match(/<p class="small profile-links">[\s\S]*?<\/p>/)[0], /linkedin\.com/)
   assert.match(page, /<a href="https:\/\/x\.com\/ada" target="_blank" rel="noopener noreferrer nofollow">X ↗<\/a>/)
   assert.doesNotMatch(page, /ada-other/, 'a second LinkedIn never renders beside the professional one')
   assert.equal(page.split('https://ada.example.com/').length, 2, 'the website renders once')

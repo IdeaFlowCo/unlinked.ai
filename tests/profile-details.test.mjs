@@ -64,7 +64,7 @@ test('anonymous, member and own headers show links, company and other profession
   for (const view of [renderPerson({profile:detail}),renderPerson({profile:detail,csrf:'test'}),renderOwnProfile({profile:detail,csrf:'test'})]) {
     assert.match(view.content,/href="https:\/\/www.linkedin.com\/in\/test-person" target="_blank" rel="noopener noreferrer"/)
     assert.match(view.content,/href="\/companies\/Example%20Co"/)
-    assert.ok(view.content.indexOf('LinkedIn profile ↗')<view.content.indexOf('<h3>About'))
+    assert.ok(view.content.indexOf('li-top')>0 && view.content.indexOf('li-top')<view.content.indexOf('<h1>'), 'LinkedIn sits in the header, beside the photo')
     assert.match(view.content,/Test School<\/b><br>Test Degree/)
   }
   const company = renderCompany({name:'Example Co',facts:{website:'https://example.test',linkedinUrl:'https://www.linkedin.com/company/example',description:'Public description'}}).content

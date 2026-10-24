@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
-import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
+import { SEARCH_MODES, companyPageName, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-index.mjs'
 import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
 
@@ -166,9 +166,12 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         summaries.set(input.id, summary); details.set(input.id, detail)
         // Everything searchable is already public on the profile page.
         tokens.set(input.id, { name: words(summary.name), text: words([summary.name, summary.headline, company, detail.about, ...detail.positions.flatMap(position => [position.title, position.company, position.description]), ...detail.education.flatMap(school => [school.institution, school.degree]), ...detail.skills].filter(Boolean).join(' ')),
-          // Position companies and the headline, tokenized once per compile, so
-          // a company page never re-tokenizes every profile per request.
-          companies: [...detail.positions.map(position => words(position.company)), words(summary.headline ?? '')].filter(list => list.length) })
+          // Position companies, the profile's own company and the headline,
+          // tokenized once per compile, so a company page never re-tokenizes
+          // every profile per request. The profile company is linked from the
+          // profile header, so it must find its page too: an import can name
+          // "Lopus AI (YC W25)" while the experience says "Lopus (YC W25)".
+          companies: [...detail.positions.map(position => words(position.company)), words(company ?? ''), words(summary.headline ?? '')].filter(list => list.length) })
       }
       const outgoing = new Map([...summaries.keys()].map(id => [id, new Set()]))
       // A connection is mutual, but an edge is stored only from the person whose export listed it.
@@ -418,10 +421,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // as it appears on profiles: a position at it, or a headline naming it.
     async company(request = {}) {
       const { name, cursor, signal, unlistedGroups } = requestValue(request)
-      if (typeof name !== 'string' || !name.trim() || name.length > 200) invalid()
+      if (!companyPageName(name)) invalid()
       const groups = groupsValue(unlistedGroups)
       const phrase = words(name)
-      if (!phrase.length || phrase.length > 12) invalid()
       const contains = tokens => {
         outer: for (let start = 0; start + phrase.length <= tokens.length; start++) {
           for (let offset = 0; offset < phrase.length; offset++) if (tokens[start + offset] !== phrase[offset]) continue outer

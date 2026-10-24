@@ -25,7 +25,7 @@ import { createPrivateSearch } from '../src/utils/private-import/ai-search.mjs'
 import { scopedSetupConfiguration, agentClientSetups } from '../src/utils/private-import/scoped-setup.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { LIMITS, linkedinUrl } from '../src/utils/private-import/archive.mjs'
-import { normalizeSocialLinks, SOCIAL_LINK_LIMITS } from '../src/utils/public-people/profile-links.mjs'
+import { normalizeSocialLinks, publicLinkedinUrl, SOCIAL_LINK_LIMITS } from '../src/utils/public-people/profile-links.mjs'
 import { handleCandidates, linkedinHandle, nameHandleBase, profilePath, setProfileHandleLookup, validateHandle } from '../src/utils/public-people/profile-handles.mjs'
 import { stageArchive, importJobStatus, importErrorMessage, ADDED_PERSON } from '../src/utils/private-import/background-job.mjs'
 import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
@@ -142,9 +142,12 @@ async function body(request, limit) {
   return Buffer.concat(parts)
 }
 
+// Pages are wrapped in email_off: Cloudflare (in front of www since 2026-10-24)
+// would otherwise rewrite mailto links into /cdn-cgi/l/email-protection links
+// whose decoder script the page CSP blocks, leaving "[email protected]".
 function page(response, title, content, status = 200) {
   response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-  response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><style>body{font:17px/1.55 system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:0 1.5rem 3rem;color:#16181d;background:#f5f6fc}main>a:first-child{display:block;padding:24px 0;margin-bottom:2rem;border-bottom:1px solid #e6e8ec;font-weight:700;font-size:21px;letter-spacing:-.04em;text-decoration:none;text-transform:lowercase}h1{font-size:2rem;letter-spacing:-.03em;line-height:1.1}form,article{padding:1.25rem 1.4rem;margin:1rem 0;background:white;border:1px solid #e6e8ec;border-radius:8px}label{display:block;margin:1rem 0}input[type=text],textarea{display:block;width:95%;padding:.75rem;font:inherit}button,a.action{display:inline-block;padding:.7rem 1.2rem;margin:.2rem .3rem .2rem 0;background:#4349c4;color:white;border:0;border-radius:8px;font:600 16px system-ui;cursor:pointer;text-decoration:none}a{color:#32379c}small{display:block;margin:.75rem 0;color:#667085}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><main><a href="/">Unlinked</a><h1>${html(title)}</h1>${content}</main></html>`)
+  response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><style>body{font:17px/1.55 system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:0 1.5rem 3rem;color:#16181d;background:#f5f6fc}main>a:first-child{display:block;padding:24px 0;margin-bottom:2rem;border-bottom:1px solid #e6e8ec;font-weight:700;font-size:21px;letter-spacing:-.04em;text-decoration:none;text-transform:lowercase}h1{font-size:2rem;letter-spacing:-.03em;line-height:1.1}form,article{padding:1.25rem 1.4rem;margin:1rem 0;background:white;border:1px solid #e6e8ec;border-radius:8px}label{display:block;margin:1rem 0}input[type=text],textarea{display:block;width:95%;padding:.75rem;font:inherit}button,a.action{display:inline-block;padding:.7rem 1.2rem;margin:.2rem .3rem .2rem 0;background:#4349c4;color:white;border:0;border-radius:8px;font:600 16px system-ui;cursor:pointer;text-decoration:none}a{color:#32379c}small{display:block;margin:.75rem 0;color:#667085}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><main><a href="/">Unlinked</a><h1>${html(title)}</h1>${content}</main><!--/email_off--></html>`)
 }
 
 // publishedPeopleFor moved to connection-identity.mjs (shared with the agent tools).
@@ -264,7 +267,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   const lookupReturn = value => { try { const u = new URL(value, base); return value.startsWith('/people/lookup?') && u.pathname === '/people/lookup' && u.searchParams.getAll('url').length === 1 && [...u.searchParams.keys()].every(key => key === 'url') && Boolean(parseLinkedinProfileUrl(u.searchParams.get('url'))) } catch { return false } }
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -279,6 +282,25 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // /scan and their edits, and contact-card links answer as unavailable. Every
   // check fails closed: when suspension cannot be established the page is
   // unavailable, never the profile.
+  // Where "Is this you?" on an imported (shadow) profile can lead a signed-in
+  // viewer. A member already has a profile, so only a copy carrying their own
+  // LinkedIn address is theirs; their export verifies that address and folds
+  // the copy in. Without a profile, a recovered legacy row is claimed at
+  // /find-me (a fresh sign-in restores the claim identity a restored session
+  // lacks); any other copy joins through the member's own export. null hides
+  // the prompt, including when the viewer's profile cannot be read.
+  const claimRouteFor = async (request, viewer, profile) => {
+    if (typeof ownProfileId !== 'function') return null
+    const mine = await ownProfileId(viewer.owner)
+    if (mine) {
+      if (mine === profile.id) return null
+      const own = await readerFor(request).profile({ id: mine }).catch(() => null)
+      const ours = publicLinkedinUrl(own?.profile?.linkedinUrl), theirs = publicLinkedinUrl(profile.linkedinUrl)
+      return ours && theirs && ours === theirs ? { href: '/import', kind: 'link-copy' } : null
+    }
+    if (selfClaims && await Promise.resolve(selfClaims.claimable(profile.id)).catch(() => false)) return { href: viewer.selfClaim ? '/find-me' : `/login?next=${encodeURIComponent('/find-me')}`, kind: 'claim' }
+    return signup ? { href: '/import', kind: 'import' } : null
+  }
   const suspendedProfile = async id => typeof readPublishedSnapshot === 'function' && typeof id === 'string' && id ? publicReader.suspended({ id }) : false
   // Authoritative: the stored decisions via the owner's backend. Proves "not
   // suspended" only when nothing is suspended or the index confirmed it.
@@ -605,7 +627,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? '' : feedbackWidgetTag(nonce)}</html>`)
+    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? '' : feedbackWidgetTag(nonce)}<!--/email_off--></html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   // `silentBack` (automatic sign-in) returns to the original page without
@@ -1435,6 +1457,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
               if (result.profile.presence === 'member') connect = viewer ? await connectionActions.relationTo(viewer.owner, result.profile.id).catch(() => undefined) : { state: 'signed-out' }
               else if (viewer && result.profile.presence === 'shadow' && memberInvitations) connect = { state: 'invite' }
             }
+            // "Is this you?" on an imported profile leads only where this viewer can
+            // actually claim it (docs/internal-links.md#claim-it).
+            const claim = result.profile.presence === 'shadow' && !publicProfile?.[2] ? (viewer ? await bounded(() => claimRouteFor(request, viewer, result.profile), null) : { href: '/join', kind: 'join' }) : null
             const notice = url.searchParams.get('connect')
             const companies = new Map(await Promise.all([...new Set(result.profile.positions.map(position => position.company).filter(Boolean))].map(async name => [name, companyDetailLevel(await bounded(() => lookupCompanyFacts(name), null))])))
             const profile = { ...result.profile, positions: result.profile.positions.map(position => ({ ...position, companyDetailLevel: companies.get(position.company) })) }
@@ -1452,7 +1477,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             const canBlock = Boolean(viewer && memberBlocks && result.profile.presence === 'member' && connect?.state !== 'self')
             // Right after "Join Unlinked & connect": the new member's own card to share back.
             const shareBack = viewer && url.searchParams.get('joined') === '1' && !publicProfile?.[2] && connect?.state !== 'self' ? await ensureOwnCard(viewer.owner, { name: viewer.displayName }) : null
-            journey(response, renderPerson({ ...chrome, shareBack, blocked, canBlock, profile, connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
+            journey(response, renderPerson({ ...chrome, shareBack, blocked, canBlock, profile, connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
