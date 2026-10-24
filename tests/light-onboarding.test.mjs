@@ -566,7 +566,7 @@ test('a profile page shows who someone is and who they know, escaped, for visito
   assert.equal(anonymous.title, 'Maya Chen')
   assert.match(anonymous.content, /href="https:\/\/www.linkedin.com\/in\/maya" target="_blank" rel="noopener noreferrer"/)
   assert.match(anonymous.content, /<h1>Maya Chen<\/h1>/)
-  assert.match(anonymous.content, /Portland · 2\+ connections/)
+  assert.match(anonymous.content, /Portland · <a class="pcount" href="#connections">2\+ connections<\/a>/)
   assert.match(anonymous.content, /<h3>Experience<\/h3>.*<b>Lead<\/b>.*2021 to Present/s)
   assert.match(anonymous.content, /<h3>Education<\/h3>.*Northfield College.*BSc/s)
   assert.match(anonymous.content, /<span class="tag">Partnerships<\/span>/)

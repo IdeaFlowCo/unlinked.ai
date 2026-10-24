@@ -50,7 +50,7 @@ test('a visitor can search and read profiles before signing in, from a home page
   assert.match(personHTML, /<title>A First · Unlinked<\/title>/)
   assert.match(personHTML, /class="unlinked-onboarding"/)
   assert.match(personHTML, /<h1>A First<\/h1>/)
-  assert.match(personHTML, /Portland · 1 connection/)
+  assert.match(personHTML, /Portland · <a class="pcount" href="#connections">1 connection<\/a>/)
   assert.match(personHTML, /<h3>Connections · 1<\/h3>/)
   assert.match(personHTML, /class="crow" href="\/people\/last"/)
   assert.match(personHTML, /href="\/join">Join Unlinked/)
