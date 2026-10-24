@@ -1477,7 +1477,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             const canBlock = Boolean(viewer && memberBlocks && result.profile.presence === 'member' && connect?.state !== 'self')
             // Right after "Join Unlinked & connect": the new member's own card to share back.
             const shareBack = viewer && url.searchParams.get('joined') === '1' && !publicProfile?.[2] && connect?.state !== 'self' ? await ensureOwnCard(viewer.owner, { name: viewer.displayName }) : null
-            journey(response, renderPerson({ ...chrome, shareBack, blocked, canBlock, profile, connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
+            journey(response, renderPerson({ ...chrome, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
           }
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'

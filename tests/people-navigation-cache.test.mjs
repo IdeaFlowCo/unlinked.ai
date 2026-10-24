@@ -63,7 +63,7 @@ test('signed-in profile to People navigation reuses public chunks with live auth
   assert.equal(profile.response.status, 200)
   assert.equal(profile.response.headers.get('cache-control'), 'private, no-cache')
   assert.match(profile.body, /Ada Lovelace/)
-  assert.match(profile.body, /href="\/network"/)
+  assert.match(profile.body, /href="\/network\?connected=1"/)
   const heldReads = chunkReads, heldPointers = pointerReads, heldOwner = ownerReads
   const people = await request('/network', session)
   assert.equal(people.response.status, 200)

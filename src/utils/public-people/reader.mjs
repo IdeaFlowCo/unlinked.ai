@@ -22,6 +22,8 @@ const plain = value => value !== null && typeof value === 'object' && (Object.ge
 const hash = value => createHash('sha256').update(value).digest('hex')
 // Same grammar as PHOTO_URL in mcp-server/profile-photos.mjs: only a same-origin photo path.
 const SUGGESTED_PEOPLE = 5
+// Faces on a profile header's mutual connections line.
+const MUTUAL_PREVIEW = 3
 const PHOTO_URL = /^\/people\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/photo\?v=[a-f0-9]{16}$/
 
 const dense = value => {
@@ -321,6 +323,11 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       if (!data.details.has(id)) return null
       let rows = data.ordered.filter(person => person.id !== id && data.connected.get(id).has(person.id))
       const connectionCount = rows.length
+      // For a signed-in viewer, who they both know across the whole list (not
+      // the current search): the count and a few faces, members first, for
+      // the profile header's mutual line. Only this person's published
+      // connections are read; the viewer's own set is never listed.
+      const mutual = known ? (shared => ({ total: shared.length, preview: shared.sort((a, b) => Number(b.presence === 'member') - Number(a.presence === 'member')).slice(0, MUTUAL_PREVIEW).map(withPhoto) }))(rows.filter(person => known.has(person.id))) : undefined
       if (search) { const matcher = createQueryMatcher(search, 'best'); rows = matcher ? rows.filter(person => matcher.test(data.tokens.get(person.id)).all) : [] }
       // Counts for each narrowing, within the current search.
       const connectionFacets = { all: rows.length, members: rows.filter(person => person.presence === 'member').length, ...(known ? { known: rows.filter(person => known.has(person.id)).length } : {}) }
@@ -328,7 +335,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       else if (show === 'known') rows = rows.filter(person => known.has(person.id))
       if (sort === 'detail') rows.sort((a, b) => Number(b.detailLevel === 'detailed') - Number(a.detailLevel === 'detailed'))
       const connections = page(rows, decodedCursor, scope, data.revision)
-      return { profile: { ...withPhoto(data.details.get(id)), connectionCount, connectionsTotal: rows.length, connectionFacets, connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
+      return { profile: { ...withPhoto(data.details.get(id)), connectionCount, connectionsTotal: rows.length, connectionFacets, ...(mutual ? { mutual } : {}), connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
     // A small public card for hover previews: the summary, plus for a signed-in
     // viewer (`known`: published ids they are connected to; never read here)

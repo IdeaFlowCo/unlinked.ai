@@ -647,6 +647,15 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .pconn-status:empty{display:none}
 .unlinked-onboarding .pconn[aria-busy=true] .crow,.unlinked-onboarding .pconn[aria-busy=true] .pconn-status{opacity:.55}
 .unlinked-onboarding .pconn-all{margin:10px 0 0}
+.unlinked-onboarding .phead .pcount{display:inline-block;padding:8px 0;margin:-8px 0;color:inherit;text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:3px}
+.unlinked-onboarding .phead .pcount:hover{text-decoration-color:currentColor}
+.unlinked-onboarding .phead .pcount:focus-visible{outline:3px solid var(--brand);outline-offset:2px;border-radius:4px}
+.unlinked-onboarding .mutuals{display:flex;align-items:center;gap:4px;margin:12px 24px 0;min-height:36px;color:var(--fg);font-size:14px;line-height:1.3;text-decoration:none}
+.unlinked-onboarding .mutuals .mfaces{display:flex;flex:none;padding-right:10px}
+.unlinked-onboarding .mutuals .avatar{width:28px;height:28px;font-size:11px;border:2px solid #fff;margin-right:-8px}
+.unlinked-onboarding .mutuals:hover .mutuals-text{text-decoration:underline}
+.unlinked-onboarding .mutuals:focus-visible{outline:3px solid var(--brand);outline-offset:3px;border-radius:6px}
+.unlinked-onboarding #connections{scroll-margin-top:12px}
 @media(max-width:900px),(pointer:coarse){.unlinked-onboarding .pconn-filter input[type=search]{font-size:16px}}
 @media(max-width:600px){.unlinked-onboarding .network-toolbar{padding:4px 14px 14px}.unlinked-onboarding .network-query{min-width:100%}.unlinked-onboarding .network-sort{flex:1}.unlinked-onboarding .network-segments{width:100%;font-size:13px}.unlinked-onboarding .network-segments a{flex:1;text-align:center;padding:9px 5px}.unlinked-onboarding .network-reset{margin-left:0}}
 /* Phones: the list, not the filters, fills the first screen. Field labels stay
