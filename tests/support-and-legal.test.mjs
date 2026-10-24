@@ -109,3 +109,22 @@ test('Settings has a Your data anchor and Help & legal links; signed-in pages of
   assert.match(support, /details class="me"/)
   assert.match(footerOf(support), /Sign out/)
 })
+
+test('the footer is two rows: brand and links, then a hairline meta row with feedback, legal and account', async t => {
+  const app = await site(t)
+  for (const path of ['/', '/support', '/data-liberation']) {
+    const footer = footerOf(await (await app.request(path)).text())
+    const main = footer.match(/<div class="foot-main">(.*?)<\/div><\/div><div class="foot-meta">/s)?.[1]
+    assert.ok(main, path)
+    assert.match(main, /<div class="foot-brand"><b>unlinked<\/b><span>An open professional network<\/span><\/div>/)
+    const links = [...main.matchAll(/<a href="([^"]+)"/g)].map(match => match[1])
+    assert.deepEqual(links, ['/support', '/data-liberation', '/agents', 'https://www.unlinked.ai/meet', '/llms.txt'], path)
+    const meta = footer.slice(footer.indexOf('<div class="foot-meta">'))
+    assert.match(meta, /Not affiliated with LinkedIn\. · <span class="app-version">v/)
+    assert.match(meta, /<span class="foot-legal"><span id="wit-feedback-slot"><\/span><a href="https:\/\/www\.ideaflow\.io\/privacy-policy"/)
+    assert.doesNotMatch(footer, /<nav/) // header nav styles must not reach the footer links
+  }
+  const session = await app.signIn()
+  const footer = footerOf(await (await app.request('/support', { headers: { Cookie: session } })).text())
+  assert.match(footer.slice(footer.indexOf('class="foot-legal"')), /<span class="account">Signed in as robin@example\.invalid · <form class="sign-out"/)
+})
