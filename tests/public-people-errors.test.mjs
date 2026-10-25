@@ -5,13 +5,13 @@ import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { renderPeopleError } from '../mcp-server/private-onboarding-views.mjs'
 
 const snapshot = { state: 'published', complete: true, revision: 'error-pages-v1', profiles: [], connections: [] }
-async function runtime(t, readPublishedSnapshot = async () => snapshot) {
+async function runtime(t, readPublishedSnapshot = async () => snapshot, recordPublicAdmission) {
   let handler
   const server = createServer((request, response) => void handler(request, response))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   t.after(() => new Promise(resolve => server.close(resolve)))
   const origin = `http://127.0.0.1:${server.address().port}`
-  handler = createPrivateBrowserHandler({ baseUrl: origin.replace('http:', 'https:'), readPublishedSnapshot,
+  handler = createPrivateBrowserHandler({ baseUrl: origin.replace('http:', 'https:'), readPublishedSnapshot, recordPublicAdmission,
     login: { begin: async () => ({ location: 'https://id.example.invalid/authorize', transaction: { state: 'test' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: 'test' }) },
     resolveOwner: async () => ({ ownerId: 'viewer-owner', userId: 'viewer-user' }), getBackend: async () => { throw Error('unexpected private read') },
   })
@@ -60,11 +60,24 @@ test('missing, invalid and unavailable public pages explain recovery without lea
 })
 
 test('exhausted minute budget returns useful browser and API errors with an honest retry interval', async t => {
-  const request = await runtime(t)
-  for (let i = 0; i < 120; i++) {
+  const admissions = []
+  const request = await runtime(t, undefined, event => admissions.push(event))
+  for (const method of ['GET', 'HEAD']) {
+    const response = await request('/api/people/missing', { method })
+    assert.equal(response.status, 404)
+    await response.text()
+    assert.deepEqual(admissions.at(-1), { lane: 'anonymous', route: 'profile', reason: 'admitted' })
+  }
+  for (let i = 0; i < 118; i++) {
     const response = await request('/api/people')
     assert.equal(response.status, 200)
     await response.text()
+  }
+  for (const method of ['GET', 'HEAD']) {
+    const response = await request('/api/people/missing', { method })
+    assert.equal(response.status, 429)
+    await response.text()
+    assert.deepEqual(admissions.at(-1), { lane: 'anonymous', route: 'profile', reason: 'minute' })
   }
   const cookie = await request.signIn()
   const viewer = await request('/people/missing', { headers: { Cookie: cookie } })

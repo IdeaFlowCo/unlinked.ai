@@ -1408,7 +1408,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const controller = new AbortController()
         const closed = () => { if (!response.writableFinished) controller.abort() }
         response.once('close', closed)
-        const route = publicProfile ? (publicProfile[2] ? 'connections' : 'profile') : publicCompany || publicCompanyApi ? 'company' : 'search'
+        const route = publicProfile?.[2] ? 'connections' : publicDetail || publicProfile ? 'profile' : publicCompany || publicCompanyApi ? 'company' : 'search'
         const admission = await publicAdmission.acquire({ ownerId: viewer?.owner.ownerId, route, signal: controller.signal })
         response.removeListener('close', closed)
         if (!admission.release) {
