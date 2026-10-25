@@ -375,6 +375,12 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .qr{margin:18px 24px 0;max-width:260px;background:#fff}
 .unlinked-onboarding .qr svg{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:var(--r)}
 .unlinked-onboarding .qr-url{margin:10px 24px 0;overflow-wrap:anywhere}
+.unlinked-onboarding .share-link{margin:12px 0 0}
+.unlinked-onboarding .share-link label{font-size:13px;color:var(--muted)}
+.unlinked-onboarding .share-row{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin-top:6px}
+.unlinked-onboarding .share-row .share-url{flex:1 1 220px;margin:0;min-height:38px;padding:8px 12px;font-size:14px;color:var(--muted);background:var(--tint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.unlinked-onboarding .share-row button{flex:0 0 auto}
+.unlinked-onboarding .share-link [role=status]{margin:6px 0 0}
 .unlinked-onboarding .sec h3{margin:0 0 12px;font-size:17px}
 .unlinked-onboarding .sec>p{margin:0}
 .unlinked-onboarding .sec>p+p,.unlinked-onboarding .sec>pre+p{margin-top:10px}

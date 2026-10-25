@@ -35,7 +35,12 @@ that is an email address never becomes an automatic card. Creation is
 create-if-absent (`MERGE … ON CREATE`), so two tabs end with one card and one link.
 
 `/card` shows the card with its QR code first (on phones the QR panel sits
-above the details), then the link, then the explanation and the form.
+above the details), then the link, then the explanation and the form. The link
+block (`shareLink` in the views, `CARD_SHARE_SCRIPT` on every page) shows the
+same URL the QR code encodes with **Copy link** and, where the browser has a
+share sheet, **Share…**, so the card can be texted or emailed across any
+platform. The public version and the Scan sheet's My card tab carry the same
+block; the public one is the member's `/people/<handle>` permalink.
 Scanning your own card says **This is your card**.
 
 ## Hiding
