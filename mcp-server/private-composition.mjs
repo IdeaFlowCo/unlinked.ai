@@ -601,6 +601,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       autoSignIn: autoSignInEnabled(autoSignInEnv),
       readPublishedSnapshot,
       messagingSecret: process.env.UNLINKED_MESSAGING_SECRET || undefined,
+      connectionIdentityForOwner: identityForOwner,
       resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }),
       createMessagingSession: createMessagingSession({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
       resolveCardMessagingRecipient: createMessagingRecipient({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),

@@ -41,7 +41,7 @@ const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list
   // Registered only for grants whose opt-in scope includes them.
   'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request',
   // Registered only for grants with the private-notes permission (catalog v7).
-  ...PRIVATE_NOTES_TOOLS]
+  ...PRIVATE_NOTES_TOOLS, 'unlinked_list_person_targets']
 
 export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
   const base = new URL(origin)

@@ -11,7 +11,7 @@ const sha = value => createHash('sha256').update(value).digest('hex')
 const BASE = ['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write']
 
 test('catalog v7: historical entries unchanged; every base scope keeps v6 tools and gains a private-notes twin', () => {
-  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION, 7)
+  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION, 8)
   // Frozen history: v6 = v5 + lookup, and v7 base scopes equal v6 exactly.
   for (const scope of BASE) {
     assert.deepEqual(ACCOUNT_GRANT_TOOL_VERSIONS[6][scope].filter(name => name !== 'unlinked_lookup_contact'), [...ACCOUNT_GRANT_TOOL_VERSIONS[5][scope]])
@@ -33,7 +33,7 @@ test('historical keys gain private notes (default on) but never connection write
   for (const version of [1, 2, 3, 4, 5, 6]) for (const scope of Object.keys(ACCOUNT_GRANT_TOOL_VERSIONS[version])) {
     const stored = { version, scope, tools: [...accountGrantTools(version, scope)] }
     const key = effectiveAccountGrant(stored)
-    assert.equal(key.version, 7)
+    assert.equal(key.version, CURRENT_ACCOUNT_GRANT_VERSION)
     assert.ok(PRIVATE_NOTES_TOOLS.every(name => key.tools.includes(name)), `${version}/${scope} key gains private notes`)
     assert.equal(ACCOUNT_WRITE_TOOLS.some(name => key.tools.includes(name)), parseAccountScope(scope).write, `${version}/${scope} never gains connection writes`)
     const oauth = effectiveAccountGrant({ ...stored, connection: { kind: 'oauth', app: 'Claude' } })

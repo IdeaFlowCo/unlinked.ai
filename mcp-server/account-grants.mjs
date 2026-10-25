@@ -32,6 +32,10 @@ const ACCOUNT_GRANT_TOOL_VERSIONS_V6 = Object.freeze(Object.fromEntries(['owner_
 export const PRIVATE_NOTES_READ_TOOLS = Object.freeze(['unlinked_get_person_private', 'unlinked_get_private_thing', 'unlinked_list_private_things', 'unlinked_search_private', 'unlinked_get_neighbourhood'])
 export const PRIVATE_NOTES_WRITE_TOOLS = Object.freeze(['unlinked_save_private_thing', 'unlinked_add_private_note', 'unlinked_delete_private_note', 'unlinked_add_private_link', 'unlinked_update_private_link', 'unlinked_delete_private_link', 'unlinked_delete_private_thing'])
 export const PRIVATE_NOTES_TOOLS = Object.freeze([...PRIVATE_NOTES_READ_TOOLS, ...PRIVATE_NOTES_WRITE_TOOLS])
+const ACCOUNT_GRANT_V7 = Object.freeze(Object.fromEntries(['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write'].flatMap(scope => {
+  const base = Object.freeze([...ACCOUNT_GRANT_TOOL_VERSIONS_V6[scope]])
+  return [[scope, base], [`${scope}_and_private_notes`, Object.freeze([...base, ...PRIVATE_NOTES_TOOLS])]]
+})))
 export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
   1: Object.freeze({
     owner_network: Object.freeze(['unlinked_search_network']),
@@ -67,12 +71,12 @@ export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
   // Jacob's decision (unlinked-lf4): on by default for API keys, so a valid
   // pre-v7 key (not an OAuth connection) resolves to its private-notes twin
   // without rotation; OAuth connections must consent to `private_notes`.
-  7: Object.freeze(Object.fromEntries(['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write'].flatMap(scope => {
-    const base = Object.freeze([...ACCOUNT_GRANT_TOOL_VERSIONS_V6[scope]])
-    return [[scope, base], [`${scope}_and_private_notes`, Object.freeze([...base, ...PRIVATE_NOTES_TOOLS])]]
-  }))),
+  7: ACCOUNT_GRANT_V7,
+  // Read-only current owner-network identity projection; no new permission.
+  8: Object.freeze(Object.fromEntries(Object.entries(ACCOUNT_GRANT_V7).map(([scope, tools]) =>
+    [scope, Object.freeze([...tools, 'unlinked_list_person_targets'])]))),
 })
-export const CURRENT_ACCOUNT_GRANT_VERSION = 7
+export const CURRENT_ACCOUNT_GRANT_VERSION = 8
 export const accountGrantTools = (version, scope) => ACCOUNT_GRANT_TOOL_VERSIONS[version]?.[scope] ?? null
 // Scope grammar: owner_network[_and_public][_and_write][_and_private_notes].
 const SCOPE_PATTERN = /^owner_network(_and_public)?(_and_write)?(_and_private_notes)?$/
