@@ -41,7 +41,13 @@ Every worker completion re-reads the owner's live network and checks the source
 fingerprint and preference. Removed contacts, suspended people, deleted owners,
 changed sources and concurrent reviews prevent late writes. Version compare-and-set
 protects each private record. Account export includes enrichment; account deletion
-removes it. Public readers and agent tools do not read this private dataset.
+removes it. Public readers do not read this private dataset. The only exception is the
+owner-scoped `unlinked_lookup_contact` (which also backs the private-context
+panel and the private-notes tools): for a contact with no LinkedIn address of
+its own it derives `linkedinRefHash` from the attached address, so the owner's
+private people card is keyed `linkedin:in:<hash>`. Only the hash leaves the
+tool, only for the owner, and only while the record matches the contact's
+current source; removing the details removes the key.
 
 ## Interface brief
 

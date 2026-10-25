@@ -13,7 +13,7 @@ function fixture(options = {}) {
   const store = { read: async (o, id) => structuredClone(records.get(key(o, id)) ?? null), write: async (o, id, version, value) => {
     if ((records.get(key(o, id))?.version ?? 0) !== version) return false
     records.set(key(o, id), structuredClone(value)); return true
-  }, owners: async () => [owner], exportOwner: async o => [...records].filter(([k]) => k.startsWith(JSON.stringify([o.ownerId, o.userId]).slice(0, -1))).map(([, v]) => v), removeOwner: async o => { for (const k of records.keys()) if (k.startsWith(JSON.stringify([o.ownerId, o.userId]).slice(0, -1))) records.delete(k) } }
+  }, owners: async () => [owner], exportOwner: async o => [...records].filter(([k]) => k.startsWith(JSON.stringify([o.ownerId, o.userId]).slice(0, -1))).map(([k, v]) => ({ id: JSON.parse(k)[2], ...v })), removeOwner: async o => { for (const k of records.keys()) if (k.startsWith(JSON.stringify([o.ownerId, o.userId]).slice(0, -1))) records.delete(k) } }
   const service = createContactEnrichment({ store, now: () => time, readNetwork: async () => ({ assertions: rows }), lookup: {
     lookup: async () => { reads++; return { status: 'found', address: url, profile: { name: 'Ada Example', about: 'Analytical engines', positions: [{ title: 'Engineer', company: 'Example' }] } } },
     search: async () => { searches++; return { status: 'found', candidates: [{ name: 'Ada Example', linkedinUrl: url, headline: 'Engineer' }] } },
@@ -203,4 +203,14 @@ test('stored profiles stay inside the record size cap', async () => {
   await f.service.review(owner, row, { action: 'link', address: url })
   const result = await f.service.inspect(owner, row)
   assert.equal(result.status, 'enriched'); assert.ok(JSON.stringify(result).length < 48000); assert.equal(result.profile.positions.length, 30)
+})
+
+test('addresses() lists only this viewer’s attached LinkedIn addresses', async () => {
+  const f = fixture()
+  await f.service.review(owner, row, { action: 'link', address: url })
+  const mine = await f.service.addresses(owner)
+  assert.equal(mine.get(row.id).address, url); assert.equal(mine.size, 1)
+  assert.equal((await f.service.addresses(other)).size, 0)
+  await f.service.review(owner, row, { action: 'dismiss' })
+  assert.equal((await f.service.addresses(owner)).size, 0)
 })
