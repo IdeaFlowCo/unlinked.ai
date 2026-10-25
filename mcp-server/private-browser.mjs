@@ -171,7 +171,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission }) {
+export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -342,10 +342,36 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   const iosApp = request => iosAppUserAgent(request?.headers?.['user-agent'])
   const readerFor = request => iosApp(request) ? memberReader : publicReader
   const snapshotFor = request => iosApp(request) && memberSnapshot ? memberSnapshot : readPublishedSnapshot
+  // Owner-private contact addresses (docs/contact-slugs.md): every link to one
+  // of the owner's own contacts prefers its slug and falls back to the row id.
+  const contactPathFor = id => contactSlugs ? contactSlugs.pathFor(id) : `/network/contacts/${encodeURIComponent(id)}`
+  const contactRowFor = async (owner, segment) => contactSlugs ? contactSlugs.resolve(owner, segment).catch(() => null) : segment
+  // What a missing slug is chosen from: the person's public handle (when their
+  // published profile has one), the contact's name and a LinkedIn address the
+  // owner's row or private details hold. An unavailable index assigns nothing
+  // now; the next network read tries again, so a slug never depends on it.
+  const describeContacts = owner => async rows => {
+    const matches = typeof readPublishedSnapshot === 'function'
+      ? await publishedPeopleFor(rows, { publicTarget: row => usableTarget(rowPublicTarget(row)), lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : null, lookup: ids => publicReader.lookup({ ids }) })
+      : rows.map(() => null)
+    const attached = contactEnrichment && typeof contactEnrichment.addresses === 'function' ? await contactEnrichment.addresses(owner).catch(() => new Map()) : new Map()
+    return rows.map((row, index) => ({ publicHandle: matches[index]?.id ? profileHandles?.handleFor?.(matches[index].id) ?? null : null, name: contactName(row),
+      linkedinUrl: parseLinkedinProfileUrl(row.fields?.url)?.url ?? attached.get(row.id)?.address ?? null }))
+  }
+  // A first visit after many new contacts waits briefly; the rest finishes in
+  // the background and later pages link by slug.
+  const CONTACT_SLUG_WAIT_MS = 2500
+  const ensureContactSlugs = async (owner, network) => {
+    if (!contactSlugs) return
+    const work = contactSlugs.ensure(owner, network.assertions.filter(row => row.category === 'connections'), describeContacts(owner)).catch(() => 0)
+    let timer
+    await Promise.race([work, new Promise(resolve => { timer = setTimeout(resolve, CONTACT_SLUG_WAIT_MS) })])
+    clearTimeout(timer)
+  }
   // An own connection links to the published profile of the same person when one
   // exists: a recovered legacy edge names it, and a public-consent import row is
   // published as public-<row id>. Private-only rows stay plain text.
-  const contactRow = row => ({ ...(typeof row.id === 'string' ? { sourceRowId: row.id, contactHref: `/network/contacts/${encodeURIComponent(row.id)}` } : {}), ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url, sourceLabel: rowSourceLabel(row) })
+  const contactRow = row => ({ ...(typeof row.id === 'string' ? { sourceRowId: row.id, contactHref: contactPathFor(row.id) } : {}), ...(row.connectedAt ? { connectedAt: row.connectedAt } : {}), ...(row.importedAt ? { importedAt: row.importedAt } : {}), name: [row.fields['first name'], row.fields['last name']].filter(Boolean).join(' '), headline: row.fields.position, company: row.fields.company, linkedinUrl: row.fields.url, sourceLabel: rowSourceLabel(row) })
   const publicTarget = rowPublicTarget
   const usableTarget = id => id && id.length <= 160 && id !== '.' && id !== '..' ? id : null
   async function contactRows(rows, reader = publicReader) {
@@ -505,7 +531,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     if (held && (held.pending || Date.now() - held.at < networkFreshMs)) return held.pending ?? held.value
     const entry = { pending: null, value: null, at: 0 }
     entry.pending = createAccountNetwork({ owner, getBackend }).readNetwork().then(
-      value => { Object.assign(entry, { value, at: Date.now(), pending: null }); return value },
+      async value => { await ensureContactSlugs(owner, value); Object.assign(entry, { value, at: Date.now(), pending: null }); return value },
       error => { if (networkCache.get(key) === entry) networkCache.delete(key); throw error })
     networkCache.delete(key); networkCache.set(key, entry)
     while (networkCache.size > NETWORK_CACHE_CAPACITY) networkCache.delete(networkCache.keys().next().value)
@@ -520,7 +546,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     if (!kind) return null
     const id = privateId(owner.ownerId, kind, item.subjectId)
     const network = await accountNetwork(owner)
-    return network.assertions.some(row => row.category === 'connections' && row.id === id) ? `/network/contacts/${encodeURIComponent(id)}` : null
+    return network.assertions.some(row => row.category === 'connections' && row.id === id) ? contactPathFor(id) : null
   }
   const dropAccountNetwork = owner => { if (owner?.ownerId) networkCache.delete(`${owner.ownerId}\u0000${owner.userId}`) }
   const linkedinPersonDestination = async (owner, address, reader = publicReader) => {
@@ -530,7 +556,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const slug = parseLinkedinProfileUrl(address)?.slug
     const network = await accountNetwork(owner)
     const contact = network.assertions.find(row => row.category === 'connections' && parseLinkedinProfileUrl(row.fields?.url)?.slug === slug)
-    return contact ? `/network/contacts/${encodeURIComponent(contact.id)}` : null
+    return contact ? contactPathFor(contact.id) : null
   }
   const publicHeadPath = pathname => ['/', '/people', '/network', '/search-public', '/api/people'].includes(pathname) || (pathname !== '/people/add' && /^\/(?:api\/)?people\/[^/]+(?:\/connections)?$/.test(pathname)) || /^\/(?:api\/)?companies\/[^/]+$/.test(pathname)
   // Photos are many small reads per page, so they have their own site-wide bound.
@@ -2154,7 +2180,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           const network = await createAccountNetwork({ owner: session.owner, getBackend }).readNetwork()
           const slug = parseLinkedinProfileUrl(candidate.result.address).slug
           const duplicate = network.assertions.find(row => row.category === 'connections' && parseLinkedinProfileUrl(row.fields?.url)?.slug === slug)
-          if (duplicate) { redirect(response, `/network/contacts/${encodeURIComponent(duplicate.id)}`); return }
+          if (duplicate) { redirect(response, contactPathFor(duplicate.id)); return }
           const profile = candidate.result.profile, pieces = profile.name.split(/\s+/), cell = value => `"${String(value ?? '').replace(/"/g, '""')}"`
           const csv = `First Name,Last Name,URL,Email Address,Company,Position,Connected On\n${[pieces.shift(), pieces.join(' '), candidate.result.address, '', profile.company, profile.headline, ''].map(cell).join(',')}\n`
           await stageArchive({ ownerId: session.owner.ownerId, filename: 'Added people.csv', bytes: Buffer.from(csv, 'utf8'), adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT, origin: { kind: ADDED_PERSON, label: [...profile.name].slice(0, 241).join('') } })
@@ -2360,7 +2386,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const contacts = []
         for (const row of network.assertions.filter(row => recentContact(row, Date.now())).slice(0, 1000)) {
           const state = await contactEnrichment.inspect(session.owner, row)
-          contacts.push({ id: row.id, name: contactName(row), status: state.status })
+          contacts.push({ id: row.id, href: contactPathFor(row.id), name: contactName(row), status: state.status })
         }
         const props = jobProps(await jobResources())
         journey(response, renderContactEnrichment({ ...props, contacts, enabled: preferences?.enabled === true }), props.importJob); return
@@ -2375,22 +2401,31 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (signup && contactEnrichment && request.method === 'POST' && enrichContact) {
         const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
         if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || input.getAll('action').length !== 1 || input.getAll('address').length > 1 || [...input.keys()].some(key => !['csrf', 'action', 'address'].includes(key))) throw Error('private_browser_csrf')
-        let id
-        try { id = decodeURIComponent(enrichContact[1]) } catch { response.writeHead(404).end(); return }
+        let segment
+        try { segment = decodeURIComponent(enrichContact[1]) } catch { response.writeHead(404).end(); return }
         const network = await accountNetwork(session.owner)
-        const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
+        const id = await contactRowFor(session.owner, segment)
+        const row = id && network.assertions.find(value => value.category === 'connections' && value.id === id)
         if (!row) { response.writeHead(404).end(); return }
         await contactEnrichment.review(session.owner, row, { action: input.get('action'), address: input.get('address') })
-        redirect(response, `/network/contacts/${encodeURIComponent(id)}`); return
+        redirect(response, contactPathFor(id)); return
       }
       // One of the owner's own imported contacts, with their private context.
       const contactDetail = url.pathname.match(/^\/network\/contacts\/([^/]{1,480})$/)
       if (signup && request.method === 'GET' && contactDetail) {
-        let id
-        try { id = decodeURIComponent(contactDetail[1]) } catch { response.writeHead(404).end(); return }
+        let segment
+        try { segment = decodeURIComponent(contactDetail[1]) } catch { response.writeHead(404).end(); return }
         const network = await accountNetwork(session.owner)
-        const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
+        // A row id or one of this owner's own slugs; another owner's slug or
+        // row is simply not found here.
+        const id = await contactRowFor(session.owner, segment)
+        const row = id && network.assertions.find(value => value.category === 'connections' && value.id === id)
         if (!row) { response.writeHead(404).end(); return }
+        // The readable address is canonical: the row id (and any other
+        // spelling) moves there for this owner. Never cached, since the answer
+        // depends on who is signed in.
+        const canonical = contactPathFor(id)
+        if (canonical !== url.pathname) { response.writeHead(301, { Location: `${canonical}${url.search}`, 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow, noarchive' }).end(); return }
         const [contact] = await contactRows([row], pageReader(request))
         const enrichment = contactEnrichment ? await contactEnrichment.inspect(session.owner, row).catch(() => ({ status: 'unavailable' })) : null
         if (contact.id && !enrichment?.publishedProfile) {
@@ -2398,7 +2433,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         }
         const props = jobProps(await jobResources())
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
-        journey(response, renderContactDetail({ ...props, contact, enrichment, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
+        journey(response, renderContactDetail({ ...props, contact: { ...contact, contactHref: canonical }, enrichment, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // Settings shows the owner's live key, but a page view never creates
@@ -2459,6 +2494,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // The contact card's details belong to the export; its link does not.
         if (contactCards) data.contactCard = await contactCards.exportOwner(session.owner).catch(() => null)
         if (contactEnrichment) data.contactEnrichment = await contactEnrichment.exportOwner(session.owner)
+        if (contactSlugs) data.contactAddresses = await contactSlugs.exportOwner(session.owner).catch(() => null)
         if (memberEmail) data.email = await memberEmail.exportOwner(session.owner).catch(() => null)
         // Private notes and relations live in the owner's Ideaflow people overlay
         // (shared with OpenChat); the export includes the owner's copy.
@@ -2487,6 +2523,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
         if (personLookup) await personLookup.removeOwner(session.owner)
         if (contactEnrichment) await contactEnrichment.removeOwner(session.owner)
+        if (contactSlugs) await contactSlugs.removeOwner(session.owner)
         // Member-published public links go with the account.
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
         // So do the member's handles, current and earlier (released once the data is gone).

@@ -100,7 +100,7 @@ const iso = value => typeof value === 'string' && !Number.isNaN(Date.parse(value
 // or null. `lookupContact(owner, input)` is the owner-scoped
 // unlinked_lookup_contact (connectionId | profileId | refHashes); it never
 // reads another owner's imports.
-export function createPrivateContext({ overlay, identityFor, lookupContact, now = () => Date.now() }) {
+export function createPrivateContext({ overlay, identityFor, lookupContact, now = () => Date.now(), contactPath = id => `/network/contacts/${encodeURIComponent(id)}` }) {
   if (typeof identityFor !== 'function' || typeof lookupContact !== 'function') throw new Error('private_context_configuration_required')
   const configured = Boolean(overlay)
   const identity = async owner => {
@@ -110,7 +110,8 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   }
   const contact = async (owner, input) => { try { return await lookupContact(owner, input) } catch { return null } }
   // Where a relation's other end lives in Unlinked, for the owner: a published
-  // profile, else their own imported contact; other ends are plain text.
+  // profile, else their own imported contact (at its owner-private slug when
+  // it has one, docs/contact-slugs.md); other ends are plain text.
   const hrefsFor = async (owner, ends) => {
     const hrefs = new Map(), hashes = new Map()
     for (const end of ends) {
@@ -123,7 +124,7 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
     if (hashes.size) {
       const found = await contact(owner, { refHashes: [...hashes.keys()].slice(0, 100) })
       for (const value of Array.isArray(found?.contacts) ? found.contacts : []) {
-        const href = value.publishedProfileId ? profilePath(value.publishedProfileId) : value.connectionId ? `/network/contacts/${encodeURIComponent(value.connectionId)}` : null
+        const href = value.publishedProfileId ? profilePath(value.publishedProfileId) : value.connectionId ? contactPath(value.connectionId) : null
         for (const id of hashes.get(value.linkedinRefHash) ?? []) if (href) hrefs.set(id, href)
       }
     }
