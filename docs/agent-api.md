@@ -708,3 +708,7 @@ formats, independent key lifecycle, compatibility and generation-aware rollback.
 ## Request diagnostics
 
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures. See [the private diagnostics contract](request-diagnostics.md) for field semantics, retention, trusted gateway correlation limits and operator lookup. The JSON response schemas, permissions and status mappings are unchanged.
+
+## Unlisted clients and consistent search admission
+
+See [agent access](agent-access.md) for public comparisons, Muse custom API setup, explicit signup/consent, and capacity policy. Both hosted launch searches share this service’s per-owner and total AI limits with REST and newer MCP tools, while retaining historical result semantics and page sizes. Text-first launch searches also consume the conservative AI search allowance.

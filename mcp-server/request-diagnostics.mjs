@@ -22,7 +22,9 @@ export function diagnosticTransport(pathname) {
 export function createRequestDiagnostics({ emit, now = () => new Date(), monotonic = () => performance.now(), maxPerMinute = 600 } = {}) {
   if (typeof emit !== 'function' || !Number.isSafeInteger(maxPerMinute) || maxPerMinute < 1 || maxPerMinute > 600) throw new Error('diagnostics_configuration_invalid')
   let window = -1, emitted = 0, dropped = 0
+  const publicAdmission = createPublicAdmissionDiagnostics({ emit, now })
   return {
+    publicAdmission,
     run(request, response, transport, work) {
       if (!['rest', 'direct_mcp', 'gateway_mcp'].includes(transport)) return work()
       const started = now(), tick = monotonic()
@@ -129,6 +131,10 @@ export function instrumentMcpTransport(transport) {
 // Defense in depth for persistence and the operator reader: even accidental
 // extra fields supplied by another internal caller cannot become log content.
 export function safeDiagnosticRecord(value) {
+  if (value?.schema === 1 && value.event === 'public_admission') {
+    if (!['anonymous', 'viewer'].includes(value.lane) || !['profile', 'connections', 'company', 'search'].includes(value.route) || !['admitted', 'minute', 'capacity', 'cancelled'].includes(value.reason) || count(value.count) === undefined || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.at ?? '') || !Number.isFinite(Date.parse(value.at))) return null
+    return { schema: 1, event: 'public_admission', at: value.at, lane: value.lane, route: value.route, reason: value.reason, count: count(value.count) }
+  }
   if (!value || value.schema !== 1 || value.event !== 'agent_request' || typeof value.request_id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.request_id ?? '')) return null
   const result = { schema: 1, event: 'agent_request', request_id: value.request_id }
   for (const key of ['at', 'completed_at']) if (typeof value[key] === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value[key]) && Number.isFinite(Date.parse(value[key]))) result[key] = value[key]
@@ -141,4 +147,24 @@ export function safeDiagnosticRecord(value) {
   for (const key of ['cancelled', 'timed_out', 'rate_limited', 'cursor_supplied', 'has_next_page', 'truncated', 'request_complete', 'response_complete']) if (typeof value[key] === 'boolean') result[key] = value[key]
   if (value.http_status === null || Number.isSafeInteger(value.http_status) && value.http_status >= 100 && value.http_status <= 599) result.http_status = value.http_status
   return result
+}
+
+// At most 32 aggregate rows per completed minute, flushed on the next read.
+// No account identifiers, client addresses, URL parameters or queries enter it.
+export function createPublicAdmissionDiagnostics({ emit, now = () => new Date() }) {
+  let window = null
+  const counts = new Map()
+  return value => {
+    const date = now(), minute = Math.floor(date.getTime() / 60000)
+    if (window !== null && minute !== window) {
+      for (const row of counts.values()) { try { emit(row) } catch { /* Collection never gates traffic. */ } }
+      counts.clear()
+    }
+    window = minute
+    const row = safeDiagnosticRecord({ ...value, schema: 1, event: 'public_admission', at: new Date(minute * 60000).toISOString(), count: 1 })
+    if (!row) return
+    const key = `${row.lane}:${row.route}:${row.reason}`, prior = counts.get(key)
+    row.count = Math.min(1_000_000_000, (prior?.count ?? 0) + 1)
+    counts.set(key, row)
+  }
 }

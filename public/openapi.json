@@ -3,7 +3,7 @@
   "info": {
     "title": "Unlinked canonical beta",
     "version": "1.0.0",
-    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository. Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository)."
+    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository. Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository). Public profile comparisons require no account. For unlisted hosts supporting custom APIs (including Muse), use this description with a named account key in the host credential store. Muse OAuth is unverified. Never request passwords or silently create accounts; honor Retry-After and use indexed queries instead of crawling profiles. Setup: https://www.unlinked.ai/agents."
   },
   "servers": [
     {

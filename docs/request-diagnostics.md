@@ -146,3 +146,7 @@ timeout and cancellation verify the record/response ID path. After activation,
 use an authorized test persona for one read and invalid synthetic credential for
 one rejection; match their IDs in the private store. Confirm file modes, bounds,
 release source/version and rollback before declaring live diagnostic coverage.
+
+## Public directory admission aggregates
+
+The same default-off collection gate also records `public_admission` schema-1 aggregates: UTC minute, lane (`anonymous`/`viewer`), route family (`profile`/`connections`/`company`/`search`), reason (`admitted`/`minute`/`capacity`/`cancelled`) and count. At most 32 rows per completed minute, flushed on the next admission; the current partial minute may be lost on shutdown. No account, IP, user agent, handle or query is collected. Retention, file size and queue bounds are identical to agent diagnostics. This distinguishes minute exhaustion from concurrency pressure without enabling access logs.

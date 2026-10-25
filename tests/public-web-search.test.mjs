@@ -78,20 +78,20 @@ test('small fetch bursts share a snapshot read and remain bounded', async t => {
   const block = new Promise(resolve => { release = resolve })
   const begun = new Promise(resolve => { started = resolve })
   const request = await runtime(t, async () => { reads++; started(); await block; return snapshot() })
-  const burst = Array.from({ length: 8 }, () => request('/search-public?q=Example'))
+  const burst = Array.from({ length: 6 }, () => request('/search-public?q=Example'))
   await begun
   // All earlier requests are admitted or rejected before the ninth response.
   const ninth = await request('/search-public?q=Example')
   try {
     assert.equal(ninth.status, 429)
     assert.equal(ninth.headers.get('retry-after'), '10')
-    assert.deepEqual(await ninth.json(), { error: 'public_people_rate_limited' })
+    assert.deepEqual(await ninth.json(), { error: 'public_people_rate_limited', retryAfter: 10, setup: '/agents', guidance: 'Honor Retry-After. Use a consented MCP or API connection for repeated searches.' })
     const browser = await request('/people/p0')
     assert.equal(browser.status, 429)
     assert.equal(browser.headers.get('retry-after'), '10')
     assert.match(browser.headers.get('content-type'), /text\/html/)
     assert.match(await browser.text(), /Unlinked is busy right now/)
   } finally { release() }
-  assert.deepEqual((await Promise.all(burst)).map(response => response.status), Array(8).fill(200))
+  assert.deepEqual((await Promise.all(burst)).map(response => response.status), Array(6).fill(200))
   assert.equal(reads, 1)
 })

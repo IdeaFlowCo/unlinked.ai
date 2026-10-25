@@ -1,3 +1,4 @@
+import { createPublicReadAdmission } from './public-read-admission.mjs'
 import { MESSAGES_CLIENT_SOURCE, messagesConfig } from './messages-client.mjs'
 import { createMessagingProxy, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
@@ -169,7 +170,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null }) {
+export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -437,10 +438,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     }
     return [...found.values()].sort((a, b) => compareNames(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
-  let publicRequests = 0, publicWindow = Date.now(), publicBusy = 0
-  // Overlapping requests share the public reader's snapshot build. Let a small
-  // browser/crawler burst share it while retaining the site-wide minute bound.
-  const PUBLIC_IN_FLIGHT = 8
+  const publicAdmission = createPublicReadAdmission({ record: recordPublicAdmission })
   let suggestRequests = 0, suggestWindow = Date.now(), suggestBusy = 0
   let cardRequests = 0, cardWindow = Date.now(), cardBusy = 0
   // The published people each signed-in member is connected to, for "You
@@ -1403,17 +1401,20 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           if (api || url.pathname === '/search-public') {
             const error = status === 429 ? 'public_people_rate_limited' : status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable'
             response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-            response.end(JSON.stringify({ error })); return
+            response.end(JSON.stringify({ error, ...(status === 429 ? { retryAfter, setup: '/agents', guidance: 'Honor Retry-After. Use a consented MCP or API connection for repeated searches.' } : {}) })); return
           }
           return journey(response, renderPeopleError({ ...chrome, status, kind: publicCompany ? 'company' : 'profile', retryAfter, retry: `${url.pathname}${url.search}` }), null, '', status)
         }
-        if (Date.now() - publicWindow >= 60000) { publicWindow = Date.now(); publicRequests = 0 }
-        if (++publicRequests > 120 || publicBusy >= PUBLIC_IN_FLIGHT) {
-          // A full minute budget cannot reliably recover after a fixed ten seconds.
-          const retryAfter = publicRequests > 120 ? Math.max(1, Math.ceil((publicWindow + 60000 - Date.now()) / 1000)) : 10
-          await directoryError(429, retryAfter); return
+        const controller = new AbortController()
+        const closed = () => { if (!response.writableFinished) controller.abort() }
+        response.once('close', closed)
+        const route = publicProfile ? (publicProfile[2] ? 'connections' : 'profile') : publicCompany || publicCompanyApi ? 'company' : 'search'
+        const admission = await publicAdmission.acquire({ ownerId: viewer?.owner.ownerId, route, signal: controller.signal })
+        response.removeListener('close', closed)
+        if (!admission.release) {
+          if (admission.reason !== 'cancelled') await directoryError(429, admission.retryAfter)
+          return
         }
-        publicBusy++
         try {
           if (url.searchParams.getAll('q').length > 1 || url.searchParams.getAll('cursor').length > 1 || url.searchParams.getAll('mode').length > 1 || url.searchParams.getAll('presence').length > 1 || url.searchParams.getAll('sort').length > 1 || url.searchParams.getAll('show').length > 1) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
           if (publicCompanyApi || publicCompany) {
@@ -1511,7 +1512,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           const status = error instanceof PublicPeopleReaderError ? error.status : 503
           // Browsers get recovery guidance; APIs keep their data-free JSON errors.
           await directoryError(status, status === 503 ? 10 : undefined); return
-        } finally { publicBusy-- }
+        } finally { admission.release() }
       }
       if (request.method === 'POST' && url.pathname === '/ask' && !viewer) {
         if (!publicAi) { response.writeHead(404).end(); return }

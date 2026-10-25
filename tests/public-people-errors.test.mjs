@@ -12,10 +12,17 @@ async function runtime(t, readPublishedSnapshot = async () => snapshot) {
   t.after(() => new Promise(resolve => server.close(resolve)))
   const origin = `http://127.0.0.1:${server.address().port}`
   handler = createPrivateBrowserHandler({ baseUrl: origin.replace('http:', 'https:'), readPublishedSnapshot,
-    login: { begin: async () => { throw Error('unexpected login') }, finish: async () => { throw Error('unexpected callback') } },
-    resolveOwner: async () => { throw Error('unexpected owner lookup') }, getBackend: async () => { throw Error('unexpected private read') },
+    login: { begin: async () => ({ location: 'https://id.example.invalid/authorize', transaction: { state: 'test' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: 'test' }) },
+    resolveOwner: async () => ({ ownerId: 'viewer-owner', userId: 'viewer-user' }), getBackend: async () => { throw Error('unexpected private read') },
   })
-  return (path, options = {}) => fetch(origin + path, { redirect: 'manual', ...options })
+  const request = (path, options = {}) => fetch(origin + path, { redirect: 'manual', ...options })
+  request.signIn = async () => {
+    const start = await request('/login')
+    const callback = await request('/auth/callback/ideaflow?state=test&code=test', { headers: { Cookie: start.headers.getSetCookie()[0].split(';')[0] } })
+    assert.equal(callback.status, 303)
+    return callback.headers.getSetCookie().find(x => x.startsWith('__Host-ul-session=')).split(';')[0]
+  }
+  return request
 }
 
 test('missing, invalid and unavailable public pages explain recovery without leaking backend errors', async t => {
@@ -59,6 +66,11 @@ test('exhausted minute budget returns useful browser and API errors with an hone
     assert.equal(response.status, 200)
     await response.text()
   }
+  const cookie = await request.signIn()
+  const viewer = await request('/people/missing', { headers: { Cookie: cookie } })
+  assert.equal(viewer.status, 404, 'signed-in viewer bypasses exhausted anonymous quota')
+  const forged = await request('/people/missing', { headers: { Cookie: '__Host-ul-session=forged' } })
+  assert.equal(forged.status, 429)
   const response = await request('/people/missing?show=members')
   assert.equal(response.status, 429)
   const seconds = Number(response.headers.get('retry-after'))
@@ -70,7 +82,7 @@ test('exhausted minute budget returns useful browser and API errors with an hone
   assert.match(response.headers.get('cache-control'), /no-cache|no-store/)
   const api = await request('/api/people')
   assert.equal(api.status, 429)
-  assert.deepEqual(await api.json(), { error: 'public_people_rate_limited' })
+  assert.deepEqual(await api.json(), { error: 'public_people_rate_limited', retryAfter: Number(api.headers.get('retry-after')), setup: '/agents', guidance: 'Honor Retry-After. Use a consented MCP or API connection for repeated searches.' })
   const head = await request('/people/missing', { method: 'HEAD' })
   assert.equal(head.status, 429)
   assert.match(head.headers.get('content-type'), /text\/html/)

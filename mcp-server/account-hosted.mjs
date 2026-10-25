@@ -80,14 +80,16 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
       try {
         await revalidate('unlinked_search_network')
-        const connectionQuery = knownConnectionQuery(query, degree)
-        if (cursor !== undefined && !connectionQuery.degree) throw new Error('account_cursor_requires_connection_mode')
-        const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).searchNetwork({ query, signal })
-        await revalidate('unlinked_search_network')
-        requestDiagnostic().result(result)
-        const text = JSON.stringify(result)
-        if (Buffer.byteLength(text) > 1024 * 1024) throw new Error('account_tool_result_limit')
-        return { content: [{ type: 'text', text }] }
+        return await toolService.withSearchBudget(grant, 'unlinked_search_network', async () => {
+          const connectionQuery = knownConnectionQuery(query, degree)
+          if (cursor !== undefined && !connectionQuery.degree) throw new Error('account_cursor_requires_connection_mode')
+          const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).searchNetwork({ query, signal })
+          await revalidate('unlinked_search_network')
+          requestDiagnostic().result(result)
+          const text = JSON.stringify(result)
+          if (Buffer.byteLength(text) > 1024 * 1024) throw new Error('account_tool_result_limit')
+          return { content: [{ type: 'text', text }] }
+        })
       } catch (error) { requestDiagnostic().failure(error, signal); return typedToolFailure(networkSearchFailure(error, signal)) }
     })
     if (grant.tools.includes('unlinked_search_everyone') && typeof readPublishedSnapshot === 'function') server.registerTool('unlinked_search_everyone', {
@@ -100,10 +102,12 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       try {
         const valid = () => revalidate('unlinked_search_everyone')
         await valid()
-        const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal })
-        await valid()
-        requestDiagnostic().result(result)
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+        return await toolService.withSearchBudget(grant, 'unlinked_search_everyone', async () => {
+          const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal })
+          await valid()
+          requestDiagnostic().result(result)
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+        })
       } catch (error) { requestDiagnostic().failure(error, signal); return typedToolFailure(error) }
     })
     for (const name of SERVICE_TOOLS) {

@@ -592,5 +592,12 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     } finally { release?.() }
   }
 
-  return { call }
+  // Hosted launch tools preserve their historical result/page shape while
+  // sharing the same per-owner and process-wide AI admission as REST/tools.
+  async function withSearchBudget(grant, name, work) {
+    if (!['unlinked_search_network', 'unlinked_search_everyone'].includes(name) || !grant?.tools?.includes(name)) throw new AccountToolError('scope_not_granted', 'This grant does not include the requested search.')
+    const release = admitAi(grant.ownerId)
+    try { return await work() } finally { release() }
+  }
+  return { call, withSearchBudget }
 }
