@@ -19,7 +19,11 @@ stale static facts are never served. If another graph row claims one of those
 aliases, that row keeps it.
 
 The runtime caches the merged index for 60 s and runs one graph read at a time.
-If the graph read fails, or the stored rows fail validation, pages serve the
+After that it only checks which revision is live (one pointer seek); the rows
+are read, verified and indexed again only when the revision changed, after a
+publish or a rollback. At about 88,000 rows the index holds about 44 MiB of
+heap, and a full re-read briefly allocates about 200 MiB, so it should not
+repeat every minute. If the graph read fails, or the stored rows fail validation, pages serve the
 static list (cached for the same 60 s). They never fail. The runtime prints one
 `unlinked_company_facts_read_failed` line to stderr each time a read fails, so
 at most once per cache period.
@@ -34,7 +38,7 @@ rows have their own small labels in the pilot graph
 |---|---|---|
 | `UnlinkedCompanyDataset` | `id` | Pointer to the live revision |
 | `UnlinkedCompanyRevision` | `(dataset, revision)` | `staging`, `published` or `deleted`, plus a digest |
-| `UnlinkedCompanyChunk` | `(dataset, revision, ordinal)` | Immutable JSON row chunks of up to 200 rows and 128 KiB each (at most 256 per revision), with a SHA-256 |
+| `UnlinkedCompanyChunk` | `(dataset, revision, ordinal)` | Immutable JSON row chunks of up to 200 rows and 128 KiB each (at most 512 per revision), with a SHA-256 |
 
 A revision is `curated-companies-v1:<sha256 of the validated rows>`. Chunks
 are written while the revision is in `staging`. One final transaction then
@@ -45,7 +49,7 @@ hash, the revision digest and the row whitelist again.
 
 ## Row schema
 
-The rows file (at most 32 MiB) is a JSON array of 1 to 50,000 objects. Only these fields are
+The rows file (at most 64 MiB) is a JSON array of 1 to 100,000 objects. Only these fields are
 allowed:
 
 | Field | Rule |

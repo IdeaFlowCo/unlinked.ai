@@ -22,8 +22,9 @@ const COMPANIES = [
 
 export const COMPANY_DATASET = 'curated-companies-v1'
 // Rows one publication may hold. Sized for a facts row per company name that
-// published profiles link (about 40,000 names in October 2026).
-export const COMPANY_ROW_LIMIT = 50000
+// published profiles link (about 88,000 matched names in late October 2026,
+// including the contributors' imported profiles), with headroom.
+export const COMPANY_ROW_LIMIT = 100000
 export const COMPANY_FIELDS = ['name', 'tagline', 'description', 'industry', 'employeeCount', 'headquarters', 'founded', 'website', 'linkedinUrl', 'aliases']
 
 export const companyKey = value => (typeof value === 'string' ? value : '').normalize('NFKC').toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter(Boolean).join(' ')
@@ -79,26 +80,30 @@ const staticIndex = buildCompanyIndex()
 // Static-only lookup, kept for callers without a graph.
 export const companyFacts = name => copy(staticIndex.get(companyKey(name)))
 
-// Runtime lookup: `readDataset()` returns the published dataset ({ revision,
-// companies }) or null. The merged index is cached for `ttlMs`, one read at a
-// time. Any read or validation failure falls back to the static list (also
+// Runtime lookup: `readDataset({ knownRevision })` returns the published
+// dataset ({ revision, companies }), `{ revision, unchanged: true }` when the
+// live revision is still `knownRevision`, or null. The merged index is cached
+// for `ttlMs`, one read at a time; after the TTL only the revision is checked,
+// and the rows are read and indexed again only when it changed (a publish or a
+// rollback). Any read or validation failure falls back to the static list (also
 // cached for `ttlMs`, so a down graph is not retried on every page view) and
 // never throws to the company page.
 export function createCompanyFacts({ readDataset, ttlMs = 60000, now = Date.now, onError = () => {} } = {}) {
   if (typeof readDataset !== 'function') return async name => companyFacts(name)
-  let cached = null, expires = 0, pending = null
+  let cached = null, revision = null, expires = 0, pending = null
   const refresh = async () => {
     try {
-      const dataset = await readDataset()
-      return buildCompanyIndex(dataset ? validateCompanyRows(dataset.companies) : [])
+      const dataset = await readDataset({ knownRevision: revision })
+      if (dataset?.unchanged === true && revision !== null && dataset.revision === revision) return { index: cached, revision }
+      return { index: buildCompanyIndex(dataset ? validateCompanyRows(dataset.companies) : []), revision: dataset ? dataset.revision ?? null : null }
     } catch (error) {
       try { onError(error) } catch { /* reporting never breaks a page */ }
-      return staticIndex
+      return { index: staticIndex, revision: null }
     }
   }
   return async name => {
     if (!cached || now() >= expires) {
-      pending ??= refresh().then(index => { cached = index; expires = now() + ttlMs; return index }).finally(() => { pending = null })
+      pending ??= refresh().then(next => { cached = next.index; revision = next.revision; expires = now() + ttlMs; return next }).finally(() => { pending = null })
       await pending
     }
     return copy(cached.get(companyKey(name)))

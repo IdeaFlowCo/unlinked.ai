@@ -15,7 +15,7 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 // The same whitelist runs again in the store and in the runtime reader, so a
 // bad rows file fails here in plan mode instead of at the graph.
 export function prepareCompanyFacts(bytes) {
-  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 32 * 1024 * 1024) throw new Error('company_rows_file_required')
+  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 64 * 1024 * 1024) throw new Error('company_rows_file_required')
   let rows
   try { rows = JSON.parse(bytes.toString('utf8')) } catch { throw new Error('company_rows_invalid') }
   const companies = validateCompanyRows(rows)
