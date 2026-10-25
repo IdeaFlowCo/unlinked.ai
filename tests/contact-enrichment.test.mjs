@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createContactEnrichment, normalizeContactCandidates, recentContact } from '../mcp-server/contact-enrichment.mjs'
 import { createPersonLookup } from '../mcp-server/person-lookup.mjs'
 import { renderContactDetail, renderPeople } from '../mcp-server/private-onboarding-views.mjs'
+import { LABELS } from '../deploy/private-pilot/graph-migration.mjs'
 
 const owner = { ownerId: 'owner', userId: 'user' }, other = { ownerId: 'other', userId: 'other-user' }
 const time = 1_800_000_000_000, url = 'https://www.linkedin.com/in/ada-example'
@@ -169,4 +170,9 @@ test('a provider outage after a viewer-supplied address keeps the address so the
   const result = await f.service.inspect(owner, row)
   assert.equal(result.status, 'unavailable'); assert.equal(result.address, url)
   assert.match(renderContactDetail({ csrf: 'csrf', contact: { sourceRowId: row.id, name: 'Ada Example' }, enrichment: result }).content, /LinkedIn profile ↗/)
+})
+
+test('the private enrichment store is part of shared recovery snapshots', () => {
+  // An unknown Unlinked label makes the shared export fail closed (deploy/private-pilot/graph-migration.mjs).
+  assert.ok(LABELS.includes('UnlinkedContactEnrichment'))
 })
