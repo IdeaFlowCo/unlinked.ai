@@ -1,5 +1,17 @@
 # Unlinked agent guide
 
+## Choose public browsing or an account connection
+
+A few public profile comparisons need no account: use `/search-public?q=...`, `/people/<handle>` and its `/connections` page. Published professional details can be richer than a Connections.csv row. Available depth varies by person. Never interpret a 429 or fetch failure as evidence that a password is required. Honor `Retry-After`, retry with backoff, and report temporary unavailability if it persists.
+
+For repeated whole-index queries, use a consented MCP/API connection and indexed search rather than downloading every profile page. Everyone means all currently published professional profiles; it does not include other users' private networks. No archive import is required to search Everyone. An owner's private network requires their authorized grant.
+
+A connector-store listing is not required when the host supports custom connectors. Prefer https://id.ideaflow.app/agents for compatible OAuth hosts. For Muse, ask: “Create an Unlinked custom API connector using https://www.unlinked.ai/openapi.json. Ask me for a named Unlinked API key through your Secure Credentials Store, then verify whoami and search People.” Obtain that key in Unlinked Settings → API keys. Meta documents custom connectors, API-information retrieval and its Secure Credentials Store; Unlinked's Muse OAuth flow has not been verified. Do not invent a connector-store entry or assume an arbitrary hosted OAuth callback is supported. A host with no custom connector or HTTP capability can still read public pages, but cannot perform account tools until it gains a supported integration.
+
+Never request the user's password or session cookies. An agent may guide sign-in/signup when the user requests it, using the user's own verified identity and the existing consent flow. It must not silently create an account, claim someone else's imported profile, accept new terms, publish a profile, import an archive, or expand app permissions merely because it can. A silent Ideaflow SSO app binding is private app state, not public-profile publication or agent consent. There is no anonymous agent signup/key-issuance API. The shared connector requires an existing Unlinked account binding; if `account_link_required` occurs, open Unlinked once with the same Ideaflow identity, then retry the connection.
+
+Successful setup means an authenticated `whoami` for the intended account followed by a small search. If the identity is wrong, stop and reconnect. Store keys in the host's credential facility, never in ordinary chat or logs. Signup and multiple keys do not buy unlimited capacity: account keys/connections share owner budgets. Do not manufacture accounts or keys to evade limits.
+
 ## Set up your agent
 
 For compatible hosts wanting several apps or messages, start with the [shared Ideaflow connector](https://id.ideaflow.app/agents) and `https://id.ideaflow.app/mcp`. Consent to each app's permissions separately. Existing direct Unlinked Claude/ChatGPT OAuth connections remain supported; no migration is required. Messages need separate **OpenChat** permissions, not Unlinked connection-request permission.

@@ -232,9 +232,9 @@ This vocabulary may be extended, never renamed.
 - AI tools (`ai_search`, `search_network` free-text mode, `search_everyone`):
   20/min, 2000/day and 2 in flight **per grant owner**, plus a shared ceiling
   of 8 concurrent AI calls per runtime. These budgets are enforced on the
-  HTTP API and on the new MCP tools; the two launch tools keep their
-  historical unmetered behavior **on the MCP surface only** (preserved for
-  existing integrations). **Known conflict with a 10 s consumer
+  HTTP API, shared gateway and all hosted MCP search tools, including the
+  two launch tools. Launch searches retain their historical result shapes
+  and page sizes; text-first searches also consume this AI allowance. **Known conflict with a 10 s consumer
   timeout:** these call a provider with batched ranking rounds; worst case is
   bounded at 40 s and p95 is not guaranteed under 10 s. Mitigations the
   contract commits to: `unlinked_ai_search` accepts `timeoutMs` (1000–40000) and
@@ -708,3 +708,7 @@ formats, independent key lifecycle, compatibility and generation-aware rollback.
 ## Request diagnostics
 
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures. See [the private diagnostics contract](request-diagnostics.md) for field semantics, retention, trusted gateway correlation limits and operator lookup. The JSON response schemas, permissions and status mappings are unchanged.
+
+## Unlisted clients and consistent search admission
+
+See [agent access](agent-access.md) for public comparisons, Muse custom API setup, explicit signup/consent, and capacity policy. Search budgets and launch-tool compatibility are defined in [Rate limits and latency](#rate-limits-and-latency).

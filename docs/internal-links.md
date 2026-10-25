@@ -44,5 +44,5 @@ The crawler uses only GET requests and skips sign-in, sign-out, MCP and photo
 URLs. It follows same-site redirects and prints every internal link that does
 not end in a 200 page, with the pages that link it. It exits 1 when any link is
 broken. Keep `--delay` at 500 ms or more against production, because real
-visitors share the public budget of 120 requests a minute.
+anonymous visitors share the [public admission budget](agent-access.md#capacity-and-abuse-policy).
 `tests/internal-links.test.mjs` runs the same check against fixture pages.

@@ -4,6 +4,12 @@ The canonical beta at **https://www.unlinked.ai** runs the standalone Noos-backe
 
 This file is the repo-internal guide for autonomous agents and contributors working *in* this codebase. For agents arriving at unlinked.ai over HTTP, see the public brief at `public/AGENTS.md` (served at `/AGENTS.md`).
 
+## Human, agent and crawler access
+
+Public comparisons need no account. Connected agents should search the indexed published network, not crawl N+1 profiles. Setup, unlisted-host/Muse fallback, account consent and abuse policy: [docs/agent-access.md](docs/agent-access.md). Public instructions: `public/AGENTS.md`; canonical setup renderer: `renderAgents` in `mcp-server/private-onboarding-views.mjs`. Keep both aligned. Do not add anonymous account/key minting, bypass verified identity/consent, change existing permission defaults, or claim Muse OAuth works without client evidence.
+
+Public admission policy: [docs/agent-access.md](docs/agent-access.md#capacity-and-abuse-policy). Aggregate diagnostics and redaction: [docs/request-diagnostics.md](docs/request-diagnostics.md#public-directory-admission-aggregates).
+
 ## Canonical agent setup and grant invariants
 
 Settings presents API keys before client instructions: named independent keys, repeatable Show/Copy API key, retained Copy agent setup, and compact per-key permission switches (connection actions; private people notes & relations). Reveal/copy never issue or rotate credentials. Shared Ideaflow OAuth is recommended for compatible multi-app hosts; direct Unlinked OAuth and manual keys remain supported. Muse manual setup is documented; Muse OAuth is unverified. The authoritative UI/lifecycle contract is [docs/agent-key-settings.md](docs/agent-key-settings.md); authentication, tool normalization and provisioning are in [docs/agent-api.md](docs/agent-api.md).

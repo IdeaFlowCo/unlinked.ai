@@ -2,8 +2,10 @@
 
 The standalone runtime can record bounded request metadata for direct REST
 (`/api/agent/...`), direct MCP (`/mcp`), and the shared gateway's signed downstream
-adapter (`/api/connector/mcp`). It does not instrument browser pages, public web
-search, OAuth sign-in/consent, messaging, or the historical Next.js APIs.
+adapter (`/api/connector/mcp`). Public directory reads produce only the
+[admission aggregates](#public-directory-admission-aggregates) described below,
+not per-request browser records. OAuth sign-in/consent, messaging, and the
+historical Next.js APIs are not instrumented.
 
 This is **off by default**. Building, merging, deploying, and enabling diagnostics
 are separate actions. There is no production activation in this change. Use the
@@ -95,8 +97,10 @@ authentication, tool results or HTTP status.
 since the next successful stage. A full disk or sustained failures may prevent
 these counters being persisted. Logging is best-effort, not a complete audit of
 all requests or a security ledger. No new public log-reading endpoint exists.
-The operator reader requires an exact request/account filter, re-projects rows,
-rejects unsafe files, and returns at most500 rows with a `truncated` indicator.
+The operator reader re-projects rows, rejects unsafe files, and returns at
+most500 rows with a `truncated` indicator. Agent request lookup requires an
+exact request/account filter; the separate
+[aggregate lookup mode](#public-directory-admission-aggregates) requires a time boundary.
 Only the approved single runtime writes this directory; concurrent writers are
 not supported. Do not include request logs in public release/CI artifacts or
 long-lived backups that defeat this retention policy.
@@ -146,3 +150,9 @@ timeout and cancellation verify the record/response ID path. After activation,
 use an authorized test persona for one read and invalid synthetic credential for
 one rejection; match their IDs in the private store. Confirm file modes, bounds,
 release source/version and rollback before declaring live diagnostic coverage.
+
+## Public directory admission aggregates
+
+The same default-off collection gate also records `public_admission` schema-1 aggregates: UTC minute, lane (`anonymous`/`viewer`), route family (`profile`/`connections`/`company`/`search`), reason (`admitted`/`minute`/`capacity`/`cancelled`) and count. At most 32 rows per completed minute, flushed on the next admission; the current partial minute may be lost on shutdown. No account, IP, user agent, handle or query is collected. Retention, file size and queue bounds are identical to agent diagnostics. This distinguishes minute exhaustion from concurrency pressure without enabling access logs.
+
+Read only aggregate counters with `node scripts/read-request-diagnostics.mjs --directory /absolute/private/audit/requests --event public_admission --since 2026-10-24T00:00:00Z`. The explicit UTC time boundary is required. This mode excludes agent request rows and cannot be combined with account/request filters; those retain their existing exact-filter requirement. All file ownership, mode, link and 500-record bounds remain in force.
