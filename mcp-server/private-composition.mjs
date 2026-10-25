@@ -211,7 +211,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // static list with a 60 s cache; a failed read serves the static list.
     const companyFactsStore = typeof dependencies.createCompanyFactsStore === 'function' ? dependencies.createCompanyFactsStore(driver, 'neo4j') : null
     await companyFactsStore?.initialize()
-    const lookupCompanyFacts = companyFactsStore ? createCompanyFacts({ readDataset: () => companyFactsStore.read(COMPANY_DATASET), onError: () => process.stderr.write('unlinked_company_facts_read_failed: serving the static list\n') }) : undefined
+    const lookupCompanyFacts = companyFactsStore ? createCompanyFacts({ readDataset: options => companyFactsStore.read(COMPANY_DATASET, options), onError: () => process.stderr.write('unlinked_company_facts_read_failed: serving the static list\n') }) : undefined
     // Member email, when the runtime supplies its private store.
     // Without RESEND_API_KEY (or with UNLINKED_EMAIL_ENABLED=false) nothing is
     // sent and no address is recorded; unsubscribe links keep working. Without

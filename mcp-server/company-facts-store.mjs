@@ -11,9 +11,9 @@ import { COMPANY_DATASET, validateCompanyRows } from './company-metadata.mjs'
 // query ever scans OperationalResource documents.
 const hash = value => createHash('sha256').update(value).digest('hex')
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(value)
-// CHUNK_ROWS x MAX_CHUNKS covers COMPANY_ROW_LIMIT (50,000 rows); the byte cap
-// per chunk keeps a stored revision under 32 MiB.
-const CHUNK_BYTES = 128 * 1024, CHUNK_ROWS = 200, MAX_CHUNKS = 256
+// CHUNK_ROWS x MAX_CHUNKS covers COMPANY_ROW_LIMIT (100,000 rows); the byte cap
+// per chunk keeps a stored revision under 64 MiB.
+const CHUNK_BYTES = 128 * 1024, CHUNK_ROWS = 200, MAX_CHUNKS = 512
 
 export const companyRevision = companies => COMPANY_DATASET + ':' + hash(JSON.stringify(companies))
 
@@ -91,11 +91,19 @@ export function createNeo4jCompanyFactsStore(driver, database = 'neo4j') {
       } finally { await session.close() }
     },
     // The live revision, verified chunk by chunk, or null when nothing is published.
-    async read(dataset = COMPANY_DATASET) {
+    // With `knownRevision`, a still-live revision is confirmed by one pointer seek
+    // and returned as { revision, unchanged: true } without reading its chunks.
+    async read(dataset = COMPANY_DATASET, { knownRevision = null } = {}) {
       requireReady()
       if (dataset !== COMPANY_DATASET) throw new Error('company_dataset_invalid')
       const session = driver.session({ database, defaultAccessMode: 'READ' })
       try {
+        if (knownRevision !== null && identifier(knownRevision)) {
+          const live = await session.executeRead(tx => tx.run(`MATCH (p:UnlinkedCompanyDataset {id: $dataset})
+            MATCH (r:UnlinkedCompanyRevision {dataset: $dataset, revision: p.revision}) WHERE r.state = 'published'
+            RETURN r.revision AS revision`, { dataset }))
+          if (live.records.length === 1 && live.records[0].get('revision') === knownRevision) return { dataset, revision: knownRevision, unchanged: true }
+        }
         const result = await session.executeRead(tx => tx.run(`MATCH (p:UnlinkedCompanyDataset {id: $dataset})
           MATCH (r:UnlinkedCompanyRevision {dataset: $dataset, revision: p.revision}) WHERE r.state = 'published'
           OPTIONAL MATCH (c:UnlinkedCompanyChunk {dataset: $dataset, revision: p.revision}) WHERE c.ordinal IS NOT NULL

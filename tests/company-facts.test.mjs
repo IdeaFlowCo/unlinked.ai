@@ -32,21 +32,23 @@ test('company rows: anything outside the whitelist is rejected', () => {
     [{ ...row, linkedinUrl: 'https://evil.test/company/riot-games/' }], [{ ...row, linkedinUrl: 'https://www.linkedin.com/company/riot/games' }],
     [{ ...row, aliases: 'Riot' }], [{ ...row, aliases: [''] }], [{ ...row, aliases: [7] }],
     [row, { name: 'riot  games' }], [row, { name: 'Other', aliases: ['RIOT'] }], [{ ...row, aliases: [null] }],
-    Array.from({ length: 50001 }, (_, index) => ({ name: `Company ${index}` })),
+    Array.from({ length: 100001 }, (_, index) => ({ name: `Company ${index}` })),
   ]
   for (const rows of bad) assert.throws(() => validateCompanyRows(rows), /company_row/, JSON.stringify(rows).slice(0, 120))
   assert.throws(() => validateCompanyRows([Object.assign(Object.create({ inherited: true }), { name: 'Proto' })]), /company_row_invalid/)
 })
 
-test('one publication holds a facts row for every linked company name (50,000 rows)', () => {
+test('one publication holds a facts row for every linked company name (100,000 rows)', () => {
   // About the size of a free-dataset row: industry, headquarters, founded, website, LinkedIn page.
-  const rows = Array.from({ length: 50000 }, (_, index) => ({ name: `Company ${index}`, industry: 'Software Development', headquarters: 'Boston, Massachusetts, United States', founded: '2014', website: `https://company-${index}.example`, linkedinUrl: `https://www.linkedin.com/company/company-${index}/` }))
+  const rows = Array.from({ length: 100000 }, (_, index) => ({ name: `Company ${index}`, industry: 'Software Development', headquarters: 'Boston, Massachusetts, United States', founded: '2014', website: `https://company-${index}.example`, linkedinUrl: `https://www.linkedin.com/company/company-${index}/` }))
   const valid = validateCompanyRows(rows), chunks = chunksOf(valid)
-  assert.equal(valid.length, 50000)
-  assert.ok(chunks.length <= 256, `${chunks.length} chunks`)
-  assert.equal(chunks.reduce((sum, chunk) => sum + chunk.rows, 0), 50000)
+  assert.equal(valid.length, 100000)
+  assert.ok(chunks.length <= 512, `${chunks.length} chunks`)
+  assert.equal(chunks.reduce((sum, chunk) => sum + chunk.rows, 0), 100000)
   assert.ok(chunks.every(chunk => Buffer.byteLength(chunk.json) <= 128 * 1024))
-  assert.ok(Buffer.byteLength(JSON.stringify(valid, null, 1)) < 32 * 1024 * 1024)
+  assert.ok(Buffer.byteLength(JSON.stringify(valid, null, 1)) < 64 * 1024 * 1024)
+  // More rows than 512 full chunks hold are refused before any graph write.
+  assert.throws(() => chunksOf(Array.from({ length: 513 * 200 }, (_, index) => ({ name: `C${index}` }))), /company_chunk_limit/)
 })
 
 test('prepareCompanyFacts derives a content-addressed revision and rejects bad files', () => {
@@ -93,6 +95,30 @@ test('runtime lookup merges the graph dataset, caches it for the TTL and returns
   assert.equal((await lookup('Riot Games')).tagline, companyFacts('Riot Games').tagline)
   assert.equal(await lookup('Fresh Co'), null)
   assert.equal(reads, 2)
+})
+
+test('after the TTL only the live revision is checked; rows are re-read and indexed only when it changed', async () => {
+  let clock = 0, live = 'r1', full = 0
+  const checks = [], rows = { r1: [{ ...row, tagline: 'First' }], r2: [{ ...row, tagline: 'Second' }, fresh] }
+  const lookup = createCompanyFacts({ now: () => clock, readDataset: async ({ knownRevision } = {}) => {
+    checks.push(knownRevision)
+    if (live === null) return null
+    if (knownRevision === live) return { revision: live, unchanged: true }
+    full++; return { revision: live, companies: structuredClone(rows[live]) }
+  } })
+  assert.equal((await lookup('Riot')).tagline, 'First')
+  clock = 60000; assert.equal((await lookup('Riot')).tagline, 'First')
+  clock = 120000; assert.equal((await lookup('Riot Games')).tagline, 'First')
+  assert.equal(full, 1); assert.deepEqual(checks, [null, 'r1', 'r1'])
+  live = 'r2'; clock = 180000
+  assert.equal((await lookup('Riot')).tagline, 'Second'); assert.equal((await lookup('Fresh Co')).name, 'Fresh Co')
+  assert.equal(full, 2)
+  // A rollback that removes the pointer falls back to the static list.
+  live = null; clock = 240000
+  assert.equal(await lookup('Fresh Co'), null); assert.equal((await lookup('Riot Games')).tagline, companyFacts('Riot Games').tagline)
+  // A store that claims "unchanged" for a revision this cache never had is not trusted.
+  const liar = createCompanyFacts({ readDataset: async () => ({ revision: 'r9', unchanged: true }) })
+  assert.equal((await liar('Riot Games')).tagline, companyFacts('Riot Games').tagline)
 })
 
 test('runtime lookup shares one in-flight read across concurrent pages', async () => {
@@ -255,6 +281,9 @@ test('real Neo4j company facts store: publish, replay, pointer fence, verified r
   await assert.rejects(store.publish(COMPANY_DATASET, [row], source, null), /company_pointer_conflict/)
   const second = await store.publish(COMPANY_DATASET, [row], source, first.revision)
   assert.deepEqual((await store.read()).companies, [row])
+  // A still-live known revision is confirmed without reading chunks; any other is read in full.
+  assert.deepEqual(await store.read(COMPANY_DATASET, { knownRevision: second.revision }), { dataset: COMPANY_DATASET, revision: second.revision, unchanged: true })
+  assert.deepEqual((await store.read(COMPANY_DATASET, { knownRevision: first.revision })).companies, [row])
   // Republishing the earlier rows moves the pointer back without rewriting chunks.
   const back = await store.publish(COMPANY_DATASET, many, source, second.revision)
   assert.equal(back.replayed, true); assert.equal((await store.read()).revision, first.revision)
@@ -263,12 +292,13 @@ test('real Neo4j company facts store: publish, replay, pointer fence, verified r
   // Tampered chunk bytes are refused on read, so the runtime falls back to the static list.
   await driver.executeQuery("MATCH (c:UnlinkedCompanyChunk {dataset: $dataset, revision: $revision, ordinal: 0}) SET c.json = '[]'", { dataset: COMPANY_DATASET, revision: first.revision })
   await assert.rejects(store.read(), /company_dataset_corrupt/)
-  const lookup = createCompanyFacts({ readDataset: () => store.read(), ttlMs: 0 })
+  const lookup = createCompanyFacts({ readDataset: options => store.read(COMPANY_DATASET, options), ttlMs: 0 })
   assert.equal(await lookup('Company 1'), null); assert.equal((await lookup('Riot Games')).name, 'Riot Games')
   await store.publish(COMPANY_DATASET, [row], source, first.revision)
   assert.equal((await lookup('Riot')).tagline, row.tagline)
   await store.revoke(COMPANY_DATASET, second.revision)
   assert.equal(await store.read(), null)
+  assert.equal(await store.read(COMPANY_DATASET, { knownRevision: second.revision }), null)
   assert.equal(await lookup('Riot'), null)
   assert.equal((await lookup('Riot Games')).tagline, companyFacts('Riot Games').tagline)
   await assert.rejects(store.publish(COMPANY_DATASET, [row], source, null), /company_revision_deleted/)
