@@ -8,7 +8,7 @@ This file is the repo-internal guide for autonomous agents and contributors work
 
 Public comparisons need no account. Connected agents should search the indexed published network, not crawl N+1 profiles. Setup, unlisted-host/Muse fallback, account consent and abuse policy: [docs/agent-access.md](docs/agent-access.md). Public instructions: `public/AGENTS.md`; canonical setup renderer: `renderAgents` in `mcp-server/private-onboarding-views.mjs`. Keep both aligned. Do not add anonymous account/key minting, bypass verified identity/consent, change existing permission defaults, or claim Muse OAuth works without client evidence.
 
-`mcp-server/public-read-admission.mjs` separates verified viewers from the anonymous minute fuse and reserves viewer burst capacity within eight public reads. Do not infer a human from user-agent names or use forwarded IPs until trusted-edge ingress is established. All hosted launch searches must share account-service AI admission. Counters use the opt-in private diagnostics sink; no raw queries, handles or client addresses.
+Public admission policy: [docs/agent-access.md](docs/agent-access.md#capacity-and-abuse-policy). Aggregate diagnostics and redaction: [docs/request-diagnostics.md](docs/request-diagnostics.md#public-directory-admission-aggregates).
 
 ## Canonical agent setup and grant invariants
 
