@@ -60,6 +60,7 @@ export const CONNECTION_GROUPINGS = Object.freeze(['person', 'none'])
 
 export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   unlinked_whoami: {},
+  unlinked_list_person_targets: { q: z.string().max(100).optional(), cursor: z.string().max(4096).optional(), limit: z.number().int().min(1).max(50).optional() },
   unlinked_list_people: {
     q: z.string().max(200).optional(), mode: z.enum(SEARCH_MODES).optional(), presence: z.enum(PRESENCE).optional(),
     sort: z.enum(PUBLIC_LIST_SORTS).optional(),
@@ -94,6 +95,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
 })
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
+  unlinked_list_person_targets: 'Read-only current owner-network members with proven active Ideaflow identity, for cross-app person targets. Exact published-profile ownership only; no names/email guesses, contact details, messages, relationship assertions, account creation or sends. Connected does not mean chatted. Cursor pages the current own network, including imported connections.',
   unlinked_whoami: 'Return the authenticated grant owner: the stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy-profile anchor if any. Linkage is the grant itself — never email matching. No contact email/phone is returned.',
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=legacy keeps recovered accounts awaiting claim, presence=shadow keeps imported profiles without a recovered account. sort: best (default: relevance with q, else stored name order), name (A–Z by first letter or number, ignoring leading emoji/punctuation, accents and case), name-desc, raw (Unicode code-point order of the name as written). Paginated with an opaque cursor bound to the query and sort, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Degree 1 groups one entry per person (grouping "person", default) when records share exact identity evidence — the same published profile (merges followed) or the same LinkedIn address, never a name — with sources[] listing every underlying record (provenance, visibility) and top-level fields from the owner import; total counts people. grouping "none" returns one row per source record. sort: name (default; A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case — names are shown exactly as written), raw (Unicode code-point order), name-desc, connected (most recently connected first), imported (most recently imported first), company. Paginated, at most 50 per page; the cursor is bound to q, sort and grouping.',
@@ -109,7 +111,7 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   ...PRIVATE_NOTES_DESCRIPTIONS,
 })
 
-const DETERMINISTIC_TOOLS = new Set([...PRIVATE_NOTES_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+const DETERMINISTIC_TOOLS = new Set(['unlinked_list_person_targets', ...PRIVATE_NOTES_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
 export const WRITE_TOOLS = new Set(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
 // Every tool that changes something: connection writes plus private-notes writes.
 export const MUTATING_TOOLS = new Set([...WRITE_TOOLS, ...PRIVATE_NOTES_MUTATING])
@@ -154,7 +156,7 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 // `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
 // people overlay client (private-context.mjs) and the owner identity bridge.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, overlay, identityFor, limits = {} }) {
+export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, overlay, identityFor, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // Write tools use the same rules as the site's Connect button.
@@ -346,6 +348,37 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       // A handle names only a member's profile.
       if (!result?.profile || (profileHandles?.resolve(id) && !handleOf(result.profile))) throw new AccountToolError('not_found', 'No published public profile has that id.')
       return { kind: 'unlinked_get_profile', revision: captured.revision, profile: withHandle(result.profile, true), ...(result.movedFrom ? { movedFrom: result.movedFrom } : {}), visibility: 'public' }
+    },
+    async unlinked_list_person_targets(grant, { q = '', cursor, limit = 50 }, signal) {
+      if (typeof connectionIdentityForOwner !== 'function' || typeof accountForProfile !== 'function' || !memberBlocks)
+        throw new AccountToolError('upstream_unavailable', 'Person identity metadata is not configured.')
+      const listing = await tools.unlinked_list_connections(grant, { q, cursor, limit, degree: 1, sort: 'connected', grouping: 'person' }, signal)
+      const viewer = owner(grant), people = []
+      const hidden = await memberBlocks.hidden(viewer)
+      // Re-read live source evidence so a completed/ongoing connection removal
+      // cannot be revived by a cached public path or an acceptance receipt.
+      const network = await createAccountNetwork({ owner: viewer, getBackend }).readNetwork(undefined, { signal })
+      const sources = new Map(network.assertions.filter(row => row.category === 'connections').map(row => [row.id, row]))
+      const [accepted, invited] = await Promise.all([
+        memberConnections ? memberConnections.connections(viewer) : [],
+        memberInvitations ? memberInvitations.connections(viewer) : [],
+      ])
+      const same = (a, b) => a.ownerId === b.ownerId && a.userId === b.userId
+      for (const entry of listing.connections) {
+        signal?.throwIfAborted()
+        if (!entry.publishedProfileId || hidden.profiles.has(entry.publishedProfileId)) continue
+        const target = await accountForProfile(entry.publishedProfileId)
+        if (!target || same(viewer, target) || await memberBlocks.between(viewer, target)) continue
+        const rows = entry.sources.map(source => sources.get(source.id)).filter(Boolean)
+        const imported = rows.some(row => !['unlinked-connection', 'unlinked-invite'].includes(row.provenance?.source))
+        if (!imported && ![...accepted, ...invited].some(value => same(value.other, target))) continue
+        const identity = await connectionIdentityForOwner(target)
+        if (!identity || identity.issuer !== 'https://id.ideaflow.app/api/auth' || typeof identity.subject !== 'string'
+          || !identity.subject || identity.subject.length > 512 || /[\x00-\x1f\x7f]/.test(identity.subject)) continue
+        people.push({ profileId: entry.publishedProfileId, displayName: entry.name,
+          identity: { issuer: identity.issuer, subject: identity.subject }, connected: true })
+      }
+      return { kind: 'unlinked_person_targets', people, ...(listing.nextCursor ? { nextCursor: listing.nextCursor } : {}) }
     },
     async unlinked_list_connections(grant, { degree = 1, q = '', sort = 'name', grouping = 'person', cursor, limit = 50 }, signal) {
       const owner = { ownerId: grant.ownerId, userId: grant.userId }
