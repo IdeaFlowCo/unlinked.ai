@@ -2,8 +2,10 @@
 
 The standalone runtime can record bounded request metadata for direct REST
 (`/api/agent/...`), direct MCP (`/mcp`), and the shared gateway's signed downstream
-adapter (`/api/connector/mcp`). It does not instrument browser pages, public web
-search, OAuth sign-in/consent, messaging, or the historical Next.js APIs.
+adapter (`/api/connector/mcp`). Public directory reads produce only the
+[admission aggregates](#public-directory-admission-aggregates) described below,
+not per-request browser records. OAuth sign-in/consent, messaging, and the
+historical Next.js APIs are not instrumented.
 
 This is **off by default**. Building, merging, deploying, and enabling diagnostics
 are separate actions. There is no production activation in this change. Use the
@@ -95,8 +97,10 @@ authentication, tool results or HTTP status.
 since the next successful stage. A full disk or sustained failures may prevent
 these counters being persisted. Logging is best-effort, not a complete audit of
 all requests or a security ledger. No new public log-reading endpoint exists.
-The operator reader requires an exact request/account filter, re-projects rows,
-rejects unsafe files, and returns at most500 rows with a `truncated` indicator.
+The operator reader re-projects rows, rejects unsafe files, and returns at
+most500 rows with a `truncated` indicator. Agent request lookup requires an
+exact request/account filter; the separate
+[aggregate lookup mode](#public-directory-admission-aggregates) requires a time boundary.
 Only the approved single runtime writes this directory; concurrent writers are
 not supported. Do not include request logs in public release/CI artifacts or
 long-lived backups that defeat this retention policy.
