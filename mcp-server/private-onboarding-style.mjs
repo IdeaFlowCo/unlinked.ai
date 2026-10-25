@@ -686,7 +686,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .private-context li{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--page);overflow-wrap:anywhere}
 .unlinked-onboarding .private-context li p{margin:0;white-space:pre-wrap}
 .unlinked-onboarding .private-context li .small{display:block;margin:4px 0 0;font-size:12px}
-.unlinked-onboarding .private-context .pc-facts{margin:10px 0 0;font-size:14px;font-weight:600}
+.unlinked-onboarding .private-context .pc-facts{margin:10px 0 0;font-size:14px;font-weight:600}.unlinked-onboarding .private-context .pc-desc{margin:10px 0 0;color:var(--muted)}
 .unlinked-onboarding .private-context .pc-facts.due{color:#a3461b}
 .unlinked-onboarding .private-context .pc-explore{margin-top:10px;min-height:36px}
 .unlinked-onboarding .private-context .pc-hint{margin:14px 0 0;font-size:13px}
