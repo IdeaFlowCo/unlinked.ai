@@ -193,3 +193,8 @@ Default-off standalone REST/MCP diagnostics, trust/redaction boundaries, private
 Public People presence and the historical-account reclaim boundary are owned by the repository contract [Historical membership](docs/public-people-reader.md#historical-membership).
 
 Browser-only LinkedIn URL/QR lookup is documented in [docs/linkedin-discovery-and-queue.md](docs/linkedin-discovery-and-queue.md). General person lookup shares signup’s global adapter budget, never its claim/lifetime account policy; private save uses the existing added-person importer. Agentbook and LinkedIn queue execution remain planning-only.
+
+Private recent-contact enrichment and the viewer-only LinkedIn candidate review
+flow are documented in [docs/contact-enrichment.md](docs/contact-enrichment.md).
+An accepted Unlinked connection/invite is not an imported contact. Keep its
+source label distinct, and never treat a name search as identity evidence.
