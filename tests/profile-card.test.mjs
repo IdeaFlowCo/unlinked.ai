@@ -95,7 +95,7 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   assert.equal(page.status, 200)
   html = await page.text()
   const cardUrl = `${signed.baseUrl}/people/${encodeURIComponent(publicId)}`
-  assert.ok(html.includes(`<code>${cardUrl.replace(/&/g, '&amp;')}</code>`), 'shows the exact encoded URL')
+  assert.ok(html.includes(`<input class="share-url" id="share-public" type="text" readonly value="${cardUrl.replace(/&/g, '&amp;')}"`), 'shows the exact encoded URL, copyable')
   assert.match(html, /<svg[^>]*aria-label="QR code opening /)
   assert.doesNotMatch(html, /src="data:|url\(data:/)
   // No contact channels on the card page (phone stays opt-in and unshipped).
@@ -120,7 +120,7 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   fixture.resources.set(newerId, { type: 'import', sourceId: newerId, sourceOwnerId: fixture.owner.ownerId, sourceRevision: 1, deleted: false,
     payload: { id: newerId, ownerId: fixture.owner.ownerId, filename: 'Newer.csv', archiveSha256: 'e'.repeat(64), status: 'partial', createdAt: Date.now() + 60000, backgroundVersion: 'profile-first-v1', counts: { accepted: 2, indexed: 1 }, consent: { ...PUBLIC_UPLOAD_CONSENT } } })
   html = await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text()
-  assert.ok(html.includes(`<code>${cardUrl.replace(/&/g, '&amp;')}</code>`), 'older published profile still on the card')
+  assert.ok(html.includes(`<input class="share-url" id="share-public" type="text" readonly value="${cardUrl.replace(/&/g, '&amp;')}"`), 'older published profile still on the card')
   fixture.resources.delete(newerId)
 
   // A confirmed legacy profile takes priority as the stable card target.

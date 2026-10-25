@@ -44,7 +44,7 @@ import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
-import { iosAppView, renderScan, fillMeHeadline, TOP_BAR_SCRIPT, LINKEDIN_EMAIL_HELP_SCRIPT, LINKEDIN_EXPORT_PROGRESS_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError, renderMemberHome } from './private-onboarding-views.mjs'
+import { iosAppView, renderScan, fillMeHeadline, TOP_BAR_SCRIPT, CARD_SHARE_SCRIPT, LINKEDIN_EMAIL_HELP_SCRIPT, LINKEDIN_EXPORT_PROGRESS_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError, renderMemberHome } from './private-onboarding-views.mjs'
 import { summarizeImports } from '../src/utils/private-import/import-summary.mjs'
 import { IMPORT_REMINDER } from './home-preferences.mjs'
 import { MEET_SCRIPT } from './public-discovery.mjs'
@@ -622,7 +622,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
     response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
-    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EMAIL_HELP_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${script}`
+    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EMAIL_HELP_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${CARD_SHARE_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
