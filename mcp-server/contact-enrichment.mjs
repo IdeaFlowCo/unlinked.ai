@@ -94,6 +94,17 @@ export function createContactEnrichment({ store, readNetwork, published = async 
         if (!await write(owner, row.id, old, { fingerprint: contactFingerprint(row), status: 'queued', address: parsed.url, confirmedAt: now() })) throw Error('contact_enrichment_conflict')
         return processRow(owner, row, { force: true })
       }
+      // The viewer knows this person's LinkedIn address: their word attaches it
+      // to their own contact only (never to the other member's account), and
+      // the existing bounded lookup fills the details.
+      if (action === 'link') {
+        const parsed = parseLinkedinProfileUrl(address)
+        if (!parsed) throw Error('contact_enrichment_input')
+        const stored = await store.read(owner, row.id)
+        if (!await write(owner, row.id, stored, { fingerprint: contactFingerprint(row), status: 'queued', address: parsed.url, linkedBy: 'viewer', confirmedAt: now() })) throw Error('contact_enrichment_conflict')
+        return processRow(owner, row, { force: true })
+      }
+      // Also how the viewer removes details attached earlier.
       if (action === 'dismiss') {
         if (!old || !await write(owner, row.id, old, { fingerprint: contactFingerprint(row), status: 'dismissed' })) throw Error('contact_enrichment_conflict')
         return

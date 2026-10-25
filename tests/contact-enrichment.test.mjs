@@ -135,4 +135,38 @@ test('HTTP preferences and reviews are session/CSRF/owner scoped; truthful detai
   assert.equal((await post(path + '/enrichment', stranger, { action: 'confirm', address: url })).status, 404)
   assert.equal((await post(path + '/enrichment', me, { action: 'confirm', address: url })).status, 303)
   response = await request(path, { headers: { Cookie: me.cookie } }); assert.match(await response.text(), /Analytical engines/)
+  assert.equal((await post(path + '/enrichment', me, { action: 'dismiss' })).status, 303)
+  assert.equal((await post(path + '/enrichment', stranger, { action: 'link', address: url })).status, 404)
+  assert.equal((await post(path + '/enrichment', me, { action: 'link', address: url })).status, 303)
+  response = await request(path, { headers: { Cookie: me.cookie } }); const linked = await response.text()
+  assert.match(linked, /Analytical engines/); assert.match(linked, /saved privately for you/)
+})
+
+test('a viewer-supplied LinkedIn address enriches only that viewer’s contact, works without opt-in, and can be removed', async () => {
+  const f = fixture()
+  await assert.rejects(f.service.review(owner, row, { action: 'link', address: 'https://evil.test/in/ada' }))
+  await f.service.review(owner, row, { action: 'link', address: url + '?utm_source=share' })
+  let result = await f.service.inspect(owner, row)
+  assert.equal(result.status, 'enriched'); assert.equal(result.address, url); assert.equal(result.linkedBy, undefined)
+  assert.equal(result.profile.positions[0].company, 'Example'); assert.deepEqual(f.counts(), { reads: 1, searches: 0 })
+  assert.equal((await f.service.inspect(other, row)).status, 'not_started')
+  assert.equal(row.fields.url, undefined)
+  let page = renderContactDetail({ csrf: 'csrf', contact: { sourceRowId: row.id, name: 'Ada Example' }, enrichment: result }).content
+  assert.match(page, /saved privately for you/); assert.match(page, /Remove these details/); assert.match(page, /href="https:\/\/www\.linkedin\.com\/in\/ada-example/)
+  await f.service.review(owner, row, { action: 'dismiss' })
+  result = await f.service.inspect(owner, row); assert.equal(result.status, 'dismissed'); assert.equal(result.profile, undefined)
+  page = renderContactDetail({ csrf: 'csrf', contact: { sourceRowId: row.id, name: 'Ada Example' }, enrichment: result }).content
+  assert.match(page, /Know their LinkedIn\?/); assert.match(page, /name="action" value="link"/)
+  // A stale record from a changed source does not block a new address (compare-and-set uses the stored version).
+  const changed = { ...row, fields: { ...row.fields, company: 'Changed' } }; f.setRows([changed])
+  await f.service.review(owner, changed, { action: 'link', address: url })
+  assert.equal((await f.service.inspect(owner, changed)).status, 'enriched')
+})
+
+test('a provider outage after a viewer-supplied address keeps the address so the LinkedIn link still shows', async () => {
+  const f = fixture({ lookup: { lookup: async () => ({ status: 'unavailable', code: 'disabled' }) } })
+  await f.service.review(owner, row, { action: 'link', address: url })
+  const result = await f.service.inspect(owner, row)
+  assert.equal(result.status, 'unavailable'); assert.equal(result.address, url)
+  assert.match(renderContactDetail({ csrf: 'csrf', contact: { sourceRowId: row.id, name: 'Ada Example' }, enrichment: result }).content, /LinkedIn profile ↗/)
 })

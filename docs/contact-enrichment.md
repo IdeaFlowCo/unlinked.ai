@@ -23,6 +23,13 @@ LinkedIn URLs survive; five candidates maximum. The viewer sees company/role,
 location and the actual LinkedIn URL, then chooses **Use this profile** or
 **None of these**. Confirmation attaches professional details to this viewer's
 contact only. It never claims, publishes or edits the other member's identity.
+**Know their LinkedIn?** on the contact page lets the viewer paste the
+person's LinkedIn address. The viewer's word attaches it to their own contact
+only (it needs no opt-in and never proves identity to anyone else), and the
+existing bounded URL lookup fills the details. **Remove these details** drops
+an attached profile again. This is the path for members who joined without a
+published profile (for example by scanning a contact card): their connection
+row carries only a name.
 Errors, no-match, paused and provider limits remain explicit; there is no
 success status without a read-back-able result. The original import is immutable.
 The URL lookup and name search share one durable budget; no new credential is
