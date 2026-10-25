@@ -15,6 +15,7 @@ import { linkedinRefHash, linkedinSlug } from '../src/utils/public-people/url-id
 import { linkedinUrl as canonicalLinkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { CONNECTION_SORTS, PUBLIC_LIST_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { groupConnectionRows, publishedPeopleFor, rowSlug, usableProfileId } from './connection-identity.mjs'
+import { contactFingerprint } from './contact-enrichment.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const LINKEDIN_PROFILE = /^https:\/\/www\.linkedin\.com\/in\/[\w%-]+$/
@@ -156,7 +157,7 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 // `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
 // people overlay client (private-context.mjs) and the owner identity bridge.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, overlay, identityFor, limits = {} }) {
+export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // Write tools use the same rules as the site's Connect button.
@@ -449,7 +450,13 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         if (mode !== 'profileId') throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.')
         rows = []
       }
-      const ordered = rows.map(row => ({ row, entry: connectionEntry(row), slug: rowSlug(row) }))
+      // A row without its own LinkedIn address uses the one the owner attached
+      // to that contact privately (contact enrichment), so the owner's private
+      // card can be keyed linkedin:in:<hash>. Only the hash leaves this tool.
+      let attached = new Map()
+      if (typeof contactAddresses === 'function') { try { attached = await contactAddresses(owner(grant)) } catch { attached = new Map() } }
+      const privateSlug = row => { const value = attached.get(row.id); return value && value.fingerprint === contactFingerprint(row) ? rowSlug({ fields: { url: value.address } }) : null }
+      const ordered = rows.map(row => ({ row, entry: connectionEntry(row), slug: rowSlug(row) ?? privateSlug(row) }))
         .sort((a, b) => a.entry.name.localeCompare(b.entry.name) || a.entry.id.localeCompare(b.entry.id))
       // Each candidate row's published profile: its own target, else a published profile with the same LinkedIn address.
       const publishedFor = async candidates => {

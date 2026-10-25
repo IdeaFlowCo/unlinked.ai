@@ -11,7 +11,7 @@ This replaces the separate Unlinked `note` store sketched in the 2026-10-02 over
 | Surface | How the person is matched |
 |---|---|
 | `/people/:id` (published profile), signed in | `unlinked:person:<id>`, plus `linkedin:in:<hash>` when the owner's own import contains the same person (`unlinked_lookup_contact` by `profileId`). |
-| `/network/contacts/:connectionId` (one of the owner's own imported contacts) | `linkedin:in:<sha256(linkedinSlug())>` from the owner's row, plus `unlinked:person:<id>` when that person has a published profile. On `/network`, private rows without a published profile now link to this page. |
+| `/network/contacts/:connectionId` (one of the owner's own imported contacts) | `linkedin:in:<sha256(linkedinSlug())>` from the owner's row, plus `unlinked:person:<id>` when that person has a published profile. A row with no LinkedIn address of its own (for example a member who joined by scanning a card) uses the address the owner attached privately on the contact page ("Know their LinkedIn?", [contact enrichment](contact-enrichment.md)), while it still matches the row's source. On `/network`, private rows without a published profile now link to this page. |
 
 When two refs name separate overlay entities (they were never joined in Noos), both are shown. Unlinked never joins them.
 

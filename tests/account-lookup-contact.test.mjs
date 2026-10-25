@@ -121,3 +121,29 @@ test('lookups share the published source’s compiled index instead of rebuildin
   await call(); await call()
   assert.equal(reads, afterFirst)
 })
+
+test('a LinkedIn address the owner attached privately keys a profile-less contact (hash only, owner only, current source only)', async () => {
+  const { contactFingerprint } = await import('../mcp-server/contact-enrichment.mjs')
+  const joiner = { requestId: 'request-joiner', name: 'Card Joiner', publicProfileId: null, other: {} }
+  const backend = who => ({ listImportIds: async () => [], readMemberConnections: async () => (who.ownerId === owner.ownerId ? [joiner] : []) })
+  const { privateId } = await import('../src/utils/private-import/job.mjs')
+  const id = privateId(owner.ownerId, 'member-connection', joiner.requestId)
+  const liveRow = { id, category: 'connections', fields: { 'first name': 'Card Joiner', company: '', position: '' }, provenance: { source: 'unlinked-connection', requestId: joiner.requestId } }
+  let fingerprint = contactFingerprint(liveRow)
+  const asked = []
+  const attached = createAccountToolService({ getBackend: async who => backend(who), readPublishedSnapshot: snapshot, lookupSlug: () => null,
+    contactAddresses: async who => { asked.push(who.ownerId); return new Map([[id, { address: 'https://www.linkedin.com/in/Synthetic-Joiner', fingerprint }]]) } })
+  const call = async (input, who = owner) => (await attached.call({ grant: grantFor(who), name: 'unlinked_lookup_contact', input })).result
+  const found = await call({ connectionId: id })
+  assert.equal(found.contact.linkedinRefHash, sha('synthetic-joiner')); assert.equal(found.visibility, 'owner_private')
+  assert.doesNotMatch(JSON.stringify(found), /linkedin\.com/)
+  assert.equal((await call({ linkedinUrl: 'https://www.linkedin.com/in/synthetic-joiner' })).contact.connectionId, id)
+  assert.equal((await call({ refHashes: [sha('synthetic-joiner')] })).contacts[0].connectionId, id)
+  assert.ok(asked.every(value => value === owner.ownerId))
+  // A changed source (here: the person later got a different row shape) drops the private key.
+  fingerprint = 'stale'
+  assert.equal((await call({ connectionId: id })).contact.linkedinRefHash, null)
+  // A failing private store never breaks the lookup.
+  const broken = createAccountToolService({ getBackend: async who => backend(who), readPublishedSnapshot: snapshot, contactAddresses: async () => { throw Error('store down') } })
+  assert.equal((await broken.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: id } })).result.contact.linkedinRefHash, null)
+})

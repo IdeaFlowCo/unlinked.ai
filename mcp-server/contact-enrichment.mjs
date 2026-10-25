@@ -145,6 +145,17 @@ export function createContactEnrichment({ store, readNetwork, published = async 
     start() { if (!timer) { timer = setInterval(() => { void service.tick().catch(() => {}) }, intervalMs); timer.unref?.() } },
     async stop() { stopped = true; clearInterval(timer); await running?.catch(() => {}) },
     exportOwner: owner => store.exportOwner(owner),
+    // The LinkedIn address this viewer attached to each of their own contacts
+    // (still matching the contact's current source). The owner-scoped contact
+    // lookup keys private people cards by it (docs/private-context.md).
+    async addresses(owner) {
+      const found = new Map()
+      for (const record of await store.exportOwner(owner)) {
+        const url = record.id !== 'preferences' && parseLinkedinProfileUrl(record.address)?.url
+        if (url && typeof record.fingerprint === 'string') found.set(record.id, { address: url, fingerprint: record.fingerprint })
+      }
+      return found
+    },
     removeOwner: owner => store.removeOwner(owner),
   }
   return service
