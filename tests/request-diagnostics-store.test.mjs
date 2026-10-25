@@ -61,3 +61,18 @@ test('backwards clock drops new date files instead of growing the retention capa
  sink.emit(row()); await sink.flush(); now = new Date('2026-10-08'); sink.emit(row()); await sink.flush()
  assert.deepEqual(await readdir(dir), ['requests-2026-10-09.jsonl']); assert.equal(sink.stats().dropped, 1)
 })
+
+
+test('operator can read persisted admission aggregates only with an explicit time boundary and no identity filters', async t => {
+ const dir = await directory(t), sink = await createDiagnosticsStore({ directory: dir, now: () => new Date('2026-10-09T00:00:00Z') })
+ t.after(() => sink.close())
+ const request = row()
+ sink.emit(request)
+ sink.emit({ schema: 1, event: 'public_admission', at: '2026-10-09T00:00:00.000Z', lane: 'anonymous', route: 'profile', reason: 'minute', count: 12, query: privateText, token: privateText })
+ await sink.flush()
+ const result = await readDiagnostics({ directory: dir, event: 'public_admission', since: '2026-10-09T00:00:00Z' })
+ assert.deepEqual(result, { records: [{ schema: 1, event: 'public_admission', at: '2026-10-09T00:00:00.000Z', lane: 'anonymous', route: 'profile', reason: 'minute', count: 12 }], truncated: false })
+ assert.equal((await readDiagnostics({ directory: dir, event: 'public_admission', since: '2026-10-10T00:00:00Z' })).records.length, 0)
+ assert.equal((await readDiagnostics({ directory: dir, requestId: request.request_id })).records.length, 1)
+ for (const options of [{ event: 'public_admission' }, { event: 'agent_request', since: '2026-10-09T00:00:00Z' }, { event: 'public_admission', since: 'bad' }, { event: 'public_admission', since: '2026-10-09T00:00:00Z', requestId: request.request_id }, { since: '2026-10-09T00:00:00Z' }]) await assert.rejects(readDiagnostics({ directory: dir, ...options }), /filter_required/)
+})

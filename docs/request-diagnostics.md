@@ -150,3 +150,5 @@ release source/version and rollback before declaring live diagnostic coverage.
 ## Public directory admission aggregates
 
 The same default-off collection gate also records `public_admission` schema-1 aggregates: UTC minute, lane (`anonymous`/`viewer`), route family (`profile`/`connections`/`company`/`search`), reason (`admitted`/`minute`/`capacity`/`cancelled`) and count. At most 32 rows per completed minute, flushed on the next admission; the current partial minute may be lost on shutdown. No account, IP, user agent, handle or query is collected. Retention, file size and queue bounds are identical to agent diagnostics. This distinguishes minute exhaustion from concurrency pressure without enabling access logs.
+
+Read only aggregate counters with `node scripts/read-request-diagnostics.mjs --directory /absolute/private/audit/requests --event public_admission --since 2026-10-24T00:00:00Z`. The explicit UTC time boundary is required. This mode excludes agent request rows and cannot be combined with account/request filters; those retain their existing exact-filter requirement. All file ownership, mode, link and 500-record bounds remain in force.
