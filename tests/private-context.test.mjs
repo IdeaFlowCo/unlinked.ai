@@ -142,6 +142,10 @@ test('a profile reads its own ref and the owner import of the same person; relat
   const hood = await context.neighbourhood(owner, 'ent-ada', 2)
   assert.deepEqual(hood.links.map(link => [link.from.name, link.relation, link.to.name, link.to.href]), [['Ada Synthetic', 'knows', 'Bo Private', `/network/contacts/${bo.id}`]])
   assert.equal(await context.neighbourhood(stranger, 'ent-ada', 2), null)
+  // With owner-private contact addresses, the same end links to its slug (docs/contact-slugs.md).
+  const slugged = createPrivateContext({ overlay, identityFor: async who => identities.get(who.ownerId) ?? null, lookupContact, now: () => Date.parse('2026-10-09T12:00:00Z'), contactPath: id => id === bo.id ? '/network/contacts/bo-private' : `/network/contacts/${id}` })
+  const viaSlug = await slugged.forProfile(owner, 'pub-ada')
+  assert.equal(viaSlug.entities[0].relations.find(relation => relation.other.name === 'Bo Private').other.href, '/network/contacts/bo-private')
 })
 
 test('no identity and a failing overlay are distinct from empty', async () => {

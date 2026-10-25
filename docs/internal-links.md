@@ -10,8 +10,8 @@ A link on an Unlinked page must lead to a page. Two rules keep that true:
   characters) render as text (`companyPageName` in
   `src/utils/public-people/text-match.mjs`).
 - **People links** go through `profilePath(id)` (see `profile-handles.md`);
-  people without a public profile link to `/network/contacts/<privateId>` or
-  render as text.
+  people without a public profile link to their owner-private contact address
+  (`contactPathFor`, docs/contact-slugs.md) or render as text.
 
 - **Claim it.** "Is this you?" on an imported profile only links where this
   viewer can claim it (`claimRouteFor` in `mcp-server/private-browser.mjs`):
