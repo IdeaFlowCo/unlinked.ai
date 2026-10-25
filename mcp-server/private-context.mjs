@@ -136,6 +136,8 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   }
   const shape = (entity, hrefs) => ({
     id: entity.id, kind: entity.kind, name: String(entity.name ?? ''),
+    // The owner's one-line summary of the person (overlay description), as OpenChat shows it.
+    description: typeof entity.description === 'string' && entity.description.trim() ? entity.description.slice(0, 280) : null,
     important: entity.card?.important === true, catchUp: catchUp(entity.card),
     notes: (Array.isArray(entity.notes) ? entity.notes : []).map(note => ({ text: String(note.text ?? ''), createdAt: iso(note.createdAt), label: provenanceLabel(note) })),
     relations: (Array.isArray(entity.links) ? entity.links : []).map(link => ({ relation: String(link.relation ?? ''), relationType: link.relationType ?? 'other', direction: link.direction === 'in' ? 'in' : 'out',
@@ -212,6 +214,7 @@ const render=(mount,data)=>{mount.replaceChildren();mount.hidden=false;const nam
  const r=remembered();box.open=r===null?true:r==='1';box.addEventListener('toggle',()=>{try{localStorage.setItem(KEY,box.open?'1':'0')}catch{}});
  for(const e of data.entities){const sec=el('div','pc-entity');if(data.entities.length>1)sec.append(el('h4',null,e.name));
   const facts=[];if(e.important)facts.push('★ Important to you');if(e.catchUp){if(e.catchUp.cadenceDays)facts.push('Catch up every '+e.catchUp.cadenceDays+' days');if(e.catchUp.lastContactAt)facts.push('last '+day(e.catchUp.lastContactAt));if(e.catchUp.due)facts.push('due now');else if(e.catchUp.nextDueAt)facts.push('next '+day(e.catchUp.nextDueAt))}
+  if(e.description)sec.append(el('p','pc-desc',e.description));
   if(facts.length)sec.append(el('p','pc-facts'+(e.catchUp&&e.catchUp.due?' due':''),facts.join(' · ')));
   if(e.notes.length){const ul=el('ul','pc-notes');for(const n of e.notes){const li=el('li');li.append(el('p',null,n.text));const meta=[n.label,n.createdAt?day(n.createdAt):''].filter(Boolean).join(' · ');if(meta)li.append(el('span','small',meta));ul.append(li)}sec.append(el('h5',null,'Notes'),ul)}
   if(e.relations.length){const ul=el('ul','pc-rels');for(const x of e.relations){const li=el('li'),line=el('span','pc-rel');if(x.direction==='in'){line.append(link(x.other),' '+x.relation+' ',el('span',null,e.name))}else{line.append(el('span',null,e.name),' '+x.relation+' ',link(x.other))}li.append(line);if(x.label)li.append(el('span','small',x.label));ul.append(li)}sec.append(el('h5',null,'Relations'),ul)}

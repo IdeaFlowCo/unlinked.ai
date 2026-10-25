@@ -16,6 +16,7 @@ This replaces the separate Unlinked `note` store sketched in the 2026-10-02 over
 When two refs name separate overlay entities (they were never joined in Noos), both are shown. Unlinked never joins them.
 
 Each entity shows:
+- The owner's one-line description of the person (overlay `description`), when there is one.
 - Notes, newest first, with a source label from provenance, such as "Added by Claude via your Ideaflow connector", "Added by you" or "· inferred". Records written before 2026-10-09 carry no provenance and show no label.
 - Relations, worded from the person's side, with the other end linked where it is an Unlinked person: a published profile, or the owner's own contact page.
 - Importance and catch-up (cadence, last contact, next or due).
