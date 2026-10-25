@@ -8,6 +8,9 @@ import { createMessagingResolver, createMessagingSession, createMessagingRecipie
 import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
+import { createContactEnrichment, createNeo4jContactEnrichmentStore } from './contact-enrichment.mjs'
+import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
+import { publishedPeopleFor } from './connection-identity.mjs'
 import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
@@ -131,11 +134,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, connectionSync, indexWarmKeeper, closed = false
+  let server, worker, memberEmail, diagnosticsStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
   const close = async () => {
     if (closed) return
     closed = true
     indexWarmKeeper?.stop()
+    await contactEnrichment?.stop()
     await diagnosticsStore?.close()
     await connectionSync?.stop()
     await worker?.stop()
@@ -595,11 +599,29 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       connectionSync = createOpenChatConnectionSync({ store: createNeo4jOpenChatSyncStore(driver), identityForOwner, secret: process.env.UNLINKED_MESSAGING_SECRET })
       connectionSync.start()
     }
+    if (personLookup && readPublishedSnapshot) {
+      const enrichmentStore = createNeo4jContactEnrichmentStore(driver)
+      await enrichmentStore.initialize()
+      const reader = createPublicPeopleReader({ readPublishedSnapshot })
+      contactEnrichment = createContactEnrichment({ store: enrichmentStore,
+        readNetwork: owner => createAccountNetwork({ owner, getBackend }).readNetwork(), lookup: personLookup,
+        published: async row => {
+          const [match] = await publishedPeopleFor([row], { lookupSlug: slug => selfClaims.lookupSlug(slug), lookup: ids => reader.lookup({ ids }) })
+          return match ? reader.profile({ id: match.id }) : null
+        },
+        localCandidates: async name => {
+          const result = await reader.list({ query: name, mode: 'exact' })
+          return Promise.all(result.profiles.slice(0, 5).map(profile => reader.profile({ id: profile.id })))
+        },
+      })
+      contactEnrichment.start()
+    }
     return { login, getBackend, close, audit, requestDiagnostics, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),
       readPublishedSnapshot,
+      contactEnrichment,
       messagingSecret: process.env.UNLINKED_MESSAGING_SECRET || undefined,
       connectionIdentityForOwner: identityForOwner,
       resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }),

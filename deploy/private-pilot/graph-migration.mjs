@@ -19,6 +19,8 @@ export const LABELS = Object.freeze([
   'UnlinkedSafetyReport',
   // Member blocks (mcp-server/member-blocks.mjs).
   'UnlinkedMemberBlock',
+  // Private per-viewer contact enrichment (mcp-server/contact-enrichment.mjs).
+  'UnlinkedContactEnrichment',
   // Reviewed source schema exists for these currently empty domains. Later
   // email/invitation writes must remain included in shared recovery snapshots.
   'UnlinkedEmailInviteLock', 'UnlinkedEmailSend', 'UnlinkedEmailSuppression', 'UnlinkedMemberInvitation',
