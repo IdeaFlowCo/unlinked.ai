@@ -176,3 +176,31 @@ test('the private enrichment store is part of shared recovery snapshots', () => 
   // An unknown Unlinked label makes the shared export fail closed (deploy/private-pilot/graph-migration.mjs).
   assert.ok(LABELS.includes('UnlinkedContactEnrichment'))
 })
+
+test('review fixes: bulk-import dates do not make old connections recent; interrupted lookups keep the controls; idle owners back off', async () => {
+  assert.equal(recentContact({ ...row, connectedAt: time - 400 * 86400000, importedAt: time - 1000 }, time), false)
+  assert.equal(recentContact({ ...row, connectedAt: undefined, importedAt: time - 1000 }, time), true)
+  // A lookup interrupted after its pending write (here: the live network read fails) is not stuck.
+  let clock = time
+  const f = fixture({ now: () => clock, readNetwork: async () => { throw Error('network down') } })
+  await f.service.review(owner, row, { action: 'link', address: url })
+  assert.equal((await f.service.inspect(owner, row)).status, 'processing')
+  clock += 61000
+  const settled = await f.service.inspect(owner, row)
+  assert.equal(settled.status, 'unavailable'); assert.equal(settled.code, 'interrupted')
+  assert.match(renderContactDetail({ csrf: 'csrf', contact: { sourceRowId: row.id, name: 'Ada Example' }, enrichment: settled }).content, /Know their LinkedIn\?/)
+  // Idle owners: one network read, then a 10-minute back-off.
+  let reads = 0
+  const idle = fixture({ now: () => clock, readNetwork: async () => { reads++; return { assertions: [] } } })
+  await idle.service.configure(owner, true); await idle.service.tick(); await idle.service.tick(); assert.equal(reads, 1)
+  clock += 601000; await idle.service.tick(); assert.equal(reads, 2)
+  await idle.service.stop()
+})
+
+test('stored profiles stay inside the record size cap', async () => {
+  const huge = { name: 'Ada Example', about: 'x'.repeat(30000), positions: Array.from({ length: 100 }, (_, i) => ({ title: 'Engineer ' + i, company: 'Example', description: 'y'.repeat(20000) })) }
+  const f = fixture({ lookup: { lookup: async () => ({ status: 'found', profile: huge }) } })
+  await f.service.review(owner, row, { action: 'link', address: url })
+  const result = await f.service.inspect(owner, row)
+  assert.equal(result.status, 'enriched'); assert.ok(JSON.stringify(result).length < 48000); assert.equal(result.profile.positions.length, 30)
+})

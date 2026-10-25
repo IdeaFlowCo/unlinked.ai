@@ -11,7 +11,11 @@ const ownerKey = owner => {
 }
 export const contactFingerprint = row => hash([row.id, row.fields, row.provenance])
 export const contactName = row => [row.fields?.['first name'], row.fields?.['last name']].filter(Boolean).join(' ').trim().slice(0, 200)
-export const recentContact = (row, now) => row.category === 'connections' && [row.connectedAt, row.importedAt].some(at => Number.isSafeInteger(at) && at > now - 14 * DAY && at <= now)
+// The connection date decides; a fresh bulk export stamps importedAt on every
+// row, so the import date counts only for rows without a connection date.
+export const recentContact = (row, now) => { const at = row.connectedAt ?? row.importedAt; return row.category === 'connections' && Number.isSafeInteger(at) && at > now - 14 * DAY && at <= now }
+// Bounded stored copy: the store caps each record at 48,000 characters.
+const storedProfile = profile => ({ ...profile, about: profile.about?.slice(0, 4000), positions: profile.positions.slice(0, 30).map(value => ({ ...value, ...(value.description ? { description: value.description.slice(0, 1000) } : {}) })), education: profile.education.slice(0, 20), skills: profile.skills.slice(0, 50) })
 const sameName = (a, b) => a.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '') === b.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 export function normalizeContactCandidates(values, name) {
   if (!Array.isArray(values)) throw Error('contact_search_unavailable')
@@ -32,6 +36,7 @@ const rich = profile => Boolean(profile?.about || profile?.positions?.length || 
 // public publication or a change to the other person's account/profile.
 export function createContactEnrichment({ store, readNetwork, published = async () => null, localCandidates = async () => [], lookup, now = Date.now, intervalMs = 15000 }) {
   let timer, running = null, stopped = false
+  const nextScan = new Map() // owner key -> earliest next network read for the worker
   const preferences = owner => store.read(owner, 'preferences')
   const saved = async (owner, row) => {
     const state = await store.read(owner, row.id)
@@ -44,7 +49,9 @@ export function createContactEnrichment({ store, readNetwork, published = async 
   async function inspect(owner, row) {
     const state = await saved(owner, row)
     const profile = await published(row)
-    return { ...(rich(profile) ? { status: 'enriched', source: 'unlinked' } : state ?? { status: 'not_started' }), ...(profile ? { publishedProfile: profile } : {}) }
+    // A lookup interrupted by a pause, restart or error must not hide the controls.
+    const settled = state && ['processing', 'queued'].includes(state.status) && !(state.retryAt > now()) ? { ...state, status: 'unavailable', code: 'interrupted' } : state
+    return { ...(rich(profile) ? { status: 'enriched', source: 'unlinked' } : settled ?? { status: 'not_started' }), ...(profile ? { publishedProfile: profile } : {}) }
   }
   async function processRow(owner, row, { force = false } = {}) {
     const prefs = await preferences(owner)
@@ -60,7 +67,7 @@ export function createContactEnrichment({ store, readNetwork, published = async 
     try {
       if (address) {
         const result = await lookup.lookup({ owner, address })
-        next = result.status === 'found' ? { status: 'enriched', address, profile: normalizeLookupProfile(result.profile), observedAt: result.observedAt ?? now(), source: 'linkedin' }
+        next = result.status === 'found' ? { status: 'enriched', address, profile: storedProfile(normalizeLookupProfile(result.profile)), observedAt: result.observedAt ?? now(), source: 'linkedin' }
           : { status: result.code === 'not_found' ? 'not_found' : 'unavailable', code: result.code, retryAt: now() + (['daily_cap', 'owner_limit'].includes(result.code) ? DAY : result.code === 'paced' ? 60000 : 3600000) }
       } else {
         let candidates = normalizeContactCandidates(await localCandidates(contactName(row)), contactName(row))
@@ -74,9 +81,10 @@ export function createContactEnrichment({ store, readNetwork, published = async 
       }
     } catch (error) { next = { status: 'unavailable', code: ['disabled', 'daily_cap', 'owner_limit', 'paced'].includes(error?.code) ? error.code : 'unavailable', retryAt: now() + (['daily_cap', 'owner_limit'].includes(error?.code) ? DAY : 3600000) } }
     // A removal, changed source, pause or concurrent review beats a late lookup.
-    const live = (await readNetwork(owner)).assertions.find(value => value.id === row.id)
+    const live = await readNetwork(owner).then(network => network.assertions.find(value => value.id === row.id), () => null)
     if (!live || contactFingerprint(live) !== pending.fingerprint || (!force && !(await preferences(owner))?.enabled)) return null
-    return write(owner, row.id, pending, { ...next, fingerprint: pending.fingerprint, ...(address ? { address } : {}) })
+    try { return await write(owner, row.id, pending, { ...next, fingerprint: pending.fingerprint, ...(address ? { address } : {}) }) }
+    catch { return write(owner, row.id, pending, { status: 'unavailable', code: 'unavailable', fingerprint: pending.fingerprint, retryAt: now() + 3600000, ...(address ? { address } : {}) }) }
   }
   const service = {
     inspect,
@@ -85,6 +93,7 @@ export function createContactEnrichment({ store, readNetwork, published = async 
       if (typeof enabled !== 'boolean') throw Error('contact_enrichment_input')
       const old = await preferences(owner)
       if (!await write(owner, 'preferences', old, { enabled })) throw Error('contact_enrichment_conflict')
+      nextScan.delete(ownerKey(owner))
     },
     async review(owner, row, { action, address }) {
       const old = await saved(owner, row)
@@ -115,11 +124,15 @@ export function createContactEnrichment({ store, readNetwork, published = async 
     },
     async processOwner(owner) {
       if (!(await preferences(owner))?.enabled) return
+      const scanKey = ownerKey(owner)
+      if (nextScan.get(scanKey) > now()) return
+      nextScan.set(scanKey, now() + 600000) // idle owners are re-read every 10 min, not every tick
       const network = await readNetwork(owner)
       for (const row of network.assertions.filter(row => recentContact(row, now())).sort((a, b) => (b.connectedAt ?? b.importedAt) - (a.connectedAt ?? a.importedAt))) {
         if (stopped) return
         const current = await saved(owner, row)
         if (current && (['enriched', 'needs_review', 'dismissed'].includes(current.status) || current.retryAt > now())) continue
+        nextScan.delete(scanKey)
         await processRow(owner, row)
         return // one operation per owner/tick; the shared provider budget also applies
       }
@@ -130,7 +143,7 @@ export function createContactEnrichment({ store, readNetwork, published = async 
       return running
     },
     start() { if (!timer) { timer = setInterval(() => { void service.tick().catch(() => {}) }, intervalMs); timer.unref?.() } },
-    async stop() { stopped = true; clearInterval(timer); await running },
+    async stop() { stopped = true; clearInterval(timer); await running?.catch(() => {}) },
     exportOwner: owner => store.exportOwner(owner),
     removeOwner: owner => store.removeOwner(owner),
   }

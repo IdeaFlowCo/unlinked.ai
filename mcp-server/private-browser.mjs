@@ -2375,7 +2375,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (signup && contactEnrichment && request.method === 'POST' && enrichContact) {
         const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
         if (input.get('csrf') !== session.csrf || input.getAll('csrf').length !== 1 || input.getAll('action').length !== 1 || input.getAll('address').length > 1 || [...input.keys()].some(key => !['csrf', 'action', 'address'].includes(key))) throw Error('private_browser_csrf')
-        const id = decodeURIComponent(enrichContact[1]), network = await accountNetwork(session.owner)
+        let id
+        try { id = decodeURIComponent(enrichContact[1]) } catch { response.writeHead(404).end(); return }
+        const network = await accountNetwork(session.owner)
         const row = network.assertions.find(value => value.category === 'connections' && value.id === id)
         if (!row) { response.writeHead(404).end(); return }
         await contactEnrichment.review(session.owner, row, { action: input.get('action'), address: input.get('address') })
