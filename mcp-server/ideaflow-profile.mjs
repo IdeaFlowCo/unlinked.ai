@@ -60,3 +60,89 @@ export function ideaflowProfileCard(profile, { self = false } = {}) {
   const source = profile.url ? `<a href="${esc(profile.url)}" rel="noopener">their Ideaflow ideas page</a>` : 'their Ideaflow ideas page'
   return `<div class="card sec ideaflow-profile"><h3>Interests and asks</h3>${list('Interested in', profile.interests)}${list('Looking for', profile.lookingFor)}${list('Can help with', profile.offers)}<p class="small muted">From ${source}${self ? '. Only you see this preview on Unlinked for now.' : '.'}</p></div>`
 }
+
+// ---- Owner control: whether a member's Ideaflow interests/asks appear on their Unlinked profile ----
+// Default (no record) is 'shown': the section appears collapsed, opened by a second click. A member can
+// hide it; the choice is theirs alone and goes with the account. Collapsed is not private: the source
+// is the member's own public About on the ideas network (public sections only; unlisted and
+// signed-in-only bullets never reach this lookup).
+export const IDEAFLOW_PROFILE_VISIBILITY = Object.freeze(['shown', 'hidden'])
+const validOwner = owner => typeof owner?.ownerId === 'string' && owner.ownerId && typeof owner.userId === 'string' && owner.userId
+
+export function createMemoryIdeaflowProfileChoices({ now = Date.now } = {}) {
+  const records = new Map()
+  return {
+    async initialize() {},
+    async get(owner) { if (!validOwner(owner)) return 'shown'; const v = records.get(owner.ownerId); return v && v.userId === owner.userId ? v.visibility : 'shown' },
+    async set(owner, visibility) {
+      if (!validOwner(owner)) throw new Error('ideaflow_profile_owner_required')
+      if (!IDEAFLOW_PROFILE_VISIBILITY.includes(visibility)) throw new Error('ideaflow_profile_visibility_invalid')
+      records.set(owner.ownerId, { userId: owner.userId, visibility, updatedAt: now() }); return visibility
+    },
+    async removeOwner(owner) { if (validOwner(owner)) records.delete(owner.ownerId) },
+  }
+}
+
+export function createNeo4jIdeaflowProfileChoices(driver, database = 'neo4j', { now = Date.now } = {}) {
+  const run = async (query, params, mode = 'WRITE') => {
+    const session = driver.session({ database, defaultAccessMode: mode })
+    try { return await (mode === 'READ' ? session.executeRead(tx => tx.run(query, params)) : session.executeWrite(tx => tx.run(query, params))) } finally { await session.close() }
+  }
+  return {
+    async initialize() {
+      await run('CREATE CONSTRAINT unlinked_ideaflow_profile_choice_owner IF NOT EXISTS FOR (p:UnlinkedIdeaflowProfileChoice) REQUIRE p.ownerId IS UNIQUE', {})
+    },
+    async get(owner) {
+      if (!validOwner(owner)) return 'shown'
+      const result = await run('MATCH (p:UnlinkedIdeaflowProfileChoice {ownerId: $ownerId}) WHERE p.userId = $userId RETURN p.visibility AS visibility LIMIT 1', { ownerId: owner.ownerId, userId: owner.userId }, 'READ')
+      const v = result.records[0]?.get('visibility')
+      return IDEAFLOW_PROFILE_VISIBILITY.includes(v) ? v : 'shown'
+    },
+    async set(owner, visibility) {
+      if (!validOwner(owner)) throw new Error('ideaflow_profile_owner_required')
+      if (!IDEAFLOW_PROFILE_VISIBILITY.includes(visibility)) throw new Error('ideaflow_profile_visibility_invalid')
+      await run('MERGE (p:UnlinkedIdeaflowProfileChoice {ownerId: $ownerId}) SET p.userId = $userId, p.visibility = $visibility, p.updatedAt = $updatedAt', { ownerId: owner.ownerId, userId: owner.userId, visibility, updatedAt: now() })
+      return visibility
+    },
+    async removeOwner(owner) {
+      if (!validOwner(owner)) return
+      await run('MATCH (p:UnlinkedIdeaflowProfileChoice {ownerId: $ownerId}) DETACH DELETE p', { ownerId: owner.ownerId })
+    },
+  }
+}
+
+/**
+ * Provider for the person page. Resolves a published profile to its member account and that account
+ * to its one verified Ideaflow identity (no names, emails or guesses), then reads ProfileV1.
+ */
+export function createIdeaflowProfileProvider({ client, accountForProfile, identityForOwner, choices }) {
+  if (!client?.byIdentity || typeof accountForProfile !== 'function' || typeof identityForOwner !== 'function' || !choices?.get || !choices?.set) throw new Error('ideaflow_profile_provider_configuration_required')
+  return {
+    publicCards: true,
+    choices,
+    async forProfile(profileId, { self = false } = {}) {
+      const owner = await accountForProfile(profileId)
+      if (!owner) return null
+      const visibility = await choices.get(owner)
+      if (!self && visibility !== 'shown') return null
+      const identity = await identityForOwner(owner)
+      if (!identity || identity.issuer !== IDEAFLOW_ISSUER) return null
+      const profile = await client.byIdentity(identity)
+      return profile ? { ...profile, visibility } : (self ? { empty: true, visibility } : null)
+    },
+  }
+}
+
+/** Collapsed "second click" section for viewers; the owner gets the open preview plus the control. */
+export function ideaflowProfileSection(profile, { self = false, csrf = '', action = '/profile/ideaflow' } = {}) {
+  if (!profile) return ''
+  const list = (label, items) => items?.length ? `<p class="small"><strong>${label}</strong></p><ul class="ideaflow-profile-list">${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul>` : ''
+  const body = profile.empty
+    ? `<p class="small">Nothing public yet. Add Interests, Looking for or Can help with sections to <a href="https://social.ideaflow.app/" rel="noopener">your Ideaflow ideas page</a> and they can appear here.</p>`
+    : `${list('Interested in', profile.interests)}${list('Looking for', profile.lookingFor)}${list('Can help with', profile.offers)}<p class="small muted">From ${profile.url ? `<a href="${esc(profile.url)}" rel="noopener">their Ideaflow ideas page</a>` : 'their Ideaflow ideas page'} (public sections only).</p>`
+  if (!self) return `<details class="card sec ideaflow-profile"><summary><h3 style="display:inline">Interests and asks</h3></summary>${body}</details>`
+  const shown = profile.visibility !== 'hidden'
+  const control = `<form method="post" action="${esc(action)}" class="actions">${csrf ? `<input type="hidden" name="csrf" value="${esc(csrf)}">` : ''}<input type="hidden" name="visibility" value="${shown ? 'hidden' : 'shown'}"><button class="quiet sm" type="submit">${shown ? 'Hide from my profile' : 'Show on my profile'}</button></form>`
+  const status = shown ? 'Shown on your profile, collapsed: visitors open it with a click.' : 'Hidden from your profile. Only you see this.'
+  return `<details class="card sec ideaflow-profile" open><summary><h3 style="display:inline">Interests and asks</h3></summary>${body}<p class="small">${status}</p>${control}</details>`
+}
