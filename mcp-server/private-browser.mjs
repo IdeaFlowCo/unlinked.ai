@@ -1,4 +1,4 @@
-import { ideaflowProfileCard } from './ideaflow-profile.mjs'
+import { ideaflowProfileSection, IDEAFLOW_PROFILE_VISIBILITY } from './ideaflow-profile.mjs'
 import { createPublicReadAdmission } from './public-read-admission.mjs'
 import { recentContact, contactName } from './contact-enrichment.mjs'
 import { MESSAGES_CLIENT_SOURCE, messagesConfig } from './messages-client.mjs'
@@ -1524,14 +1524,15 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             // Right after "Join Unlinked & connect": the new member's own card to share back.
             const shareBack = viewer && url.searchParams.get('joined') === '1' && !publicProfile?.[2] && connect?.state !== 'self' ? await ensureOwnCard(viewer.owner, { name: viewer.displayName }) : null
             // Interests and asks from the member's Ideaflow ideas page (ideaflow.profile.v1, unlinked-4dig).
-            // Optional provider: the owner sees a private preview of their own; other members' cards
-            // render only when the provider is configured with publicCards (a separate publication decision).
+            // Shown collapsed (a second click) unless the member hid it; the member sees an open preview
+            // with the Show/Hide control. Only the source's public sections are ever read.
             let ideaflowCard = ''
             if (ideaflowProfiles && !publicProfile?.[2] && result.profile.presence === 'member') {
-              const self = connect?.state === 'self'
+              const mineId = viewer && typeof ownProfileId === 'function' ? await bounded(() => ownProfileId(viewer.owner), null) : null
+              const self = connect?.state === 'self' || (mineId !== null && mineId === result.profile.id)
               if (self || ideaflowProfiles.publicCards === true) {
                 const found = await bounded(() => ideaflowProfiles.forProfile(result.profile.id, { viewer: viewer?.owner ?? null, self }), null)
-                ideaflowCard = ideaflowProfileCard(found, { self: self && ideaflowProfiles.publicCards !== true })
+                ideaflowCard = ideaflowProfileSection(found, { self, csrf: self ? viewer?.csrf : '' })
               }
             }
             journey(response, renderPerson({ ...chrome, ideaflowCard, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
@@ -1939,6 +1940,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         })()
         work.catch(() => {})
         return Promise.race([work.catch(() => null), new Promise(resolve => setTimeout(resolve, 2500, null).unref?.())])
+      }
+      if (request.method === 'POST' && url.pathname === '/profile/ideaflow' && signup && ideaflowProfiles?.choices) {
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('visibility').length !== 1 || !IDEAFLOW_PROFILE_VISIBILITY.includes(input.get('visibility')) || [...input.keys()].some(key => !['csrf', 'visibility'].includes(key))) throw new Error('private_browser_csrf')
+        // The member's own display choice for their own profile page.
+        await ideaflowProfiles.choices.set(session.owner, input.get('visibility'))
+        const own = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
+        redirect(response, own ? profilePath(own) : '/profile'); return
       }
       if (request.method === 'POST' && url.pathname === '/home/import-reminder' && signup && homePreferences) {
         const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
@@ -2533,6 +2542,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
         if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
+        if (ideaflowProfiles?.choices) await ideaflowProfiles.choices.removeOwner(session.owner).catch(() => {})
         if (personLookup) await personLookup.removeOwner(session.owner)
         if (contactEnrichment) await contactEnrichment.removeOwner(session.owner)
         if (contactSlugs) await contactSlugs.removeOwner(session.owner)

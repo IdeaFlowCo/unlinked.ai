@@ -23,6 +23,8 @@ export const LABELS = Object.freeze([
   'UnlinkedContactEnrichment',
   // Owner-private contact addresses (mcp-server/contact-slugs.mjs).
   'UnlinkedContactSlug',
+  // Members' show/hide choice for Ideaflow interests and asks (mcp-server/ideaflow-profile.mjs).
+  'UnlinkedIdeaflowProfileChoice',
   // Reviewed source schema exists for these currently empty domains. Later
   // email/invitation writes must remain included in shared recovery snapshots.
   'UnlinkedEmailInviteLock', 'UnlinkedEmailSend', 'UnlinkedEmailSuppression', 'UnlinkedMemberInvitation',

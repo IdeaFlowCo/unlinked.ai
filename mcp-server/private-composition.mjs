@@ -26,6 +26,7 @@ import { createNeo4jCompanyFactsStore } from './company-facts-store.mjs'
 import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
 import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
+import { createIdeaflowProfileClient, createIdeaflowProfileProvider, createNeo4jIdeaflowProfileChoices } from './ideaflow-profile.mjs'
 import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
 import { createNeo4jProfileHandleStore, createProfileHandles } from './profile-handles.mjs'
 import { createNeo4jSafetyReportStore, createSafetyReports } from './safety-reports.mjs'
@@ -93,7 +94,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createIdeaflowProfileChoiceStore: createNeo4jIdeaflowProfileChoices, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -206,6 +207,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // The signed-in home's display choices (docs/member-home.md); UI preferences only.
     const homePreferences = typeof dependencies.createHomePreferenceStore === 'function' ? dependencies.createHomePreferenceStore(driver, 'neo4j') : undefined
     await homePreferences?.initialize()
+    // Members' choice to show or hide their Ideaflow interests and asks (docs/ideaflow-profile.md).
+    const ideaflowProfileChoices = process.env.UNLINKED_IDEAFLOW_PROFILES !== 'off' && typeof dependencies.createIdeaflowProfileChoiceStore === 'function' ? dependencies.createIdeaflowProfileChoiceStore(driver, 'neo4j') : undefined
+    await ideaflowProfileChoices?.initialize()
     // Member-published public profile links (docs/profile-social-links.md).
     const profileSocialLinks = typeof dependencies.createProfileLinkStore === 'function' ? dependencies.createProfileLinkStore(driver, 'neo4j') : undefined
     await profileSocialLinks?.initialize()
@@ -628,6 +632,12 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       contactEnrichment,
       messagingSecret: process.env.UNLINKED_MESSAGING_SECRET || undefined,
       connectionIdentityForOwner: identityForOwner,
+      // Ideaflow interests and asks on member profiles (ideaflow.profile.v1): public sections of the
+      // member's own ideas-network About, found by their one verified Ideaflow identity; collapsed for
+      // visitors, hideable by the member. Off with UNLINKED_IDEAFLOW_PROFILES=off.
+      ideaflowProfiles: ideaflowProfileChoices && accountForProfile ? createIdeaflowProfileProvider({
+        client: createIdeaflowProfileClient({ origin: process.env.IDEANETWORK_URL || 'https://social.ideaflow.app' }),
+        accountForProfile, identityForOwner, choices: ideaflowProfileChoices }) : undefined,
       resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }),
       createMessagingSession: createMessagingSession({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
       resolveCardMessagingRecipient: createMessagingRecipient({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
