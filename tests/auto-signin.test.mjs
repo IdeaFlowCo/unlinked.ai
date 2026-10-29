@@ -223,7 +223,7 @@ test('guards: no hop for non-navigations, prefetches, crawlers, in-app browsers 
   // Existing markers: already attempted this browser session, or explicitly signed out.
   for (const cookie of [`${AUTO_SIGNIN_COOKIE}=1`, '__Host-ul-signed-out=1']) await noHop('/', { Cookie: cookie })
   // Only the explicit /login visits above reached the provider, without a prompt.
-  assert.deepEqual(s.begins, [{}, {}])
+  assert.deepEqual(s.begins, [{ prompt: 'select_account' }, { prompt: 'select_account' }])
   // Our verification browser is an ordinary browser.
   assert.ok(s.isSilentHop(await s.visit('/', '', { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36' })))
 })

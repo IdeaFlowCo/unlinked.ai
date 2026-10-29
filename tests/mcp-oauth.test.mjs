@@ -142,7 +142,7 @@ test('dynamic registration accepts only connector callbacks and loopback, always
   assert.equal(forged.headers.get('location'), null)
 })
 
-test('connector sign-in uses silent SSO, and consent offers Switch account back to the same request', async t => {
+test('connector sign-in offers account choice, and consent offers Switch account back to the same request', async t => {
   const begins = []
   const p = await pilot(t, { login: { authorizationOrigin: 'https://synthetic-idp.invalid',
     begin: async (options = {}) => { begins.push(options); return { location: `https://synthetic-idp.invalid/authorize${options.prompt ? `?prompt=${options.prompt}` : ''}`, transaction: { state: 'synthetic-state' } } },
@@ -153,7 +153,7 @@ test('connector sign-in uses silent SSO, and consent offers Switch account back 
   const { cookie, location } = await p.signIn(next)
   assert.equal(location, `/oauth/authorize?${query}`)
   // No forced password: the consent screen below is the confirmation for this grant.
-  assert.deepEqual(begins, [{}])
+  assert.deepEqual(begins, [{ prompt: 'select_account' }])
 
   const consent = await p.go(location, { headers: { Cookie: cookie } })
   const csp = consent.headers.get('content-security-policy'), text = await consent.text()

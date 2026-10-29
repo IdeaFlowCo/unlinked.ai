@@ -4,8 +4,7 @@ import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMemorySessionStore } from '../mcp-server/session-store.mjs'
 
-// Silent SSO: a normal sign-in sends no prompt. Only an explicit sign-out,
-// Switch account or account deletion asks Ideaflow ID for its account chooser.
+// Interactive sign-in shows account choice; passive sign-in remains separate.
 const ISSUER_ORIGIN = 'https://id.example.invalid'
 
 async function site(t) {
@@ -44,11 +43,11 @@ async function site(t) {
   return { begins, go, signIn, csrfOf, post, cookieFrom }
 }
 
-test('a normal sign-in sends no prompt; after sign-out the next one asks for the account chooser, once', async t => {
+test('every interactive sign-in asks for the account chooser and clears the sign-out marker', async t => {
   const s = await site(t)
   const first = await s.signIn()
-  assert.equal(first.provider.searchParams.has('prompt'), false)
-  assert.deepEqual(s.begins, [{}])
+  assert.equal(first.provider.searchParams.get('prompt'), 'select_account')
+  assert.deepEqual(s.begins, [{ prompt: 'select_account' }])
 
   const signOut = await s.post('/logout', first.session, { csrf: await s.csrfOf(first.session) })
   assert.equal(signOut.status, 303); assert.equal(signOut.headers.get('location'), '/')
@@ -59,13 +58,13 @@ test('a normal sign-in sends no prompt; after sign-out the next one asks for the
 
   const second = await s.signIn(jar)
   assert.equal(second.provider.searchParams.get('prompt'), 'select_account')
-  // A successful sign-in clears the marker, so the following one is silent again.
+  // A successful sign-in clears the marker; later interactive sign-ins still offer choice.
   assert.match(s.cookieFrom(second.callback, '__Host-ul-signed-out'), /^__Host-ul-signed-out=; .*Max-Age=0$/)
   const third = await s.signIn()
-  assert.equal(third.provider.searchParams.has('prompt'), false)
+  assert.equal(third.provider.searchParams.get('prompt'), 'select_account')
 
-  // Only the exact marker value counts.
-  assert.equal((await s.signIn('__Host-ul-signed-out=login')).provider.searchParams.has('prompt'), false)
+  // An unrelated marker does not alter interactive account choice.
+  assert.equal((await s.signIn('__Host-ul-signed-out=login')).provider.searchParams.get('prompt'), 'select_account')
 })
 
 test('Switch account signs out, then starts sign-in with the account chooser and a validated return page', async t => {
