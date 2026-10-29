@@ -59,7 +59,7 @@ async function site(t, { visitorName = 'Grace Hopper', visitorEmail = 'grace@exa
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
   const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
   const accounts = { ada, grace }, names = { ada: 'Ada Lovelace', grace: visitorName }, emails = { ada: 'ada@example.test', grace: visitorEmail }
-  const messageCalls = [], resolvedOwners = []
+  const messageCalls = [], resolvedOwners = [], loginBegins = []
   handler = createPrivateBrowserHandler({ ...(messaging ? {
     createMessagingSession: async session => ({ token: `viewer-${session.owner.ownerId}`, user: { userId: `oc-${session.owner.ownerId}` } }),
     resolveCardMessagingRecipient: async (owner, name) => { resolvedOwners.push(owner); if (failMessaging) throw Error('offline'); return { id: `oc-${owner.ownerId}`, name } },
@@ -72,7 +72,7 @@ async function site(t, { visitorName = 'Grace Hopper', visitorEmail = 'grace@exa
       return Response.json({ id: 'direct-grace-ada', type: 'direct', participants: [] })
     } },
   } : {}), baseUrl, dataMode: 'private_live', readPublishedSnapshot,
-    login: { begin: async () => ({ location: 'https://id.example.invalid/authorize', transaction: { state: 's' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: current, displayName: names[current], verifiedEmail: emails[current] }) },
+    login: { begin: async (options = {}) => { loginBegins.push(options); return { location: 'https://id.example.invalid/authorize', transaction: { state: 's' } } }, finish: async () => ({ issuer: 'https://id.example.invalid', subject: current, displayName: names[current], verifiedEmail: emails[current] }) },
     resolveOwner: async identity => registered.has(identity.subject) ? accounts[identity.subject] : null,
     signup: async () => { registered.add(current); signups++; return accounts[current] },
     ownProfileId: async owner => owner.ownerId === 'ada' ? 'ada' : null, accountForProfile: async id => id === 'ada' ? ada : null,
@@ -88,7 +88,7 @@ async function site(t, { visitorName = 'Grace Hopper', visitorEmail = 'grace@exa
     return { callback, cookie: callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session='))?.split(';')[0] }
   }
   const signIn = async (who, next) => (await finish(who, await request(`/login${next ? `?next=${encodeURIComponent(next)}` : ''}`)))
-  return { messageCalls, resolvedOwners, cards, connections, connectionStore, store, saved, ada, grace, request, post, finish, signIn, signups: () => signups, baseUrl }
+  return { loginBegins, messageCalls, resolvedOwners, cards, connections, connectionStore, store, saved, ada, grace, request, post, finish, signIn, signups: () => signups, baseUrl }
 }
 
 test('a non-member scans a contact card: save it, or join and land connected with their own card to share back', async t => {
@@ -100,6 +100,7 @@ test('a non-member scans a contact card: save it, or join and land connected wit
   // The header's Sign in keeps the card as the return target.
   assert.ok(guest.includes(`href="/login?next=${encodeURIComponent(path)}"`))
   const { callback, cookie } = await s.finish('grace', await s.post(`${path}/add`))
+  assert.deepEqual(s.loginBegins.at(-1), { prompt: 'select_account' })
   assert.equal(callback.headers.get('location'), `${path}?added=1`)
   assert.equal(s.signups(), 1)
   assert.equal((await s.connections.between(s.grace, s.ada)).state, 'connected')
@@ -142,6 +143,7 @@ test('a non-member scans a public profile: Join & connect sends the request afte
   assert.equal((await s.post('/people/imported/join')).status, 404)
   assert.equal((await s.post('/people/nobody/join')).status, 404)
   const { callback, cookie } = await s.finish('grace', await s.post('/people/ada/join'))
+  assert.deepEqual(s.loginBegins.at(-1), { prompt: 'select_account' })
   assert.equal(callback.headers.get('location'), '/people/ada?connect=sent&joined=1')
   assert.equal((await s.connections.between(s.grace, s.ada)).state, 'outgoing', 'a normal request: Ada accepts it')
   const landed = await (await s.request('/people/ada?connect=sent&joined=1', { cookie })).text()

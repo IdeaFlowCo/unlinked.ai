@@ -1296,7 +1296,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         }
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
-        const started = await login.begin(cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}), id = token()
+        const started = await login.begin({ prompt: SELECT_ACCOUNT }), id = token()
         pending.set(id, { ...started.transaction, cardToken: cardAdd[1], expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
         redirect(response, started.location); return
@@ -1381,7 +1381,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (viewer) { redirect(response, path); return }
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
-        const started = await login.begin(cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}), transactionId = token()
+        const started = await login.begin({ prompt: SELECT_ACCOUNT }), transactionId = token()
         pending.set(transactionId, { ...started.transaction, connectProfileId: target, expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', transactionId, 300))
         redirect(response, started.location); return
