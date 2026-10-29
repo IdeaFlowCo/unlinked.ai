@@ -1629,8 +1629,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (request.method === 'GET' && url.pathname === '/login') {
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
-        // Silent SSO unless this browser explicitly signed out of Unlinked.
-        const result = await login.begin(cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}), id = token()
+        // Explicit sign-in offers the active identity and another account.
+        const result = await login.begin({ prompt: SELECT_ACCOUNT }), id = token()
         pending.set(id, { ...result.transaction, next: returnPath(url.searchParams.get('next')), expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
         redirect(response, result.location); return
