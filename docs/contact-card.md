@@ -61,7 +61,7 @@ Scanning your own card says **This is your card**.
 | `email` | `showEmail` | A plain address, up to 254 characters. |
 | `link` | `showLink` | `https` only, no credentials, up to 200 characters. |
 
-The card also keeps the member's `name`, `headline`, `location`, public `linkedinUrl` and public `profilePath`, refreshed whenever they open `/card`, so the link can be rendered without their session. The LinkedIn address is part of the already-public identity (it appears on the public profile), not a switched contact detail; both card versions and the vCard show it.
+The card also keeps the member's `name`, `headline`, `location`, public `linkedinUrl` and public `profilePath`, refreshed whenever they open `/card`, so the link can be rendered without their session. The LinkedIn address is part of the already-public identity (it appears on the public profile), not a switched contact detail; both card versions and the vCard show it. When the member's own profile rows have no LinkedIn address (a recovered legacy profile keeps it only as a slug joined into the published profile), the card takes the address from the published public profile its QR code opens.
 
 Storage: one `UnlinkedContactCard` node per account in the pilot graph (`ownerKey` and `token` unique). `projectContactCard` is the single consent projection; the page, the owner's preview and the vCard all render from it.
 

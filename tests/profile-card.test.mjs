@@ -129,6 +129,20 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   html = await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text()
   assert.match(html, /\/people\/legacy-profile-uuid/)
 
+  // The raw legacy record carries no LinkedIn address (its slug is joined only
+  // into the published profile); the card shows the one the public page shows.
+  assert.doesNotMatch(html, /linkedin\.com\/in\/legacy-owner/)
+  fixture.snapshot.current = { ...fixture.snapshot.current, profiles: fixture.snapshot.current.profiles.map(value => value.id === 'legacy-profile-uuid' ? { ...value, linkedinUrl: 'https://www.linkedin.com/in/legacy-owner' } : value) }
+  html = await (await fetch(`${signed.endpoint}/card?share=public`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /href="https:\/\/www\.linkedin\.com\/in\/legacy-owner"/)
+  html = await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /href="https:\/\/www\.linkedin\.com\/in\/legacy-owner"/)
+  // An address the owner's own profile already has is never replaced.
+  fixture.backend.readLegacyProfile = async () => ({ profileId: 'legacy-profile-uuid', profile: { name: 'Card Owner', linkedinUrl: 'https://www.linkedin.com/in/own-address' } })
+  html = await (await fetch(`${signed.endpoint}/card?share=public`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /linkedin\.com\/in\/own-address/)
+  assert.doesNotMatch(html, /linkedin\.com\/in\/legacy-owner/)
+
   // Sign-in can return to the card page.
   assert.equal((await fetch(`${signed.endpoint}/card?x=1`, { redirect: 'manual' })).status, 401)
   const signIn = await (await fetch(`${signed.endpoint}/card`)).text()
