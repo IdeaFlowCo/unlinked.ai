@@ -2025,6 +2025,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
                 // The card shows the public profile's published photo, if any.
                 const photo = profilePhotos?.urlFor(found.moved ?? id)
                 if (photo) profile.photo = photo
+                // The LinkedIn address the public profile already shows (a
+                // legacy profile's comes from its slug, which the owner's own
+                // rows and the raw legacy snapshot lack): unlinked-fqxd.
+                const published = !profile.linkedinUrl && !found.profile && found.moved
+                  ? await bounded(() => publicReader.profile({ id: found.moved }), null)
+                  : found
+                const address = profile.linkedinUrl ? null : publicLinkedinUrl(published?.profile?.linkedinUrl)
+                if (address) profile.linkedinUrl = address
                 break
               }
             }
