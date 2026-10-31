@@ -2028,7 +2028,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
                 // The LinkedIn address the public profile already shows (a
                 // legacy profile's comes from its slug, which the owner's own
                 // rows and the raw legacy snapshot lack): unlinked-fqxd.
-                const address = profile.linkedinUrl ? null : publicLinkedinUrl(found.profile?.linkedinUrl)
+                const published = !profile.linkedinUrl && !found.profile && found.moved
+                  ? await bounded(() => publicReader.profile({ id: found.moved }), null)
+                  : found
+                const address = profile.linkedinUrl ? null : publicLinkedinUrl(published?.profile?.linkedinUrl)
                 if (address) profile.linkedinUrl = address
                 break
               }

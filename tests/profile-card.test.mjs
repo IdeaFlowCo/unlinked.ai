@@ -143,6 +143,14 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   assert.match(html, /linkedin\.com\/in\/own-address/)
   assert.doesNotMatch(html, /linkedin\.com\/in\/legacy-owner/)
 
+  fixture.backend.readLegacyProfile = async () => ({ profileId: 'legacy-profile-uuid', profile: { name: 'Card Owner' } })
+  fixture.snapshot.current = { ...fixture.snapshot.current, revision: 'card-test-moved', profiles: fixture.snapshot.current.profiles.filter(value => value.id !== 'legacy-profile-uuid').concat({ id: 'survivor', name: 'Card Owner', linkedinUrl: 'https://www.linkedin.com/in/survivor', positions: [], education: [], skills: [] }), aliases: { 'legacy-profile-uuid': 'survivor' } }
+  html = await (await fetch(`${signed.endpoint}/card?share=public`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /\/people\/survivor/)
+  assert.match(html, /href="https:\/\/www\.linkedin\.com\/in\/survivor"/)
+  html = await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /href="https:\/\/www\.linkedin\.com\/in\/survivor"/)
+
   // Sign-in can return to the card page.
   assert.equal((await fetch(`${signed.endpoint}/card?x=1`, { redirect: 'manual' })).status, 401)
   const signIn = await (await fetch(`${signed.endpoint}/card`)).text()
