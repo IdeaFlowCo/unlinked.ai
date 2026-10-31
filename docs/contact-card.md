@@ -119,3 +119,11 @@ credential is used to open/reuse the direct conversation. No identity, email or
 recipient id is accepted from browser fields. Blocks apply. The card capability
 never leaves Unlinked or enters the conversation URL. Opening does not send a
 message; unavailable messaging leaves a retry action on the card.
+
+## Asking for their number
+
+An owner can switch on **Ask people who join from my card for their phone
+number** (`askPhone` on the card record). After Join & connect, the connected
+viewer is asked once to share their number with that owner only; the number
+becomes an owner-private `UnlinkedContactShare` record, never a profile or card
+detail unless they also choose that. Design and flow: [card-phone-request.md](card-phone-request.md).
