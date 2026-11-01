@@ -104,7 +104,7 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
 
 // One process-wide worker; Noos discovery + CAS leases make restart and a
 // second process safe. There is no separate people database or fixture fallback.
-export function createArchiveWorker({ listPendingImports, getBackend, intervalMs = 2000, onError = () => {}, now = Date.now }) {
+export function createArchiveWorker({ listPendingImports, getBackend, coordination, intervalMs = 2000, onError = () => {}, now = Date.now }) {
   if (typeof listPendingImports !== 'function' || typeof getBackend !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 100 || intervalMs > 60000) throw new Error('private_worker_configuration_required')
   let closed = false, running = null, timer
   const notify = async event => { try { await onError(event) } catch { /* Logging never changes job authority or worker recovery. */ } }
@@ -113,13 +113,19 @@ export function createArchiveWorker({ listPendingImports, getBackend, intervalMs
     running = (async () => {
       const pending = await listPendingImports()
       if (!Array.isArray(pending) || pending.length > 200) throw new Error('private_worker_discovery_limit')
-      for (const item of pending) {
-        if (closed) break
+      let index = 0
+      const consume = async () => { while (!closed && index < pending.length) {
+        const item = pending[index++]
         try {
-          const backend = await getBackend(item.owner)
-          await runArchiveJob({ ownerId: item.owner.ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
+          const release = coordination ? await coordination.acquire('owner:' + item.owner.ownerId, false) : () => {}
+          try {
+            if (closed) continue
+            const backend = await getBackend(item.owner)
+            await runArchiveJob({ ownerId: item.owner.ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
+          } finally { release() }
         } catch { await notify({ event: 'import_worker_retry', importId: item.id }) }
-      }
+      } }
+      await Promise.all(Array.from({ length: Math.min(8, pending.length) }, consume))
     })().catch(() => notify({ event: 'import_worker_discovery_failed' })).finally(() => { running = null })
     return running
   }

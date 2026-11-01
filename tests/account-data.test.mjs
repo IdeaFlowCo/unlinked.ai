@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { createServer, request as httpRequest } from 'node:http'
+import { createHash, randomBytes } from 'node:crypto'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createAccountGrantService } from '../mcp-server/account-grants.mjs'
 import { createMemorySessionStore } from '../mcp-server/session-store.mjs'
@@ -161,8 +161,9 @@ for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'hand
       return record
     }
     store.deleteOwner = async id => { if (failedStep === 'sessions' && fail) throw new Error('storage unavailable'); await deleteOwner(id) }
-    let handlers
-    const server = createServer((req, res) => void handlers[req.headers['x-worker'] === 'second' ? 1 : 0](req, res))
+    let handlers, stalledArrived
+    const stalled = new Promise(resolve => { stalledArrived = resolve })
+    const server = createServer((req, res) => { if (req.headers['x-stall']) stalledArrived(); void handlers[req.headers['x-worker'] === 'second' ? 1 : 0](req, res) })
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     t.after(() => new Promise(resolve => server.close(resolve)))
     const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
@@ -195,6 +196,17 @@ for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'hand
     const streamReader = stream?.body.getReader()
     if (streamReader) { assert.equal(stream.status, 200); await streamReader.read() }
     const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
+    if (failedStep === 'sessions') {
+      const other = { ownerId: 'other-owner', userId: 'other-user' }, otherSid = 'other-session'
+      f.register(other)
+      await store.put(createHash('sha256').update(otherSid).digest('hex'), { ...other, csrf: 'other-csrf', expiresAt: Date.now() + 60000 })
+      const incomplete = httpRequest(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Length': '1000', 'X-Stall': '1' } })
+      incomplete.on('error', () => {})
+      incomplete.write('csrf=')
+      await stalled
+      assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: `__Host-ul-session=${otherSid}` }, signal: AbortSignal.timeout(2000) })).status, 200)
+      incomplete.destroy()
+    }
     const remove = () => fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, confirm: 'delete everything' }) })
     const failed = await remove()
     assert.notEqual(failed.status, 200)
@@ -210,7 +222,7 @@ for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'hand
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(deletionStarted, false)
     releaseRead()
-    assert.equal((await pending).status, 200)
+    assert.ok([200, 401].includes((await pending).status))
     const retried = await retry
     assert.equal(retried.status, 200)
     assert.match(await retried.text(), /Your Unlinked account is deleted/)

@@ -57,29 +57,7 @@ import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 import { BlockError } from './member-blocks.mjs'
 import { renderPeopleError } from './private-onboarding-views.mjs'
 
-const runtimeCoordinators = new WeakMap(), memoryRuntime = {}
-function coordinatorFor(store) {
-  const key = store ?? memoryRuntime
-  if (runtimeCoordinators.has(key)) return runtimeCoordinators.get(key)
-  const queue = [], sessionMaps = new Set(), deletingProfiles = new Map()
-  let readers = 0, writer = false
-  const drain = () => {
-    if (writer || !queue.length) return
-    if (queue[0].exclusive) {
-      if (readers) return
-      writer = true
-      queue.shift().resolve(() => { writer = false; drain() })
-      return
-    }
-    while (queue.length && !queue[0].exclusive) {
-      readers++
-      queue.shift().resolve(() => { readers--; drain() })
-    }
-  }
-  const coordinator = { sessionMaps, deletingProfiles, acquire: exclusive => new Promise(resolve => { queue.push({ exclusive, resolve }); drain() }) }
-  runtimeCoordinators.set(key, coordinator)
-  return coordinator
-}
+import { coordinatorFor } from './owner-coordination.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -217,9 +195,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // A default handle only for a profile an active account still stands behind,
   // so a just-deleted account (still in the published index) never gets one back.
   const ensureHandle = async profile => {
-    if ([...coordination.deletingProfiles.values()].includes(profile.id)) return null
-    if (typeof accountForProfile === 'function' && !await accountForProfile(profile.id)) return null
-    return profileHandles.ensure(profile)
+    const release = await coordination.acquire('profile:' + profile.id, false)
+    try {
+      if ([...coordination.deletingProfiles.values()].includes(profile.id)) return null
+      if (typeof accountForProfile === 'function' && !await accountForProfile(profile.id)) return null
+      return await profileHandles.ensure(profile)
+    } finally { release() }
   }
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
@@ -599,7 +580,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
-  const requestSessions = new WeakMap()
+  const requestSessions = new WeakMap(), deletionInputs = new WeakMap()
   const sessionFor = request => requestSessions.get(request)
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
@@ -691,6 +672,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null, cardToken = null, connectProfileId = null) {
     let claimed
     let owner = await resolveOwner(identity)
+    const releaseOwner = owner ? await coordination.acquire('owner:' + owner.ownerId, false) : () => {}
+    try {
+    if (owner && !await resolveOwner(identity)) throw new Error('private_owner_recovery_required')
     let newOwner = false
     if (invitationToken) {
       if (typeof claimInvitation !== 'function') throw new Error('private_invitation_intent_invalid')
@@ -749,6 +733,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
     redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
     return 'signed_in'
+    } finally { releaseOwner() }
   }
   // Where a silent attempt returns: the same-origin page it started on, only
   // ever one of the automatic sign-in pages; anything else goes home.
@@ -1020,7 +1005,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const queue = [], queuedIds = new Set(), queuedHandles = new Set()
     const flush = async () => {
       if (!queue.length) return
-      changed += await profileHandles.assignMany(queue.splice(0))
+      for (const entry of queue.splice(0)) {
+        const release = await coordination.acquire('profile:' + entry.id, false)
+        try {
+          if ([...coordination.deletingProfiles.values()].includes(entry.id)) continue
+          if (members.has(entry.id) && typeof accountForProfile === 'function' && !await accountForProfile(entry.id).catch(() => null)) continue
+          changed += await profileHandles.assignMany([entry])
+        } finally { release() }
+      }
       if (pauseMs > 0) await new Promise(resolve => setTimeout(resolve, pauseMs))
     }
     const enqueue = async (id, handle, kind) => { queue.push({ id, handle, kind }); queuedIds.add(id); queuedHandles.add(handle); if (queue.length >= batchSize) await flush() }
@@ -1041,7 +1033,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (!sameAddress || typeof profileHandles.transfer !== 'function') continue
       // A default (name) handle gives way to the slug; a chosen one stays current.
       const makeCurrent = !own || handleCandidates({ name: profile.name }).includes(own) ? slug : own
-      if (await profileHandles.transfer(holder, profile.id, { makeCurrent }).catch(() => null)) changed++
+      const release = await coordination.acquire('profile:' + profile.id, false)
+      try {
+        if (![...coordination.deletingProfiles.values()].includes(profile.id) && (!members.has(profile.id) || typeof accountForProfile !== 'function' || await accountForProfile(profile.id).catch(() => null))) {
+          if (await profileHandles.transfer(holder, profile.id, { makeCurrent }).catch(() => null)) changed++
+        }
+      } finally { release() }
     }
     await flush()
     for (const profile of ordered) {
@@ -1055,7 +1052,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     await flush()
     return changed
   }
-  const backfillHandles = async options => { const release = await coordination.acquire(false); try { return await backfillHandlesCore(options) } finally { release() } }
+  const backfillHandles = backfillHandlesCore
   if (profileHandles && handleBackfillMs > 0) {
     const run = () => backfillHandles().catch(() => process.stderr.write('unlinked_handle_backfill_failed\n'))
     setTimeout(run, Math.min(handleBackfillMs, 5000)).unref?.()
@@ -2554,7 +2551,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         response.end(JSON.stringify(data, null, 2)); return
       }
       if (signup && request.method === 'POST' && url.pathname === '/delete-account') {
-        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        const input = deletionInputs.get(request) ?? new URLSearchParams((await body(request, 8192)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) throw new Error('private_browser_csrf')
         if (!['delete account', 'delete everything'].includes((input.get('confirm') ?? '').trim().toLowerCase())) {
           const jobs = await jobResources(), props = jobProps(jobs)
@@ -2580,6 +2577,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           handleProfile = await ownProfileId(session.owner)
           if (handleProfile) coordination.deletingProfiles.set(session.owner.ownerId, handleProfile)
         }
+        const releaseProfile = handleProfile ? await coordination.acquire('profile:' + handleProfile, true) : () => {}
+        try {
         if (handleProfile) await profileHandles.removeProfile(handleProfile)
         // Reports this member sent stay for review, without who sent them.
         if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
@@ -2601,6 +2600,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         await recordAudit({ event: 'account_data_deleted', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), deletedResources: result.deletedResources })
         journey(response, renderDataDeleted())
         return
+        } finally { releaseProfile() }
       }
       if (signup && request.method === 'POST' && ['/setup-account', '/revoke-account', '/search-account'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
@@ -2749,8 +2749,24 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     }
   }
   const serve = async (request, response) => {
-    const exclusive = request.method === 'POST' && new URL(request.url, base).pathname === '/delete-account'
-    const release = await coordination.acquire(exclusive)
+    const path = new URL(request.url, base).pathname
+    const exclusive = request.method === 'POST' && path === '/delete-account'
+    const sid = cookies(request)['__Host-ul-session']
+    let record = sid ? sessions.get(sid) : null
+    if (sid && sessionStore) {
+      try { record = await sessionStore.get(createHash('sha256').update(sid).digest('hex'), Date.now()) }
+      catch { response.writeHead(503, { 'Retry-After': '10' }).end(); return }
+    }
+    const ownerId = record?.ownerId ?? record?.owner?.ownerId
+    if (exclusive && ownerId && request.headers.host === base.host && request.headers.origin === base.origin) {
+      let input
+      try { input = new URLSearchParams((await body(request, 8192)).toString('utf8')) }
+      catch { response.writeHead(413).end(); return }
+      if (input.getAll('csrf').length !== 1 || input.get('csrf') !== record.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) { response.writeHead(400).end(); return }
+      deletionInputs.set(request, input)
+    }
+    if (!ownerId || path === '/auth/callback/ideaflow' || path === '/invite/confirm' || (exclusive && !deletionInputs.has(request))) return serveCore(request, response)
+    const release = await coordination.acquire('owner:' + ownerId, exclusive)
     try { return await serveCore(request, response) } finally { release() }
   }
   serve.backfillHandles = backfillHandles

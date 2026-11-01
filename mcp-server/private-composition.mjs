@@ -47,6 +47,7 @@ import { CLIENT_ID_PATTERN } from './account-api.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
 import { createArchiveWorker } from '../src/utils/private-import/background-job.mjs'
+import { coordinatorFor } from './owner-coordination.mjs'
 
 export function earliestConnectionDates(invitations, requests) {
   const key = value => JSON.stringify([value.other.ownerId, value.other.userId])
@@ -449,7 +450,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       } finally { await descriptor.close() }
     }
     if (typeof store.listPendingImportJobs !== 'function' || typeof store.listImportJobIds !== 'function') throw new Error('private_background_store_required')
-    worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend,
+    worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend, coordination: coordinatorFor(sessionStore),
       onError: event => audit({ ...event, at: new Date().toISOString() }) })
     worker.start()
     // The notification mailer runs on its own timer; startup never waits for it.
