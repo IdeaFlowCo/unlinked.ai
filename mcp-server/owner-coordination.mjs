@@ -30,23 +30,39 @@ export function coordinatorFor(store) {
     })
   }
   const run = async (keys, work, { exclusive = false } = {}) => {
-    const held = context.getStore() ?? new Map(), next = new Map(held), releases = []
+    const held = new Map([...(context.getStore() ?? [])].filter(([, value]) => value.active)), next = new Map(held), releases = [], acquired = []
+    const borrowed = []
+    for (const name of new Set(keys)) {
+      const token = held.get(name)
+      if (token?.exclusive) {
+        let done
+        const pending = new Promise(resolve => { done = resolve })
+        token.children.add(pending)
+        borrowed.push(() => { token.children.delete(pending); done() })
+      }
+    }
     try {
       for (const name of [...new Set(keys)].sort()) {
         if (held.has(name)) {
-          if (exclusive && !held.get(name)) throw new Error('owner_lock_upgrade_forbidden')
-          continue
+          if (exclusive && !held.get(name).exclusive) throw new Error('owner_lock_upgrade_forbidden')
+          if (held.get(name).exclusive) continue
         }
         releases.push(await acquire(name, exclusive, held.size > 0))
-        next.set(name, exclusive)
+        const token = { exclusive, active: true, children: new Set() }
+        acquired.push(token)
+        next.set(name, token)
       }
       return await context.run(next, work)
-    } finally { for (const release of releases.reverse()) release() }
+    } finally {
+      for (const token of acquired) { while (token.children.size) await Promise.allSettled([...token.children]); token.active = false }
+      for (const release of releases.reverse()) release()
+      for (const done of borrowed) done()
+    }
   }
-  const withHeld = (key, exclusive, work) => {
-    const held = new Map(context.getStore() ?? [])
-    held.set(key, exclusive)
-    return context.run(held, work)
+  const withHeld = async (key, exclusive, work) => {
+    const held = new Map(context.getStore() ?? []), token = { exclusive, active: true, children: new Set() }
+    held.set(key, token)
+    try { return await context.run(held, work) } finally { while (token.children.size) await Promise.allSettled([...token.children]); token.active = false }
   }
   const coordinator = { sessionMaps, deletingProfiles, acquire, run, withHeld,
     checkpoint: () => generation,

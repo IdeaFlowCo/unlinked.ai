@@ -74,6 +74,23 @@ test('nested sender coordination permits pair writes and reciprocal acceptance',
   assert.equal((await requests.between(jacob, ada)).state, 'connected')
 })
 
+test('detached nested work keeps its own owner lock until it settles', async () => {
+  const coordination = coordinatorFor({})
+  let entered, resume, deleted = false
+  const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve })
+  let child
+  await coordination.run(['owner:' + jacob.ownerId], async () => {
+    child = coordination.run(['owner:' + jacob.ownerId], async () => { entered(); await proceed })
+    await waiting
+  })
+  const deletion = (async () => { const release = await coordination.acquire('owner:' + jacob.ownerId, true); deleted = true; release() })()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(deleted, false)
+  resume()
+  await Promise.all([child, deletion])
+  assert.equal(deleted, true)
+})
+
 test('nested pair acquisition does not deadlock with waiting deletions', async () => {
   const coordination = coordinatorFor({}), { requests } = setup({ coordination, validateParticipant: async () => {} })
   const releaseAda = await coordination.acquire('owner:' + ada.ownerId, true)

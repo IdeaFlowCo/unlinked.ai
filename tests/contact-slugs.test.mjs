@@ -93,7 +93,7 @@ const ROGER = 'fda3008a-5990-4816-86ff-3834cfa6825d'
 const profile = (id, name, extra = {}) => ({ id, name, positions: [], education: [], skills: [], ...extra })
 const snapshot = { state: 'published', complete: true, revision: 'contact-slugs-test', profiles: [profile(ROGER, 'Roger Cole', { headline: 'Founder', linkedinUrl: 'https://www.linkedin.com/in/roger-cole' }), profile('alex-a', 'Alex Kim', { headline: 'Designer' })], members: [ROGER], connections: [], aliases: {} }
 
-async function harness(t) {
+async function harness(t, { slugStore = createMemoryContactSlugStore(), onDelete = () => {} } = {}) {
   const importId = hex('a'), rogerRow = hex('b'), alexRow = hex('c'), otherAlexRow = hex('d')
   const row = (id, fields) => [id, { sourceOwnerId: owner.ownerId, deleted: false, payload: { id, ownerId: owner.ownerId, importId, category: 'connections', fields } }]
   const resources = new Map([
@@ -105,11 +105,11 @@ async function harness(t) {
   const profileHandles = createProfileHandles({ store: createMemoryProfileHandleStore() })
   await profileHandles.initialize()
   await profileHandles.assignMany([{ id: ROGER, handle: 'roger-cole', kind: 'linkedin' }])
-  const contactSlugs = createContactSlugs({ store: createMemoryContactSlugStore() })
+  const contactSlugs = createContactSlugs({ store: slugStore })
   const reviews = []
   const contactEnrichment = { inspect: async () => ({ status: 'not_started' }), review: async (who, value, input) => { reviews.push({ who, id: value.id, ...input }) }, preferences: async () => null, addresses: async () => new Map(), exportOwner: async () => [], removeOwner: async () => {} }
   let subject = 'owner', handler
-  const server = createServer((req, res) => void handler(req, res))
+  const server = createServer((req, res) => { if (req.url === '/delete-account') onDelete(); void handler(req, res) })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
   t.after(() => setProfileHandleLookup(null))
   const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
@@ -132,8 +132,28 @@ async function harness(t) {
     const page = await (await go('/network', cookie)).text()
     return { cookie, csrf: /name="csrf" value="([^"]+)"/.exec(page)[1], network: page }
   }
-  return { go, signIn, baseUrl, reviews, rogerRow, alexRow, otherAlexRow, jamieRow: privateId(owner.ownerId, 'member-connection', 'jamie-request'), theirJamie: privateId(other.ownerId, 'member-connection', 'their-jamie') }
+  return { go, signIn, baseUrl, contactSlugs, reviews, rogerRow, alexRow, otherAlexRow, jamieRow: privateId(owner.ownerId, 'member-connection', 'jamie-request'), theirJamie: privateId(other.ownerId, 'member-connection', 'their-jamie') }
 }
+
+test('timed-out network slug assignment finishes before account deletion', async t => {
+  const slugStore = createMemoryContactSlugStore(), assign = slugStore.assign.bind(slugStore)
+  let entered, resume, arrived, removed = false
+  const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve }), deletionArrived = new Promise(resolve => { arrived = resolve })
+  slugStore.assign = async (...args) => { entered(); await proceed; return assign(...args) }
+  const remove = slugStore.removeOwner.bind(slugStore)
+  slugStore.removeOwner = async who => { removed = true; await remove(who) }
+  const h = await harness(t, { slugStore, onDelete: arrived })
+  const signing = h.signIn('owner')
+  await waiting
+  const me = await signing
+  const deletion = h.go('/delete-account', me.cookie, { method: 'POST', headers: { Origin: h.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: me.csrf, confirm: 'delete account' }) })
+  await deletionArrived
+  assert.equal(removed, false)
+  resume()
+  assert.equal((await deletion).status, 200)
+  assert.equal(removed, true)
+  assert.deepEqual(await h.contactSlugs.exportOwner(owner), [])
+})
 
 test('end to end: the old hash address 301s to the owner’s slug, which renders the private contact; links prefer slugs; auth unchanged', async t => {
   const h = await harness(t)

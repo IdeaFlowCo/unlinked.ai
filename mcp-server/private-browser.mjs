@@ -363,9 +363,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // A first visit after many new contacts waits briefly; the rest finishes in
   // the background and later pages link by slug.
   const CONTACT_SLUG_WAIT_MS = 2500
-  const ensureContactSlugs = async (owner, network) => {
+  const ensureContactSlugs = async (owner, network, checkpoint) => {
     if (!contactSlugs) return
-    const work = contactSlugs.ensure(owner, network.assertions.filter(row => row.category === 'connections'), describeContacts(owner)).catch(() => 0)
+    const work = coordination.run(['owner:' + owner.ownerId], async () => {
+      if (coordination.version(owner.ownerId) > checkpoint) return 0
+      await getBackend(owner)
+      return contactSlugs.ensure(owner, network.assertions.filter(row => row.category === 'connections'), describeContacts(owner))
+    }).catch(() => 0)
     let timer
     await Promise.race([work, new Promise(resolve => { timer = setTimeout(resolve, CONTACT_SLUG_WAIT_MS) })])
     clearTimeout(timer)
@@ -531,9 +535,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const key = `${owner.ownerId}\u0000${owner.userId}`
     const held = networkCache.get(key)
     if (held && (held.pending || Date.now() - held.at < networkFreshMs)) return held.pending ?? held.value
-    const entry = { pending: null, value: null, at: 0 }
+    const entry = { pending: null, value: null, at: 0 }, checkpoint = coordination.checkpoint()
     entry.pending = createAccountNetwork({ owner, getBackend }).readNetwork().then(
-      async value => { await ensureContactSlugs(owner, value); Object.assign(entry, { value, at: Date.now(), pending: null }); return value },
+      async value => { await ensureContactSlugs(owner, value, checkpoint); Object.assign(entry, { value, at: Date.now(), pending: null }); return value },
       error => { if (networkCache.get(key) === entry) networkCache.delete(key); throw error })
     networkCache.delete(key); networkCache.set(key, entry)
     while (networkCache.size > NETWORK_CACHE_CAPACITY) networkCache.delete(networkCache.keys().next().value)

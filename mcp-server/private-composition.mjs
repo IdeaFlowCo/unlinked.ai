@@ -612,7 +612,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       const enrichmentStore = createNeo4jContactEnrichmentStore(driver)
       await enrichmentStore.initialize()
       const reader = createPublicPeopleReader({ readPublishedSnapshot })
-      contactEnrichment = createContactEnrichment({ store: enrichmentStore,
+      contactEnrichment = createContactEnrichment({ store: enrichmentStore, coordination: coordinatorFor(sessionStore),
         readNetwork: owner => createAccountNetwork({ owner, getBackend }).readNetwork(), lookup: personLookup,
         published: async row => {
           const [match] = await publishedPeopleFor([row], { lookupSlug: slug => selfClaims.lookupSlug(slug), lookup: ids => reader.lookup({ ids }) })
