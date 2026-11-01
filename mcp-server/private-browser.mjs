@@ -2593,6 +2593,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner)
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId)
         if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId)
+        coordination.deleted(session.owner.ownerId)
         for (const map of coordination.sessionMaps) for (const [id, value] of map) if (value.owner.ownerId === session.owner.ownerId) map.delete(id)
         coordination.deletingProfiles.delete(session.owner.ownerId)
         // Signing in again later starts from the Ideaflow account chooser.

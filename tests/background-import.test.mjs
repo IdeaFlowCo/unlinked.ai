@@ -89,7 +89,7 @@ test('deletion waits for an active import while another owner progresses', async
     if (phase === 'before' && !paused && items.some(item => item.sourceOwnerId === 'owner-a' && item.payload?.status === 'parsing')) { paused = true; importStarted(); await resume }
     if (phase === 'after' && items.some(item => item.sourceOwnerId === 'owner-b' && ['indexed', 'partial'].includes(item.payload?.status))) otherFinished()
   })
-  const worker = createArchiveWorker({ coordination, listPendingImports: async () => [{ id: first.id, owner: { ownerId: 'owner-a', userId: 'a' } }, { id: second.id, owner: { ownerId: 'owner-b', userId: 'b' } }], getBackend: async owner => owner.ownerId === 'owner-a' ? a : b })
+  const worker = createArchiveWorker({ coordination, listPendingImports: async () => [...Array.from({ length: 8 }, () => ({ id: first.id, owner: { ownerId: 'owner-a', userId: 'a' } })), { id: second.id, owner: { ownerId: 'owner-b', userId: 'b' } }], getBackend: async owner => owner.ownerId === 'owner-a' ? a : b })
   const running = worker.tick()
   await started
   let deleted = false

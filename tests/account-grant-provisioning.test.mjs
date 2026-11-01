@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createAccountGrantService, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE, accountGrantTools } from '../mcp-server/account-grants.mjs'
 import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
+import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
 
 // Server-to-server grant provisioning (docs/agent-api.md v1.1): an allow-listed
 // confidential client maps a verified issuer+subject binding to a reusable
@@ -38,7 +39,7 @@ function fixture() {
   return { register, getBackend, resolveOwner, resources, beforeWrite: fn => { beforeWrite = fn }, beforeRead: fn => { beforeRead = fn } }
 }
 
-async function launch(t, { clients, perClientPerMinute } = {}) {
+async function launch(t, { clients, perClientPerMinute, coordination, onResolve } = {}) {
   const f = fixture()
   const grants = createAccountGrantService({ issuer: 'https://synthetic-prov.invalid', signingKey: randomBytes(32), getBackend: f.getBackend, publicSearchEnabled: true })
   const service = createAccountToolService({ getBackend: f.getBackend, complete: async () => ({ matches: [] }), readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'prov-v1', profiles: [], connections: [] }) })
@@ -49,13 +50,31 @@ async function launch(t, { clients, perClientPerMinute } = {}) {
   const origin = `https://127.0.0.1:${server.address().port}`
   const api = createAccountAgentApiHandler({ authenticateGrantDetailed: async request => { const run = beforeVerification; beforeVerification = null; await run?.(); return grants.authenticateGrantDetailed(request) }, authenticateGrant: grants.authenticateGrant, service, origin,
     provisioning: clients === null ? undefined : { clients: clients ?? [{ clientId: CLIENT_ID, secretSha256: createHash('sha256').update(CLIENT_SECRET).digest() }],
-      resolveOwner: f.resolveOwner, ensureGrant: grants.ensureGrant, audit: async event => audits.push(event), perClientPerMinute } })
+      resolveOwner: async identity => { const owner = await f.resolveOwner(identity); onResolve?.(); return owner }, ensureGrant: grants.ensureGrant, audit: async event => audits.push(event), perClientPerMinute, coordination } })
   server.removeAllListeners('request'); server.on('request', (req, res) => void api(req, res))
   const endpoint = `http://127.0.0.1:${server.address().port}`
   const provision = (body, authorization = basic(CLIENT_ID, CLIENT_SECRET)) => fetch(`${endpoint}/api/agent/v1/provision-grant`, {
     method: 'POST', headers: { ...(authorization ? { Authorization: authorization } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   return { f, grants, audits, endpoint, provision, beforeVerification: fn => { beforeVerification = fn } }
 }
+
+test('provisioning waiting on deletion cannot mint a grant for the deleted account', async t => {
+  const coordination = coordinatorFor({}), owner = { ownerId: 'prov-race-owner', userId: 'prov-race-user' }
+  let queued
+  const waiting = new Promise(resolve => { queued = resolve })
+  const acquire = coordination.acquire
+  coordination.acquire = (key, exclusive) => { if (!exclusive) queued(); return acquire(key, exclusive) }
+  const app = await launch(t, { coordination })
+  app.f.register({ issuer: ISSUER, subject: 'race-subject' }, owner)
+  const release = await coordination.acquire('owner:' + owner.ownerId, true)
+  const request = app.provision({ issuer: ISSUER, subject: 'race-subject' })
+  await waiting
+  coordination.deleted(owner.ownerId)
+  release()
+  const result = await request
+  assert.notEqual(result.status, 200)
+  assert.equal(app.f.resources.size, 0)
+})
 
 test('provisioning maps verified issuer+subject to a reusable read-only grant; never minted twice, never a token in audit', async t => {
   const app = await launch(t, {})

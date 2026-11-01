@@ -5,6 +5,7 @@ import { createServer } from 'node:http'
 import { hkdfSync } from 'node:crypto'
 import { generateKeyPair } from 'jose'
 import { createPrivateBrowserHandler } from './private-browser.mjs'
+import { coordinatorFor } from './owner-coordination.mjs'
 import { createPrivateHostedHandler } from './private-hosted.mjs'
 import { createPrivateGrantService } from './private-grants.mjs'
 import { createAccountGrantService } from './account-grants.mjs'
@@ -58,7 +59,7 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   if (provisionAgentClients.length && !accountGrants) throw new Error('account_agent_provisioning_configuration_required')
   // Server-to-server grant provisioning stays off unless the operator supplied
   // a non-empty allow list (see docs/agent-api.md, "Grant provisioning").
-  const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit } : undefined
+  const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit, coordination: coordinatorFor(sessionStore) } : undefined
   const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin, provisioning }) : null
   const connector = accountGrants ? createIdeaflowConnectorHandler({ secret: ideaflowConnectorSecret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService }) : null
   const messaging = createMessagingHandler({ origin: base.origin, secret: messagingSecret, resolveRecipient: resolveMessagingRecipient })

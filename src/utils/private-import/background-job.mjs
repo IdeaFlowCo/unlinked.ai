@@ -113,19 +113,33 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
     running = (async () => {
       const pending = await listPendingImports()
       if (!Array.isArray(pending) || pending.length > 200) throw new Error('private_worker_discovery_limit')
-      let index = 0
-      const consume = async () => { while (!closed && index < pending.length) {
-        const item = pending[index++]
+      const groups = new Map(), waiters = []
+      for (const item of pending) {
+        const key = item.owner.ownerId
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key).push(item)
+      }
+      let active = 0
+      const slot = () => new Promise(resolve => {
+        const enter = () => { active++; resolve(() => { active--; waiters.shift()?.() }) }
+        if (active < 8) enter(); else waiters.push(enter)
+      })
+      const consume = async items => { for (const item of items) {
+        if (closed) break
         try {
           const release = coordination ? await coordination.acquire('owner:' + item.owner.ownerId, false) : () => {}
           try {
             if (closed) continue
-            const backend = await getBackend(item.owner)
-            await runArchiveJob({ ownerId: item.owner.ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
+            const releaseSlot = await slot()
+            try {
+              if (closed) continue
+              const backend = await getBackend(item.owner)
+              await runArchiveJob({ ownerId: item.owner.ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
+            } finally { releaseSlot() }
           } finally { release() }
         } catch { await notify({ event: 'import_worker_retry', importId: item.id }) }
       } }
-      await Promise.all(Array.from({ length: Math.min(8, pending.length) }, consume))
+      await Promise.all([...groups.values()].map(consume))
     })().catch(() => notify({ event: 'import_worker_discovery_failed' })).finally(() => { running = null })
     return running
   }
