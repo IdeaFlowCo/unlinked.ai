@@ -146,7 +146,7 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
   assert.equal(exportAfter.status, 401)
 })
 
-for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'handle-removal']) {
+for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'handle-removal', 'home-preference', 'visibility-choice']) {
   test(`account deletion retries after ${failedStep} cleanup fails`, async t => {
     const f = fixture(), owner = { ownerId: 'retry-owner', userId: 'retry-user' }, bindings = new Map()
     const grants = createAccountGrantService({ issuer: 'https://synthetic-private.invalid', signingKey: randomBytes(32), getBackend: f.getBackend })
@@ -178,6 +178,8 @@ for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'hand
         removeProfile: async id => { assert.equal(id, 'profile-id'); if (failedStep === 'handle-removal' && fail) throw new Error('handle unavailable'); handlePresent = false } },
       ownProfileId: async () => { if (failedStep === 'handle-lookup' && fail) throw new Error('profile unavailable'); return identityPresent ? 'profile-id' : null },
       signupLookup: { read: async () => null, removeOwner: async () => { identityPresent = false } },
+      homePreferences: { get: async () => null, set: async () => {}, removeOwner: async () => { if (failedStep === 'home-preference' && fail) throw new Error('unavailable') } },
+      ideaflowProfiles: { choices: { removeOwner: async () => { if (failedStep === 'visibility-choice' && fail) throw new Error('unavailable') } } },
       createMessagingSession: async () => ({ token: 'fixture-token', user: { userId: 'fixture-user' } }),
       messagingOptions: { apiOrigin: 'https://chat.example.invalid', heartbeatMs: 20, lingerMs: 10,
         fetchImpl: async () => new Response('{}', { status: 200 }),

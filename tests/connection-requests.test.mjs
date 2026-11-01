@@ -43,6 +43,26 @@ test('connection resolved before recipient deletion cannot recreate a request or
   assert.deepEqual(await notifications.list(ada), [])
 })
 
+test('invitation acceptance waits for inviter deletion and rejects a stale invite', async () => {
+  const coordination = coordinatorFor({}), store = createMemoryInvitationStore()
+  let entered, resume, paused = false, notifications = 0
+  const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve })
+  const get = store.get.bind(store)
+  store.get = async key => { const record = await get(key); if (!paused) { paused = true; entered(); await proceed } return record }
+  const invitations = createMemberInvitations({ store, coordination, validateParticipant: async () => {}, onAccepted: async () => { notifications++ } })
+  const created = await invitations.create({ inviter: jacob, inviterName: 'Jacob', inviteeName: 'Ada' })
+  const response = invitations.respond(created.token, ada, 'accept', 'Ada')
+  await waiting
+  const release = await coordination.acquire('owner:' + jacob.ownerId, true)
+  await invitations.removeOwner(jacob)
+  coordination.deleted(jacob.ownerId)
+  release()
+  resume()
+  await assert.rejects(response, { code: 'invitation_unavailable' })
+  assert.equal(notifications, 0)
+  assert.deepEqual(await invitations.connections(ada), [])
+})
+
 test('nested sender coordination permits pair writes and reciprocal acceptance', async () => {
   const coordination = coordinatorFor({}), { requests } = setup({ coordination, validateParticipant: async () => {} })
   await coordination.run(['owner:' + jacob.ownerId], async () => {

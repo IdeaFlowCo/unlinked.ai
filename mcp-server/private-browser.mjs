@@ -699,6 +699,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     }
     if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new Error('private_owner_recovery_required')
     if (claimed && (claimed.ownerId !== owner.ownerId || claimed.userId !== owner.userId)) throw new Error('private_owner_recovery_required')
+    return await coordination.run(['owner:' + owner.ownerId], async () => {
+    if (coordination.version(owner.ownerId) > started) throw new Error('private_owner_recovery_required')
+    const currentOwner = await resolveOwner(identity)
+    if (!currentOwner || currentOwner.ownerId !== owner.ownerId || currentOwner.userId !== owner.userId) throw new Error('private_owner_recovery_required')
     purge(sessions)
     if (sessions.size >= SESSION_CAPACITY) throw new Error('private_login_capacity')
     const sessionId = token()
@@ -736,6 +740,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
     redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
     return 'signed_in'
+    })
     })
     } finally { releaseOwner() }
   }
@@ -960,9 +965,18 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // Blocking: kept by Unlinked for the blocker, applied to connection requests
   // here and to messages through OpenChat's own block (docs/report-and-block.md).
   async function applyBlock(session, { profileId = null, openChatUserId = null, name = null }) {
+    const checkpoint = coordination.checkpoint()
     let blocked = null
     if (profileId && typeof accountForProfile === 'function') blocked = await accountForProfile(profileId).catch(() => null)
     if (blocked && blocked.ownerId === session.owner.ownerId && blocked.userId === session.owner.userId) throw new BlockError('block_self')
+    return coordination.run([session.owner, ...(blocked ? [blocked] : [])].map(member => 'owner:' + member.ownerId), async () => {
+    if ([session.owner, ...(blocked ? [blocked] : [])].some(member => coordination.version(member.ownerId) > checkpoint)) throw new BlockError('block_target_invalid')
+    await getBackend(session.owner)
+    if (blocked) {
+      await getBackend(blocked)
+      const current = await accountForProfile(profileId)
+      if (!current || current.ownerId !== blocked.ownerId || current.userId !== blocked.userId) throw new BlockError('block_target_invalid')
+    }
     // A member's OpenChat user, through the same confidential path as Message.
     if (!openChatUserId && profileId && messaging) {
       const context = unlinkedProfileContext(profileId)
@@ -983,6 +997,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     knownCache.delete(session.owner.ownerId)
     await recordAudit({ event: 'member_blocked', ownerHash: ownerHash(session.owner), openChat, account: Boolean(blocked) })
     return record
+    })
   }
   const blockFor = async (owner, profileId) => memberBlocks && profileId ? (await bounded(() => memberBlocks.list(owner), [])).find(value => value.blockedProfileId === profileId) ?? null : null
   // Every published profile gets a readable address without waiting for a page
@@ -1805,9 +1820,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('action').length !== 1 || [...input.keys()].some(key => !['csrf','action'].includes(key))) throw new Error('private_browser_csrf')
         if (!session.legacyCandidate || !session.legacyProof || !legacyAccount) throw new Error('legacy_confirmation_unavailable')
         if (input.get('action') === 'confirm') {
+          const checkpoint = coordination.checkpoint()
           await legacyAccount.confirm(session.legacyProof, session.legacyCandidate.profileId, true)
           await recordAudit({ event: 'legacy_profile_confirmed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
-          if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(session.legacyCandidate.profileId, session.owner).catch(() => {})
+          if (typeof notifyProfileClaimed === 'function') await notifyProfileClaimed(session.legacyCandidate.profileId, session.owner, checkpoint).catch(() => {})
         } else if (input.get('action') !== 'skip') throw new Error('legacy_confirmation_required')
         session.legacyCandidate = null
         redirect(response, '/profile'); return
@@ -1881,10 +1897,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('candidate').length !== 1 || [...input.keys()].some(key => !['csrf', 'candidate'].includes(key))) throw new Error('private_browser_csrf')
         if (!selfClaims || !session.selfClaim?.candidate || input.get('candidate') !== session.selfClaim.candidate.token) throw new Error('self_claim_unavailable')
         const { profileId, evidence, source, slug } = session.selfClaim.candidate
+        const checkpoint = coordination.checkpoint()
         try {
           const claimed = source === 'profile-lookup' ? await signupLookup.confirm({ owner: session.owner, slug }) : await selfClaims.claim({ owner: session.owner, issuer: session.selfClaim.identity.issuer, subject: session.selfClaim.identity.subject, emailHash: session.selfClaim.emailHash, profileId, evidence })
           await recordAudit({ event: source === 'profile-lookup' ? 'signup_profile_self_asserted' : claimed.test === true ? 'test_profile_self_claimed' : 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId: claimed.profileId, evidence: source === 'profile-lookup' ? 'self-asserted-public-profile-v1' : evidence, receiptId: claimed.receiptId })
-          if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(claimed.profileId, session.owner).catch(() => {})
+          if (typeof notifyProfileClaimed === 'function') await notifyProfileClaimed(claimed.profileId, session.owner, checkpoint).catch(() => {})
           session.selfClaim = null
           redirect(response, '/profile'); return
         } catch (error) {
@@ -2570,8 +2587,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
-        if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
-        if (ideaflowProfiles?.choices) await ideaflowProfiles.choices.removeOwner(session.owner).catch(() => {})
+        if (homePreferences) await homePreferences.removeOwner(session.owner)
+        if (ideaflowProfiles?.choices) await ideaflowProfiles.choices.removeOwner(session.owner)
         if (personLookup) await personLookup.removeOwner(session.owner)
         if (contactEnrichment) await contactEnrichment.removeOwner(session.owner)
         if (contactSlugs) await contactSlugs.removeOwner(session.owner)
@@ -2587,7 +2604,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         try {
         if (handleProfile) await profileHandles.removeProfile(handleProfile)
         // Reports this member sent stay for review, without who sent them.
-        if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
+        if (safetyReports) await safetyReports.forgetReporter(session.owner)
         // Blocks this member made, and blocks of this member.
         if (memberBlocks) await memberBlocks.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
