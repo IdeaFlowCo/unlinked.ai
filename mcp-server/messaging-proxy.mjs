@@ -1,3 +1,4 @@
+import { readRequestBody } from './request-body.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { connectOpenChatSocket, OPENCHAT_SOCKET_URL } from './openchat-socket.mjs'
@@ -27,6 +28,13 @@ const AUDIO_TYPES = new Set(['audio/m4a', 'audio/mp4', 'audio/x-m4a', 'audio/aac
 const DOCUMENT_TYPES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/csv', 'text/plain', 'application/rtf', 'application/zip', 'application/x-zip-compressed'])
 const FILE_TYPES = new Set([...IMAGE_TYPES, ...AUDIO_TYPES, ...DOCUMENT_TYPES])
 const UPLOAD_TYPES = new Set([...IMAGE_TYPES, ...DOCUMENT_TYPES])
+export const messagingBodyLimit = (path, type) => path === '/messages/api/attachments' ? (DOCUMENT_TYPES.has(String(type ?? '').split(';')[0].trim().toLowerCase()) ? 20 * 1024 * 1024 : 10 * 1024 * 1024) : 64 * 1024
+export const validMessagingAttachmentHeaders = headers => {
+  const mimeType = String(headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+  const declared = Number(headers['content-length'])
+  const maxBytes = DOCUMENT_TYPES.has(mimeType) ? DOCUMENT_MAX_BYTES : UPLOAD_MAX_BYTES
+  return UPLOAD_TYPES.has(mimeType) && Number.isSafeInteger(declared) && declared > 0 && declared <= maxBytes
+}
 // Images stay at this proxy's existing 10 MB cap (stricter than OpenChat's own 20 MB).
 // Documents share the download/serve ceiling below (well under OpenChat's 50 MB cap),
 // so one FILE_MAX_BYTES also bounds what serveFile will ever stream back.
@@ -346,11 +354,10 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const declared = Number(request.headers['content-length'])
     // Documents get the larger (but still bounded) cap; images keep the existing stricter one.
     const maxBytes = DOCUMENT_TYPES.has(mimeType) ? DOCUMENT_MAX_BYTES : UPLOAD_MAX_BYTES
-    if (!UPLOAD_TYPES.has(mimeType) || !Number.isSafeInteger(declared) || declared <= 0 || declared > maxBytes) throw invalid()
+    if (!validMessagingAttachmentHeaders(request.headers)) throw invalid()
     const filename = (String(request.headers['x-filename'] ?? 'image').normalize('NFKC').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100) || 'image')
-    const parts = []; let length = 0
-    for await (const part of request) { length += part.length; if (length > maxBytes) throw new MessagingError(413, 'body_too_large'); parts.push(part) }
-    const bytes = Buffer.concat(parts)
+    let bytes
+    try { bytes = await readRequestBody(request, maxBytes) } catch { throw new MessagingError(413, 'body_too_large') }
     if (bytes.length !== declared) throw invalid()
     const { value } = await upstream(session, 'POST', '/api/chat/attachments/presign', { filename, mimeType, sizeBytes: bytes.length })
     let put
@@ -602,10 +609,10 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   // ── Routes ──────────────────────────────────────────────────────────────
   async function readJson(request) {
     if (!/^application\/json(?:;\s*charset=utf-8)?$/i.test(request.headers['content-type'] ?? '')) throw invalid()
-    const parts = []; let length = 0
-    for await (const part of request) { length += part.length; if (length > BODY_MAX_BYTES) throw new MessagingError(413, 'body_too_large'); parts.push(part) }
+    let bytes
+    try { bytes = await readRequestBody(request, BODY_MAX_BYTES) } catch { throw new MessagingError(413, 'body_too_large') }
     let value
-    try { value = JSON.parse(Buffer.concat(parts).toString('utf8') || '{}') } catch { throw invalid() }
+    try { value = JSON.parse(bytes.toString('utf8') || '{}') } catch { throw invalid() }
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid()
     return value
   }

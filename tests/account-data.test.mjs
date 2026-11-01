@@ -68,8 +68,9 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
   const grants = createAccountGrantService({ issuer: 'https://synthetic-private.invalid', signingKey: randomBytes(32), getBackend: f.getBackend })
   let legacyRevoked = 0, assetsRemoved = []
   const complete = async () => ({ matches: [] })
-  let handler
-  const server = createServer((req, res) => void handler(req, res))
+  let handler, uploadStarted
+  const uploading = new Promise(resolve => { uploadStarted = resolve })
+  const server = createServer((req, res) => { if (req.headers['x-stalled-upload']) uploadStarted(); void handler(req, res) })
   await new Promise(r => server.listen(0, '127.0.0.1', r)); t.after(() => new Promise(r => server.close(r)))
   const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
   handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'synthetic',
@@ -130,9 +131,18 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
 
   // The confirmed deletion tombstones every resource, including receipts,
   // sources, assertions and the agent grant, and ends every session.
-  const deleted = await fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(signed.csrf)}&confirm=${encodeURIComponent('Delete Account ')}` })
+  const boundary = 'synthetic-boundary'
+  const uploadBody = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="csrf"\r\n\r\n${signed.csrf}\r\n--${boundary}\r\nContent-Disposition: form-data; name="syntheticConsent"\r\n\r\nyes\r\n--${boundary}\r\nContent-Disposition: form-data; name="archive"; filename="Connections.csv"\r\nContent-Type: text/csv\r\n\r\n${header}New,Contact,https://www.linkedin.com/in/new-contact,Example,Engineer\n\r\n--${boundary}--\r\n`)
+  const pausedUpload = httpRequest(`${endpoint}/upload`, { method: 'POST', headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': uploadBody.length, 'X-Stalled-Upload': '1' } })
+  const uploadResult = new Promise((resolve, reject) => { pausedUpload.on('response', response => { response.resume(); response.on('end', () => resolve(response.statusCode)) }); pausedUpload.on('error', reject) })
+  const half = Math.floor(uploadBody.length / 2)
+  pausedUpload.write(uploadBody.subarray(0, half))
+  await uploading
+  const deleted = await fetch(`${endpoint}/delete-account`, { method: 'POST', signal: AbortSignal.timeout(2000), headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(signed.csrf)}&confirm=${encodeURIComponent('Delete Account ')}` })
   assert.equal(deleted.status, 200)
   assert.match(await deleted.text(), /Your Unlinked account is deleted/)
+  pausedUpload.end(uploadBody.subarray(half))
+  assert.equal(await uploadResult, 401)
   const remaining = [...f.resources.values()].filter(x => x.sourceOwnerId === owner.ownerId && !x.deleted)
   assert.deepEqual(remaining, [])
   for (const value of f.resources.values()) if (value.sourceOwnerId === owner.ownerId) assert.equal(value.payload, null)

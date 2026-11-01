@@ -1,8 +1,9 @@
+import { readRequestBody, bufferRequestBody } from './request-body.mjs'
 import { ideaflowProfileSection, IDEAFLOW_PROFILE_VISIBILITY } from './ideaflow-profile.mjs'
 import { createPublicReadAdmission } from './public-read-admission.mjs'
 import { recentContact, contactName } from './contact-enrichment.mjs'
 import { MESSAGES_CLIENT_SOURCE, messagesConfig } from './messages-client.mjs'
-import { createMessagingProxy, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
+import { createMessagingProxy, messagingBodyLimit, validMessagingAttachmentHeaders, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { groupConnectionRows, publishedPeopleFor, rowProvenanceType, rowPublicTarget, rowSourceLabel } from './connection-identity.mjs'
@@ -138,15 +139,7 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
   }
 }
 
-async function body(request, limit) {
-  const parts = []; let size = 0
-  for await (const part of request) {
-    size += part.length
-    if (size > limit) throw new Error('private_body_limit')
-    parts.push(part)
-  }
-  return Buffer.concat(parts)
-}
+const body = readRequestBody
 
 // Pages are wrapped in email_off: Cloudflare (in front of www since 2026-10-24)
 // would otherwise rewrite mailto links into /cdn-cgi/l/email-protection links
@@ -1079,7 +1072,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     setTimeout(run, Math.min(handleBackfillMs, 5000)).unref?.()
     setInterval(run, handleBackfillMs).unref?.()
   }
-  let lastPrune = Date.now()
+  let lastPrune = Date.now(), pendingArchiveBodies = 0, pendingMessageBodies = 0
+  const pendingMessageOwners = new Map()
   const serveCore = async (request, response) => {
     // GET page navigations allow the browser's back/forward cache, so Back
     // from a profile restores the search results instantly without a request.
@@ -2782,16 +2776,38 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       catch { response.writeHead(503, { 'Retry-After': '10' }).end(); return }
     }
     const ownerId = record?.ownerId ?? record?.owner?.ownerId
-    if (exclusive && ownerId && request.headers.host === base.host && request.headers.origin === base.origin) {
-      let input
-      try { input = new URLSearchParams((await body(request, 8192)).toString('utf8')) }
-      catch { response.writeHead(413).end(); return }
-      if (input.getAll('csrf').length !== 1 || input.get('csrf') !== record.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) { response.writeHead(400).end(); return }
-      deletionInputs.set(request, input)
-    }
-    if (!ownerId || path === '/auth/callback/ideaflow' || path === '/invite/confirm' || (exclusive && !deletionInputs.has(request))) return serveCore(request, response)
-    const release = await coordination.acquire('owner:' + ownerId, exclusive)
-    try { return await coordination.withHeld('owner:' + ownerId, exclusive, () => serveCore(request, response)) } finally { release() }
+    const before = ownerId ? coordination.version(ownerId) : null
+    let reserved = null
+    try {
+      const eligible = ownerId && request.method === 'POST' && path !== '/invite/confirm' && request.headers.host === base.host && (request.headers.origin === base.origin || (path === '/email/unsubscribe' && memberEmail))
+      if (eligible && (path !== '/messages/api/attachments' || validMessagingAttachmentHeaders(request.headers))) {
+        const attachment = path === '/messages/api/attachments'
+        if (path === '/upload') {
+          if (pendingArchiveBodies >= 1) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+          pendingArchiveBodies++; reserved = () => { pendingArchiveBodies-- }
+        } else if (attachment) {
+          const mine = pendingMessageOwners.get(ownerId) ?? 0
+          if (mine >= 2 || pendingMessageBodies >= 8) { response.writeHead(429, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'rate_limited' })); return }
+          pendingMessageOwners.set(ownerId, mine + 1); pendingMessageBodies++
+          reserved = () => { pendingMessageBodies--; const left = pendingMessageOwners.get(ownerId) - 1; if (left) pendingMessageOwners.set(ownerId, left); else pendingMessageOwners.delete(ownerId) }
+        }
+        const limit = path === '/upload' ? LIMITS.archiveBytes + 65536 : path.startsWith('/messages/api/') ? messagingBodyLimit(path, request.headers['content-type']) : 16384
+        let bytes
+        try { bytes = await bufferRequestBody(request, limit) }
+        catch { if (!response.destroyed) response.writeHead(413, path.startsWith('/messages/api/') ? { 'Content-Type': 'application/json' } : {}).end(path.startsWith('/messages/api/') ? JSON.stringify({ error: 'body_too_large' }) : undefined); return }
+        if (exclusive) {
+          const input = new URLSearchParams(bytes.toString('utf8'))
+          if (bytes.length > 8192 || input.getAll('csrf').length !== 1 || input.get('csrf') !== record.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) { response.writeHead(bytes.length > 8192 ? 413 : 400).end(); return }
+          deletionInputs.set(request, input)
+        }
+      }
+      if (!ownerId || path === '/auth/callback/ideaflow' || path === '/invite/confirm' || (exclusive && !deletionInputs.has(request))) return await serveCore(request, response)
+      const release = await coordination.acquire('owner:' + ownerId, exclusive)
+      try {
+        if (coordination.version(ownerId) !== before) { response.writeHead(401).end(); return }
+        return await coordination.withHeld('owner:' + ownerId, exclusive, () => serveCore(request, response))
+      } finally { release() }
+    } finally { reserved?.() }
   }
   serve.backfillHandles = backfillHandles
   return serve
