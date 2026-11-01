@@ -572,7 +572,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
-  const sessionFor = request => { purge(sessions); return sessions.get(cookies(request)['__Host-ul-session']) }
+  const requestSessions = new WeakMap()
+  const sessionFor = request => requestSessions.get(request)
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
@@ -699,10 +700,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
+    if (sessionStore) await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() })
     sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel, displayName, csrf, expiresAt })
-    if (sessionStore) {
-      try { await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() }) } catch { }
-    }
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     if (cardToken) {
@@ -1055,15 +1054,34 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     // RFC 8058 one-click unsubscribe is posted by mail providers, without this
     // origin; its signed token is the whole authority and it only turns email off.
     const oneClick = request.method === 'POST' && memberEmail && new URL(request.url, base).pathname === '/email/unsubscribe'
-    // After the mutation finished, never mid-request; /search reads only.
-    if (request.method === 'POST' && new URL(request.url, base).pathname !== '/search') {
-      const posted = sessionFor(request)?.owner
-      if (posted) response.once('finish', () => dropAccountNetwork(posted))
-    }
     if (request.method === 'POST' && !oneClick && request.headers.origin !== base.origin) { if (connectionPost(request)) connectionFailure(response, 'This page could not be verified. Refresh Unlinked and try again.', 403); else response.writeHead(403).end(); return }
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      purge(sessions)
+      const sid = cookies(request)['__Host-ul-session']
+      let current = sid ? sessions.get(sid) : null
+      if (sessionStore && sid) {
+        const hash = createHash('sha256').update(sid).digest('hex')
+        let record
+        try {
+          record = await sessionStore.get(hash, Date.now())
+          if (record) record = await sessionStore.get(hash, Date.now())
+        } catch { response.writeHead(503, { 'Retry-After': '10' }).end(); return }
+        if (!record) { sessions.delete(sid); current = null }
+        else if (!current || current.csrf !== record.csrf || current.owner.ownerId !== record.ownerId || current.owner.userId !== record.userId) {
+          current = { legacyProof: null, legacyCandidate: null, selfClaim: null,
+            owner: Object.freeze({ ownerId: record.ownerId, userId: record.userId }),
+            accountLabel: record.accountLabel, displayName: record.displayName, csrf: record.csrf, expiresAt: record.expiresAt }
+          sessions.set(sid, current)
+        }
+      }
+      if (sessionStore && Date.now() - lastPrune > 3600000) {
+        lastPrune = Date.now()
+        sessionStore.prune(Date.now()).catch(() => {})
+      }
+      if (current) requestSessions.set(request, current)
+      if (request.method === 'POST' && url.pathname !== '/search' && current) response.once('finish', () => dropAccountNetwork(current.owner))
       // Browser autocomplete reads the same published projection for everyone.
       // Its own burst budget keeps keystrokes out of the full-page read budget.
       if (request.method === 'GET' && url.pathname === '/search-suggestions') {
@@ -1157,34 +1175,6 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       // Page views read the photo set's pointer at most every 30 seconds.
       if (profilePhotos && request.method === 'GET') await profilePhotos.refresh().catch(() => {})
 
-      if (sessionStore) {
-        const sid = cookies(request)['__Host-ul-session']
-        if (sid) {
-          purge(sessions)
-          if (!sessions.has(sid)) {
-            try {
-              const hash = createHash('sha256').update(sid).digest('hex')
-              const record = await sessionStore.get(hash, Date.now())
-              if (record) {
-                sessions.set(sid, {
-                  legacyProof: null,
-                  legacyCandidate: null,
-                  selfClaim: null,
-                  owner: Object.freeze({ ownerId: record.ownerId, userId: record.userId }),
-                  accountLabel: record.accountLabel,
-                  displayName: record.displayName,
-                  csrf: record.csrf,
-                  expiresAt: record.expiresAt
-                })
-              }
-            } catch { }
-          }
-        }
-        if (Date.now() - lastPrune > 3600000) {
-          lastPrune = Date.now()
-          sessionStore.prune(Date.now()).catch(() => {})
-        }
-      }
 
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
@@ -2557,13 +2547,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // Member-published public links go with the account.
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
         // So do the member's handles, current and earlier (released once the data is gone).
-        const handleProfile = profileHandles && typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
+        const handleProfile = profileHandles && typeof ownProfileId === 'function' ? await ownProfileId(session.owner) : null
+        if (handleProfile) await profileHandles.removeProfile(handleProfile)
         // Reports this member sent stay for review, without who sent them.
         if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
         // Blocks this member made, and blocks of this member.
         if (memberBlocks) await memberBlocks.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
-        if (handleProfile) await profileHandles.removeProfile(handleProfile)
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)

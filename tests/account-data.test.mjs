@@ -146,11 +146,20 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
   assert.equal(exportAfter.status, 401)
 })
 
-for (const failedStep of ['legacy', 'assets', 'sessions']) {
+for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'handle-removal']) {
   test(`account deletion retries after ${failedStep} cleanup fails`, async t => {
     const f = fixture(), owner = { ownerId: 'retry-owner', userId: 'retry-user' }, bindings = new Map()
+    const grants = createAccountGrantService({ issuer: 'https://synthetic-private.invalid', signingKey: randomBytes(32), getBackend: f.getBackend })
     const store = createMemorySessionStore(), deleteOwner = store.deleteOwner.bind(store)
-    let fail = true
+    let fail = true, identityPresent = true, handlePresent = true, pauseRead = false, releaseRead, readStarted
+    const readPending = new Promise(resolve => { readStarted = resolve })
+    const readRelease = new Promise(resolve => { releaseRead = resolve })
+    const get = store.get.bind(store)
+    store.get = async (...args) => {
+      const record = await get(...args)
+      if (pauseRead) { pauseRead = false; readStarted(); await readRelease }
+      return record
+    }
     store.deleteOwner = async id => { if (failedStep === 'sessions' && fail) throw new Error('storage unavailable'); await deleteOwner(id) }
     let handlers
     const server = createServer((req, res) => void handlers[req.headers['x-worker'] === 'second' ? 1 : 0](req, res))
@@ -162,7 +171,12 @@ for (const failedStep of ['legacy', 'assets', 'sessions']) {
         finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'retry-subject', clientId: 'synthetic-client', verifiedAt: Math.floor(Date.now() / 1000), provenanceReceiptId: 'retry-proof' }) },
       resolveOwner: async identity => bindings.get(`${identity.issuer}:${identity.subject}`),
       signup: async identity => { bindings.set(`${identity.issuer}:${identity.subject}`, owner); f.register(owner); return owner },
-      getBackend: f.getBackend, complete: async () => ({ matches: [] }),
+      getBackend: f.getBackend, complete: async () => ({ matches: [] }), issueAccountGrant: grants.issueGrant, revokeAccountGrant: grants.revoke,
+      handleBackfillMs: 0,
+      profileHandles: { resolve: () => null, handleFor: () => null, ensure: async () => {}, availability: () => ({}), rename: async () => {},
+        removeProfile: async id => { assert.equal(id, 'profile-id'); if (failedStep === 'handle-removal' && fail) throw new Error('handle unavailable'); handlePresent = false } },
+      ownProfileId: async () => { if (failedStep === 'handle-lookup' && fail) throw new Error('profile unavailable'); return identityPresent ? 'profile-id' : null },
+      signupLookup: { read: async () => null, removeOwner: async () => { identityPresent = false } },
       revokeLegacyLink: async () => { if (failedStep === 'legacy' && fail) throw new Error('legacy unavailable') },
       removeOwnerAssets: async () => { if (failedStep === 'assets' && fail) throw new Error('assets unavailable') },
       mcpEndpoint: `${baseUrl}/mcp` }
@@ -172,16 +186,24 @@ for (const failedStep of ['legacy', 'assets', 'sessions']) {
     assert.equal(callback.status, 303)
     const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
     const page = await (await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).text()
+    assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })).status, 200)
     const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
     const remove = () => fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, confirm: 'delete everything' }) })
     const failed = await remove()
     assert.notEqual(failed.status, 200)
     assert.doesNotMatch(await failed.text(), /Your Unlinked account is deleted/)
     assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).status, 200)
+    if (failedStep.startsWith('handle-')) { assert.equal(identityPresent, true); assert.equal(handlePresent, true) }
+    pauseRead = true
+    const pending = fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })
+    await readPending
     fail = false
     const retried = await remove()
     assert.equal(retried.status, 200)
     assert.match(await retried.text(), /Your Unlinked account is deleted/)
+    releaseRead()
+    assert.equal((await pending).status, 401)
+    assert.equal(handlePresent, false)
     assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).status, 401)
     assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })).status, 401)
   })

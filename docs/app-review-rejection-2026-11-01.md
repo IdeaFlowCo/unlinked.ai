@@ -13,7 +13,7 @@ The shared Ideaflow ID is independent: Settings and the completion page link dir
 App Store Connect app `6821198719`, version resource `0e7a6367-a01a-4395-85b1-f96a8f4ba604`:
 
 - Description now says **connect your own AI agents through MCP**, preserving network and agent search benefits and relevant keywords. It no longer names ChatGPT as an example client. Apple sign-in is included accurately.
-- Removed the old iPad `03-agents.jpg` screenshot, which named ChatGPT and showed technical setup instructions. Five iPhone and three iPad screenshots remain.
+- Removed the old iPad `01-home.jpg` and `03-agents.jpg` screenshots, which included ChatGPT; the latter also showed technical setup instructions. Five iPhone and two iPad screenshots remain. Both removals returned ASC DELETE 204 and were verified by GET readback.
 - Mainland China (`CHN`) availability is off; all other 174 territories remain enabled. Readback verified that only CHN changed. This uses Apple's offered distribution remedy because the live app uses OpenAI search; removing a brand name alone would not suppress that functionality. A future mainland release needs a separately verified functional and compliance plan.
 
 ## Submission gate
