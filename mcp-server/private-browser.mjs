@@ -675,6 +675,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     let owner = await resolveOwner(identity)
     const releaseOwner = owner ? await coordination.acquire('owner:' + owner.ownerId, false) : () => {}
     try {
+    return await coordination.withHeld('owner:' + (owner?.ownerId ?? ''), false, async () => {
     if (owner && coordination.version(owner.ownerId) > started) throw new Error('private_owner_recovery_required')
     if (owner && !await resolveOwner(identity)) throw new Error('private_owner_recovery_required')
     let newOwner = false
@@ -709,7 +710,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
     const accountLabel = identity.verifiedEmail ?? identity.subject
     // Keep the sign-in address private for member email and invite Reply-To.
-    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner && silentBack === null }), false)
+    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner && silentBack === null }).catch(() => {})
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
@@ -735,6 +736,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
     redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
     return 'signed_in'
+    })
     } finally { releaseOwner() }
   }
   // Where a silent attempt returns: the same-origin page it started on, only
@@ -761,6 +763,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // Connect rules shared with agent write tools (connection-actions.mjs).
   const canAddCard = Boolean(memberConnections && contactCards?.ownerForToken)
   async function addCard(owner, cardToken, displayName) {
+    const checkpoint = memberConnections.checkpoint?.()
     const target = await contactCards.ownerForToken(cardToken)
     const card = await openCard(cardToken)
     if (!target || !card) throw new Error('contact_card_not_found')
@@ -774,7 +777,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       senderProfileId: typeof ownProfileId === 'function' ? await ownProfileId(owner) : null,
       recipient: target, recipientName: card.name,
       // A card's path may carry the member's handle; the request stores the profile id.
-      recipientProfileId: card.profilePath ? handleTarget(decodeURIComponent(card.profilePath.slice('/people/'.length))) : null })
+      recipientProfileId: card.profilePath ? handleTarget(decodeURIComponent(card.profilePath.slice('/people/'.length))) : null, checkpoint,
+      beforeWrite: async () => { const current = await contactCards.ownerForToken(cardToken); if (!current || current.ownerId !== target.ownerId || current.userId !== target.userId) throw new Error('contact_card_not_found') } })
     if (sent.status !== 'accepted') await memberConnections.respond(target, sent.request.id, 'accept')
   }
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
@@ -2678,7 +2682,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const file = form.get('archive')
         if (!file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name)) throw new Error('private_archive_filename_invalid')
         const receipt = await (backgroundImports ? stageArchive : ingestArchive)({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: dataMode === 'private_live' && readPublishedSnapshot ? PUBLIC_UPLOAD_CONSENT : COMBINED_UPLOAD_CONSENT })
-        if (memberEmail?.completeImportReminders) await bounded(() => memberEmail.completeImportReminders(session.owner), false)
+        if (memberEmail?.completeImportReminders) await memberEmail.completeImportReminders(session.owner).catch(() => {})
         redirect(response, signup ? '/profile' : `/imports/${receipt.id}`); return
         } finally { uploadBusy = false }
       }
@@ -2770,7 +2774,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     }
     if (!ownerId || path === '/auth/callback/ideaflow' || path === '/invite/confirm' || (exclusive && !deletionInputs.has(request))) return serveCore(request, response)
     const release = await coordination.acquire('owner:' + ownerId, exclusive)
-    try { return await serveCore(request, response) } finally { release() }
+    try { return await coordination.withHeld('owner:' + ownerId, exclusive, () => serveCore(request, response)) } finally { release() }
   }
   serve.backfillHandles = backfillHandles
   return serve

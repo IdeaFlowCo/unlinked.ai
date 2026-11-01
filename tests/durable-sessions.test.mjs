@@ -5,6 +5,39 @@ import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMemorySessionStore } from '../mcp-server/session-store.mjs'
 import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
 
+test('deletion waits for a pending sign-in email write', async t => {
+  const owner = { ownerId: 'mail-owner', userId: 'mail-user' }, sessionStore = createMemorySessionStore()
+  let address = null, writes = 0, entered, resume, deletionArrived
+  const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve })
+  const deleting = new Promise(resolve => { deletionArrived = resolve })
+  const memberEmail = { sending: true, rememberAddress: async () => { if (++writes === 2) { entered(); await proceed } address = 'member@example.invalid' },
+    settings: async () => ({}), savePreferences: async () => {}, sendInvite: async () => {}, inspectUnsubscribe: async () => {}, unsubscribe: async () => {}, exportOwner: async () => ({}), removeOwner: async () => { address = null } }
+  let handler
+  const server = createServer((req, res) => { if (req.url === '/delete-account') deletionArrived(); void handler(req, res) })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  handler = createPrivateBrowserHandler({ baseUrl, sessionStore, memberEmail,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid', transaction: { state: 's' } }), finish: async () => ({ issuer: 'https://synthetic.invalid', subject: 'sub', verifiedEmail: 'member@example.invalid' }) },
+    resolveOwner: async () => owner, signup: async () => owner, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {},
+    getBackend: async () => ({ adapter: {}, readResource: async () => null, listImportIds: async () => [], listAccountGrantIds: async () => [] }) })
+  const start = async () => fetch(`${endpoint}/login`, { redirect: 'manual' })
+  const finish = async response => fetch(`${endpoint}/auth/callback/ideaflow?code=x&state=s`, { redirect: 'manual', headers: { Cookie: response.headers.getSetCookie()[0].split(';')[0] } })
+  const signed = await finish(await start())
+  const cookie = signed.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const settings = await (await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).text()
+  const csrf = settings.match(/name="csrf" value="([^"]+)"/)[1]
+  const second = finish(await start())
+  await waiting
+  const deletion = fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: new URLSearchParams({ csrf, confirm: 'delete account' }) })
+  await deleting
+  assert.equal(address, 'member@example.invalid')
+  resume()
+  await second
+  assert.equal((await deletion).status, 200)
+  assert.equal(address, null)
+})
+
 test('sign-in queued across deletion cannot create a session', async t => {
   const owner = { ownerId: 'queued-owner', userId: 'queued-user' }, sessionStore = createMemorySessionStore(), coordination = coordinatorFor(sessionStore)
   let queued

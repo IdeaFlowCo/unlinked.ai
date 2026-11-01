@@ -157,7 +157,7 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 // `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
 // people overlay client (private-context.mjs) and the owner identity bridge.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, limits = {} }) {
+export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // Write tools use the same rules as the site's Connect button.
@@ -585,6 +585,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
     const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
     try {
+      const execute = async () => {
       if (typeof revalidate === 'function') grant = await revalidate() ?? grant
       const result = await tools[name](grant, parsed.data, signal, revalidate)
       // A write has already happened by now; only reads are withheld when the
@@ -596,6 +597,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       const text = JSON.stringify(result)
       if (Buffer.byteLength(text) > 1024 * 1024) throw new AccountToolError('result_too_large', 'The result exceeded 1 MiB; narrow the query or lower the page size.')
       return { result, text }
+      }
+      return coordination && MUTATING_TOOLS.has(name) ? await coordination.run(['owner:' + grant.ownerId], execute) : await execute()
     } finally { release?.() }
   }
 

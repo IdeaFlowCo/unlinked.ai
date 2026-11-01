@@ -267,7 +267,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const memberBlocks = blockStore ? createMemberBlocks({ store: blockStore }) : undefined
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
     await connectionStore?.initialize()
-    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
+    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
     const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
       // The inviter hears that their invite was accepted (and so that the invitee joined).
       onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,

@@ -48,6 +48,7 @@ export function createConnectionActions({ memberConnections, accountForProfile, 
   // `accepted` (they had already asked), else a ConnectionError code.
   // Throws ConnectionError('connection_profile_not_found') for an unknown id.
   async function send(owner, { profileId, note, fallbackName, reader, beforeWrite } = {}) {
+    const checkpoint = memberConnections.checkpoint?.()
     const shared = readerFor(reader)
     let id = profileId, detail = await shared.profile({ id })
     if (detail?.moved) { id = detail.moved; detail = await shared.profile({ id }) }
@@ -62,8 +63,13 @@ export function createConnectionActions({ memberConnections, accountForProfile, 
     let senderName = fallbackName
     if (senderProfileId) { try { senderName = (await shared.lookup({ ids: [senderProfileId] })).get(senderProfileId)?.name ?? senderName } catch { /* keep the fallback name */ } }
     try {
-      if (typeof beforeWrite === 'function') await beforeWrite()
-      const sent = await memberConnections.send({ sender: owner, senderName, senderProfileId, recipient: account, recipientName: detail.profile.name, recipientProfileId: id, note })
+      const validate = async () => {
+        if (typeof beforeWrite === 'function') await beforeWrite()
+        const current = await accountForProfile(id)
+        if (!current || !sameAccount(current, account)) throw new ConnectionError('connection_not_available')
+      }
+      await validate()
+      const sent = await memberConnections.send({ sender: owner, senderName, senderProfileId, recipient: account, recipientName: detail.profile.name, recipientProfileId: id, note, checkpoint, beforeWrite: validate })
       return { code: sent.status === 'accepted' ? 'accepted' : 'sent', profileId: id, request: sent.request }
     } catch (failure) {
       if (!(failure instanceof ConnectionError)) throw failure
