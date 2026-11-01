@@ -57,6 +57,30 @@ import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 import { BlockError } from './member-blocks.mjs'
 import { renderPeopleError } from './private-onboarding-views.mjs'
 
+const runtimeCoordinators = new WeakMap(), memoryRuntime = {}
+function coordinatorFor(store) {
+  const key = store ?? memoryRuntime
+  if (runtimeCoordinators.has(key)) return runtimeCoordinators.get(key)
+  const queue = [], sessionMaps = new Set(), deletingProfiles = new Map()
+  let readers = 0, writer = false
+  const drain = () => {
+    if (writer || !queue.length) return
+    if (queue[0].exclusive) {
+      if (readers) return
+      writer = true
+      queue.shift().resolve(() => { writer = false; drain() })
+      return
+    }
+    while (queue.length && !queue[0].exclusive) {
+      readers++
+      queue.shift().resolve(() => { readers--; drain() })
+    }
+  }
+  const coordinator = { sessionMaps, deletingProfiles, acquire: exclusive => new Promise(resolve => { queue.push({ exclusive, resolve }); drain() }) }
+  runtimeCoordinators.set(key, coordinator)
+  return coordinator
+}
+
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 const cookie = (name, value, maxAge) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
@@ -193,6 +217,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // A default handle only for a profile an active account still stands behind,
   // so a just-deleted account (still in the published index) never gets one back.
   const ensureHandle = async profile => {
+    if ([...coordination.deletingProfiles.values()].includes(profile.id)) return null
     if (typeof accountForProfile === 'function' && !await accountForProfile(profile.id)) return null
     return profileHandles.ensure(profile)
   }
@@ -212,9 +237,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const authorization = new URL(authorizationOrigin)
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
+  const coordination = coordinatorFor(sessionStore)
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map(), pickerBudgets = new Map()
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
+  coordination.sessionMaps.add(sessions)
   const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users } : {}), ...messagingOptions }) : null
   // "View on Unlinked" for conversation partners (docs/openchat-message.md):
   // OpenChat names which of the member's own partners have a shared Ideaflow
@@ -975,7 +1002,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // imported copy folds into a member (or into another copy) or its import is
   // gone, its addresses move to the profile now carrying that address.
   // Removed and suspended addresses never move.
-  const backfillHandles = async ({ batchSize = 500, pauseMs = 25 } = {}) => {
+  const backfillHandlesCore = async ({ batchSize = 500, pauseMs = 25 } = {}) => {
     if (!profileHandles || typeof readPublishedSnapshot !== 'function') return 0
     if (typeof profileHandles.reload === 'function') await profileHandles.reload()
     const { profiles, aliases, hidden } = await publicReader.addresses()
@@ -984,6 +1011,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     // A default handle only for a member an active account still stands behind.
     const standing = new Map()
     const eligible = async profile => {
+      if ([...coordination.deletingProfiles.values()].includes(profile.id)) return false
       if (!members.has(profile.id) || typeof accountForProfile !== 'function') return true
       if (!standing.has(profile.id)) standing.set(profile.id, Boolean(await accountForProfile(profile.id).catch(() => null)))
       return standing.get(profile.id)
@@ -1027,13 +1055,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     await flush()
     return changed
   }
+  const backfillHandles = async options => { const release = await coordination.acquire(false); try { return await backfillHandlesCore(options) } finally { release() } }
   if (profileHandles && handleBackfillMs > 0) {
     const run = () => backfillHandles().catch(() => process.stderr.write('unlinked_handle_backfill_failed\n'))
     setTimeout(run, Math.min(handleBackfillMs, 5000)).unref?.()
     setInterval(run, handleBackfillMs).unref?.()
   }
   let lastPrune = Date.now()
-  const serve = async (request, response) => {
+  const serveCore = async (request, response) => {
     // GET page navigations allow the browser's back/forward cache, so Back
     // from a profile restores the search results instantly without a request.
     // `private, no-cache` still forces revalidation on normal navigations, and
@@ -1066,7 +1095,6 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         let record
         try {
           record = await sessionStore.get(hash, Date.now())
-          if (record) record = await sessionStore.get(hash, Date.now())
         } catch { response.writeHead(503, { 'Retry-After': '10' }).end(); return }
         if (!record) { sessions.delete(sid); current = null }
         else if (!current || current.csrf !== record.csrf || current.owner.ownerId !== record.ownerId || current.owner.userId !== record.userId) {
@@ -2117,7 +2145,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         }
         const mine = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
         const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
-        const own = published?.profile?.presence === 'member' ? published.profile.id : null
+        const own = published?.profile?.presence === 'member' && !coordination.deletingProfiles.has(session.owner.ownerId) ? published.profile.id : null
         if (checking) {
           const answer = own ? profileHandles.availability(input.get('handle'), own) : { code: 'unavailable' }
           response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private' })
@@ -2547,7 +2575,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // Member-published public links go with the account.
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
         // So do the member's handles, current and earlier (released once the data is gone).
-        const handleProfile = profileHandles && typeof ownProfileId === 'function' ? await ownProfileId(session.owner) : null
+        let handleProfile = coordination.deletingProfiles.get(session.owner.ownerId)
+        if (!handleProfile && profileHandles && typeof ownProfileId === 'function') {
+          handleProfile = await ownProfileId(session.owner)
+          if (handleProfile) coordination.deletingProfiles.set(session.owner.ownerId, handleProfile)
+        }
         if (handleProfile) await profileHandles.removeProfile(handleProfile)
         // Reports this member sent stay for review, without who sent them.
         if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
@@ -2562,7 +2594,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner)
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId)
         if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId)
-        for (const [id, value] of sessions) if (value.owner.ownerId === session.owner.ownerId) sessions.delete(id)
+        for (const map of coordination.sessionMaps) for (const [id, value] of map) if (value.owner.ownerId === session.owner.ownerId) map.delete(id)
+        coordination.deletingProfiles.delete(session.owner.ownerId)
         // Signing in again later starts from the Ideaflow account chooser.
         response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS), browserSessionCookie(AUTO_SIGNIN_COOKIE, '1')])
         await recordAudit({ event: 'account_data_deleted', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), deletedResources: result.deletedResources })
@@ -2714,6 +2747,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       const recovery = error.message === 'private_owner_recovery_required'
       if (!response.headersSent) render(response, recovery ? 'Account recovery required' : 'We could not finish that', recovery ? '<p>Your Ideaflow identity could not be safely mapped to an existing or newly provisioned Unlinked owner. No archive was accepted. Complete the trusted account recovery/provisioning step.</p>' : '<p>Try again, or sign in and return to your files in Settings. Your account and files have not been moved to another account.</p><a href="/settings">Open Settings</a>', limited ? 413 : recovery ? 409 : 400)
     }
+  }
+  const serve = async (request, response) => {
+    const exclusive = request.method === 'POST' && new URL(request.url, base).pathname === '/delete-account'
+    const release = await coordination.acquire(exclusive)
+    try { return await serveCore(request, response) } finally { release() }
   }
   serve.backfillHandles = backfillHandles
   return serve

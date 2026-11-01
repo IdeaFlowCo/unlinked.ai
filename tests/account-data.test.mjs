@@ -177,6 +177,10 @@ for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'hand
         removeProfile: async id => { assert.equal(id, 'profile-id'); if (failedStep === 'handle-removal' && fail) throw new Error('handle unavailable'); handlePresent = false } },
       ownProfileId: async () => { if (failedStep === 'handle-lookup' && fail) throw new Error('profile unavailable'); return identityPresent ? 'profile-id' : null },
       signupLookup: { read: async () => null, removeOwner: async () => { identityPresent = false } },
+      createMessagingSession: async () => ({ token: 'fixture-token', user: { userId: 'fixture-user' } }),
+      messagingOptions: { apiOrigin: 'https://chat.example.invalid', heartbeatMs: 20, lingerMs: 10,
+        fetchImpl: async () => new Response('{}', { status: 200 }),
+        connectSocket: async () => ({ open: true, emit() {}, close() {} }) },
       revokeLegacyLink: async () => { if (failedStep === 'legacy' && fail) throw new Error('legacy unavailable') },
       removeOwnerAssets: async () => { if (failedStep === 'assets' && fail) throw new Error('assets unavailable') },
       mcpEndpoint: `${baseUrl}/mcp` }
@@ -187,6 +191,9 @@ for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'hand
     const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
     const page = await (await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).text()
     assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })).status, 200)
+    const stream = failedStep === 'sessions' ? await fetch(`${endpoint}/messages/api/stream`, { headers: { Cookie: cookie, 'X-Worker': 'second' } }) : null
+    const streamReader = stream?.body.getReader()
+    if (streamReader) { assert.equal(stream.status, 200); await streamReader.read() }
     const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
     const remove = () => fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, confirm: 'delete everything' }) })
     const failed = await remove()
@@ -198,11 +205,19 @@ for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'hand
     const pending = fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })
     await readPending
     fail = false
-    const retried = await remove()
+    let deletionStarted = false
+    const retry = remove().then(response => { deletionStarted = true; return response })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(deletionStarted, false)
+    releaseRead()
+    assert.equal((await pending).status, 200)
+    const retried = await retry
     assert.equal(retried.status, 200)
     assert.match(await retried.text(), /Your Unlinked account is deleted/)
-    releaseRead()
-    assert.equal((await pending).status, 401)
+    if (streamReader) {
+      let chunk
+      do { chunk = await streamReader.read() } while (!chunk.done)
+    }
     assert.equal(handlePresent, false)
     assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).status, 401)
     assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })).status, 401)

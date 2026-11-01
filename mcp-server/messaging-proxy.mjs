@@ -577,24 +577,24 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     if (link.streams.size >= 3) { const oldest = [...link.streams][0]; oldest.write('superseded', {}); oldest.end() }
     const since = iso(request.headers['last-event-id']) ?? iso(url.searchParams.get('since'))
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store, private', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' })
-    let ended = false
+    let ended = false, heartbeat, lifetime
     const stream = {
       seen: new Set(),
-      write(event, data, id) { if (!ended) response.write(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) },
+      write(event, data, id) { if (!isSessionLive(session)) { this.end(); return } if (!ended) response.write(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) },
       end() { if (ended) return; ended = true; clearInterval(heartbeat); clearTimeout(lifetime); link.streams.delete(stream); response.end(); if (!link.streams.size && !link.closed) { link.lingerTimer = setTimeout(() => closeLink(link), lingerMs); link.lingerTimer.unref?.() } },
     }
     response.write('retry: 3000\n\n')
     link.streams.add(stream)
     stream.write('ready', { state: link.mode === 'socket' ? 'live' : link.mode })
     if (since) void replay(link, since, [stream]).catch(() => {})
-    const heartbeat = setInterval(() => {
+    heartbeat = setInterval(() => {
       if ((session.expiresAt && session.expiresAt <= now()) || !isSessionLive(session)) { stream.write('expired', {}); stream.end(); return }
       link.socket?.emit('heartbeat')
       stream.write('heartbeat', {})
     }, heartbeatMs)
     heartbeat.unref?.()
     // Streams are recycled; EventSource reconnects with Last-Event-ID and replays the gap.
-    const lifetime = setTimeout(() => stream.end(), streamLifetimeMs); lifetime.unref?.()
+    lifetime = setTimeout(() => stream.end(), streamLifetimeMs); lifetime.unref?.()
     request.on('close', () => stream.end())
     response.on('error', () => stream.end())
   }
