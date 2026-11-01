@@ -61,7 +61,7 @@ The runtime then signs a one-minute HS256 assertion for app `unlinked`, with the
 ## Export and deletion
 
 - **Export** (`/export`): includes `ideaflowPrivateContext`, the owner's copy of their whole overlay (Noos `GET /export`), marked `deletedWithUnlinkedAccount: false`. If Noos cannot be read, the export carries `{error: 'private_context_unavailable'}` instead.
-- **Delete everything** (`/delete-account`): does **not** delete the overlay. It belongs to the person's Ideaflow identity and is shared with OpenChat, so deleting an Unlinked account must not silently erase what they keep in OpenChat. The Settings copy says so and points to OpenChat or their agent. Noos `DELETE /api/overlay/owner` erases it all.
+- **Delete account** (`/delete-account`): does **not** delete the overlay. It belongs to the person's Ideaflow identity and is shared with OpenChat, so deleting an Unlinked account must not silently erase what they keep in OpenChat. Settings points to OpenChat to manage it. Noos `DELETE /api/overlay/owner` erases it all.
 - **App-level erasure** of refs in the `unlinked:` prefix (`POST /purge-ref` with a purge assertion) is not wired up. A published profile that is removed leaves owners' own notes in place, under a ref that no longer resolves.
 
 ## Configuration

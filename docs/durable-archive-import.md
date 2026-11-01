@@ -5,7 +5,8 @@ and commits its Noos `uploaded` receipt before redirecting the browser to `/prof
 The upload action records a versioned retention/AI-processing disclosure; production shared People uploads use `public-professional-archive-openai-v2`, while older/private receipts remain narrow. There is no additional consent checkbox. Replays do not broaden older receipts.
 
 A process-wide worker discovers pending imports through the trusted private Noos
-store, obtains a fresh owner-authorized backend, and claims a CAS lease lasting 180 seconds. Profile, Positions, Education and Skills observations are staged before
+store, runs up to eight jobs concurrently while serializing each owner's jobs,
+obtains a fresh owner-authorized backend, and claims a CAS lease lasting 180 seconds. Jobs defer while account deletion holds the owner lock. Profile, Positions, Education and Skills observations are staged before
 connection batches. The profile boundary has its own immutable chunk, so the own
 profile can appear before connection ingestion. Browser navigation or closing the
 browser does not cancel the worker. A restart resumes expired leases using the
