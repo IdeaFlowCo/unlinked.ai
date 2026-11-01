@@ -575,7 +575,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   // on revoked/replaced identity or removal of the requested permission. Unrelated
   // permission edits are allowed. Reads recheck after work; writes recheck before
   // execution (send also after target lookup), never misreport a committed write.
-  async function call({ grant, name, input = {}, signal, revalidate }) {
+  async function call({ grant, name, input = {}, signal, revalidate, requestContext }) {
     if (!grant || typeof grant.ownerId !== 'string' || typeof grant.userId !== 'string' || !Array.isArray(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant is no longer valid.')
     if (!Object.hasOwn(tools, name)) throw new AccountToolError('not_found', 'Unknown tool.')
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
@@ -586,6 +586,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
     try {
       const execute = async () => {
+      if (coordination && MUTATING_TOOLS.has(name) && requestContext?.ownerCheckpoint !== undefined && coordination.version(grant.ownerId) > requestContext.ownerCheckpoint) throw new AccountToolError('grant_revoked', 'The account changed during this request; reconnect and retry.')
       if (typeof revalidate === 'function') grant = await revalidate() ?? grant
       const result = await tools[name](grant, parsed.data, signal, revalidate)
       // A write has already happened by now; only reads are withheld when the

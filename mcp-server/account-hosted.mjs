@@ -47,7 +47,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || ![authenticateGrant, getBackend, complete].every(x => typeof x === 'function')) throw new Error('account_host_configuration_required')
   const toolService = service ?? createAccountToolService({ getBackend, complete, readPublishedSnapshot })
-  return async (request, response, parsedBody) => {
+  return async (request, response, parsedBody, requestContext) => {
     response.setHeader('Cache-Control', 'no-store')
     if (request.headers.host !== base.host || request.headers.origin && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
     // Unauthenticated requests get the OAuth challenge (RFC 9728) whatever the
@@ -119,7 +119,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
         response.once('close', () => { if (!response.writableFinished) controller.abort() })
         try {
-          const { text, result } = await toolService.call({ grant, name, input, signal, revalidate: () => revalidate(name) })
+          const { text, result } = await toolService.call({ grant, name, input, signal, requestContext, revalidate: () => revalidate(name) })
           requestDiagnostic().result(result)
           return { content: [{ type: 'text', text }] }
         } catch (error) {
