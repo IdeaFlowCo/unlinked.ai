@@ -93,7 +93,7 @@ export class OAuthError extends Error {
   constructor(code, description, status = 400) { super(code); this.code = code; this.description = description; this.status = status }
 }
 
-export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, publicSearchEnabled = false, issueGrant, revokeConnectionToken, audit, fetchImpl = globalThis.fetch, now = () => Date.now() }) {
+export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, publicSearchEnabled = false, issueGrant, revokeConnectionToken, coordination, audit, fetchImpl = globalThis.fetch, now = () => Date.now() }) {
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || !(clientKey instanceof Uint8Array) || clientKey.length < 32 ||
       typeof issueGrant !== 'function' || typeof revokeConnectionToken !== 'function' || typeof fetchImpl !== 'function' || !/^\/[a-z]+$/.test(resourcePath)) throw new Error('oauth_server_configuration_required')
@@ -244,7 +244,7 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
     const code = randomBytes(32).toString('base64url')
     issuedFor.set(sha256hex(code), { clientId: request.clientId, clientName: request.clientName, app: request.app, redirectUri: request.redirectUri, redirectProvided: request.redirectProvided, redirectHost: request.redirectHost,
       codeChallenge: request.codeChallenge, resource: request.resource, scope, scopeText,
-      owner: { ownerId: owner.ownerId, userId: owner.userId }, expiresAt: at + CODE_SECONDS * 1000 })
+      owner: { ownerId: owner.ownerId, userId: owner.userId }, ownerVersion: coordination?.version(owner.ownerId), expiresAt: at + CODE_SECONDS * 1000 })
     const target = new URL(request.redirectUri)
     target.searchParams.set('code', code)
     if (request.state !== undefined) target.searchParams.set('state', request.state)
@@ -327,12 +327,16 @@ export function createOAuthServer({ origin, resourcePath = '/mcp', clientKey, pu
     if (computed.length !== expected.length || !timingSafeEqual(computed, expected)) throw new OAuthError('invalid_grant', 'PKCE verification failed.')
     if (requestedResource !== undefined && !resourceAliases.has(requestedResource)) throw new OAuthError('invalid_target', `This server only issues tokens for ${resource}.`)
     const connection = { kind: 'oauth', app: pending.app, clientName: pending.clientName, redirectHost: pending.redirectHost, clientKey: sha256hex(clientId), resource }
+    const release = coordination ? await coordination.acquire('owner:' + pending.owner.ownerId, false) : () => {}
+    try {
+    if (coordination && coordination.version(pending.owner.ownerId) !== pending.ownerVersion) throw new OAuthError('invalid_grant', 'The account changed after authorization.')
     const issued = await issueGrant(pending.owner, undefined, { scope: pending.scope, connection })
     if (typeof audit === 'function') {
       try { await audit({ event: 'oauth_connection_granted', app: pending.app, clientKey: connection.clientKey, ownerHash: sha256hex(pending.owner.ownerId), grantId: issued.grantId, scope: pending.scope, at: new Date(now()).toISOString(), origin: base.origin }) }
       catch { /* Audit availability never changes an already-consented issuance. */ }
     }
     json(response, 200, { access_token: issued.accessToken, token_type: 'Bearer', scope: pending.scopeText })
+    } finally { release() }
   }
 
   async function revoke(request, response) {

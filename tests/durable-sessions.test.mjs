@@ -3,6 +3,36 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMemorySessionStore } from '../mcp-server/session-store.mjs'
+import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
+
+test('sign-in queued across deletion cannot create a session', async t => {
+  const owner = { ownerId: 'queued-owner', userId: 'queued-user' }, sessionStore = createMemorySessionStore(), coordination = coordinatorFor(sessionStore)
+  let queued
+  const waiting = new Promise(resolve => { queued = resolve })
+  const acquire = coordination.acquire
+  coordination.acquire = (key, exclusive) => { if (!exclusive && key === 'owner:queued-owner') queued(); return acquire(key, exclusive) }
+  let handler
+  const server = createServer((req, res) => void handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  handler = createPrivateBrowserHandler({ baseUrl, sessionStore,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid', transaction: { state: 's' } }), finish: async () => ({ issuer: 'https://synthetic.invalid', subject: 'sub' }) },
+    resolveOwner: async () => owner, signup: async () => owner, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {},
+    getBackend: async () => ({ adapter: {}, readResource: async () => null, listImportIds: async () => [], listAccountGrantIds: async () => [] }) })
+  const start = await fetch(`${endpoint}/login`, { redirect: 'manual' })
+  const release = await coordination.acquire('owner:queued-owner', true)
+  const callback = fetch(`${endpoint}/auth/callback/ideaflow?code=x&state=s`, { redirect: 'manual', headers: { Cookie: start.headers.getSetCookie()[0].split(';')[0] } })
+  await waiting
+  coordination.deleted(owner.ownerId)
+  release()
+  const rejected = await callback
+  assert.notEqual(rejected.status, 303)
+  assert.ok(!rejected.headers.getSetCookie().some(value => value.startsWith('__Host-ul-session=')))
+  const fresh = await fetch(`${endpoint}/login`, { redirect: 'manual' })
+  const accepted = await fetch(`${endpoint}/auth/callback/ideaflow?code=x&state=s`, { redirect: 'manual', headers: { Cookie: fresh.headers.getSetCookie()[0].split(';')[0] } })
+  assert.equal(accepted.status, 303)
+})
 
 test('durable session restore across handler instances', async t => {
   let signups = 0

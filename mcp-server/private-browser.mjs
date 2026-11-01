@@ -671,9 +671,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // Ideaflow identity receives its private account, just as in OpenChat.
   async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null, cardToken = null, connectProfileId = null) {
     let claimed
+    const started = coordination.checkpoint()
     let owner = await resolveOwner(identity)
     const releaseOwner = owner ? await coordination.acquire('owner:' + owner.ownerId, false) : () => {}
     try {
+    if (owner && coordination.version(owner.ownerId) > started) throw new Error('private_owner_recovery_required')
     if (owner && !await resolveOwner(identity)) throw new Error('private_owner_recovery_required')
     let newOwner = false
     if (invitationToken) {

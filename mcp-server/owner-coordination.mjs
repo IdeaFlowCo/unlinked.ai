@@ -3,6 +3,7 @@ export function coordinatorFor(store) {
   const key = store ?? memoryRuntime
   if (runtimeCoordinators.has(key)) return runtimeCoordinators.get(key)
   const sessionMaps = new Set(), deletingProfiles = new Map(), locks = new Map(), versions = new Map()
+  let generation = 0
   const acquire = (ownerId, exclusive) => {
     if (!locks.has(ownerId)) locks.set(ownerId, { queue: [], readers: 0, writer: false })
     const state = locks.get(ownerId), queue = state.queue
@@ -23,8 +24,9 @@ export function coordinatorFor(store) {
     return new Promise(resolve => { queue.push({ exclusive, resolve }); drain() })
   }
   const coordinator = { sessionMaps, deletingProfiles, acquire,
+    checkpoint: () => generation,
     version: ownerId => versions.get(ownerId) ?? 0,
-    deleted: ownerId => versions.set(ownerId, (versions.get(ownerId) ?? 0) + 1) }
+    deleted: ownerId => versions.set(ownerId, ++generation) }
   runtimeCoordinators.set(key, coordinator)
   return coordinator
 }
