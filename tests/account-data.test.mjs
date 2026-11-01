@@ -118,6 +118,10 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
   const settings = await (await fetch(`${endpoint}/settings`, { headers: { Cookie: signed.cookie } })).text()
   assert.match(settings, /action="\/export"/)
   assert.match(settings, /action="\/delete-account"/)
+  assert.match(settings, /<h2 id="delete-account">Delete account<\/h2>/)
+  assert.doesNotMatch(settings.split('<h2 id="delete-account">')[1].split('<h2')[0], /<details\b/)
+  assert.match(settings, /href="https:\/\/id\.ideaflow\.app\/account\/delete\?return_to=https:\/\/www\.unlinked\.ai"/)
+  assert.match(settings, /Permanently delete my Unlinked account/)
   const refused = await fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(signed.csrf)}&confirm=${encodeURIComponent('delete')}` })
   assert.equal(refused.status, 400)
   assert.match(await refused.text(), /Nothing was deleted/)
@@ -125,9 +129,9 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
 
   // The confirmed deletion tombstones every resource, including receipts,
   // sources, assertions and the agent grant, and ends every session.
-  const deleted = await fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(signed.csrf)}&confirm=${encodeURIComponent('Delete Everything ')}` })
+  const deleted = await fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(signed.csrf)}&confirm=${encodeURIComponent('Delete Account ')}` })
   assert.equal(deleted.status, 200)
-  assert.match(await deleted.text(), /Your data is deleted/)
+  assert.match(await deleted.text(), /Your Unlinked account is deleted/)
   const remaining = [...f.resources.values()].filter(x => x.sourceOwnerId === owner.ownerId && !x.deleted)
   assert.deepEqual(remaining, [])
   for (const value of f.resources.values()) if (value.sourceOwnerId === owner.ownerId) assert.equal(value.payload, null)

@@ -2538,9 +2538,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (signup && request.method === 'POST' && url.pathname === '/delete-account') {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) throw new Error('private_browser_csrf')
-        if ((input.get('confirm') ?? '').trim().toLowerCase() !== 'delete everything') {
+        if (!['delete account', 'delete everything'].includes((input.get('confirm') ?? '').trim().toLowerCase())) {
           const jobs = await jobResources(), props = jobProps(jobs)
-          journey(response, renderSettings({ ...props, grants: await grantList(session.owner, backend), imports: summaries(jobs), connector, deleteError: 'Type “delete everything” exactly to confirm. Nothing was deleted.' }), props.importJob, '', 400)
+          journey(response, renderSettings({ ...props, grants: await grantList(session.owner, backend), imports: summaries(jobs), connector, deleteError: 'Type “delete account” exactly to confirm. Nothing was deleted.' }), props.importJob, '', 400)
           return
         }
         const jobs = await jobResources()
