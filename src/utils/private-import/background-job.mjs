@@ -119,16 +119,16 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
     const ownerId = item.owner.ownerId
     const work = (ownerTails.get(ownerId) ?? Promise.resolve()).then(async () => {
       if (closed) return
-      const release = coordination ? await coordination.acquire('owner:' + ownerId, false) : () => {}
+      const releaseSlot = await slot()
       try {
         if (closed) return
-        const releaseSlot = await slot()
+        const release = coordination ? coordination.tryAcquireShared('owner:' + ownerId) : () => {}
+        if (!release) return
         try {
-          if (closed) return
           const backend = await getBackend(item.owner)
           await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
-        } finally { releaseSlot() }
-      } finally { release() }
+        } finally { release() }
+      } finally { releaseSlot() }
     }).catch(() => notify({ event: 'import_worker_retry', importId: item.id }))
     const settled = work.finally(() => { scheduled.delete(key); if (ownerTails.get(ownerId) === settled) ownerTails.delete(ownerId) })
     scheduled.set(key, settled)

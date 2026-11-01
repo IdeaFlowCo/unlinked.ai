@@ -116,6 +116,36 @@ test('deletion waits for an active import while another owner progresses', async
   await worker.stop()
 })
 
+test('capacity waiters do not delay deletion and blocked owners do not consume slots', async () => {
+  const coordination = coordinatorFor({}), blocked = await coordination.acquire('owner:blocked', true)
+  let resume, allStarted
+  const paused = new Promise(resolve => { resume = resolve })
+  const started = new Promise(resolve => { allStarted = resolve })
+  let running = 0, peak = 0, blockedStarted = false, ninthStarted = false
+  const jobs = [{ id: 'blocked-job', owner: { ownerId: 'blocked' } }, ...Array.from({ length: 8 }, (_, i) => ({ id: `job-${i}`, owner: { ownerId: `owner-${i}` } })), { id: 'ninth-job', owner: { ownerId: 'ninth' } }]
+  const worker = createArchiveWorker({ coordination, listPendingImports: async () => jobs, getBackend: async owner => {
+    if (owner.ownerId === 'blocked') blockedStarted = true
+    if (owner.ownerId === 'ninth') ninthStarted = true
+    running++; peak = Math.max(peak, running)
+    if (running === 8) allStarted()
+    await paused
+    running--
+    return { adapter: { withImport: async () => null }, readAsset: async () => null }
+  } })
+  const tick = worker.tick()
+  await started
+  const deletion = coordination.acquire('owner:ninth', true)
+  const releaseDeletion = await Promise.race([deletion, new Promise((_, reject) => setTimeout(() => reject(new Error('deletion blocked by capacity waiter')), 1000))])
+  assert.equal(ninthStarted, false)
+  assert.equal(blockedStarted, false)
+  releaseDeletion()
+  blocked()
+  resume()
+  await tick
+  assert.equal(peak, 8)
+  await worker.stop()
+})
+
 async function richProfileArchive(count = 401) {
   const zip = new JSZip()
   zip.file('Connections.csv', 'First Name,Last Name,URL,Company,Position\n' + Array.from({ length: count }, (_, i) => `Person${i},Synthetic,https://www.linkedin.com/in/rich-${i},Synthetic Co,Engineer\n`).join(''))
