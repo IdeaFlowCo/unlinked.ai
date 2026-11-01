@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createAccountGrantService } from '../mcp-server/account-grants.mjs'
+import { createMemorySessionStore } from '../mcp-server/session-store.mjs'
 import { privateId } from '../src/utils/private-import/job.mjs'
 
 const header = 'First Name,Last Name,URL,Company,Position\n'
@@ -144,3 +145,44 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
   const exportAfter = await fetch(`${endpoint}/export`, { headers: { Cookie: signed.cookie } })
   assert.equal(exportAfter.status, 401)
 })
+
+for (const failedStep of ['legacy', 'assets', 'sessions']) {
+  test(`account deletion retries after ${failedStep} cleanup fails`, async t => {
+    const f = fixture(), owner = { ownerId: 'retry-owner', userId: 'retry-user' }, bindings = new Map()
+    const store = createMemorySessionStore(), deleteOwner = store.deleteOwner.bind(store)
+    let fail = true
+    store.deleteOwner = async id => { if (failedStep === 'sessions' && fail) throw new Error('storage unavailable'); await deleteOwner(id) }
+    let handlers
+    const server = createServer((req, res) => void handlers[req.headers['x-worker'] === 'second' ? 1 : 0](req, res))
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    t.after(() => new Promise(resolve => server.close(resolve)))
+    const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+    const options = { baseUrl, dataMode: 'synthetic', sessionStore: store,
+      login: { begin: async () => ({ location: 'https://synthetic-idp.invalid/authorize', transaction: { state: 'retry-state' } }),
+        finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'retry-subject', clientId: 'synthetic-client', verifiedAt: Math.floor(Date.now() / 1000), provenanceReceiptId: 'retry-proof' }) },
+      resolveOwner: async identity => bindings.get(`${identity.issuer}:${identity.subject}`),
+      signup: async identity => { bindings.set(`${identity.issuer}:${identity.subject}`, owner); f.register(owner); return owner },
+      getBackend: f.getBackend, complete: async () => ({ matches: [] }),
+      revokeLegacyLink: async () => { if (failedStep === 'legacy' && fail) throw new Error('legacy unavailable') },
+      removeOwnerAssets: async () => { if (failedStep === 'assets' && fail) throw new Error('assets unavailable') },
+      mcpEndpoint: `${baseUrl}/mcp` }
+    handlers = [createPrivateBrowserHandler(options), createPrivateBrowserHandler(options)]
+    const start = await fetch(`${endpoint}/login`, { redirect: 'manual' })
+    const callback = await fetch(`${endpoint}/auth/callback/ideaflow?state=retry-state&code=synthetic`, { redirect: 'manual', headers: { Cookie: start.headers.getSetCookie()[0].split(';')[0] } })
+    assert.equal(callback.status, 303)
+    const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+    const page = await (await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).text()
+    const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
+    const remove = () => fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, confirm: 'delete everything' }) })
+    const failed = await remove()
+    assert.notEqual(failed.status, 200)
+    assert.doesNotMatch(await failed.text(), /Your Unlinked account is deleted/)
+    assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).status, 200)
+    fail = false
+    const retried = await remove()
+    assert.equal(retried.status, 200)
+    assert.match(await retried.text(), /Your Unlinked account is deleted/)
+    assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).status, 401)
+    assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })).status, 401)
+  })
+}

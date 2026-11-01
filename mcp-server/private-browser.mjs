@@ -2569,11 +2569,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (notifications) await notifications.removeOwner(session.owner)
         // The stored sign-in address, email choices and invite-send counters.
         if (memberEmail) await memberEmail.removeOwner(session.owner)
-        // Best effort beyond the graph: the legacy claim and the stored archive bytes.
-        if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
-        if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})
+        if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner)
+        if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId)
+        if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId)
         for (const [id, value] of sessions) if (value.owner.ownerId === session.owner.ownerId) sessions.delete(id)
-        if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId).catch(() => {})
         // Signing in again later starts from the Ideaflow account chooser.
         response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS), browserSessionCookie(AUTO_SIGNIN_COOKIE, '1')])
         await recordAudit({ event: 'account_data_deleted', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), deletedResources: result.deletedResources })
