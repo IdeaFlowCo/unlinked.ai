@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createHash, createHmac, randomUUID } from 'node:crypto'
 import { createAssertionVerifier, createIdeaflowConnectorHandler } from '../mcp-server/ideaflow-connector.mjs'
+import { createAccountToolService } from '../mcp-server/account-tools.mjs'
+import { createConnectionRequests, createMemoryConnectionStore } from '../mcp-server/member-connections.mjs'
+import { createNotifications, createMemoryNotificationStore } from '../mcp-server/member-notifications.mjs'
+import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
 const secret = 'test-only-connector-secret-32-bytes-minimum'
 const owner = { ownerId:'exact-owner', userId:'exact-local-user' }
 function signed(body, changes = {}, key = secret) {
@@ -19,6 +23,50 @@ test('assertions bind exact bytes, identity, audience, limited lifetime, scopes 
   assert.equal(verify(signed(body),Buffer.from('{ }')),null)
   assert.equal(createAssertionVerifier('')(signed(body),body),null)
 })
+
+for (const pauseAt of ['identity', 'owner-lock']) {
+  test(`connector mutation paused at ${pauseAt} cannot cross account deletion`, async t => {
+    const coordination = coordinatorFor({}), recipient = { ownerId: 'recipient-owner', userId: 'recipient-user' }
+    const notifications = createNotifications({ store: createMemoryNotificationStore() })
+    const connections = createConnectionRequests({ store: createMemoryConnectionStore(), notifications, coordination, validateParticipant: async () => {} })
+    const readPublishedSnapshot = async () => ({ state: 'published', complete: true, revision: 'connector-race', profiles: [{ id: 'recipient', name: 'Recipient', positions: [], education: [], skills: [] }], members: ['recipient'], connections: [] })
+    const getBackend = async () => ({})
+    const service = createAccountToolService({ getBackend, complete: async () => ({ matches: [] }), readPublishedSnapshot, coordination, memberConnections: connections, accountForProfile: async id => id === 'recipient' ? recipient : null })
+    let entered, resume, pause = pauseAt === 'identity'
+    const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve })
+    const resolveOwner = async () => { if (pause) { pause = false; entered(); await proceed } return owner }
+    if (pauseAt === 'owner-lock') {
+      const run = coordination.run
+      coordination.run = (...args) => { entered(); return run(...args) }
+    }
+    let handler
+    const server = createServer((req, res) => void handler(req, res))
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    t.after(() => new Promise(resolve => server.close(resolve)))
+    const host = `127.0.0.1:${server.address().port}`
+    handler = createIdeaflowConnectorHandler({ secret, origin: `https://${host}`, resolveOwner, getBackend, complete: async () => ({}), readPublishedSnapshot, service, coordination })
+    const request = async () => {
+      const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'unlinked_send_connection_request', arguments: { profileId: 'recipient' } } })
+      const response = await fetch(`http://${host}/api/connector/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${signed(body, { scope: 'unlinked:read unlinked:write' })}` }, body })
+      return response.json()
+    }
+    const release = await coordination.acquire('owner:' + owner.ownerId, true)
+    const stale = request()
+    await waiting
+    coordination.deleted(owner.ownerId)
+    release()
+    if (pauseAt === 'identity') resume()
+    const rejected = await stale
+    assert.equal(rejected.result.isError, true)
+    assert.equal(JSON.parse(rejected.result.content[0].text).error.code, 'grant_revoked')
+    assert.deepEqual(await connections.received(recipient), [])
+    assert.deepEqual(await notifications.list(recipient), [])
+    const fresh = await request()
+    assert.notEqual(fresh.result.isError, true)
+    assert.equal((await connections.received(recipient)).length, 1)
+    assert.equal((await notifications.list(recipient)).length, 1)
+  })
+}
 test('hosted MCP reuses scoped tool catalog and exact live account binding without minting credentials', async t => {
   let linked = true, broken = false, resolved = [], calls = []
   const service = { call: async x => { calls.push(x); await x.revalidate(); return {text:JSON.stringify({ownerId:x.grant.ownerId})} } }

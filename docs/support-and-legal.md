@@ -16,8 +16,11 @@ None of these answer 401, read an owner or start the automatic sign-in hop.
 The support page covers: contact (`support@ideaflow.app`, the brand-wide
 inbox that forwards to the operators), the public feedback board
 (`https://worldissuetracker.com/tracker/unlinked-ai`), how to delete an
-account (Settings → Your data → Delete everything…, anchored at
-`/settings#your-data`; afterwards, and on the deleted page, **Also delete your
+account (Settings → Delete account, anchored at
+`/settings#delete-account`; the form is visible without opening a disclosure. Type
+`delete account` and choose **Permanently delete my Unlinked account**. The
+previous `delete everything` confirmation remains accepted for open pages.
+On Settings and the confirmation page, **Also delete your
 Ideaflow ID** links to `https://id.ideaflow.app/account/delete?return_to=https://www.unlinked.ai`,
 which removes sign-in for every Ideaflow app; that page belongs to Ideaflow ID
 and is built separately), how to report people or messages, how a person can

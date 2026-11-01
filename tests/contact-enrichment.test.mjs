@@ -4,6 +4,7 @@ import { createContactEnrichment, normalizeContactCandidates, recentContact } fr
 import { createPersonLookup } from '../mcp-server/person-lookup.mjs'
 import { renderContactDetail, renderPeople } from '../mcp-server/private-onboarding-views.mjs'
 import { LABELS } from '../deploy/private-pilot/graph-migration.mjs'
+import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
 
 const owner = { ownerId: 'owner', userId: 'user' }, other = { ownerId: 'other', userId: 'other-user' }
 const time = 1_800_000_000_000, url = 'https://www.linkedin.com/in/ada-example'
@@ -20,6 +21,37 @@ function fixture(options = {}) {
   }, ...options })
   return { service, store, setRows: value => { rows = value }, counts: () => ({ reads, searches }) }
 }
+
+test('enrichment preference read stays fenced until deletion clears its writes', async () => {
+  const coordination = coordinatorFor({}), f = fixture({ coordination })
+  await f.service.configure(owner, true)
+  let entered, resume, paused = false, removed = false
+  const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve })
+  const read = f.store.read.bind(f.store)
+  f.store.read = async (who, id) => { const value = await read(who, id); if (id === 'preferences' && !paused) { paused = true; entered(); await proceed } return value }
+  const worker = f.service.tick()
+  await waiting
+  const deleting = (async () => { const release = await coordination.acquire('owner:' + owner.ownerId, true); try { await f.service.removeOwner(owner); coordination.deleted(owner.ownerId); removed = true } finally { release() } })()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(removed, false)
+  resume()
+  await Promise.all([worker, deleting])
+  assert.equal(removed, true)
+  assert.deepEqual(await f.store.exportOwner(owner), [])
+})
+
+test('queued enrichment from before deletion is discarded', async () => {
+  const coordination = coordinatorFor({}), f = fixture({ coordination })
+  await f.service.configure(owner, true)
+  const checkpoint = coordination.checkpoint(), release = await coordination.acquire('owner:' + owner.ownerId, true)
+  const pending = f.service.processOwner(owner, checkpoint)
+  await f.service.removeOwner(owner)
+  coordination.deleted(owner.ownerId)
+  release()
+  await pending
+  assert.deepEqual(await f.store.exportOwner(owner), [])
+  assert.deepEqual(f.counts(), { reads: 0, searches: 0 })
+})
 
 test('opt-in only; recent name-only contacts get private proposals, even for a unique match; explicit confirmation fetches details', async () => {
   const f = fixture()

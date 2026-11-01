@@ -389,7 +389,7 @@ test('member copy avoids forbidden technical and legacy words outside Settings d
   const forbidden = /observations|parser records|durable receipt|SHA-256|Ideaflow ID|invitation|private pilot|no feed/i
   for (const view of views) {
     const outsideDetails = view.content.replace(/<details\b[^>]*>.*?<\/details>/gs, '')
-    assert.doesNotMatch(outsideDetails, forbidden)
+    assert.doesNotMatch(outsideDetails, view.title === 'Settings' ? /observations|parser records|durable receipt|SHA-256|invitation|private pilot|no feed/i : forbidden)
     if (view.title !== 'Settings') assert.doesNotMatch(view.content, forbidden)
     assert.doesNotMatch(view.content, /<script|onclick=|onsubmit=/)
   }
@@ -412,7 +412,7 @@ test('unimplemented editing, public discovery and removal are stated truthfully'
   assert.match(renderPeople(account).content, /Friends come soon/)
   assert.match(renderSettings(account).content, /action="\/export"/)
   assert.match(renderSettings(account).content, /action="\/delete-account"/)
-  assert.match(renderSettings(account).content, /Type <b>delete everything<\/b> to confirm/)
+  assert.match(renderSettings(account).content, /Type <b>delete account<\/b> to confirm/)
   assert.doesNotMatch(renderSettings(account).content, /not available in this beta/)
   assert.match(renderPeople({ ...account, state: 'error' }).content, /does not mean your network is empty/)
   assert.match(renderJoin().content, /href="\/login"/)
@@ -469,8 +469,7 @@ test('fixture previews cover every requested screen and are reproducible without
       assert.match(content, /^<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>/)
       assert.match(content, /<body><style>/)
       assert.equal([...content.matchAll(/<h1\b/g)].length >= 1, true)
-      // The account-deletion step names the Ideaflow ID on purpose (the sign-in it deletes).
-      assert.doesNotMatch(content.replace(/<div class="ideaflow-id-delete">.*?<\/div>/gs, ''), /<script|type="checkbox"|observations|parser records|durable receipt|Ideaflow ID|invitation|private pilot/i)
+      assert.doesNotMatch(content, /<script|type="checkbox"|observations|parser records|durable receipt|invitation|private pilot/i)
     }
     const own = first[files.findIndex(file => file.endsWith('/own-profile-importing.html'))]
     assert.equal((own.match(/<div class="xp">/g) || []).length, 4)
@@ -632,8 +631,9 @@ test('Settings opens with one compact account row: who is signed in and a native
   assert.match(section, /^<div class="acct"><span>Signed in as <b>member@example\.test<\/b><\/span><form method="post" action="\/logout">/)
   assert.match(section, /name="csrf" value="csrf-value"/)
   assert.match(section, /<button class="quiet sm" type="submit"[^>]*>Sign out</)
-  // One row: no heading, card or paragraph of its own.
-  assert.doesNotMatch(section, /<h2|class="card"|<p\b/)
+  // The account row remains compact, followed by direct data and deletion links.
+  assert.match(section, /<a href="#your-data">Download your data<\/a> · <a href="#delete-account">Delete account<\/a>/)
+  assert.doesNotMatch(section, /<h2|class="card"/)
   assert.doesNotMatch(section, /<script|onclick=/)
 })
 

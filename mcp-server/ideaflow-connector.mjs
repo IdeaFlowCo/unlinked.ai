@@ -30,7 +30,7 @@ export function createAssertionVerifier(secret) {
 
 /** The gateway owns consent/revocation; each call carries a new 60s assertion.
  * No stored personal keys, account creation, or email matching occurs here. */
-export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin, service }) {
+export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin, service, coordination }) {
   const verify = createAssertionVerifier(secret), authenticated = new WeakMap()
   const authenticateGrant = async request => {
     const state = authenticated.get(request)
@@ -42,6 +42,7 @@ export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBacken
   }
   const hosted = createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service })
   return async (request, response) => {
+    const ownerCheckpoint = coordination?.checkpoint()
     response.setHeader('Cache-Control', 'no-store')
     const fail = (status, message) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ jsonrpc:'2.0', id:null, error:{ code:-32001, message } })) }
     if (typeof secret !== 'string' || Buffer.byteLength(secret) < 32) return fail(503, 'Unified connector is not configured')
@@ -64,7 +65,7 @@ export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBacken
     const scope = write ? ACCOUNT_WRITE_SCOPE : publicEnabled ? 'owner_network_and_public' : 'owner_network'
     const grant = { ...owner, grantId:`ideaflow:${identity.jti}`, version:CURRENT_ACCOUNT_GRANT_VERSION, scope, tools:[...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] }
     authenticated.set(request, { identity, grant })
-    return await hosted(request, response, body)
+    return await hosted(request, response, body, coordination ? { ownerCheckpoint } : undefined)
     } catch {
       if (!response.headersSent) return fail(503, 'Unlinked connector is temporarily unavailable')
       response.end()

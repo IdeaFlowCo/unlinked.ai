@@ -47,6 +47,7 @@ import { CLIENT_ID_PATTERN } from './account-api.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
 import { createArchiveWorker } from '../src/utils/private-import/background-job.mjs'
+import { coordinatorFor } from './owner-coordination.mjs'
 
 export function earliestConnectionDates(invitations, requests) {
   const key = value => JSON.stringify([value.other.ownerId, value.other.userId])
@@ -266,8 +267,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const memberBlocks = blockStore ? createMemberBlocks({ store: blockStore }) : undefined
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
     await connectionStore?.initialize()
-    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
-    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
+    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
+    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
       // The inviter hears that their invite was accepted (and so that the invitee joined).
       onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,
         ...await publicProfileIdFor(value.invitee).then(id => id ? { actorProfileId: id } : {}, () => ({})), subjectId: value.invitationId, dedupeKey: `invite-accepted:${value.invitationId}` }) : undefined }) : undefined
@@ -449,7 +450,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       } finally { await descriptor.close() }
     }
     if (typeof store.listPendingImportJobs !== 'function' || typeof store.listImportJobIds !== 'function') throw new Error('private_background_store_required')
-    worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend,
+    worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend, coordination: coordinatorFor(sessionStore),
       onError: event => audit({ ...event, at: new Date().toISOString() }) })
     worker.start()
     // The notification mailer runs on its own timer; startup never waits for it.
@@ -611,7 +612,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       const enrichmentStore = createNeo4jContactEnrichmentStore(driver)
       await enrichmentStore.initialize()
       const reader = createPublicPeopleReader({ readPublishedSnapshot })
-      contactEnrichment = createContactEnrichment({ store: enrichmentStore,
+      contactEnrichment = createContactEnrichment({ store: enrichmentStore, coordination: coordinatorFor(sessionStore),
         readNetwork: owner => createAccountNetwork({ owner, getBackend }).readNetwork(), lookup: personLookup,
         published: async row => {
           const [match] = await publishedPeopleFor([row], { lookupSlug: slug => selfClaims.lookupSlug(slug), lookup: ids => reader.lookup({ ids }) })
@@ -669,7 +670,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       ownProfileId: publicProfileIdFor,
       // Someone just claimed `profileId`: tell members whose own exports listed
       // that profile. Best effort and bounded; never blocks the claim.
-      notifyProfileClaimed: notifications && publicPeople ? async (profileId, claimer) => {
+      notifyProfileClaimed: notifications && publicPeople ? async (profileId, claimer, checkpoint = coordinatorFor(sessionStore).checkpoint()) => {
         if (isTestProfileId(profileId)) return 0
         const snapshot = await readPublishedSnapshot?.()
         if (!snapshot || !Array.isArray(snapshot.connections)) return 0
@@ -681,7 +682,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           try {
             const recipient = await accountForProfile(fromId)
             if (!recipient || (recipient.ownerId === claimer?.ownerId && recipient.userId === claimer?.userId)) continue
-            if (await notifications.notify({ recipient, kind: 'profile_claimed', actor: claimer, actorName: name, actorProfileId: profileId, subjectId: profileId, dedupeKey: `profile-claimed:${profileId}:${recipient.ownerId}:${recipient.userId}` })) sent++
+            await coordinatorFor(sessionStore).run(['owner:' + claimer.ownerId, 'owner:' + recipient.ownerId], async () => {
+              if ([claimer, recipient].some(member => coordinatorFor(sessionStore).version(member.ownerId) > checkpoint)) return
+              await getBackend(claimer); await getBackend(recipient)
+              const current = await accountForProfile(fromId)
+              if (!current || current.ownerId !== recipient.ownerId || current.userId !== recipient.userId) return
+              if (await notifications.notify({ recipient, kind: 'profile_claimed', actor: claimer, actorName: name, actorProfileId: profileId, subjectId: profileId, dedupeKey: `profile-claimed:${profileId}:${recipient.ownerId}:${recipient.userId}` })) sent++
+            })
           } catch { /* best effort */ }
         }
         return sent

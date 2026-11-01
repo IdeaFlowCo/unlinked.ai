@@ -34,7 +34,7 @@ const rich = profile => Boolean(profile?.about || profile?.positions?.length || 
 
 // Private professional context on the viewer's contact. Never a member claim,
 // public publication or a change to the other person's account/profile.
-export function createContactEnrichment({ store, readNetwork, published = async () => null, localCandidates = async () => [], lookup, now = Date.now, intervalMs = 15000 }) {
+export function createContactEnrichment({ store, readNetwork, published = async () => null, localCandidates = async () => [], lookup, coordination, now = Date.now, intervalMs = 15000 }) {
   let timer, running = null, stopped = false
   const nextScan = new Map() // owner key -> earliest next network read for the worker
   const preferences = owner => store.read(owner, 'preferences')
@@ -122,7 +122,9 @@ export function createContactEnrichment({ store, readNetwork, published = async 
       if (old && !await write(owner, row.id, old, { fingerprint: contactFingerprint(row), status: 'queued', ...(old.address ? { address: old.address } : {}) })) throw Error('contact_enrichment_conflict')
       return processRow(owner, row, { force: true })
     },
-    async processOwner(owner) {
+    async processOwner(owner, checkpoint = coordination?.checkpoint()) {
+      const process = async () => {
+      if (coordination && coordination.version(owner.ownerId) > checkpoint) return
       if (!(await preferences(owner))?.enabled) return
       const scanKey = ownerKey(owner)
       if (nextScan.get(scanKey) > now()) return
@@ -136,10 +138,13 @@ export function createContactEnrichment({ store, readNetwork, published = async 
         await processRow(owner, row)
         return // one operation per owner/tick; the shared provider budget also applies
       }
+      }
+      return coordination ? coordination.run(['owner:' + owner.ownerId], process) : process()
     },
     async tick() {
       if (running || stopped) return running
-      running = (async () => { for (const owner of await store.owners()) { if (stopped) break; try { await service.processOwner(owner) } catch { /* retry next tick; never log provider data */ } } })().finally(() => { running = null })
+      const checkpoint = coordination?.checkpoint()
+      running = (async () => { for (const owner of await store.owners()) { if (stopped) break; try { await service.processOwner(owner, checkpoint) } catch { /* retry next tick; never log provider data */ } } })().finally(() => { running = null })
       return running
     },
     start() { if (!timer) { timer = setInterval(() => { void service.tick().catch(() => {}) }, intervalMs); timer.unref?.() } },

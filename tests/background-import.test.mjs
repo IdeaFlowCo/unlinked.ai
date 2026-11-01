@@ -11,6 +11,8 @@ import { ingestArchive } from '../src/utils/private-import/job.mjs'
 import { createNoosOwnerBackend, createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
+import { deleteAccountData } from '../src/utils/private-import/account-data.mjs'
+import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
 
 // Real private filesystem persistence exercises the production adapter's batch,
 // replay and asset paths. This is not a substitute for the Noos graph CI job.
@@ -72,6 +74,77 @@ async function fullArchive(count = 1001) {
   zip.file('Skills.csv', 'Name\nGraph systems\n')
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 }
+
+test('deletion waits for an active import while another owner progresses', async t => {
+  const f = await fixture(t), bytes = await fullArchive(2), a = f.backend('owner-a'), b = f.backend('owner-b')
+  const first = await stageArchive({ ownerId: 'owner-a', filename: 'a.zip', bytes, adapter: a.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const second = await stageArchive({ ownerId: 'owner-b', filename: 'b.zip', bytes, adapter: b.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const coordination = coordinatorFor({})
+  let releaseImport, importStarted, otherFinished
+  const started = new Promise(resolve => { importStarted = resolve })
+  const resume = new Promise(resolve => { releaseImport = resolve })
+  const other = new Promise(resolve => { otherFinished = resolve })
+  let paused = false
+  f.setHook(async (phase, items) => {
+    if (phase === 'before' && !paused && items.some(item => item.sourceOwnerId === 'owner-a' && item.payload?.status === 'parsing')) { paused = true; importStarted(); await resume }
+    if (phase === 'after' && items.some(item => item.sourceOwnerId === 'owner-b' && ['indexed', 'partial'].includes(item.payload?.status))) otherFinished()
+  })
+  let includeOther = false
+  const worker = createArchiveWorker({ coordination, listPendingImports: async () => [...Array.from({ length: 8 }, () => ({ id: first.id, owner: { ownerId: 'owner-a', userId: 'a' } })), ...(includeOther ? [{ id: second.id, owner: { ownerId: 'owner-b', userId: 'b' } }] : [])], getBackend: async owner => owner.ownerId === 'owner-a' ? a : b })
+  const running = worker.tick()
+  await started
+  let deleted = false
+  const deletion = (async () => {
+    const release = await coordination.acquire('owner:owner-a', true)
+    try {
+      await deleteAccountData({ owner: { ownerId: 'owner-a', userId: 'a' }, backend: a, jobs: [await a.readResource('import', first.id)] })
+      await rm(join(f.root, 'owner-a'), { recursive: true, force: true })
+      deleted = true
+    } finally { release() }
+  })()
+  includeOther = true
+  const nextTick = worker.tick()
+  await other
+  assert.equal(deleted, false)
+  releaseImport()
+  await Promise.all([running, deletion, nextTick])
+  assert.equal(deleted, true)
+  assert.equal((await a.readResource('import', first.id)).deleted, true)
+  await worker.tick()
+  await assert.rejects(readFile(join(f.root, 'owner-a', first.archiveSha256)), { code: 'ENOENT' })
+  assert.equal((await b.readResource('import', second.id)).payload.status, 'indexed')
+  await worker.stop()
+})
+
+test('capacity waiters do not delay deletion and blocked owners do not consume slots', async () => {
+  const coordination = coordinatorFor({}), blocked = await coordination.acquire('owner:blocked', true)
+  let resume, allStarted
+  const paused = new Promise(resolve => { resume = resolve })
+  const started = new Promise(resolve => { allStarted = resolve })
+  let running = 0, peak = 0, blockedStarted = false, ninthStarted = false
+  const jobs = [{ id: 'blocked-job', owner: { ownerId: 'blocked' } }, ...Array.from({ length: 8 }, (_, i) => ({ id: `job-${i}`, owner: { ownerId: `owner-${i}` } })), { id: 'ninth-job', owner: { ownerId: 'ninth' } }]
+  const worker = createArchiveWorker({ coordination, listPendingImports: async () => jobs, getBackend: async owner => {
+    if (owner.ownerId === 'blocked') blockedStarted = true
+    if (owner.ownerId === 'ninth') ninthStarted = true
+    running++; peak = Math.max(peak, running)
+    if (running === 8) allStarted()
+    await paused
+    running--
+    return { adapter: { withImport: async () => null }, readAsset: async () => null }
+  } })
+  const tick = worker.tick()
+  await started
+  const deletion = coordination.acquire('owner:ninth', true)
+  const releaseDeletion = await Promise.race([deletion, new Promise((_, reject) => setTimeout(() => reject(new Error('deletion blocked by capacity waiter')), 1000))])
+  assert.equal(ninthStarted, false)
+  assert.equal(blockedStarted, false)
+  releaseDeletion()
+  blocked()
+  resume()
+  await tick
+  assert.equal(peak, 8)
+  await worker.stop()
+})
 
 async function richProfileArchive(count = 401) {
   const zip = new JSZip()

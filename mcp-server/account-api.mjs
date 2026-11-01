@@ -116,9 +116,15 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
         typeof subject !== 'string' || !subject || subject.length > 512 || /[\x00-\x1f\x7f]/.test(subject)) throw new AccountToolError('invalid_input', 'Send { issuer, subject }: the verified https OIDC issuer and the exact opaque subject.')
     // The caller must have verified this identity itself; this endpoint only
     // maps an exact issuer+subject binding to its owner — never email.
+    const checkpoint = provisioning.coordination?.checkpoint()
     let owner = null
     try { owner = await provisioning.resolveOwner({ issuer, subject }) } catch { throw new AccountToolError('upstream_unavailable', 'The identity binding could not be read right now; retry.') }
     if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new AccountToolError('not_linked', 'No Unlinked account is bound to that verified identity. The person must sign in at /login once; linkage is never established by email matching.')
+    const release = provisioning.coordination ? await provisioning.coordination.acquire('owner:' + owner.ownerId, false) : () => {}
+    try {
+    if (provisioning.coordination && provisioning.coordination.version(owner.ownerId) > checkpoint) throw new AccountToolError('not_linked', 'The account changed while provisioning; sign in again.')
+    const currentOwner = await provisioning.resolveOwner({ issuer, subject })
+    if (!currentOwner || currentOwner.ownerId !== owner.ownerId || currentOwner.userId !== owner.userId) throw new AccountToolError('not_linked', 'The account is no longer linked.')
     let ensured = null
     try { ensured = await provisioning.ensureGrant({ ownerId: owner.ownerId, userId: owner.userId }, { readOnly: true }) } catch { throw new AccountToolError('upstream_unavailable', 'Grant provisioning could not finish; retry.') }
     if (!ensured) throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
@@ -143,6 +149,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
     response.end(JSON.stringify({ kind: 'unlinked_provision_grant', ownerId: owner.ownerId, grantId: ensured.grantId, created: ensured.created === true,
       version: grant.version, scope: grant.scope, tools: grant.tools, accessToken: ensured.accessToken }))
+    } finally { release() }
   }
   const send = (response, status, value, headers = {}) => {
     if (response.headersSent) { response.end(); return }

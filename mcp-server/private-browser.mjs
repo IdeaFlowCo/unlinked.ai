@@ -1,8 +1,9 @@
+import { readRequestBody, bufferRequestBody } from './request-body.mjs'
 import { ideaflowProfileSection, IDEAFLOW_PROFILE_VISIBILITY } from './ideaflow-profile.mjs'
 import { createPublicReadAdmission } from './public-read-admission.mjs'
 import { recentContact, contactName } from './contact-enrichment.mjs'
 import { MESSAGES_CLIENT_SOURCE, messagesConfig } from './messages-client.mjs'
-import { createMessagingProxy, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
+import { createMessagingProxy, messagingBodyLimit, validMessagingAttachmentHeaders, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
 import { parseUnlinkedProfileContext, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { NETWORK_SORTS, PUBLIC_NETWORK_SORTS, compareNames, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { groupConnectionRows, publishedPeopleFor, rowProvenanceType, rowPublicTarget, rowSourceLabel } from './connection-identity.mjs'
@@ -56,6 +57,8 @@ import { createMembersOnlySnapshotReader, iosAppUserAgent } from '../src/utils/p
 import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 import { BlockError } from './member-blocks.mjs'
 import { renderPeopleError } from './private-onboarding-views.mjs'
+
+import { coordinatorFor } from './owner-coordination.mjs'
 
 const token = () => randomBytes(32).toString('base64url')
 const html = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -136,15 +139,7 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
   }
 }
 
-async function body(request, limit) {
-  const parts = []; let size = 0
-  for await (const part of request) {
-    size += part.length
-    if (size > limit) throw new Error('private_body_limit')
-    parts.push(part)
-  }
-  return Buffer.concat(parts)
-}
+const body = readRequestBody
 
 // Pages are wrapped in email_off: Cloudflare (in front of www since 2026-10-24)
 // would otherwise rewrite mailto links into /cdn-cgi/l/email-protection links
@@ -193,8 +188,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // A default handle only for a profile an active account still stands behind,
   // so a just-deleted account (still in the published index) never gets one back.
   const ensureHandle = async profile => {
-    if (typeof accountForProfile === 'function' && !await accountForProfile(profile.id)) return null
-    return profileHandles.ensure(profile)
+    const release = await coordination.acquire('profile:' + profile.id, false)
+    try {
+      if ([...coordination.deletingProfiles.values()].includes(profile.id)) return null
+      if (typeof accountForProfile === 'function' && !await accountForProfile(profile.id)) return null
+      return await profileHandles.ensure(profile)
+    } finally { release() }
   }
   if (signup !== undefined && (typeof signup !== 'function' || typeof issueAccountGrant !== 'function' || typeof revokeAccountGrant !== 'function')) throw new Error('account_signup_configuration_required')
   if (ensureAccountGrant !== undefined && typeof ensureAccountGrant !== 'function') throw new Error('account_signup_configuration_required')
@@ -212,9 +211,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const authorization = new URL(authorizationOrigin)
     if (authorization.protocol !== 'https:' || authorization.origin !== authorizationOrigin) throw new Error('explicit_private_authorization_origin_required')
   }
+  const coordination = coordinatorFor(sessionStore)
   const pending = new Map(), invitations = new Map(), confirmations = new Map(), sessions = new Map(), contextBudgets = new Map(), pickerBudgets = new Map()
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
+  coordination.sessionMaps.add(sessions)
   const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users } : {}), ...messagingOptions }) : null
   // "View on Unlinked" for conversation partners (docs/openchat-message.md):
   // OpenChat names which of the member's own partners have a shared Ideaflow
@@ -362,9 +363,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // A first visit after many new contacts waits briefly; the rest finishes in
   // the background and later pages link by slug.
   const CONTACT_SLUG_WAIT_MS = 2500
-  const ensureContactSlugs = async (owner, network) => {
+  const ensureContactSlugs = async (owner, network, checkpoint) => {
     if (!contactSlugs) return
-    const work = contactSlugs.ensure(owner, network.assertions.filter(row => row.category === 'connections'), describeContacts(owner)).catch(() => 0)
+    const work = coordination.run(['owner:' + owner.ownerId], async () => {
+      if (coordination.version(owner.ownerId) > checkpoint) return 0
+      await getBackend(owner)
+      return contactSlugs.ensure(owner, network.assertions.filter(row => row.category === 'connections'), describeContacts(owner))
+    }).catch(() => 0)
     let timer
     await Promise.race([work, new Promise(resolve => { timer = setTimeout(resolve, CONTACT_SLUG_WAIT_MS) })])
     clearTimeout(timer)
@@ -530,9 +535,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const key = `${owner.ownerId}\u0000${owner.userId}`
     const held = networkCache.get(key)
     if (held && (held.pending || Date.now() - held.at < networkFreshMs)) return held.pending ?? held.value
-    const entry = { pending: null, value: null, at: 0 }
+    const entry = { pending: null, value: null, at: 0 }, checkpoint = coordination.checkpoint()
     entry.pending = createAccountNetwork({ owner, getBackend }).readNetwork().then(
-      async value => { await ensureContactSlugs(owner, value); Object.assign(entry, { value, at: Date.now(), pending: null }); return value },
+      async value => { await ensureContactSlugs(owner, value, checkpoint); Object.assign(entry, { value, at: Date.now(), pending: null }); return value },
       error => { if (networkCache.get(key) === entry) networkCache.delete(key); throw error })
     networkCache.delete(key); networkCache.set(key, entry)
     while (networkCache.size > NETWORK_CACHE_CAPACITY) networkCache.delete(networkCache.keys().next().value)
@@ -572,7 +577,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   const render = (response, title, content, status = 200) => page(response, title,
     (dataMode === 'synthetic' ? '<p><strong>Synthetic rehearsal only. Do not upload a personal archive.</strong></p>' : '') + content, status)
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
-  const sessionFor = request => { purge(sessions); return sessions.get(cookies(request)['__Host-ul-session']) }
+  const requestSessions = new WeakMap(), deletionInputs = new WeakMap()
+  const sessionFor = request => requestSessions.get(request)
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
@@ -662,7 +668,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // Ideaflow identity receives its private account, just as in OpenChat.
   async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null, cardToken = null, connectProfileId = null) {
     let claimed
+    const started = coordination.checkpoint()
     let owner = await resolveOwner(identity)
+    const releaseOwner = owner ? await coordination.acquire('owner:' + owner.ownerId, false) : () => {}
+    try {
+    return await coordination.withHeld('owner:' + (owner?.ownerId ?? ''), false, async () => {
+    if (owner && coordination.version(owner.ownerId) > started) throw new Error('private_owner_recovery_required')
+    if (owner && !await resolveOwner(identity)) throw new Error('private_owner_recovery_required')
     let newOwner = false
     if (invitationToken) {
       if (typeof claimInvitation !== 'function') throw new Error('private_invitation_intent_invalid')
@@ -684,6 +696,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     }
     if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new Error('private_owner_recovery_required')
     if (claimed && (claimed.ownerId !== owner.ownerId || claimed.userId !== owner.userId)) throw new Error('private_owner_recovery_required')
+    return await coordination.run(['owner:' + owner.ownerId], async () => {
+    if (coordination.version(owner.ownerId) > started) throw new Error('private_owner_recovery_required')
+    const currentOwner = await resolveOwner(identity)
+    if (!currentOwner || currentOwner.ownerId !== owner.ownerId || currentOwner.userId !== owner.userId) throw new Error('private_owner_recovery_required')
     purge(sessions)
     if (sessions.size >= SESSION_CAPACITY) throw new Error('private_login_capacity')
     const sessionId = token()
@@ -695,14 +711,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const selfClaim = selfClaims && !legacyCandidate ? { emailHash: createHash('sha256').update((identity.verifiedEmail ?? `subject-v1:${identity.issuer}/${identity.subject}`).normalize('NFKC').toLowerCase()).digest('hex'), identity: Object.freeze({ issuer: identity.issuer, subject: identity.subject }), candidate: null } : null
     const accountLabel = identity.verifiedEmail ?? identity.subject
     // Keep the sign-in address private for member email and invite Reply-To.
-    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await bounded(() => memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner && silentBack === null }), false)
+    if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner && silentBack === null }).catch(() => {})
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
+    if (sessionStore) await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() })
     sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel, displayName, csrf, expiresAt })
-    if (sessionStore) {
-      try { await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() }) } catch { }
-    }
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     if (cardToken) {
@@ -723,6 +737,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
     redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
     return 'signed_in'
+    })
+    })
+    } finally { releaseOwner() }
   }
   // Where a silent attempt returns: the same-origin page it started on, only
   // ever one of the automatic sign-in pages; anything else goes home.
@@ -748,6 +765,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // Connect rules shared with agent write tools (connection-actions.mjs).
   const canAddCard = Boolean(memberConnections && contactCards?.ownerForToken)
   async function addCard(owner, cardToken, displayName) {
+    const checkpoint = memberConnections.checkpoint?.()
     const target = await contactCards.ownerForToken(cardToken)
     const card = await openCard(cardToken)
     if (!target || !card) throw new Error('contact_card_not_found')
@@ -761,7 +779,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       senderProfileId: typeof ownProfileId === 'function' ? await ownProfileId(owner) : null,
       recipient: target, recipientName: card.name,
       // A card's path may carry the member's handle; the request stores the profile id.
-      recipientProfileId: card.profilePath ? handleTarget(decodeURIComponent(card.profilePath.slice('/people/'.length))) : null })
+      recipientProfileId: card.profilePath ? handleTarget(decodeURIComponent(card.profilePath.slice('/people/'.length))) : null, checkpoint,
+      beforeWrite: async () => { const current = await contactCards.ownerForToken(cardToken); if (!current || current.ownerId !== target.ownerId || current.userId !== target.userId) throw new Error('contact_card_not_found') } })
     if (sent.status !== 'accepted') await memberConnections.respond(target, sent.request.id, 'accept')
   }
   const connectionActions = memberConnections ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
@@ -943,9 +962,18 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // Blocking: kept by Unlinked for the blocker, applied to connection requests
   // here and to messages through OpenChat's own block (docs/report-and-block.md).
   async function applyBlock(session, { profileId = null, openChatUserId = null, name = null }) {
+    const checkpoint = coordination.checkpoint()
     let blocked = null
     if (profileId && typeof accountForProfile === 'function') blocked = await accountForProfile(profileId).catch(() => null)
     if (blocked && blocked.ownerId === session.owner.ownerId && blocked.userId === session.owner.userId) throw new BlockError('block_self')
+    return coordination.run([session.owner, ...(blocked ? [blocked] : [])].map(member => 'owner:' + member.ownerId), async () => {
+    if ([session.owner, ...(blocked ? [blocked] : [])].some(member => coordination.version(member.ownerId) > checkpoint)) throw new BlockError('block_target_invalid')
+    await getBackend(session.owner)
+    if (blocked) {
+      await getBackend(blocked)
+      const current = await accountForProfile(profileId)
+      if (!current || current.ownerId !== blocked.ownerId || current.userId !== blocked.userId) throw new BlockError('block_target_invalid')
+    }
     // A member's OpenChat user, through the same confidential path as Message.
     if (!openChatUserId && profileId && messaging) {
       const context = unlinkedProfileContext(profileId)
@@ -966,6 +994,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     knownCache.delete(session.owner.ownerId)
     await recordAudit({ event: 'member_blocked', ownerHash: ownerHash(session.owner), openChat, account: Boolean(blocked) })
     return record
+    })
   }
   const blockFor = async (owner, profileId) => memberBlocks && profileId ? (await bounded(() => memberBlocks.list(owner), [])).find(value => value.blockedProfileId === profileId) ?? null : null
   // Every published profile gets a readable address without waiting for a page
@@ -976,7 +1005,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // imported copy folds into a member (or into another copy) or its import is
   // gone, its addresses move to the profile now carrying that address.
   // Removed and suspended addresses never move.
-  const backfillHandles = async ({ batchSize = 500, pauseMs = 25 } = {}) => {
+  const backfillHandlesCore = async ({ batchSize = 500, pauseMs = 25 } = {}) => {
     if (!profileHandles || typeof readPublishedSnapshot !== 'function') return 0
     if (typeof profileHandles.reload === 'function') await profileHandles.reload()
     const { profiles, aliases, hidden } = await publicReader.addresses()
@@ -985,6 +1014,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     // A default handle only for a member an active account still stands behind.
     const standing = new Map()
     const eligible = async profile => {
+      if ([...coordination.deletingProfiles.values()].includes(profile.id)) return false
       if (!members.has(profile.id) || typeof accountForProfile !== 'function') return true
       if (!standing.has(profile.id)) standing.set(profile.id, Boolean(await accountForProfile(profile.id).catch(() => null)))
       return standing.get(profile.id)
@@ -993,7 +1023,18 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const queue = [], queuedIds = new Set(), queuedHandles = new Set()
     const flush = async () => {
       if (!queue.length) return
-      changed += await profileHandles.assignMany(queue.splice(0))
+      while (queue.length) {
+        const batch = queue.splice(0, 500)
+        await coordination.run(batch.map(entry => 'profile:' + entry.id), async () => {
+          const active = []
+          for (const entry of batch) {
+            if ([...coordination.deletingProfiles.values()].includes(entry.id)) continue
+            if (members.has(entry.id) && typeof accountForProfile === 'function' && !await accountForProfile(entry.id).catch(() => null)) continue
+            active.push(entry)
+          }
+          if (active.length) changed += await profileHandles.assignMany(active)
+        })
+      }
       if (pauseMs > 0) await new Promise(resolve => setTimeout(resolve, pauseMs))
     }
     const enqueue = async (id, handle, kind) => { queue.push({ id, handle, kind }); queuedIds.add(id); queuedHandles.add(handle); if (queue.length >= batchSize) await flush() }
@@ -1014,7 +1055,12 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (!sameAddress || typeof profileHandles.transfer !== 'function') continue
       // A default (name) handle gives way to the slug; a chosen one stays current.
       const makeCurrent = !own || handleCandidates({ name: profile.name }).includes(own) ? slug : own
-      if (await profileHandles.transfer(holder, profile.id, { makeCurrent }).catch(() => null)) changed++
+      const release = await coordination.acquire('profile:' + profile.id, false)
+      try {
+        if (![...coordination.deletingProfiles.values()].includes(profile.id) && (!members.has(profile.id) || typeof accountForProfile !== 'function' || await accountForProfile(profile.id).catch(() => null))) {
+          if (await profileHandles.transfer(holder, profile.id, { makeCurrent }).catch(() => null)) changed++
+        }
+      } finally { release() }
     }
     await flush()
     for (const profile of ordered) {
@@ -1028,13 +1074,15 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     await flush()
     return changed
   }
+  const backfillHandles = backfillHandlesCore
   if (profileHandles && handleBackfillMs > 0) {
     const run = () => backfillHandles().catch(() => process.stderr.write('unlinked_handle_backfill_failed\n'))
     setTimeout(run, Math.min(handleBackfillMs, 5000)).unref?.()
     setInterval(run, handleBackfillMs).unref?.()
   }
-  let lastPrune = Date.now()
-  const serve = async (request, response) => {
+  let lastPrune = Date.now(), pendingArchiveBodies = 0, pendingMessageBodies = 0
+  const pendingMessageOwners = new Map()
+  const serveCore = async (request, response) => {
     // GET page navigations allow the browser's back/forward cache, so Back
     // from a profile restores the search results instantly without a request.
     // `private, no-cache` still forces revalidation on normal navigations, and
@@ -1055,15 +1103,33 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     // RFC 8058 one-click unsubscribe is posted by mail providers, without this
     // origin; its signed token is the whole authority and it only turns email off.
     const oneClick = request.method === 'POST' && memberEmail && new URL(request.url, base).pathname === '/email/unsubscribe'
-    // After the mutation finished, never mid-request; /search reads only.
-    if (request.method === 'POST' && new URL(request.url, base).pathname !== '/search') {
-      const posted = sessionFor(request)?.owner
-      if (posted) response.once('finish', () => dropAccountNetwork(posted))
-    }
     if (request.method === 'POST' && !oneClick && request.headers.origin !== base.origin) { if (connectionPost(request)) connectionFailure(response, 'This page could not be verified. Refresh Unlinked and try again.', 403); else response.writeHead(403).end(); return }
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      purge(sessions)
+      const sid = cookies(request)['__Host-ul-session']
+      let current = sid ? sessions.get(sid) : null
+      if (sessionStore && sid) {
+        const hash = createHash('sha256').update(sid).digest('hex')
+        let record
+        try {
+          record = await sessionStore.get(hash, Date.now())
+        } catch { response.writeHead(503, { 'Retry-After': '10' }).end(); return }
+        if (!record) { sessions.delete(sid); current = null }
+        else if (!current || current.csrf !== record.csrf || current.owner.ownerId !== record.ownerId || current.owner.userId !== record.userId) {
+          current = { legacyProof: null, legacyCandidate: null, selfClaim: null,
+            owner: Object.freeze({ ownerId: record.ownerId, userId: record.userId }),
+            accountLabel: record.accountLabel, displayName: record.displayName, csrf: record.csrf, expiresAt: record.expiresAt }
+          sessions.set(sid, current)
+        }
+      }
+      if (sessionStore && Date.now() - lastPrune > 3600000) {
+        lastPrune = Date.now()
+        sessionStore.prune(Date.now()).catch(() => {})
+      }
+      if (current) requestSessions.set(request, current)
+      if (request.method === 'POST' && url.pathname !== '/search' && current) response.once('finish', () => dropAccountNetwork(current.owner))
       // Browser autocomplete reads the same published projection for everyone.
       // Its own burst budget keeps keystrokes out of the full-page read budget.
       if (request.method === 'GET' && url.pathname === '/search-suggestions') {
@@ -1157,34 +1223,6 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       // Page views read the photo set's pointer at most every 30 seconds.
       if (profilePhotos && request.method === 'GET') await profilePhotos.refresh().catch(() => {})
 
-      if (sessionStore) {
-        const sid = cookies(request)['__Host-ul-session']
-        if (sid) {
-          purge(sessions)
-          if (!sessions.has(sid)) {
-            try {
-              const hash = createHash('sha256').update(sid).digest('hex')
-              const record = await sessionStore.get(hash, Date.now())
-              if (record) {
-                sessions.set(sid, {
-                  legacyProof: null,
-                  legacyCandidate: null,
-                  selfClaim: null,
-                  owner: Object.freeze({ ownerId: record.ownerId, userId: record.userId }),
-                  accountLabel: record.accountLabel,
-                  displayName: record.displayName,
-                  csrf: record.csrf,
-                  expiresAt: record.expiresAt
-                })
-              }
-            } catch { }
-          }
-        }
-        if (Date.now() - lastPrune > 3600000) {
-          lastPrune = Date.now()
-          sessionStore.prune(Date.now()).catch(() => {})
-        }
-      }
 
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
@@ -1784,9 +1822,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('action').length !== 1 || [...input.keys()].some(key => !['csrf','action'].includes(key))) throw new Error('private_browser_csrf')
         if (!session.legacyCandidate || !session.legacyProof || !legacyAccount) throw new Error('legacy_confirmation_unavailable')
         if (input.get('action') === 'confirm') {
+          const checkpoint = coordination.checkpoint()
           await legacyAccount.confirm(session.legacyProof, session.legacyCandidate.profileId, true)
           await recordAudit({ event: 'legacy_profile_confirmed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
-          if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(session.legacyCandidate.profileId, session.owner).catch(() => {})
+          if (typeof notifyProfileClaimed === 'function') await notifyProfileClaimed(session.legacyCandidate.profileId, session.owner, checkpoint).catch(() => {})
         } else if (input.get('action') !== 'skip') throw new Error('legacy_confirmation_required')
         session.legacyCandidate = null
         redirect(response, '/profile'); return
@@ -1860,10 +1899,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('candidate').length !== 1 || [...input.keys()].some(key => !['csrf', 'candidate'].includes(key))) throw new Error('private_browser_csrf')
         if (!selfClaims || !session.selfClaim?.candidate || input.get('candidate') !== session.selfClaim.candidate.token) throw new Error('self_claim_unavailable')
         const { profileId, evidence, source, slug } = session.selfClaim.candidate
+        const checkpoint = coordination.checkpoint()
         try {
           const claimed = source === 'profile-lookup' ? await signupLookup.confirm({ owner: session.owner, slug }) : await selfClaims.claim({ owner: session.owner, issuer: session.selfClaim.identity.issuer, subject: session.selfClaim.identity.subject, emailHash: session.selfClaim.emailHash, profileId, evidence })
           await recordAudit({ event: source === 'profile-lookup' ? 'signup_profile_self_asserted' : claimed.test === true ? 'test_profile_self_claimed' : 'legacy_profile_self_claimed', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), profileId: claimed.profileId, evidence: source === 'profile-lookup' ? 'self-asserted-public-profile-v1' : evidence, receiptId: claimed.receiptId })
-          if (typeof notifyProfileClaimed === 'function') void notifyProfileClaimed(claimed.profileId, session.owner).catch(() => {})
+          if (typeof notifyProfileClaimed === 'function') await notifyProfileClaimed(claimed.profileId, session.owner, checkpoint).catch(() => {})
           session.selfClaim = null
           redirect(response, '/profile'); return
         } catch (error) {
@@ -2127,7 +2167,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         }
         const mine = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
         const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
-        const own = published?.profile?.presence === 'member' ? published.profile.id : null
+        const own = published?.profile?.presence === 'member' && !coordination.deletingProfiles.has(session.owner.ownerId) ? published.profile.id : null
         if (checking) {
           const answer = own ? profileHandles.availability(input.get('handle'), own) : { code: 'unavailable' }
           response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private' })
@@ -2536,11 +2576,11 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         response.end(JSON.stringify(data, null, 2)); return
       }
       if (signup && request.method === 'POST' && url.pathname === '/delete-account') {
-        const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
+        const input = deletionInputs.get(request) ?? new URLSearchParams((await body(request, 8192)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) throw new Error('private_browser_csrf')
-        if ((input.get('confirm') ?? '').trim().toLowerCase() !== 'delete everything') {
+        if (!['delete account', 'delete everything'].includes((input.get('confirm') ?? '').trim().toLowerCase())) {
           const jobs = await jobResources(), props = jobProps(jobs)
-          journey(response, renderSettings({ ...props, grants: await grantList(session.owner, backend), imports: summaries(jobs), connector, deleteError: 'Type “delete everything” exactly to confirm. Nothing was deleted.' }), props.importJob, '', 400)
+          journey(response, renderSettings({ ...props, grants: await grantList(session.owner, backend), imports: summaries(jobs), connector, deleteError: 'Type “delete account” exactly to confirm. Nothing was deleted.' }), props.importJob, '', 400)
           return
         }
         const jobs = await jobResources()
@@ -2549,36 +2589,44 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
-        if (homePreferences) await homePreferences.removeOwner(session.owner).catch(() => {})
-        if (ideaflowProfiles?.choices) await ideaflowProfiles.choices.removeOwner(session.owner).catch(() => {})
+        if (homePreferences) await homePreferences.removeOwner(session.owner)
+        if (ideaflowProfiles?.choices) await ideaflowProfiles.choices.removeOwner(session.owner)
         if (personLookup) await personLookup.removeOwner(session.owner)
         if (contactEnrichment) await contactEnrichment.removeOwner(session.owner)
         if (contactSlugs) await contactSlugs.removeOwner(session.owner)
         // Member-published public links go with the account.
         if (profileSocialLinks) await profileSocialLinks.removeOwner(session.owner)
         // So do the member's handles, current and earlier (released once the data is gone).
-        const handleProfile = profileHandles && typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
+        let handleProfile = coordination.deletingProfiles.get(session.owner.ownerId)
+        if (!handleProfile && profileHandles && typeof ownProfileId === 'function') {
+          handleProfile = await ownProfileId(session.owner)
+          if (handleProfile) coordination.deletingProfiles.set(session.owner.ownerId, handleProfile)
+        }
+        const releaseProfile = handleProfile ? await coordination.acquire('profile:' + handleProfile, true) : () => {}
+        try {
+        if (handleProfile) await profileHandles.removeProfile(handleProfile)
         // Reports this member sent stay for review, without who sent them.
-        if (safetyReports) await safetyReports.forgetReporter(session.owner).catch(() => {})
+        if (safetyReports) await safetyReports.forgetReporter(session.owner)
         // Blocks this member made, and blocks of this member.
         if (memberBlocks) await memberBlocks.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
-        if (handleProfile) await profileHandles.removeProfile(handleProfile)
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)
         // The stored sign-in address, email choices and invite-send counters.
         if (memberEmail) await memberEmail.removeOwner(session.owner)
-        // Best effort beyond the graph: the legacy claim and the stored archive bytes.
-        if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner).catch(() => {})
-        if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId).catch(() => {})
-        for (const [id, value] of sessions) if (value.owner.ownerId === session.owner.ownerId) sessions.delete(id)
-        if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId).catch(() => {})
+        if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner)
+        if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId)
+        if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId)
+        coordination.deleted(session.owner.ownerId)
+        for (const map of coordination.sessionMaps) for (const [id, value] of map) if (value.owner.ownerId === session.owner.ownerId) map.delete(id)
+        coordination.deletingProfiles.delete(session.owner.ownerId)
         // Signing in again later starts from the Ideaflow account chooser.
         response.setHeader('Set-Cookie', [cookie('__Host-ul-session', '', 0), cookie(SIGNED_OUT_COOKIE, '1', SIGNED_OUT_SECONDS), browserSessionCookie(AUTO_SIGNIN_COOKIE, '1')])
         await recordAudit({ event: 'account_data_deleted', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), deletedResources: result.deletedResources })
         journey(response, renderDataDeleted())
         return
+        } finally { releaseProfile() }
       }
       if (signup && request.method === 'POST' && ['/setup-account', '/revoke-account', '/search-account'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
@@ -2653,7 +2701,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const file = form.get('archive')
         if (!file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name)) throw new Error('private_archive_filename_invalid')
         const receipt = await (backgroundImports ? stageArchive : ingestArchive)({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: dataMode === 'private_live' && readPublishedSnapshot ? PUBLIC_UPLOAD_CONSENT : COMBINED_UPLOAD_CONSENT })
-        if (memberEmail?.completeImportReminders) await bounded(() => memberEmail.completeImportReminders(session.owner), false)
+        if (memberEmail?.completeImportReminders) await memberEmail.completeImportReminders(session.owner).catch(() => {})
         redirect(response, signup ? '/profile' : `/imports/${receipt.id}`); return
         } finally { uploadBusy = false }
       }
@@ -2725,6 +2773,49 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       const recovery = error.message === 'private_owner_recovery_required'
       if (!response.headersSent) render(response, recovery ? 'Account recovery required' : 'We could not finish that', recovery ? '<p>Your Ideaflow identity could not be safely mapped to an existing or newly provisioned Unlinked owner. No archive was accepted. Complete the trusted account recovery/provisioning step.</p>' : '<p>Try again, or sign in and return to your files in Settings. Your account and files have not been moved to another account.</p><a href="/settings">Open Settings</a>', limited ? 413 : recovery ? 409 : 400)
     }
+  }
+  const serve = async (request, response) => {
+    const path = new URL(request.url, base).pathname
+    const exclusive = request.method === 'POST' && path === '/delete-account'
+    const sid = cookies(request)['__Host-ul-session']
+    let record = sid ? sessions.get(sid) : null
+    if (sid && sessionStore) {
+      try { record = await sessionStore.get(createHash('sha256').update(sid).digest('hex'), Date.now()) }
+      catch { response.writeHead(503, { 'Retry-After': '10' }).end(); return }
+    }
+    const ownerId = record?.ownerId ?? record?.owner?.ownerId
+    const before = ownerId ? coordination.version(ownerId) : null
+    let reserved = null
+    try {
+      const eligible = ownerId && request.method === 'POST' && path !== '/invite/confirm' && request.headers.host === base.host && (request.headers.origin === base.origin || (path === '/email/unsubscribe' && memberEmail))
+      if (eligible && (path !== '/messages/api/attachments' || validMessagingAttachmentHeaders(request.headers))) {
+        const attachment = path === '/messages/api/attachments'
+        if (path === '/upload') {
+          if (pendingArchiveBodies >= 1) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+          pendingArchiveBodies++; reserved = () => { pendingArchiveBodies-- }
+        } else if (attachment) {
+          const mine = pendingMessageOwners.get(ownerId) ?? 0
+          if (mine >= 2 || pendingMessageBodies >= 8) { response.writeHead(429, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'rate_limited' })); return }
+          pendingMessageOwners.set(ownerId, mine + 1); pendingMessageBodies++
+          reserved = () => { pendingMessageBodies--; const left = pendingMessageOwners.get(ownerId) - 1; if (left) pendingMessageOwners.set(ownerId, left); else pendingMessageOwners.delete(ownerId) }
+        }
+        const limit = path === '/upload' ? LIMITS.archiveBytes + 65536 : path.startsWith('/messages/api/') ? messagingBodyLimit(path, request.headers['content-type']) : 16384
+        let bytes
+        try { bytes = await bufferRequestBody(request, limit) }
+        catch { if (!response.destroyed) response.writeHead(413, path.startsWith('/messages/api/') ? { 'Content-Type': 'application/json' } : {}).end(path.startsWith('/messages/api/') ? JSON.stringify({ error: 'body_too_large' }) : undefined); return }
+        if (exclusive) {
+          const input = new URLSearchParams(bytes.toString('utf8'))
+          if (bytes.length > 8192 || input.getAll('csrf').length !== 1 || input.get('csrf') !== record.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) { response.writeHead(bytes.length > 8192 ? 413 : 400).end(); return }
+          deletionInputs.set(request, input)
+        }
+      }
+      if (!ownerId || path === '/auth/callback/ideaflow' || path === '/invite/confirm' || (exclusive && !deletionInputs.has(request))) return await serveCore(request, response)
+      const release = await coordination.acquire('owner:' + ownerId, exclusive)
+      try {
+        if (coordination.version(ownerId) !== before) { response.writeHead(401).end(); return }
+        return await coordination.withHeld('owner:' + ownerId, exclusive, () => serveCore(request, response))
+      } finally { release() }
+    } finally { reserved?.() }
   }
   serve.backfillHandles = backfillHandles
   return serve

@@ -104,27 +104,50 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
 
 // One process-wide worker; Noos discovery + CAS leases make restart and a
 // second process safe. There is no separate people database or fixture fallback.
-export function createArchiveWorker({ listPendingImports, getBackend, intervalMs = 2000, onError = () => {}, now = Date.now }) {
+export function createArchiveWorker({ listPendingImports, getBackend, coordination, intervalMs = 2000, onError = () => {}, now = Date.now }) {
   if (typeof listPendingImports !== 'function' || typeof getBackend !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 100 || intervalMs > 60000) throw new Error('private_worker_configuration_required')
-  let closed = false, running = null, timer
-  const notify = async event => { try { await onError(event) } catch { /* Logging never changes job authority or worker recovery. */ } }
-  const tick = () => {
-    if (closed || running) return running ?? Promise.resolve()
-    running = (async () => {
-      const pending = await listPendingImports()
-      if (!Array.isArray(pending) || pending.length > 200) throw new Error('private_worker_discovery_limit')
-      for (const item of pending) {
-        if (closed) break
+  let closed = false, discovery = null, timer, active = 0
+  const scheduled = new Map(), ownerTails = new Map(), waiters = []
+  const notify = async event => { try { await onError(event) } catch {} }
+  const slot = () => new Promise(resolve => {
+    const enter = () => { active++; resolve(() => { active--; waiters.shift()?.() }) }
+    if (active < 8) enter(); else waiters.push(enter)
+  })
+  const schedule = item => {
+    const key = JSON.stringify([item.owner.ownerId, item.id])
+    if (scheduled.has(key)) return scheduled.get(key)
+    const ownerId = item.owner.ownerId
+    const work = (ownerTails.get(ownerId) ?? Promise.resolve()).then(async () => {
+      if (closed) return
+      const releaseSlot = await slot()
+      try {
+        if (closed) return
+        const release = coordination ? coordination.tryAcquireShared('owner:' + ownerId) : () => {}
+        if (!release) return
         try {
           const backend = await getBackend(item.owner)
-          await runArchiveJob({ ownerId: item.owner.ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
-        } catch { await notify({ event: 'import_worker_retry', importId: item.id }) }
-      }
-    })().catch(() => notify({ event: 'import_worker_discovery_failed' })).finally(() => { running = null })
-    return running
+          await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
+        } finally { release() }
+      } finally { releaseSlot() }
+    }).catch(() => notify({ event: 'import_worker_retry', importId: item.id }))
+    const settled = work.finally(() => { scheduled.delete(key); if (ownerTails.get(ownerId) === settled) ownerTails.delete(ownerId) })
+    scheduled.set(key, settled)
+    ownerTails.set(ownerId, settled)
+    return settled
+  }
+  const tick = () => {
+    if (closed) return Promise.resolve()
+    if (discovery) return discovery.then(jobs => Promise.all(jobs))
+    discovery = (async () => {
+      const pending = await listPendingImports()
+      if (!Array.isArray(pending) || pending.length > 200) throw new Error('private_worker_discovery_limit')
+      return pending.map(schedule)
+    })().catch(async () => { await notify({ event: 'import_worker_discovery_failed' }); return [] }).finally(() => { discovery = null })
+    return discovery.then(jobs => Promise.all(jobs))
   }
   return { tick, start() { if (!timer && !closed) { timer = setInterval(tick, intervalMs); timer.unref?.(); void tick() } },
-    async stop() { closed = true; clearInterval(timer); await running } }
+    async stop() { closed = true; clearInterval(timer); if (discovery) await discovery; await Promise.all(scheduled.values()) } }
+
 }
 
 export function importJobStatus(job) {

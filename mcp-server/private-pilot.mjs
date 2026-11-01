@@ -5,6 +5,7 @@ import { createServer } from 'node:http'
 import { hkdfSync } from 'node:crypto'
 import { generateKeyPair } from 'jose'
 import { createPrivateBrowserHandler } from './private-browser.mjs'
+import { coordinatorFor } from './owner-coordination.mjs'
 import { createPrivateHostedHandler } from './private-hosted.mjs'
 import { createPrivateGrantService } from './private-grants.mjs'
 import { createAccountGrantService } from './account-grants.mjs'
@@ -31,10 +32,10 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   // client-registration MAC key is derived from, and separate from, the grant key.
   const oauth = accountGrants ? createOAuthServer({ origin: base.origin, resourcePath: '/mcp', publicSearchEnabled: typeof readPublishedSnapshot === 'function',
     clientKey: new Uint8Array(hkdfSync('sha256', accountGrantKey, 'unlinked-oauth', 'client-registration-v1', 32)),
-    issueGrant: accountGrants.issueGrant, revokeConnectionToken: accountGrants.revokeConnectionToken, audit }) : null
+    issueGrant: accountGrants.issueGrant, revokeConnectionToken: accountGrants.revokeConnectionToken, coordination: coordinatorFor(sessionStore), audit }) : null
   // One tool service instance backs both agent surfaces, so the MCP tools and
   // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
-  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined,
+  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, coordination: coordinatorFor(sessionStore), lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined,
     contactAddresses: contactEnrichment ? owner => contactEnrichment.addresses(owner) : undefined,
     // Private people notes & relations (catalog v7) call the same Noos overlay as the private-context panel.
     ...(overlay && typeof overlayIdentity === 'function' ? { overlay, identityFor: overlayIdentity } : {}) }) : null
@@ -58,9 +59,9 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   if (provisionAgentClients.length && !accountGrants) throw new Error('account_agent_provisioning_configuration_required')
   // Server-to-server grant provisioning stays off unless the operator supplied
   // a non-empty allow list (see docs/agent-api.md, "Grant provisioning").
-  const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit } : undefined
+  const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit, coordination: coordinatorFor(sessionStore) } : undefined
   const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin, provisioning }) : null
-  const connector = accountGrants ? createIdeaflowConnectorHandler({ secret: ideaflowConnectorSecret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService }) : null
+  const connector = accountGrants ? createIdeaflowConnectorHandler({ secret: ideaflowConnectorSecret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService, coordination: coordinatorFor(sessionStore) }) : null
   const messaging = createMessagingHandler({ origin: base.origin, secret: messagingSecret, resolveRecipient: resolveMessagingRecipient })
   const server = createServer((request, response) => {
     let pathname

@@ -68,6 +68,22 @@ const authorizeQuery = (clientId, extra = {}) => new URLSearchParams({ client_id
 const csrfFrom = text => text.match(/name="csrf" value="([^"]+)"/)[1]
 const hiddenParams = text => new URLSearchParams([...text.matchAll(/<input type="hidden" name="([a-z_]+)" value="([^"]*)">/g)].filter(m => !['csrf', 'next'].includes(m[1])).map(m => [m[1], m[2].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')]))
 
+test('authorization code issued before account deletion cannot mint a grant', async t => {
+  const p = await pilot(t)
+  const client = await (await p.register({ client_name: 'Claude', redirect_uris: [CLAUDE] })).json()
+  const query = authorizeQuery(client.client_id, { resource: `${p.baseUrl}/mcp` })
+  const { cookie } = await p.signIn()
+  const consent = await (await p.go(`/oauth/authorize?${query}`, { headers: { Cookie: cookie } })).text()
+  const csrf = csrfFrom(consent)
+  const approved = await p.go('/oauth/authorize', { method: 'POST', headers: { Cookie: cookie, Origin: p.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams([['csrf', csrf], ['decision', 'allow'], ...hiddenParams(consent)]) })
+  const code = new URL(approved.headers.get('location')).searchParams.get('code')
+  const deleted = await p.go('/delete-account', { method: 'POST', headers: { Cookie: cookie, Origin: p.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, confirm: 'delete account' }) })
+  assert.equal(deleted.status, 200)
+  const token = await p.token({ grant_type: 'authorization_code', code, code_verifier: 'v'.repeat(64), client_id: client.client_id, redirect_uri: CLAUDE, resource: `${p.baseUrl}/mcp` })
+  assert.equal((await token.json()).error, 'invalid_grant')
+  assert.equal(p.graph.live().length, 0)
+})
+
 async function mcpTools(endpoint, accessToken) {
   const client = new Client({ name: 'oauth-test', version: '1.0.0' })
   await client.connect(new StreamableHTTPClientTransport(new URL(`${endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${accessToken}` } } }))

@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto'
 import { handleCandidates, nameHandleBase, profilePath, setProfileHandleLookup, validateHandle } from '../src/utils/public-people/profile-handles.mjs'
 import { createMemoryProfileHandleStore, createNeo4jProfileHandleStore, createProfileHandles } from '../mcp-server/profile-handles.mjs'
 import { createPrivateBrowserHandler, notificationTargetFor } from '../mcp-server/private-browser.mjs'
+import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
 import { LABELS } from '../deploy/private-pilot/graph-migration.mjs'
 
@@ -235,6 +236,29 @@ test('a just-deleted account in the still-published index never gets a handle ba
   assert.equal(handles.handleFor('twin-b'), null)
   assert.equal(handles.handleFor('public-shadow'), 'sam-fictional')
   assert.equal((await get('/people/twin-b')).status, 200, 'its page stays at its id')
+})
+
+test('backfill batches store writes and rechecks members after waiting for profile locks', async t => {
+  const store = createMemoryProfileHandleStore(), batches = []
+  const assignMany = store.assignMany.bind(store)
+  store.assignMany = async rows => { batches.push(rows.map(row => row.profileId)); return assignMany(rows) }
+  const handles = createProfileHandles({ store }), sessionStore = {}
+  const coordination = coordinatorFor(sessionStore)
+  const release = await coordination.acquire('profile:' + SIGNUP_ID, true)
+  let observed
+  const initialLookup = new Promise(resolve => { observed = resolve })
+  let active = true
+  const { handler } = await site(t, { handles, extra: { sessionStore, accountForProfile: async id => {
+    if (id === SIGNUP_ID) { observed(); return active ? peterOwner : null }
+    return { ownerId: id, userId: id }
+  } } })
+  const backfill = handler.backfillHandles({ pauseMs: 0 })
+  await initialLookup
+  active = false
+  release()
+  assert.equal(await backfill, 3)
+  assert.equal(handles.handleFor(SIGNUP_ID), null)
+  assert.deepEqual(batches.map(batch => batch.length), [1, 2])
 })
 
 test('a reload that read before a local write never overwrites it', async () => {
