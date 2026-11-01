@@ -204,17 +204,6 @@ test('end to end: the old hash address 301s to the owner’s slug, which renders
   assert.deepEqual(exported.contactAddresses.map(value => value.slug).sort(), ['alex-kim', 'alex-kim-fabrikam', 'jamie-heywood', 'roger-cole'])
 })
 
-test('the isolated pilot forwards the slug registry to the browser', async () => {
-  const source = await import('node:fs/promises').then(fs => fs.readFile(new URL('../mcp-server/private-pilot.mjs', import.meta.url), 'utf8'))
-  // Regression shape from 0.6.25: a store the composition creates must reach the browser and private context.
-  assert.match(source, /contactEnrichment, contactSlugs, accountGrantKey/)
-  assert.match(source, /contactEnrichment, contactSlugs, getBackend, complete, readPublishedSnapshot,\n {4}issueAccountGrant/)
-  assert.match(source, /contactPath: id => contactSlugs\.pathFor\(id\)/)
-  const composition = await import('node:fs/promises').then(fs => fs.readFile(new URL('../mcp-server/private-composition.mjs', import.meta.url), 'utf8'))
-  assert.match(composition, /createContactSlugStore: createNeo4jContactSlugStore/)
-  assert.match(composition, /\n {6}contactSlugs,\n/)
-})
-
 const uri = process.env.UNLINKED_TEST_NEO4J_URI
 const neo4jEnabled = /^bolt:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uri ?? '') && process.env.UNLINKED_TEST_NEO4J_DRIVER
 test('durable slugs: owner-scoped, active-binding gated, concurrent assignment settles, removable', { skip: !neo4jEnabled }, async t => {

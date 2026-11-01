@@ -1023,13 +1023,17 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const queue = [], queuedIds = new Set(), queuedHandles = new Set()
     const flush = async () => {
       if (!queue.length) return
-      for (const entry of queue.splice(0)) {
-        const release = await coordination.acquire('profile:' + entry.id, false)
-        try {
-          if ([...coordination.deletingProfiles.values()].includes(entry.id)) continue
-          if (members.has(entry.id) && typeof accountForProfile === 'function' && !await accountForProfile(entry.id).catch(() => null)) continue
-          changed += await profileHandles.assignMany([entry])
-        } finally { release() }
+      while (queue.length) {
+        const batch = queue.splice(0, 500)
+        await coordination.run(batch.map(entry => 'profile:' + entry.id), async () => {
+          const active = []
+          for (const entry of batch) {
+            if ([...coordination.deletingProfiles.values()].includes(entry.id)) continue
+            if (members.has(entry.id) && typeof accountForProfile === 'function' && !await accountForProfile(entry.id).catch(() => null)) continue
+            active.push(entry)
+          }
+          if (active.length) changed += await profileHandles.assignMany(active)
+        })
       }
       if (pauseMs > 0) await new Promise(resolve => setTimeout(resolve, pauseMs))
     }
