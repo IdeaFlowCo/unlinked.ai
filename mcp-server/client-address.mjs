@@ -58,3 +58,14 @@ export function visitorKey(request, { edges = EDGES } = {}) {
   }
   return bucket(peer)
 }
+
+// Self-declared crawlers and non-browser clients. Crawlers spread over many
+// addresses read slowly per address, so the per-visitor arrival allowance
+// cannot tell them from people; their own user agent can. They stay on the
+// shared anonymous fuse and never receive arrival or card priority.
+const AUTOMATION = /bot\b|bot\/|crawl|spider|slurp|externalhit|headless|preview|scrap|fetch|python|curl|wget|httpclient|http-client|okhttp|java\/|go-http|axios|libwww|monitor|uptime|check|scan(?:ner)?\b|archiver|lighthouse|^$/i
+
+export function declaredAutomation(request) {
+  const agent = request.headers?.['user-agent']
+  return typeof agent !== 'string' || AUTOMATION.test(agent.trim()) || !/^Mozilla\/5\.0 /.test(agent.trim())
+}
