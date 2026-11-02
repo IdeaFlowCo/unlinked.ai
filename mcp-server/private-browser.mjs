@@ -1,6 +1,6 @@
 import { ideaflowProfileSection, IDEAFLOW_PROFILE_VISIBILITY } from './ideaflow-profile.mjs'
 import { createPublicReadAdmission } from './public-read-admission.mjs'
-import { visitorKey } from './client-address.mjs'
+import { declaredAutomation, visitorKey } from './client-address.mjs'
 import { recentContact, contactName } from './contact-enrichment.mjs'
 import { MESSAGES_CLIENT_SOURCE, messagesConfig } from './messages-client.mjs'
 import { createMessagingProxy, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
@@ -1441,8 +1441,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const route = publicProfile?.[2] ? 'connections' : publicDetail || publicProfile ? 'profile' : publicCompany || publicCompanyApi ? 'company' : 'search'
         // A card QR opens the profile with ?via=card: that person is arriving,
         // so a crawler-saturated shared fuse must never turn them away.
-        const cardArrival = publicProfile && !publicProfile[2] && url.searchParams.getAll('via').length === 1 && url.searchParams.get('via') === 'card'
-        const admission = await publicAdmission.acquire({ ownerId: viewer?.owner.ownerId, visitor: viewer ? undefined : visitorKey(request), priority: Boolean(cardArrival), route, signal: controller.signal })
+        // Declared crawlers and non-browser clients never get either priority.
+        const automated = !viewer && declaredAutomation(request)
+        const cardArrival = !automated && publicProfile && !publicProfile[2] && url.searchParams.getAll('via').length === 1 && url.searchParams.get('via') === 'card'
+        const admission = await publicAdmission.acquire({ ownerId: viewer?.owner.ownerId, visitor: viewer || automated ? undefined : visitorKey(request), priority: Boolean(cardArrival), route, signal: controller.signal })
         response.removeListener('close', closed)
         if (!admission.release) {
           if (admission.reason !== 'cancelled') await directoryError(429, admission.retryAfter)

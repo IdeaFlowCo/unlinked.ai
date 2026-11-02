@@ -83,10 +83,14 @@ test('exhausted minute budget returns useful browser and API errors with an hone
     await response.text()
     assert.deepEqual(admissions.at(-1), { lane: 'anonymous', route: 'profile', reason: 'minute' })
   }
-  const arriving = await request('/people/missing', { headers: { 'cf-connecting-ip': '198.51.100.7' } })
+  const phone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1'
+  const crawler = await request('/people/missing?via=card', { headers: { 'cf-connecting-ip': '198.51.100.8', 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ShapBot/0.1.0' } })
+  assert.equal(crawler.status, 429, 'a declared crawler gets neither arrival nor card priority')
+  await crawler.text()
+  const arriving = await request('/people/missing', { headers: { 'cf-connecting-ip': '198.51.100.7', 'user-agent': phone } })
   assert.equal(arriving.status, 404, 'a new visitor is not turned away by the drained shared fuse')
   assert.deepEqual(admissions.at(-1), { lane: 'arrival', route: 'profile', reason: 'admitted' })
-  const scanned = await request('/people/missing?via=card')
+  const scanned = await request('/people/missing?via=card', { headers: { 'user-agent': phone } })
   assert.equal(scanned.status, 404, 'a card scan is admitted even without a visitor key')
   assert.deepEqual(admissions.at(-1), { lane: 'arrival', route: 'profile', reason: 'admitted' })
   const cookie = await request.signIn()
