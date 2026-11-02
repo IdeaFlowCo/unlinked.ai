@@ -106,11 +106,12 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   // CSP stays locked down; the QR is inline SVG, not an image fetch.
   assert.match(page.headers.get('content-security-policy'), /default-src 'none'/)
 
-  // The decoded QR content equals the public profile URL.
+  // The decoded QR content is the public profile URL marked as a card scan
+  // (admission priority); the copyable field above stays the clean URL.
   const { qrMatrix } = await import('../src/utils/qr-code.mjs')
   const svgPath = html.match(/<path d="([^"]+)" fill="#16181d"/)[1]
   assert.equal(svgPath, (() => { // same deterministic rendering as qrSvg
-    const matrix = qrMatrix(cardUrl)
+    const matrix = qrMatrix(`${cardUrl}?via=card`)
     let path = ''
     for (let y = 0; y < matrix.length; y++) for (let x = 0; x < matrix.length; x++) if (matrix[y][x]) path += `M${x + 4} ${y + 4}h1v1h-1z`
     return path
