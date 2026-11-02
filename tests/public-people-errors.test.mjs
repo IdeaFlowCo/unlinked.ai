@@ -61,7 +61,11 @@ test('missing, invalid and unavailable public pages explain recovery without lea
 
 test('exhausted minute budget returns useful browser and API errors with an honest retry interval', async t => {
   const admissions = []
-  const request = await runtime(t, undefined, event => admissions.push(event))
+  const direct = await runtime(t, undefined, event => admissions.push(event))
+  // Keyless traffic (a Cloudflare edge without a visitor header) meets the
+  // shared fuse; a person arriving with their own address does not.
+  const edge = { 'x-forwarded-for': '172.70.1.2' }
+  const request = Object.assign((path, options = {}) => direct(path, { ...options, headers: { ...edge, ...options.headers } }), { signIn: direct.signIn })
   for (const method of ['GET', 'HEAD']) {
     const response = await request('/api/people/missing', { method })
     assert.equal(response.status, 404)
@@ -79,6 +83,16 @@ test('exhausted minute budget returns useful browser and API errors with an hone
     await response.text()
     assert.deepEqual(admissions.at(-1), { lane: 'anonymous', route: 'profile', reason: 'minute' })
   }
+  const phone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1'
+  const crawler = await request('/people/missing?via=card', { headers: { 'cf-connecting-ip': '198.51.100.8', 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ShapBot/0.1.0' } })
+  assert.equal(crawler.status, 429, 'a declared crawler gets neither arrival nor card priority')
+  await crawler.text()
+  const arriving = await request('/people/missing', { headers: { 'cf-connecting-ip': '198.51.100.7', 'user-agent': phone } })
+  assert.equal(arriving.status, 404, 'a new visitor is not turned away by the drained shared fuse')
+  assert.deepEqual(admissions.at(-1), { lane: 'arrival', route: 'profile', reason: 'admitted' })
+  const scanned = await request('/people/missing?via=card', { headers: { 'user-agent': phone } })
+  assert.equal(scanned.status, 404, 'a card scan is admitted even without a visitor key')
+  assert.deepEqual(admissions.at(-1), { lane: 'arrival', route: 'profile', reason: 'admitted' })
   const cookie = await request.signIn()
   const viewer = await request('/people/missing', { headers: { Cookie: cookie } })
   assert.equal(viewer.status, 404, 'signed-in viewer bypasses exhausted anonymous quota')
