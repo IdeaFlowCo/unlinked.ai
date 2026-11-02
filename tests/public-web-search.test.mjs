@@ -77,7 +77,9 @@ test('small fetch bursts share a snapshot read and remain bounded', async t => {
   let release, started, reads = 0
   const block = new Promise(resolve => { release = resolve })
   const begun = new Promise(resolve => { started = resolve })
-  const request = await runtime(t, async () => { reads++; started(); await block; return snapshot() })
+  const direct = await runtime(t, async () => { reads++; started(); await block; return snapshot() })
+  // Keyless anonymous traffic: the shared concurrency fuse is under test here.
+  const request = (path, options = {}) => direct(path, { ...options, headers: { 'x-forwarded-for': '172.70.1.2', ...options.headers } })
   const burst = Array.from({ length: 6 }, () => request('/search-public?q=Example'))
   await begun
   // All earlier requests are admitted or rejected before the ninth response.
