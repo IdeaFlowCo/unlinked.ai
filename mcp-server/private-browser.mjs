@@ -38,6 +38,7 @@ import { ConnectionError } from './member-connections.mjs'
 import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
 import { CONNECTION_FEEDBACK_SCRIPT, CONNECTION_FEEDBACK_SRC, CONNECTION_FEEDBACK_VERSION } from './connection-feedback.mjs'
 import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
+import { ANALYTICS_ORIGIN, analyticsTag, queueAnalyticsEvent, takeAnalyticsEvents } from './ideaflow-analytics.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
 import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
@@ -659,13 +660,13 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     // whose redirect chain ends at the configured Ideaflow ID origin.
     const signInFormAction = authorizationOrigin ? ` ${authorizationOrigin}` : ''
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
-    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
     script = `${TOP_BAR_SCRIPT}${LINKEDIN_EMAIL_HELP_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${CARD_SHARE_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? '' : feedbackWidgetTag(nonce)}<!--/email_off--></html>`)
+    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? '' : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   // `silentBack` (automatic sign-in) returns to the original page without
@@ -720,8 +721,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
-    if (sessionStore) await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() })
-    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), accountLabel, displayName, csrf, expiresAt })
+    if (sessionStore) await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, subject: identity.subject, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() })
+    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), subject: identity.subject, accountLabel, displayName, csrf, expiresAt, analyticsEvents: newOwner ? ['signup'] : [] })
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     if (cardToken) {
@@ -1124,7 +1125,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (!record) { sessions.delete(sid); current = null }
         else if (!current || current.csrf !== record.csrf || current.owner.ownerId !== record.ownerId || current.owner.userId !== record.userId) {
           current = { legacyProof: null, legacyCandidate: null, selfClaim: null,
-            owner: Object.freeze({ ownerId: record.ownerId, userId: record.userId }),
+            owner: Object.freeze({ ownerId: record.ownerId, userId: record.userId }), subject: record.subject ?? null,
             accountLabel: record.accountLabel, displayName: record.displayName, csrf: record.csrf, expiresAt: record.expiresAt }
           sessions.set(sid, current)
         }
@@ -2715,6 +2716,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (!file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name)) throw new Error('private_archive_filename_invalid')
         const receipt = await (backgroundImports ? stageArchive : ingestArchive)({ ownerId: session.owner.ownerId, filename: file.name, bytes: Buffer.from(await file.arrayBuffer()), adapter: backend.adapter, consent: dataMode === 'private_live' && readPublishedSnapshot ? PUBLIC_UPLOAD_CONSENT : COMBINED_UPLOAD_CONSENT })
         if (memberEmail?.completeImportReminders) await memberEmail.completeImportReminders(session.owner).catch(() => {})
+        queueAnalyticsEvent(session, 'activated')
         redirect(response, signup ? '/profile' : `/imports/${receipt.id}`); return
         } finally { uploadBusy = false }
       }

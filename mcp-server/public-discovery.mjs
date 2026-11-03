@@ -6,6 +6,7 @@ import { renderAgents, renderDataLiberation, renderImportGuide, renderMeet, rend
 import { iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
+import { ANALYTICS_ORIGIN, analyticsTag } from './ideaflow-analytics.mjs'
 
 const root = new URL('../', import.meta.url)
 const requireFromRoot = createRequire(new URL('package.json', root))
@@ -56,7 +57,7 @@ const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '
 // Every page carries the header's Me-menu script under its own nonce.
 // Header counts (`alerts`) are display-only, like the rest of `chrome`.
 // In the iOS app (`UnlinkediOS/`), pages get iosAppView and no floating feedback bubble.
-const document = (view, { headline, nonce, alerts, ios = false }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? '' : feedbackWidgetTag(nonce)}<!--/email_off--></html>`
+const document = (view, { headline, nonce, alerts, ios = false }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? '' : feedbackWidgetTag(nonce) + analyticsTag(nonce)}<!--/email_off--></html>`
 const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
 
 // Exact, source-controlled anonymous discovery only. Never resolves an owner,
@@ -84,13 +85,13 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     type = 'text/html; charset=utf-8'
     const nonce = randomBytes(24).toString('base64url'), page = { headline: chrome.headline, nonce, alerts: chrome.alerts, ios: iosAppUserAgent(request.headers['user-agent']) }
     const formAction = `form-action 'self'${typeof signInOrigin === 'string' && /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/.test(signInOrigin) ? ` ${signInOrigin}` : ''}`
-    response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+    response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (pathname === '/agents') content = document(renderAgents(chrome), page)
     if (pathname === '/import-linkedin') content = document(renderImportGuide(chrome), page)
     if (pathname === '/support') content = document(renderSupport(chrome), page)
     if (pathname === '/data-liberation') content = document(renderDataLiberation(chrome), page)
     if (pathname === '/meet') {
-      response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE}; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE}; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+      response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
       response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
       content = document(renderMeet(chrome), page).replace(/<\/html>$/, '') + `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}</script></html>`
     }
