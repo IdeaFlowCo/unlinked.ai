@@ -100,7 +100,7 @@ test('a non-member scans a contact card: save it, or join and land connected wit
   // The header's Sign in keeps the card as the return target.
   assert.ok(guest.includes(`href="/login?next=${encodeURIComponent(path)}"`))
   const { callback, cookie } = await s.finish('grace', await s.post(`${path}/add`))
-  assert.deepEqual(s.loginBegins.at(-1), { prompt: 'select_account' })
+  assert.deepEqual(s.loginBegins.at(-1), {})
   assert.equal(callback.headers.get('location'), `${path}?added=1`)
   assert.equal(s.signups(), 1)
   assert.equal((await s.connections.between(s.grace, s.ada)).state, 'connected')
@@ -143,7 +143,7 @@ test('a non-member scans a public profile: Join & connect sends the request afte
   assert.equal((await s.post('/people/imported/join')).status, 404)
   assert.equal((await s.post('/people/nobody/join')).status, 404)
   const { callback, cookie } = await s.finish('grace', await s.post('/people/ada/join'))
-  assert.deepEqual(s.loginBegins.at(-1), { prompt: 'select_account' })
+  assert.deepEqual(s.loginBegins.at(-1), {})
   assert.equal(callback.headers.get('location'), '/people/ada?connect=sent&joined=1')
   assert.equal((await s.connections.between(s.grace, s.ada)).state, 'outgoing', 'a normal request: Ada accepts it')
   const landed = await (await s.request('/people/ada?connect=sent&joined=1', { cookie })).text()
