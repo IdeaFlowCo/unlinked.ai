@@ -272,6 +272,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // An OAuth connector authorization request returns to its own validated
   // consent page (the query is re-validated there, never trusted).
   const lookupReturn = value => { try { const u = new URL(value, base); return value.startsWith('/people/lookup?') && u.pathname === '/people/lookup' && u.searchParams.getAll('url').length === 1 && [...u.searchParams.keys()].every(key => key === 'url') && Boolean(parseLinkedinProfileUrl(u.searchParams.get('url'))) } catch { return false } }
+  // Plain sign-in sends no prompt (silent SSO). Only an explicit switch, or the
+  // first sign-in after an explicit sign-out, asks Ideaflow ID for its chooser.
+  const signInOptions = (request, switching = false) => switching || cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
   const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
@@ -1336,7 +1339,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         }
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
-        const started = await login.begin({ prompt: SELECT_ACCOUNT }), id = token()
+        const started = await login.begin(signInOptions(request)), id = token()
         pending.set(id, { ...started.transaction, cardToken: cardAdd[1], expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
         redirect(response, started.location); return
@@ -1421,7 +1424,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         if (viewer) { redirect(response, path); return }
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
-        const started = await login.begin({ prompt: SELECT_ACCOUNT }), transactionId = token()
+        const started = await login.begin(signInOptions(request)), transactionId = token()
         pending.set(transactionId, { ...started.transaction, connectProfileId: target, expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', transactionId, 300))
         redirect(response, started.location); return
@@ -1674,8 +1677,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (request.method === 'GET' && url.pathname === '/login') {
         purge(pending)
         if (pending.size >= 100) throw new Error('private_login_capacity')
-        // Explicit sign-in offers the active identity and another account.
-        const result = await login.begin({ prompt: SELECT_ACCOUNT }), id = token()
+        // Silent SSO: an existing Ideaflow ID session returns at once. The account
+        // chooser appears only for ?switch=1 or right after an explicit sign-out.
+        const result = await login.begin(signInOptions(request, url.searchParams.get('switch') === '1')), id = token()
         pending.set(id, { ...result.transaction, next: returnPath(url.searchParams.get('next')), expiresAt: Date.now() + 5 * 60000 })
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
         redirect(response, result.location); return

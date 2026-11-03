@@ -15,8 +15,8 @@ only authorization URL. It accepts no `prompt`, `select_account` or `none`
 
 | Flow | `prompt` |
 | --- | --- |
-| Ordinary sign-in, including the OAuth connector's sign-in and `/i/<token>` invitation links | `select_account`: continue with the current Ideaflow identity or choose another |
-| First sign-in after an explicit Unlinked sign-out, Switch account or account deletion | `select_account` |
+| Ordinary sign-in, including the OAuth connector's sign-in, card/profile join and `/i/<token>` invitation links | none: with an Ideaflow ID session the provider returns at once (silent SSO) |
+| `GET /login?switch=1` ("use a different Ideaflow account"), and the first sign-in after an explicit Unlinked sign-out, Switch account or account deletion | `select_account` |
 | Invited-owner binding (`/invite`, and "Use another account" on its confirmation) | `select_account`, then Unlinked's own confirmation of the returned account |
 | Automatic sign-in on a signed-out page view (below) | `none`: never a provider page |
 
@@ -29,9 +29,11 @@ the grant's confirmation.
 ## Sign-out marker
 
 `POST /logout`, `POST /switch-account` and account deletion set
-`__Host-ul-signed-out=1` (Secure, HttpOnly, SameSite=Lax, one hour). It
-suppresses passive sign-in; interactive `/login` always asks for account
-choice. A successful sign-in clears it. The cookie carries no URL or identity, and only the exact value `1` counts.
+`__Host-ul-signed-out=1` (Secure, HttpOnly, SameSite=Lax, one hour). While it
+is present, `/login` (and the card/profile join sign-ins) sends
+`prompt=select_account`, and passive sign-in is suppressed. A successful
+sign-in clears it. The cookie carries no URL or identity, and only the exact
+value `1` counts. `/login?switch=1` asks for the chooser regardless of the marker.
 
 ## Switch account
 
