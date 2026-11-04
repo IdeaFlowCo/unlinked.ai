@@ -97,7 +97,10 @@ test('chat profile enforces account blocks without an OpenChat ID', async t => {
   const alex = await app.signIn('alex')
   const path = '/messages/person/c_group/oc_blake'
   assert.equal((await app.page(path)).status, 401)
-  assert.equal((await app.page(path, alex)).status, 303)
+  const redirect = await app.go(path, { headers: { Cookie: alex } })
+  assert.equal(redirect.status, 303)
+  assert.match(redirect.headers.get('cache-control'), /no-store/)
+  assert.match(redirect.headers.get('x-robots-tag'), /noindex/)
   await app.blockService.block(A, { blocked: B, profileId: BLAKE })
   assert.equal((await app.page(path, alex)).status, 404)
   assert.equal(strictCalls, 1)

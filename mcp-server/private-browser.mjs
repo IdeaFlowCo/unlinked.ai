@@ -1116,7 +1116,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     // their own) and capability-URL contact cards, which stay no-store.
     if (iosApp(request)) iosResponses.add(response)
     const navigationPath = new URL(request.url, base).pathname
-    const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/')
+    const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/') && !navigationPath.startsWith('/messages/person/')
     response.setHeader('Cache-Control', navigation ? 'private, no-cache' : 'no-store')
     if (navigation) response.setHeader('Vary', 'Cookie')
     response.setHeader('Referrer-Policy', 'strict-origin')
@@ -1782,8 +1782,6 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         return
       }
       if (request.method === 'GET' && url.pathname.startsWith('/messages/person/')) {
-        response.setHeader('Cache-Control', 'no-store, private')
-        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         const parts = url.pathname.slice('/messages/person/'.length).split('/')
         let entry
         try {
@@ -2828,6 +2826,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   }
   const serve = async (request, response) => {
     const path = new URL(request.url, base).pathname
+    if (path.startsWith('/messages/person/')) {
+      response.setHeader('Cache-Control', 'no-store, private')
+      response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+    }
     const exclusive = request.method === 'POST' && path === '/delete-account'
     const sid = cookies(request)['__Host-ul-session']
     let record = sid ? sessions.get(sid) : null
