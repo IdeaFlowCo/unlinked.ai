@@ -29,7 +29,7 @@ test('session exchange reads the live owner binding and fails closed without it'
 
 test('chat profile headers survive a session store failure', async t => {
   const handler = createPrivateBrowserHandler({ baseUrl: 'https://example.test', dataMode: 'synthetic',
-    login: {}, resolveOwner: async () => null, getBackend: async () => ({ adapter: {} }),
+    login: { begin: async () => {}, finish: async () => {} }, resolveOwner: async () => null, getBackend: async () => ({ adapter: {} }),
     sessionStore: { get: async () => { throw new Error('unavailable') } },
   })
   const server = createServer((req, res) => handler(req, res))

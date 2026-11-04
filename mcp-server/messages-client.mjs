@@ -156,10 +156,8 @@ function messagesClient(config) {
 
   // ── Conversations ──────────────────────────────────────────────────────────
   const others = conversation => conversation.participants.filter(person => person.id !== state.me)
-  // Where someone's Unlinked profile is: the server's path (their handle) for a
-  // partner who claimed a published member profile, else the public id the
-  // Message link or picker named for this conversation. Nothing otherwise, so
-  // a name without a profile stays plain text rather than a dead link.
+  // Prefer a published profile or the public id remembered for this conversation;
+  // otherwise use the conversation-scoped participant profile when available.
   const profileHref = (person, conversationId) => chatProfileHref(person, conversationId, profiles)
   const titleOf = conversation => conversation.title || others(conversation).map(person => person.name).join(', ') || 'Just you'
   const peerOf = conversation => conversation.type === 'direct' ? others(conversation)[0] : null

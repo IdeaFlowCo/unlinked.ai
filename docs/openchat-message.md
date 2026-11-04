@@ -193,18 +193,17 @@ Unlinked profile destination when one is available. Otherwise they open a
 signed-in, conversation-scoped chat profile at
 `/messages/person/<conversationId>/<openChatUserId>`. This page uses only the
 participant name already supplied by OpenChat. Each read checks the viewer's
-current conversation membership and blocks; unknown conversations and people
-return 404. Responses use `Cache-Control: no-store, private` and a noindex
-robots header. No profile is created, no name/email matching is performed, and
-no message is sent. A failed published-profile lookup can fall back to this
-page; if a required block check cannot be resolved, the page is unavailable.
+current conversation membership and user, profile and account blocks; unknown
+conversations and people return 404. Reads use the messaging read budget; an
+exhausted budget returns 429 and an unavailable required check returns 503,
+both with `Retry-After`. Responses use `Cache-Control: no-store, private` and a
+noindex robots header. No profile is created, no name/email matching is performed,
+and no message is sent. A failed published-profile lookup can fall back to this page.
 
 Chat profiles do not list OpenChat-only users publicly. Existing public and
 unlisted profile choices are unchanged. Public-by-default provisioning for
 existing OpenChat accounts would expand their audience and requires an explicit,
 clearly disclosed publication flow; this navigation change does not do that.
-The chat profile explains that **unlisted remains publicly readable by direct
-link**, while omitted from discovery. Unlisting currently uses the existing
-operator/support workflow described in [unlisted profiles](unlisted-profiles.md); there is no
-self-service visibility mutation on this page. A private conversation-scoped
-chat profile is not equivalent to a public unlisted profile.
+The chat profile explains [unlisted visibility and its operator/support workflow](unlisted-profiles.md);
+there is no self-service visibility mutation on this page. A private
+conversation-scoped chat profile is not equivalent to a public unlisted profile.
