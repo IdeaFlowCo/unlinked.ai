@@ -149,11 +149,10 @@ Notifications for accepted connection requests open the direct conversation.
   `#msg-config` block (CSRF token, thread id, emoji list, dock flag).
 - **Profile links** (the header name and avatar, the dock window title and,
   in groups, sender names; Jacob, 2026-10-24) for any partner who claimed a
-  published Unlinked profile, at their handle (`profilePathFor`). Someone
-  without one stays plain text: never a dead link. A suspended or removed
-  profile is not published, so it is not linked (the per-member lookup cache
-  lasts up to 10 minutes). Only members are linked, so the iOS app's
-  members-only rule holds. OpenChat's confidential `POST /api/unlinked/identities` (service
+  published Unlinked profile, at their handle (`profilePathFor`); other
+  participants use the [conversation-scoped chat profile](#chat-participant-profiles).
+  A suspended or removed profile is not linked as a published profile (the
+  per-member lookup cache lasts up to 10 minutes). OpenChat's confidential `POST /api/unlinked/identities` (service
   secret) names which of the member's own conversation partners have a shared
   Ideaflow identity. Unlinked maps each identity to its owner (read-only),
   then to that owner's own profile, and links it only if the published index
@@ -195,8 +194,10 @@ signed-in, conversation-scoped chat profile at
 `/messages/person/<conversationId>/<openChatUserId>`. This page uses only the
 participant name already supplied by OpenChat. Each read checks the viewer's
 current conversation membership and blocks; unknown conversations and people
-return 404. No profile is created, no name/email matching is performed, and no
-message is sent. Identity lookup failures still leave the chat profile usable.
+return 404. Responses use `Cache-Control: no-store, private` and a noindex
+robots header. No profile is created, no name/email matching is performed, and
+no message is sent. A failed published-profile lookup can fall back to this
+page; if a required block check cannot be resolved, the page is unavailable.
 
 Chat profiles do not list OpenChat-only users publicly. Existing public and
 unlisted profile choices are unchanged. Public-by-default provisioning for
@@ -204,6 +205,6 @@ existing OpenChat accounts would expand their audience and requires an explicit,
 clearly disclosed publication flow; this navigation change does not do that.
 The chat profile explains that **unlisted remains publicly readable by direct
 link**, while omitted from discovery. Unlisting currently uses the existing
-operator/support workflow described in `unlisted-profiles.md`; there is no
+operator/support workflow described in [unlisted profiles](unlisted-profiles.md); there is no
 self-service visibility mutation on this page. A private conversation-scoped
 chat profile is not equivalent to a public unlisted profile.
