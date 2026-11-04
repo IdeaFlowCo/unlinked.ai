@@ -88,7 +88,9 @@ async function site(t, { reports = true, blocks = true, onProfileLookup, identit
 
 test('chat profile enforces account blocks without an OpenChat ID', async t => {
   let fail = false
-  const app = await site(t, { identityLookup: async (_session, ids) => {
+  let strictCalls = 0
+  const app = await site(t, { identityLookup: async (_session, ids, options) => {
+    if (options?.strict) strictCalls++
     if (fail) throw new Error('identity unavailable')
     return ids.filter(id => id === 'oc_blake').map(userId => ({ userId, issuer: 'https://identity.invalid', subject: 'blake' }))
   } })
@@ -98,6 +100,7 @@ test('chat profile enforces account blocks without an OpenChat ID', async t => {
   assert.equal((await app.page(path, alex)).status, 303)
   await app.blockService.block(A, { blocked: B, profileId: BLAKE })
   assert.equal((await app.page(path, alex)).status, 404)
+  assert.equal(strictCalls, 1)
   fail = true
   const unavailable = await app.go(path, { headers: { Cookie: alex } })
   assert.equal(unavailable.status, 503)

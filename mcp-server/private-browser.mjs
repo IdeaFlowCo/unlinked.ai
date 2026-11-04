@@ -224,8 +224,8 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     if (blocks.some(block => block.openChatUserId === userId)) return true
     if (!blocks.some(block => block.blocked || block.blockedProfileId)) return false
     if (typeof messagingIdentities !== 'function' || typeof resolveOwner !== 'function') throw new Error('identity_unavailable')
-    const identities = await messagingIdentities(session, [userId])
-    if (!Array.isArray(identities) || identities.some(identity => identity?.userId !== userId || typeof identity.issuer !== 'string' || !identity.issuer || typeof identity.subject !== 'string' || !identity.subject)) throw new Error('identity_unavailable')
+    const identities = await messagingIdentities(session, [userId], { strict: true })
+    if (!Array.isArray(identities) || identities.length > 1 || identities.some(identity => identity?.userId !== userId || typeof identity.issuer !== 'string' || !identity.issuer || typeof identity.subject !== 'string' || !identity.subject)) throw new Error('identity_unavailable')
     for (const identity of identities) {
       const owner = await resolveOwner({ issuer: identity.issuer, subject: identity.subject })
       if (!owner) continue
