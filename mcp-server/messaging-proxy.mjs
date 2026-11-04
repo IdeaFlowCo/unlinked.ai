@@ -235,12 +235,16 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   const remember = (key, id, clientId) => { let map = issued.get(key); if (!map) { map = new Map(); issued.set(key, map); trim(issued, 5000) } map.set(id, clientId); trim(map, 300) }
   const withClientId = (key, message) => { const clientId = issued.get(key)?.get(message.id); return clientId ? { ...message, clientId } : message }
 
-  async function listConversations(session) {
+  async function listConversations(session, { freshBlocks = false } = {}) {
     const { value, credential } = await upstream(session, 'GET', '/api/chat/conversations')
     const all = array(value).map(projectConversation).filter(Boolean).slice(0, 500)
     rememberPeers(session, all, credential.userId)
     // Conversations with someone this member blocked are hidden from the inbox.
-    const blocked = await blockedFor(session)
+    let blocked
+    if (freshBlocks) {
+      if (typeof blockedUsers !== 'function' || !ownerKey(session)) throw unavailable()
+      try { blocked = new Set([...(await blockedUsers(session))].filter(validId)) } catch { throw unavailable() }
+    } else blocked = await blockedFor(session)
     const conversations = blocked.size ? all.filter(conversation => !(conversation.type === 'direct' && conversation.participants.some(person => person.id !== credential.userId && blocked.has(person.id)))) : all
     // Profile links: public profile ids of partners who claimed a published
     // Unlinked profile (the header name, dock window title and group sender
@@ -261,7 +265,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     for (const conversation of conversations) for (const person of conversation.participants) {
       if (person.id !== credential.userId && !person.profileId) person.chatProfilePath = `/messages/person/${encodeURIComponent(conversation.id)}/${encodeURIComponent(person.id)}`
     }
-    return { me: { id: credential.userId }, conversations }
+    return { me: { id: credential.userId }, conversations, ...(freshBlocks ? { blocked } : {}) }
   }
 
   async function markUnread(session, conversationId) {
@@ -702,11 +706,12 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   // Read only the caller's current, nonblocked conversations. No identity inference
   // or public profile creation: OpenChat-only participants stay conversation scoped.
   async function participantProfile(session, conversationId, userId) {
+    spend(session, 'read')
     if (!validId(conversationId) || !validId(userId)) throw invalid()
-    const { me, conversations } = await listConversations(session)
+    const { me, conversations, blocked } = await listConversations(session, { freshBlocks: true })
     const conversation = conversations.find(item => item.id === conversationId)
     const person = conversation?.participants.find(item => item.id === userId && item.id !== me.id)
-    if (!person || (await blockedFor(session)).has(userId)) throw new MessagingError(404, 'not_found')
+    if (!person || blocked.has(userId)) throw new MessagingError(404, 'not_found')
     return { person: { id: person.id, name: person.name, profileId: person.profileId, profilePath: person.profilePath }, conversationId }
   }
   // A public profile's OpenChat user (the same confidential path Message uses), or null.
