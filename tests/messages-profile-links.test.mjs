@@ -3,18 +3,15 @@
 // groups) lead to their Unlinked profile; someone without one stays plain text.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { MESSAGES_CLIENT_SOURCE } from '../mcp-server/messages-client.mjs'
+import { chatProfileHref } from '../mcp-server/messages-client.mjs'
 import { createMessagingProxy } from '../mcp-server/messaging-proxy.mjs'
 
-test('the client links the header person, the dock title and group senders through one profileHref helper, with no dead-link fallback', () => {
-  const source = MESSAGES_CLIENT_SOURCE
-  assert.match(source, /const profileHref = \(person, conversationId\) => person\?\.profilePath \|\| \(person\?\.profileId \? `\/people\/\$\{encodeURIComponent\(person\.profileId\)\}` : conversationId && profiles\[conversationId\] \? `\/people\/\$\{encodeURIComponent\(profiles\[conversationId\]\)\}` : null\)/)
-  assert.match(source, /href \? h\('a', \{ class: 'msg-thread-person', href, title: `View \$\{title\}’s Unlinked profile` \}, \.\.\.who\(\)\) : h\('div', \{ class: 'msg-thread-person' \}, \.\.\.who\(\)\)/)
-  assert.match(source, /const href = profileHref\(peer, id\)/)
-  assert.match(source, /function senderLabel\(message\)[\s\S]*profileHref\(sender\)[\s\S]*h\('span', \{ class: 'msg-sender' \}, href \? h\('a', \{ href \}, name\) : name\)/)
-  assert.doesNotMatch(source, /View on Unlinked/)
-  // Every profile address comes from the helper; nothing hand-builds one from a name.
-  assert.equal((source.match(/\/people\//g) ?? []).length, 2)
+test('chat navigation prefers published links and provides a conversation-scoped fallback', () => {
+  assert.equal(chatProfileHref({ profilePath: '/people/vlad', chatProfilePath: '/messages/person/c/v' }), '/people/vlad')
+  assert.equal(chatProfileHref({ profileId: 'a b' }), '/people/a%20b')
+  assert.equal(chatProfileHref({ chatProfilePath: '/messages/person/c/v' }), '/messages/person/c/v')
+  assert.equal(chatProfileHref(null, 'c', { c: 'known' }), '/people/known')
+  assert.equal(chatProfileHref(null), null)
 })
 
 test('the proxy adds the profile page path only for a linked partner, and only a /people/ path', async () => {

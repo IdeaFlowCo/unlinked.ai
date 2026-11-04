@@ -258,6 +258,9 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
         if (typeof path === 'string' && path.startsWith('/people/') && path.length <= 600) person.profilePath = path
       }
     }
+    for (const conversation of conversations) for (const person of conversation.participants) {
+      if (person.id !== credential.userId && !person.profileId) person.chatProfilePath = `/messages/person/${encodeURIComponent(conversation.id)}/${encodeURIComponent(person.id)}`
+    }
     return { me: { id: credential.userId }, conversations }
   }
 
@@ -696,6 +699,16 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const others = conversation.participants.filter(person => person.id !== credential.userId)
     return { conversation, me: credential.userId, peer: conversation.type === 'direct' && others.length === 1 ? others[0] : null }
   }
+  // Read only the caller's current, nonblocked conversations. No identity inference
+  // or public profile creation: OpenChat-only participants stay conversation scoped.
+  async function participantProfile(session, conversationId, userId) {
+    if (!validId(conversationId) || !validId(userId)) throw invalid()
+    const { me, conversations } = await listConversations(session)
+    const conversation = conversations.find(item => item.id === conversationId)
+    const person = conversation?.participants.find(item => item.id === userId && item.id !== me.id)
+    if (!person || (await blockedFor(session)).has(userId)) throw new MessagingError(404, 'not_found')
+    return { person: { id: person.id, name: person.name, profileId: person.profileId, profilePath: person.profilePath }, conversationId }
+  }
   // A public profile's OpenChat user (the same confidential path Message uses), or null.
   async function recipientFor(session, profile) {
     const { value } = await upstream(session, 'POST', '/api/unlinked/recipient', { profile })
@@ -734,5 +747,5 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
 
   function close() { for (const link of [...links.values()]) closeLink(link) }
-  return { handle, openProfile, openOwner, unreadTotal, close, conversationPeer, recipientFor, blockUser, evidence, forwardReport, invalidateBlocks, _links: links }
+  return { participantProfile, handle, openProfile, openOwner, unreadTotal, close, conversationPeer, recipientFor, blockUser, evidence, forwardReport, invalidateBlocks, _links: links }
 }

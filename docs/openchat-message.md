@@ -186,3 +186,24 @@ confidential session exchange to obtain the inbox id. The recipient credential
 is discarded; direct-conversation creation always uses the viewer credential.
 This does not extend the public-profile resolver or agent grants. See
 [Message after a scan](contact-card.md#message-after-a-scan).
+
+### Chat participant profiles
+
+Conversation headers, dock titles and group senders retain their linked
+Unlinked profile destination when one is available. Otherwise they open a
+signed-in, conversation-scoped chat profile at
+`/messages/person/<conversationId>/<openChatUserId>`. This page uses only the
+participant name already supplied by OpenChat. Each read checks the viewer's
+current conversation membership and blocks; unknown conversations and people
+return 404. No profile is created, no name/email matching is performed, and no
+message is sent. Identity lookup failures still leave the chat profile usable.
+
+Chat profiles do not list OpenChat-only users publicly. Existing public and
+unlisted profile choices are unchanged. Public-by-default provisioning for
+existing OpenChat accounts would expand their audience and requires an explicit,
+clearly disclosed publication flow; this navigation change does not do that.
+The chat profile explains that **unlisted remains publicly readable by direct
+link**, while omitted from discovery. Unlisting currently uses the existing
+operator/support workflow described in `unlisted-profiles.md`; there is no
+self-service visibility mutation on this page. A private conversation-scoped
+chat profile is not equivalent to a public unlisted profile.

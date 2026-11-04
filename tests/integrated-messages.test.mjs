@@ -35,9 +35,10 @@ test('the inbox requires browser login; the shell carries no OpenChat credential
     login: { begin: async () => ({ location: 'https://id.example.invalid/auth', transaction: { state: 'fixture-state' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: 'verified', displayName: 'Avery' }) },
     resolveOwner: async () => owner, getBackend: async () => ({ adapter: {} }),
     createMessagingSession: async session => { calls++; assert.deepEqual(session.owner, owner); return { token: 'fixture-private-token', user: { userId: 'inbox' } } },
-    messagingOptions: { fetchImpl: async () => new Response(JSON.stringify({ unreadTotal: 2 })) },
+    messagingOptions: { fetchImpl: async url => new Response(JSON.stringify(String(url).endsWith('/api/chat/conversations') ? [{ id: 'conv_1', type: 'direct', participants: [{ user: { id: 'inbox', name: 'Avery' } }, { user: { id: 'vlad', name: 'Vlad Sitalo' } }] }] : { unreadTotal: 2 })) },
   })
   const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
+  assert.equal((await request('/messages/person/conv_1/vlad')).status, 401)
   assert.equal((await request('/messages')).status, 401)
   assert.equal((await request('/messages/c/conv_1')).status, 401)
   const start = await request('/login?next=%2Fmessages%2Fc%2Fconv_1'), transaction = start.headers.getSetCookie().find(value => value.startsWith('__Host-ul-login=')).split(';')[0]
@@ -50,6 +51,17 @@ test('the inbox requires browser login; the shell carries no OpenChat credential
   assert.doesNotMatch(markup, /fixture-private-token|<iframe/)
   assert.match(markup, /data-nav-messages aria-current="page">Messages<span class="nav-count" aria-label="2 unread">2<\/span>/)
   assert.equal(calls, 1)
+  const person = await request('/messages/person/conv_1/vlad', { headers: { Cookie: cookie } })
+  assert.equal(person.status, 200)
+  const personHtml = await person.text()
+  assert.match(personHtml, /Vlad Sitalo/)
+  assert.match(personHtml, /Chat profile/)
+  assert.match(personHtml, /unlisted does not mean private/)
+  assert.match(person.headers.get('cache-control'), /no-store/)
+  assert.doesNotMatch(personHtml, /fixture-private-token/)
+  assert.equal((await request('/messages/person/other/vlad', { headers: { Cookie: cookie } })).status, 404)
+  assert.equal((await request('/messages/person/conv_1/stranger', { headers: { Cookie: cookie } })).status, 404)
+
   // The old exchange that returned the OpenChat token to the browser no longer exists.
   const csrf = /name="csrf" value="([^"]+)"/.exec(markup)[1]
   const old = await request('/messages/session', { method: 'POST', headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${csrf}` })

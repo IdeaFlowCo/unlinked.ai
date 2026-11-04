@@ -44,7 +44,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderChatPerson, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
@@ -1762,6 +1762,18 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         else if (connectionPost(request)) connectionFailure(response, 'Your session has expired. Sign in, then send your connection request again.', 401)
         else render(response, 'Sign in required', '<a class="action" href="/login">Sign in with Ideaflow</a>', 401)
         return
+      }
+      if (request.method === 'GET' && url.pathname.startsWith('/messages/person/')) {
+        response.setHeader('Cache-Control', 'no-store, private')
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        const parts = url.pathname.slice('/messages/person/'.length).split('/')
+        let entry
+        try {
+          if (!messaging || parts.length !== 2) throw new Error('unavailable')
+          entry = await messaging.participantProfile(session, decodeURIComponent(parts[0]), decodeURIComponent(parts[1]))
+        } catch { journey(response, renderNotFound(), null, '', 404); return }
+        if (entry.person.profileId) { redirect(response, entry.person.profilePath || profilePath(entry.person.profileId)); return }
+        journey(response, renderChatPerson({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, ...entry })); return
       }
       // A profile's Message link resolves on the server (OpenChat's confidential
       // recipient path) and opens the direct conversation; it never sends anything.

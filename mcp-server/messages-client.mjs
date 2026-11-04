@@ -4,6 +4,10 @@
 // nothing here holds an OpenChat credential. All text is rendered with
 // textContent, never as HTML.
 
+export function chatProfileHref(person, conversationId, profiles = {}) {
+  return person?.profilePath || (person?.profileId ? `/people/${encodeURIComponent(person.profileId)}` : conversationId && profiles[conversationId] ? `/people/${encodeURIComponent(profiles[conversationId])}` : person?.chatProfilePath || null)
+}
+
 // Links in message text: http(s) URLs, www. and bare domains such as unlinked.ai.
 // Bare domains link only for a fixed list of common TLDs, so file names
 // (notes.md, app.py), Node.js and the domain of an email stay text. Same rule as
@@ -156,7 +160,7 @@ function messagesClient(config) {
   // partner who claimed a published member profile, else the public id the
   // Message link or picker named for this conversation. Nothing otherwise, so
   // a name without a profile stays plain text rather than a dead link.
-  const profileHref = (person, conversationId) => person?.profilePath || (person?.profileId ? `/people/${encodeURIComponent(person.profileId)}` : conversationId && profiles[conversationId] ? `/people/${encodeURIComponent(profiles[conversationId])}` : null)
+  const profileHref = (person, conversationId) => chatProfileHref(person, conversationId, profiles)
   const titleOf = conversation => conversation.title || others(conversation).map(person => person.name).join(', ') || 'Just you'
   const peerOf = conversation => conversation.type === 'direct' ? others(conversation)[0] : null
   const muted = conversation => conversation.mutedUntil === 'always' || (conversation.mutedUntil && Date.parse(conversation.mutedUntil) > Date.now())
@@ -328,7 +332,7 @@ function messagesClient(config) {
     const who = () => [avatar(title, peer?.id || state.open, peer?.presence), h('div', { class: 'msg-thread-who' }, h('h2', {}, title), presence ? h('span', { class: 'small' }, presence) : null)]
     head.replaceChildren(...[
       h('button', { class: 'msg-back', type: 'button', 'aria-label': 'Back to conversations', onclick: () => closeConversation() }, '←'),
-      href ? h('a', { class: 'msg-thread-person', href, title: `View ${title}’s Unlinked profile` }, ...who()) : h('div', { class: 'msg-thread-person' }, ...who()),
+      href ? h('a', { class: 'msg-thread-person', href, title: `View ${title}’s profile` }, ...who()) : h('div', { class: 'msg-thread-person' }, ...who()),
       menu].filter(Boolean))
   }
   async function setMute(mutedUntil) {
@@ -946,7 +950,7 @@ function messagesClient(config) {
     node.head.replaceChildren(...[
       avatar(title, peer?.id || id, peer?.presence),
       h('span', { class: 'msg-win-title' },
-        href ? h('a', { href, title: `View ${title}’s Unlinked profile`, onclick: event => event.stopPropagation() }, title) : h('b', {}, title),
+        href ? h('a', { href, title: `View ${title}’s profile`, onclick: event => event.stopPropagation() }, title) : h('b', {}, title),
         h('span', { class: 'msg-win-sub' }, typing.length ? 'typing…' : peer?.presence === 'online' ? 'Active now' : '')),
       unread ? h('span', { class: 'msg-pill', 'aria-label': `${unread} unread` }, unread > 99 ? '99+' : unread) : null,
       button(entry.minimized ? 'Expand' : 'Minimise', entry.minimized ? '⌃' : '⌄', () => toggleWindow(id)),
@@ -1034,7 +1038,7 @@ function messagesClient(config) {
 }
 
 /** The client as a static, cacheable script; it reads its configuration from #msg-config. */
-export const MESSAGES_CLIENT_SOURCE = `(() => {\n${messageLinks.toString().replace(/^export /, '')}\n(${messagesClient.toString()})(JSON.parse(document.getElementById('msg-config').textContent));\n})();`
+export const MESSAGES_CLIENT_SOURCE = `(() => {\n${messageLinks.toString().replace(/^export /, '')}\n${chatProfileHref.toString()}\n(${messagesClient.toString()})(JSON.parse(document.getElementById('msg-config').textContent));\n})();`
 
 /** The per-page configuration: CSRF token, open conversation, emoji allowlist, dock mode. Not executable. */
 export function messagesConfig({ csrf, conversationId = null, reactions, dock = false }) {
