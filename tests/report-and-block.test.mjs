@@ -112,6 +112,22 @@ test('chat profile enforces account blocks without an OpenChat ID', async t => {
   assert.doesNotMatch(body, /Blake|oc_blake/)
 })
 
+test('unresolved chat identities fail closed only when account blocks require comparison', async t => {
+  let identityResult = []
+  const app = await site(t, { identityLookup: async () => identityResult })
+  const alex = await app.signIn('alex')
+  const path = '/messages/person/c_group/oc_casey'
+  assert.equal((await app.page(path, alex)).status, 200)
+  await app.blockService.block(A, { blocked: B, profileId: BLAKE })
+  const empty = await app.page(path, alex)
+  assert.equal(empty.status, 503)
+  assert.doesNotMatch(empty.body, /Casey Ito/)
+  identityResult = [{ userId: 'oc_casey', issuer: 'https://identity.invalid', subject: 'unknown' }]
+  const unknown = await app.page(path, alex)
+  assert.equal(unknown.status, 503)
+  assert.doesNotMatch(unknown.body, /Casey Ito/)
+})
+
 test('chat profile rate limiting returns a temporary response', async t => {
   const app = await site(t)
   const alex = await app.signIn('alex')
