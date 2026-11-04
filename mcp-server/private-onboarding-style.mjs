@@ -101,6 +101,8 @@ body:has(.msg) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
 .unlinked-onboarding .msg-item-preview.typing{color:var(--brand-d);font-style:italic}
 .unlinked-onboarding .msg-line{position:relative;display:flex;align-items:center;max-width:100%}
 .unlinked-onboarding .msg-row.own .msg-line{flex-direction:row-reverse}
+/* Reserve the toolbar's height below group sender links so it cannot cover them. */
+.unlinked-onboarding .msg-sender + .msg-line{margin-top:30px}
 /* A floating toolbar over the bubble's top corner: hidden actions never take width from the message. */
 .unlinked-onboarding .msg-actions{position:absolute;bottom:calc(100% - 6px);left:8px;z-index:3;display:flex;gap:0;padding:2px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #2529531f;opacity:0;pointer-events:none;transition:opacity .12s}
 .unlinked-onboarding .msg-row.own .msg-actions{left:auto;right:8px}

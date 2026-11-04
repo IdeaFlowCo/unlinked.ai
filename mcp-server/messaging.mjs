@@ -84,7 +84,7 @@ export function createMessagingRecipient(options) {
 // for this member's own visible conversation partners only, which have a
 // shared Ideaflow identity (docs/openchat-message.md). Confidential server call.
 export function createMessagingIdentities({ secret, identityForOwner, fetchImpl = fetch }) {
-  return async ({ owner }, userIds) => {
+  return async ({ owner }, userIds, { strict = false } = {}) => {
     if (!secret || secret.length < 32) throw Error('messaging_unavailable')
     const ids = [...new Set(userIds)].filter(id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(id)).slice(0, 200)
     if (!ids.length) return []
@@ -99,8 +99,10 @@ export function createMessagingIdentities({ secret, identityForOwner, fetchImpl 
     const text = await response.text()
     if (text.length > 200000) throw Error('messaging_unavailable')
     const value = JSON.parse(text)
-    return (Array.isArray(value?.identities) ? value.identities : [])
-      .filter(item => ids.includes(item?.userId) && item.issuer === IDEAFLOW_ISSUER && typeof item.subject === 'string' && item.subject && item.subject.length <= 512 && !/[\x00-\x1f\x7f]/.test(item.subject))
+    const valid = item => ids.includes(item?.userId) && item.issuer === IDEAFLOW_ISSUER && typeof item.subject === 'string' && item.subject && item.subject.length <= 512 && !/[\x00-\x1f\x7f]/.test(item.subject)
+    const identities = Array.isArray(value?.identities) ? value.identities : []
+    if (strict && (!Array.isArray(value?.identities) || identities.some(item => !valid(item)) || new Set(identities.map(item => item.userId)).size !== identities.length)) throw Error('messaging_unavailable')
+    return identities.filter(valid)
       .map(item => ({ userId: item.userId, issuer: item.issuer, subject: item.subject }))
   }
 }

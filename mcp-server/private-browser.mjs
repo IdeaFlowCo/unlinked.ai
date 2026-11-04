@@ -44,7 +44,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderChatPerson, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
@@ -219,7 +219,25 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
   coordination.sessionMaps.add(sessions)
-  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users } : {}), ...messagingOptions }) : null
+  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users, participantBlocked: async (session, userId) => {
+    const blocks = await memberBlocks.list(session.owner)
+    if (blocks.some(block => block.openChatUserId === userId)) return true
+    if (!blocks.some(block => block.blocked || block.blockedProfileId)) return false
+    if (typeof messagingIdentities !== 'function' || typeof resolveOwner !== 'function') throw new Error('identity_unavailable')
+    const identities = await messagingIdentities(session, [userId], { strict: true })
+    if (!Array.isArray(identities) || identities.length !== 1 || identities.some(identity => identity?.userId !== userId || typeof identity.issuer !== 'string' || !identity.issuer || typeof identity.subject !== 'string' || !identity.subject)) throw new Error('identity_unavailable')
+    for (const identity of identities) {
+      const owner = await resolveOwner({ issuer: identity.issuer, subject: identity.subject })
+      if (!owner) throw new Error('identity_unavailable')
+      if (blocks.some(block => block.blocked?.ownerId === owner.ownerId && block.blocked?.userId === owner.userId)) return true
+      if (blocks.some(block => block.blockedProfileId)) {
+        if (typeof ownProfileId !== 'function') throw new Error('identity_unavailable')
+        const profileId = await ownProfileId(owner)
+        if (profileId && blocks.some(block => block.blockedProfileId === profileId)) return true
+      }
+    }
+    return false
+  } } : {}), ...messagingOptions }) : null
   // "View on Unlinked" for conversation partners (docs/openchat-message.md):
   // OpenChat names which of the member's own partners have a shared Ideaflow
   // identity; that identity's owner links only if they claimed a published
@@ -1098,7 +1116,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     // their own) and capability-URL contact cards, which stay no-store.
     if (iosApp(request)) iosResponses.add(response)
     const navigationPath = new URL(request.url, base).pathname
-    const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/')
+    const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/') && !navigationPath.startsWith('/messages/person/')
     response.setHeader('Cache-Control', navigation ? 'private, no-cache' : 'no-store')
     if (navigation) response.setHeader('Vary', 'Cookie')
     response.setHeader('Referrer-Policy', 'strict-origin')
@@ -1762,6 +1780,23 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         else if (connectionPost(request)) connectionFailure(response, 'Your session has expired. Sign in, then send your connection request again.', 401)
         else render(response, 'Sign in required', '<a class="action" href="/login">Sign in with Ideaflow</a>', 401)
         return
+      }
+      if (request.method === 'GET' && url.pathname.startsWith('/messages/person/')) {
+        const parts = url.pathname.slice('/messages/person/'.length).split('/')
+        let entry
+        try {
+          if (!messaging || parts.length !== 2) throw new Error('unavailable')
+          entry = await messaging.participantProfile(session, decodeURIComponent(parts[0]), decodeURIComponent(parts[1]))
+        } catch (error) {
+          if (error?.status === 429 || error?.status === 503 || !messaging) {
+            const status = error?.status === 429 ? 429 : 503
+            response.setHeader('Retry-After', status === 429 ? '60' : '10')
+            render(response, 'Temporarily unavailable', '<h1>Temporarily unavailable</h1><p>Please try again shortly.</p>', status); return
+          }
+          journey(response, renderNotFound(), null, '', 404); return
+        }
+        if (entry.person.profileId) { redirect(response, entry.person.profilePath || profilePath(entry.person.profileId)); return }
+        journey(response, renderChatPerson({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, ...entry })); return
       }
       // A profile's Message link resolves on the server (OpenChat's confidential
       // recipient path) and opens the direct conversation; it never sends anything.
@@ -2791,6 +2826,10 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   }
   const serve = async (request, response) => {
     const path = new URL(request.url, base).pathname
+    if (path.startsWith('/messages/person/')) {
+      response.setHeader('Cache-Control', 'no-store, private')
+      response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+    }
     const exclusive = request.method === 'POST' && path === '/delete-account'
     const sid = cookies(request)['__Host-ul-session']
     let record = sid ? sessions.get(sid) : null
