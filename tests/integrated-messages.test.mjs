@@ -4,6 +4,8 @@ import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMessagingSession } from '../mcp-server/messaging.mjs'
 import { renderMessages, renderPerson, renderPeople } from '../mcp-server/private-onboarding-views.mjs'
+import { createMemberBlocks, createMemoryBlockStore } from '../mcp-server/member-blocks.mjs'
+import { renderedProfileLink } from './messages-client-navigation-helper.mjs'
 
 test('membership is visible and unclaimed profiles invite instead of pretending to be recipients', () => {
   const base = { id: 'person', name: 'Avery', positions: [], education: [], skills: [] }
@@ -34,6 +36,7 @@ test('the inbox requires browser login; the shell carries no OpenChat credential
   handler = createPrivateBrowserHandler({ baseUrl: origin, dataMode: 'synthetic',
     login: { begin: async () => ({ location: 'https://id.example.invalid/auth', transaction: { state: 'fixture-state' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: 'verified', displayName: 'Avery' }) },
     resolveOwner: async () => owner, getBackend: async () => ({ adapter: {} }),
+    memberBlocks: createMemberBlocks({ store: createMemoryBlockStore() }),
     createMessagingSession: async session => { calls++; assert.deepEqual(session.owner, owner); return { token: 'fixture-private-token', user: { userId: 'inbox' } } },
     messagingOptions: { fetchImpl: async url => new Response(JSON.stringify(String(url).endsWith('/api/chat/conversations') ? [{ id: 'conv_1', type: 'direct', participants: [{ user: { id: 'inbox', name: 'Avery' } }, { user: { id: 'vlad', name: 'Vlad Sitalo' } }] }] : { unreadTotal: 2 })) },
   })
@@ -58,9 +61,22 @@ test('the inbox requires browser login; the shell carries no OpenChat credential
   assert.match(personHtml, /Chat profile/)
   assert.match(personHtml, /unlisted does not mean private/)
   assert.match(person.headers.get('cache-control'), /no-store/)
+  assert.match(person.headers.get('x-robots-tag'), /noindex/)
   assert.doesNotMatch(personHtml, /fixture-private-token/)
   assert.equal((await request('/messages/person/other/vlad', { headers: { Cookie: cookie } })).status, 404)
   assert.equal((await request('/messages/person/conv_1/stranger', { headers: { Cookie: cookie } })).status, 404)
+
+  const direct = (await (await request('/messages/api/conversations', { headers: { Cookie: cookie } })).json()).conversations[0]
+  const group = { ...direct, type: 'group' }
+  const message = { id: 'm1', conversationId: 'conv_1', senderId: 'vlad', sender: { id: 'vlad', name: 'Vlad Sitalo' }, content: 'Hello', createdAt: '2026-01-01T00:00:00Z', reactions: [] }
+  for (const options of [{ conversation: direct }, { conversation: direct, dock: true }, { conversation: group, messages: [message] }]) {
+    const link = await renderedProfileLink(options)
+    assert.ok(link, 'the client renders a profile anchor')
+    assert.equal(link.getAttribute('href'), '/messages/person/conv_1/vlad')
+    const destination = await request(link.activate(), { headers: { Cookie: cookie } })
+    assert.equal(destination.status, 200)
+    assert.match(await destination.text(), /Vlad Sitalo/)
+  }
 
   // The old exchange that returned the OpenChat token to the browser no longer exists.
   const csrf = /name="csrf" value="([^"]+)"/.exec(markup)[1]
