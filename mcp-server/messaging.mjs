@@ -99,8 +99,8 @@ export function createMessagingIdentities({ secret, identityForOwner, fetchImpl 
     const text = await response.text()
     if (text.length > 200000) throw Error('messaging_unavailable')
     const value = JSON.parse(text)
-    return (Array.isArray(value?.identities) ? value.identities : [])
-      .filter(item => ids.includes(item?.userId) && item.issuer === IDEAFLOW_ISSUER && typeof item.subject === 'string' && item.subject && item.subject.length <= 512 && !/[\x00-\x1f\x7f]/.test(item.subject))
+    if (!Array.isArray(value?.identities) || value.identities.some(item => !ids.includes(item?.userId) || item.issuer !== IDEAFLOW_ISSUER || typeof item.subject !== 'string' || !item.subject || item.subject.length > 512 || /[\x00-\x1f\x7f]/.test(item.subject))) throw Error('messaging_unavailable')
+    return value.identities
       .map(item => ({ userId: item.userId, issuer: item.issuer, subject: item.subject }))
   }
 }

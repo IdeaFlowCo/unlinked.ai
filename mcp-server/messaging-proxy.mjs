@@ -144,7 +144,7 @@ const invalid = () => new MessagingError(400, 'invalid_input')
 // `blockedUsers(session)` (optional) returns the OpenChat user ids this member
 // blocked (member-blocks.mjs): their direct conversations are hidden, their
 // messages are not delivered, and no message is sent to them from here.
-export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, profilePathFor = null, blockedUsers = null, resolveOwnerRecipient = null } = {}) {
+export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, profilePathFor = null, blockedUsers = null, participantBlocked = null, resolveOwnerRecipient = null } = {}) {
   const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map(), blockCache = new Map(), peers = new Map()
   // The member's blocked OpenChat users, read at most every 30 seconds (and again after a change).
   async function blockedFor(session) {
@@ -712,6 +712,12 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const conversation = conversations.find(item => item.id === conversationId)
     const person = conversation?.participants.find(item => item.id === userId && item.id !== me.id)
     if (!person || blocked.has(userId)) throw new MessagingError(404, 'not_found')
+    if (participantBlocked) {
+      let hidden
+      try { hidden = await participantBlocked(session, userId) } catch { throw unavailable() }
+      if (hidden !== false && hidden !== true) throw unavailable()
+      if (hidden) throw new MessagingError(404, 'not_found')
+    }
     return { person: { id: person.id, name: person.name, profileId: person.profileId, profilePath: person.profilePath }, conversationId }
   }
   // A public profile's OpenChat user (the same confidential path Message uses), or null.

@@ -219,7 +219,25 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
   coordination.sessionMaps.add(sessions)
-  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users } : {}), ...messagingOptions }) : null
+  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users, participantBlocked: async (session, userId) => {
+    const blocks = await memberBlocks.list(session.owner)
+    if (blocks.some(block => block.openChatUserId === userId)) return true
+    if (!blocks.some(block => block.blocked || block.blockedProfileId)) return false
+    if (typeof messagingIdentities !== 'function' || typeof resolveOwner !== 'function') throw new Error('identity_unavailable')
+    const identities = await messagingIdentities(session, [userId])
+    if (!Array.isArray(identities) || identities.some(identity => identity?.userId !== userId || typeof identity.issuer !== 'string' || !identity.issuer || typeof identity.subject !== 'string' || !identity.subject)) throw new Error('identity_unavailable')
+    for (const identity of identities) {
+      const owner = await resolveOwner({ issuer: identity.issuer, subject: identity.subject })
+      if (!owner) continue
+      if (blocks.some(block => block.blocked?.ownerId === owner.ownerId && block.blocked?.userId === owner.userId)) return true
+      if (blocks.some(block => block.blockedProfileId)) {
+        if (typeof ownProfileId !== 'function') throw new Error('identity_unavailable')
+        const profileId = await ownProfileId(owner)
+        if (profileId && blocks.some(block => block.blockedProfileId === profileId)) return true
+      }
+    }
+    return false
+  } } : {}), ...messagingOptions }) : null
   // "View on Unlinked" for conversation partners (docs/openchat-message.md):
   // OpenChat names which of the member's own partners have a shared Ideaflow
   // identity; that identity's owner links only if they claimed a published
@@ -1771,7 +1789,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         try {
           if (!messaging || parts.length !== 2) throw new Error('unavailable')
           entry = await messaging.participantProfile(session, decodeURIComponent(parts[0]), decodeURIComponent(parts[1]))
-        } catch { journey(response, renderNotFound(), null, '', 404); return }
+        } catch (error) {
+          if (error?.status === 429 || error?.status === 503 || !messaging) {
+            const status = error?.status === 429 ? 429 : 503
+            response.setHeader('Retry-After', status === 429 ? '60' : '10')
+            render(response, 'Temporarily unavailable', '<h1>Temporarily unavailable</h1><p>Please try again shortly.</p>', status); return
+          }
+          journey(response, renderNotFound(), null, '', 404); return
+        }
         if (entry.person.profileId) { redirect(response, entry.person.profilePath || profilePath(entry.person.profileId)); return }
         journey(response, renderChatPerson({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, ...entry })); return
       }
