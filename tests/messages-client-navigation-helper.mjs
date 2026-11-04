@@ -10,7 +10,7 @@ export async function renderedProfileLink({ conversation, dock = false, messages
     addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn) }
     activate() {
       const event = { target: this, button: 0, defaultPrevented: false, stopped: false, preventDefault() { this.defaultPrevented = true }, stopPropagation() { this.stopped = true } }
-      for (let node = this; node && !event.stopped; node = node.parent) {
+      for (let node = event.target; node && !event.stopped; node = node.parent) {
         event.currentTarget = node
         for (const listener of node.listeners.click || []) listener(event)
         node.onclick?.(event)
