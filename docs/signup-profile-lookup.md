@@ -3,7 +3,8 @@
 `/find-me` can offer an optional, operator-configured public profile lookup.
 It is off by default. When enabled, it only runs after the recovered legacy
 slug/name lookup finds nothing. Only a validated `linkedin.com/in/<slug>` URL
-can trigger it. Bare slugs still work for legacy lookup but never trigger a
+can trigger it (junk around or after the profile address is discarded; see
+`docs/linkedin-discovery-and-queue.md`). Bare slugs still work for legacy lookup but never trigger a
 lookup. Encoded and decoded Unicode slugs match the same way. A legacy match,
 including one that is already claimed, never uses lookup budget.
 
