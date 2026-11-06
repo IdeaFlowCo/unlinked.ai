@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { digest, LIMITS, parseArchive, PARSER_VERSION } from './archive.mjs'
+import { digest, LIMITS, parseArchive, PARSER_VERSION, RUNNABLE_PARSER_VERSIONS } from './archive.mjs'
 import { privateId } from './job.mjs'
 import { requireCombinedUploadConsent } from './consent.mjs'
 
@@ -45,7 +45,7 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
   return adapter.withImport(ownerId, id, async store => {
     let current = await store.getJob(id)
     if (!current || terminal(current) || current.backgroundVersion !== 'profile-first-v1') return current
-    if (current.ownerId !== ownerId || current.parserVersion !== PARSER_VERSION) throw new Error('private_import_owner_invalid')
+    if (current.ownerId !== ownerId || !RUNNABLE_PARSER_VERSIONS.includes(current.parserVersion)) throw new Error('private_import_owner_invalid')
     if (current.lease && current.lease.expiresAt > now() && current.lease.id !== leaseId) return current
     requireCombinedUploadConsent(current.consent)
     const save = async changes => {
@@ -55,7 +55,7 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
       await store.saveJob(next)
       current = next
     }
-    await save({ status: 'parsing', phase: 'parsing' })
+    await save({ status: 'parsing', phase: 'parsing', ...(current.parserVersion !== PARSER_VERSION ? { parsedWith: PARSER_VERSION } : {}) })
     const bytes = await readAsset(current.archiveSha256)
     if (!Buffer.isBuffer(bytes) || bytes.length > LIMITS.archiveBytes || digest(bytes) !== current.archiveSha256) throw new Error('private_archive_recovery_invalid')
     let parsed

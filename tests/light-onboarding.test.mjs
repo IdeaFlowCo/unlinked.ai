@@ -114,7 +114,8 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   assert.match(archive.content, /href="\/profile">Skip for now/)
   const uploadForm = archive.content.match(/<form id="onboarding-upload"[^>]*>(.*?)<\/form>/s)[1]
   assert.deepEqual([...uploadForm.matchAll(/name="([^"]+)"/g)].map(match => match[1]), ['csrf', 'archive'])
-  assert.match(uploadForm, /<button[^>]*>Import my file<\/button><p class="small">By importing,/)
+  assert.match(uploadForm, /Each upload adds to your earlier imports\. Someone in two files appears once\..*<button[^>]*>Import my files<\/button><p class="small">By importing,/s)
+  assert.match(uploadForm, /<input required type="file" name="archive" accept="\.zip,\.csv" multiple>/)
   const own = renderOwnProfile(account)
   assert.equal(own.title, "Here's your profile")
   // A new profile without an import gets a clear next step, not "Looks good".
@@ -420,9 +421,9 @@ test('unimplemented editing, public discovery and removal are stated truthfully'
 
 test('progress enhancement is separate from HTML and preserves native submission', () => {
   let submit
-  const button = { disabled: false, textContent: 'Import my file' }
+  const button = { disabled: false, textContent: 'Import my files' }
   const progress = { hidden: true }
-  const form = { reportValidity: () => true, addEventListener: (event, handler) => { assert.equal(event, 'submit'); submit = handler } }
+  const form = { querySelector: () => null, reportValidity: () => true, addEventListener: (event, handler) => { assert.equal(event, 'submit'); submit = handler } }
   vm.runInNewContext(uploadProgressScript(), { document: { getElementById: id => ({ 'onboarding-upload': form, 'onboarding-import': button, 'onboarding-progress': progress }[id]) } })
   submit({ preventDefault: () => assert.fail('must preserve native submission') })
   assert.equal(button.disabled, true)
@@ -715,4 +716,33 @@ test('LinkedIn export click progress survives anonymous reloads, expires and res
   blocked.click()
   assert.equal(blocked.link.textContent, 'Export page opened ✓')
   assert.equal(blocked.status.hidden, false)
+})
+
+test('dropping files adds them to the native file input and lists them; later drops add to the list', () => {
+  class FakeDataTransfer { constructor() { const files = []; this.files = files; this.items = { add: file => files.push(file) } } }
+  const handlers = {}, windowHandlers = {}
+  const input = { files: [], addEventListener: (event, handler) => { handlers['input:' + event] = handler } }
+  const classes = new Set()
+  const drop = { contains: target => target === drop || target === input, classList: { toggle: (name, on) => on ? classes.add(name) : classes.delete(name), remove: name => classes.delete(name) }, addEventListener: (event, handler) => { handlers[event] = handler } }
+  const items = []
+  const list = { hidden: true, set textContent(value) { items.length = 0 }, appendChild: item => items.push(item.textContent) }
+  const form = { querySelector: () => input, reportValidity: () => true, addEventListener: () => {} }
+  vm.runInNewContext(uploadProgressScript(), { DataTransfer: FakeDataTransfer, window: { addEventListener: (event, handler) => { windowHandlers[event] = handler } },
+    document: { createElement: () => ({ textContent: '' }), getElementById: id => ({ 'onboarding-upload': form, 'onboarding-drop': drop, 'onboarding-files': list }[id]) } })
+  let prevented = 0
+  const event = files => ({ target: drop, preventDefault: () => { prevented++ }, dataTransfer: { files } })
+  handlers.dragover(event([]))
+  assert.ok(classes.has('over'))
+  handlers.drop(event([{ name: 'Connections.csv' }, { name: 'photo.png' }]))
+  assert.deepEqual(input.files.map(file => file.name), ['Connections.csv'])
+  handlers.drop(event([{ name: 'Connections_2.csv' }, { name: 'Connections.csv' }, { name: 'Complete_LinkedInDataExport.zip' }]))
+  assert.deepEqual(input.files.map(file => file.name), ['Connections.csv', 'Connections_2.csv', 'Complete_LinkedInDataExport.zip'])
+  assert.deepEqual(items, ['Connections.csv', 'Connections_2.csv', 'Complete_LinkedInDataExport.zip'])
+  assert.equal(list.hidden, false)
+  assert.ok(!classes.has('over'))
+  // A drop that misses the box does not navigate away to the dropped file.
+  let missed = false
+  windowHandlers.drop({ target: {}, preventDefault: () => { missed = true } })
+  assert.equal(missed, true)
+  assert.ok(prevented >= 3)
 })
