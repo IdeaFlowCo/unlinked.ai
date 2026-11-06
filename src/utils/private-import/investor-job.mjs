@@ -63,6 +63,10 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       if (!parsed.accepted.length && !parsed.rejected.length) throw fail('invalid_input', 'CSV has no data rows.')
       const canonicalMapping = sorted(mapping)
       const id = privateId(grant.ownerId, KIND, parsed.sourceDigest, JSON.stringify(canonicalMapping), listName, listId ?? '')
+      const job = { kind: KIND, ownerId: grant.ownerId, id, revision: 1, createdAt: now(), sourceDigest: parsed.sourceDigest,
+        mapping: canonicalMapping, listName, listId: listId ?? null, status: 'staged', offset: 0, imported: 0, rejected: 0,
+        total: parsed.accepted.length + parsed.rejected.length, lease: null }
+      if (Buffer.byteLength(JSON.stringify(job)) > 60000) throw fail('invalid_input', 'CSV column mapping exceeds the import metadata limit.')
       const backend = await backendFor(grant)
       const existing = await backend.readResource('import', id)
       if (existing) return summary(await read(backend, grant.ownerId, id))
@@ -70,10 +74,6 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       await graph.validate(grant, listId)
       await register(backend, grant.ownerId, id)
       await backend.adapter.withImport(grant.ownerId, id, store => store.putAsset(parsed.sourceDigest, bytes))
-      const job = { kind: KIND, ownerId: grant.ownerId, id, revision: 1, createdAt: now(), sourceDigest: parsed.sourceDigest,
-        mapping: canonicalMapping, listName, listId: listId ?? null, status: 'staged', offset: 0, imported: 0, rejected: 0,
-        total: parsed.accepted.length + parsed.rejected.length, lease: null }
-      if (Buffer.byteLength(JSON.stringify(job)) > 60000) throw fail('invalid_input', 'CSV column mapping exceeds the import metadata limit.')
       await write(backend, grant.ownerId, job, null)
       return { ...summary(job), preview: { valid: parsed.accepted.length, rejected: parsed.rejected.length,
         exactReferences: parsed.accepted.filter(row => row.identity.linkedinRefHash).length,
@@ -89,6 +89,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
         const resource = await backend.readResource('import', investorReceiptId(grant.ownerId, importId, i))
         const receipt = resource ? await read(backend, grant.ownerId, investorReceiptId(grant.ownerId, importId, i), `${KIND}_row`) : null
         receipts.push({ ordinal: i, sourceRow: rows[i].row, rowId: rows[i].rowId, fields: rows[i].fields ?? null,
+          ...(rows[i].sourceValues ? { sourceValues: rows[i].sourceValues } : {}),
           result: receipt?.result ?? { status: rows[i].reason ? 'rejected' : 'pending', ...(rows[i].reason ? { reason: rows[i].reason } : {}) } })
       }
       return { ...summary(job), receipts, nextOffset: offset + receipts.length < job.total ? offset + receipts.length : null }

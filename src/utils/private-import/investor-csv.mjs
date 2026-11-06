@@ -38,12 +38,13 @@ export function parseInvestorCsv(input, mapping) {
   for (const [index, values] of parsed.data.slice(1).entries()) {
     const row = index + 2
     const rowId = sha(`investor-csv-v1\n${sourceDigest}\n${row}`)
-    if (values.length !== headers.length) { rejected.push({ row, rowId, reason: 'csv_column_count' }); continue }
-    if (values.some(value => value.length > INVESTOR_CSV_LIMITS.fieldChars)) { rejected.push({ row, rowId, reason: 'csv_field_size_limit' }); continue }
-    const fields = Object.fromEntries(headers.map((header, i) => [header, values[i]]))
+    const fields = Object.fromEntries(headers.slice(0, values.length).map((header, i) => [header, values[i]]))
+    const reject = reason => rejected.push({ row, rowId, reason, fields, sourceValues: values })
+    if (values.length !== headers.length) { reject('csv_column_count'); continue }
+    if (values.some(value => value.length > INVESTOR_CSV_LIMITS.fieldChars)) { reject('csv_field_size_limit'); continue }
     const read = key => mapping[key] ? fields[mapping[key]].trim() : ''
     const name = read('name') || [read('firstName'), read('lastName')].filter(Boolean).join(' ')
-    if (!name) { rejected.push({ row, rowId, reason: 'missing_name' }); continue }
+    if (!name) { reject('missing_name'); continue }
     const suppliedUrl = read('linkedinUrl')
     const url = suppliedUrl && canonicalLinkedinUrl(suppliedUrl)
     const refHash = url && linkedinRefHash(linkedinSlug(url))

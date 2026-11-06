@@ -52,7 +52,25 @@ test('exact addresses match across imports; append retains independent source no
   assert.ok([...f.state('alice').notes.values()].some(n => n.text.includes('New meeting')))
   const page = await tools.unlinked_get_investor_import(owner, { importId: next.importId })
   assert.equal(page.receipts[1].result.reason, 'missing_name')
+  assert.deepEqual(page.receipts[1].fields, { Name: '', LinkedIn: '', Comment: 'No name' })
   await assert.rejects(tools.unlinked_stage_investor_csv(grant('bob'), { ...input, listId: done.listId }), e => e.code === 'not_found')
+})
+
+test('rejected rows retain all source values in status', async () => {
+  const tools = fixture().tools(), owner = grant(), oversized = 'x'.repeat(32769)
+  const staged = await tools.unlinked_stage_investor_csv(owner, { csv: `Name,Notes\n,missing\nShort\nExtra,value,overflow\nLarge,${oversized}`, mapping: { name: 'Name' }, listName: 'Review' })
+  await tools.unlinked_resume_investor_import(owner, { importId: staged.importId })
+  const { receipts } = await tools.unlinked_get_investor_import(owner, { importId: staged.importId })
+  assert.deepEqual(receipts.map(row => row.result.reason), ['missing_name', 'csv_column_count', 'csv_column_count', 'csv_field_size_limit'])
+  assert.deepEqual(receipts.map(row => row.sourceValues), [['', 'missing'], ['Short'], ['Extra', 'value', 'overflow'], ['Large', oversized]])
+  assert.deepEqual(receipts[2].fields, { Name: 'Extra', Notes: 'value' })
+})
+
+test('oversized metadata is rejected without storing a catalog or asset', async () => {
+  const f = fixture(), first = 'a'.repeat(31000), second = 'b'.repeat(31000)
+  await assert.rejects(f.tools().unlinked_stage_investor_csv(grant(), { csv: `${first},${second}\nAlice,note`, mapping: { name: first, notes: [second] }, listName: 'Review' }), e => e.code === 'invalid_input' && /metadata limit/.test(e.message))
+  assert.equal(f.resources.size, 0)
+  assert.equal(f.assets.size, 0)
 })
 
 test('revocation mid-batch and transient failure retain progress without claiming completion', async () => {
