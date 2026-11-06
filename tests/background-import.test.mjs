@@ -703,3 +703,24 @@ test('lease-held returns do not reset consecutive failures', async () => {
   assert.deepEqual(events.filter(event => event.event === 'import_worker_retry').map(event => event.attempt), [1, 2, 4])
   assert.equal(events.filter(event => event.event === 'import_worker_stuck').length, 1)
 })
+
+
+test('hanging event delivery does not hold the worker or owner coordination', async () => {
+  const jobs = [{ id: 'first', owner: { ownerId: 'owner-a' } }, { id: 'second', owner: { ownerId: 'owner-a' } }]
+  const handled = [], events = []
+  let held = 0
+  const worker = createArchiveWorker({ listPendingImports: async () => jobs,
+    coordination: { tryAcquireShared: () => { held++; return () => { held-- } } },
+    getBackend: async () => ({ adapter: { withImport: async (_owner, id, fn) => {
+      handled.push(id)
+      return fn({ getJob: async () => ({ status: 'indexed', phase: 'private_observation_index_ready' }) })
+    } } }), onError: event => { events.push(event); return new Promise(() => {}) } })
+  let timer
+  try {
+    await Promise.race([worker.tick(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('worker blocked on event delivery')), 1000) })])
+    await worker.stop()
+    assert.deepEqual(handled, ['first', 'second'])
+    assert.equal(held, 0)
+    assert.equal(events.length, 2)
+  } finally { clearTimeout(timer) }
+})

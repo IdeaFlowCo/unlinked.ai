@@ -122,7 +122,7 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
   // Per-job failure history, so a job that keeps failing is visible (reason,
   // attempt, first failure) instead of retrying silently every interval.
   const failures = new Map(), finished = new Set(), notRunnable = new Set()
-  const notify = async event => { try { await onError(event) } catch {} }
+  const notify = event => { void Promise.resolve().then(() => onError(event)).catch(() => {}) }
   const slot = () => new Promise(resolve => {
     const enter = () => { active++; resolve(() => { active--; waiters.shift()?.() }) }
     if (active < 8) enter(); else waiters.push(enter)
@@ -150,11 +150,11 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
           if (progressed || (result && terminal(result))) failures.delete(key)
           if (result && terminal(result) && !finished.has(key)) {
             finished.add(key)
-            await notify({ event: 'import_job_finished', importId: item.id, status: result.status, phase: phases.has(result.phase) ? result.phase : 'unknown',
+            notify({ event: 'import_job_finished', importId: item.id, status: result.status, phase: phases.has(result.phase) ? result.phase : 'unknown',
               durationMs: now() - startedAt, ...jobNumbers(result), ...(history ? { attemptsBeforeSuccess: history.attempt } : {}) })
           } else if (result && !terminal(result) && result.backgroundVersion !== 'profile-first-v1' && !notRunnable.has(key)) {
             notRunnable.add(key)
-            await notify({ event: 'import_job_not_runnable', importId: item.id, reason: 'background_version_unsupported' })
+            notify({ event: 'import_job_not_runnable', importId: item.id, reason: 'background_version_unsupported' })
           }
         } finally { clearTimeout(slow); release() }
       } finally { releaseSlot() }
@@ -183,7 +183,7 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
     })().then(jobs => { discoveryFailures = 0; return jobs }, async error => {
       discoveryFailures++
       // Same 1, 2, 4, 8, ... throttle: a lasting outage stays visible without flooding.
-      if ((discoveryFailures & (discoveryFailures - 1)) === 0) await notify({ event: 'import_worker_discovery_failed', reason: safeCode(error?.message), attempt: discoveryFailures })
+      if ((discoveryFailures & (discoveryFailures - 1)) === 0) notify({ event: 'import_worker_discovery_failed', reason: safeCode(error?.message), attempt: discoveryFailures })
       return []
     }).finally(() => { discovery = null })
     return discovery.then(jobs => Promise.all(jobs))

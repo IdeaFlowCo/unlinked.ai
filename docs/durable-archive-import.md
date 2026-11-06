@@ -73,7 +73,11 @@ fixed lower-case codes and numbers; never names, emails, filenames or rows.
 | `import_worker_discovery_failed` | Listing pending jobs failed: `reason`, `attempt`, same 1, 2, 4, 8 throttle. |
 
 When the audit file would pass 8 MiB it is renamed to `browser-events.1.jsonl` (one previous file kept)
-and `private_audit_rotated` is logged; before, every later event was silently dropped.
+and `private_audit_rotated` is logged. A single runtime process must own this audit file; it serializes
+all appends and rotations through one in-process queue with an inode check. Do not share the audit
+directory between runtime processes. The queue is limited to 64 writes, and each caller waits at most
+five seconds; overload is logged as `private_audit_queue_full`. Worker event delivery never waits for
+the audit write, and worker events remain available in the container log.
 
 Operator triage for a slow import: `docker logs <runtime> 2>&1 | grep unlinkedImportWorker | grep <import id>`.
 No `import_job_finished`, no retry and no `running_long` means the worker never picked the job up.

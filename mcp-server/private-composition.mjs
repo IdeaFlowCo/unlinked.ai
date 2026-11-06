@@ -439,59 +439,46 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       diagnosticsStore = await createDiagnosticsStore({ directory: join(auditDirectory, 'requests') })
       requestDiagnostics = createRequestDiagnostics({ emit: diagnosticsStore.emit })
     }
-    const audit = async event => {
+    // One runtime process owns this audit file; all its appends and rotations share this queue.
+    let auditTail = Promise.resolve(), auditPending = 0, auditOverflowReported = false
+    const writeAudit = async event => {
       const directory = join(root, 'audit')
       await mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
       const state = await lstat(directory)
       if (!state.isDirectory() || state.isSymbolicLink() || (state.mode & 0o077) || state.uid !== process.getuid?.()) throw new Error('private_audit_directory_required')
-      let descriptor = await open(join(directory, 'browser-events.jsonl'), constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
-      try {
-        const stat = await descriptor.stat()
-        if (!stat.isFile() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_audit_file_required')
-        const line = JSON.stringify(event) + '\n'
-        if (Buffer.byteLength(line) > 64 * 1024) throw new Error('private_audit_event_too_large')
-        if (stat.size + Buffer.byteLength(line) > 8 * 1024 * 1024) {
-          // Full: keep one previous file (bounded to 2 x 8 MiB) instead of
-          // dropping every later event, and say so in the container log. The
-          // inode check stops a concurrent writer rotating the fresh file away.
+      const line = JSON.stringify(event) + '\n'
+      if (Buffer.byteLength(line) > 64 * 1024) throw new Error('private_audit_event_too_large')
+      const live = join(directory, 'browser-events.jsonl')
+      for (;;) {
+        let descriptor = await open(live, constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
+        try {
+          const stat = await descriptor.stat()
+          if (!stat.isFile() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_audit_file_required')
+          if (stat.size + Buffer.byteLength(line) <= 8 * 1024 * 1024) {
+            await descriptor.write(line); await descriptor.sync()
+            return
+          }
           await descriptor.close(); descriptor = null
-          const live = join(directory, 'browser-events.jsonl'), lockPath = join(directory, 'browser-events.rotate.lock')
-          let lock
-          try {
-            lock = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
-            await lock.writeFile(String(process.pid))
-          } catch (error) {
-            if (error.code !== 'EEXIST') throw error
-            const reaperPath = lockPath + '.reaper'
-            let reaper
-            try {
-              reaper = await open(reaperPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
-              const info = await lstat(lockPath).catch(() => null)
-              if (info?.isFile() && Date.now() - info.mtimeMs > 60000) {
-                const pid = Number(await readFile(lockPath, 'utf8').catch(() => ''))
-                let alive = Number.isSafeInteger(pid) && pid > 0
-                if (alive) try { process.kill(pid, 0) } catch (probe) { if (probe.code === 'ESRCH') alive = false }
-                if (!alive) await rm(lockPath, { force: true })
-              }
-            } catch (reapError) { if (reapError.code !== 'EEXIST' && reapError.code !== 'ENOENT') throw reapError }
-            finally { if (reaper) { await reaper.close(); await rm(reaperPath, { force: true }) } }
-            await new Promise(resolve => setTimeout(resolve, 20))
-            return audit(event)
+          const current = await lstat(live).catch(error => { if (error.code !== 'ENOENT') throw error; return null })
+          if (current && current.dev === stat.dev && current.ino === stat.ino) {
+            await rename(live, join(directory, 'browser-events.1.jsonl'))
+            console.error(JSON.stringify({ event: 'private_audit_rotated', at: new Date().toISOString() }))
           }
-          try {
-            const current = await lstat(live).catch(() => null)
-            if (current && current.dev === stat.dev && current.ino === stat.ino) {
-              await rename(live, join(directory, 'browser-events.1.jsonl'))
-              console.error(JSON.stringify({ event: 'private_audit_rotated', at: new Date().toISOString() }))
-            }
-          } finally {
-            await lock.close()
-            await rm(lockPath, { force: true })
-          }
-          return audit(event)
-        }
-        await descriptor.write(line); await descriptor.sync()
-      } finally { await descriptor?.close() }
+        } finally { await descriptor?.close() }
+      }
+    }
+    const audit = event => {
+      if (auditPending >= 64) {
+        if (!auditOverflowReported) console.error(JSON.stringify({ event: 'private_audit_queue_full' }))
+        auditOverflowReported = true
+        return Promise.reject(new Error('private_audit_queue_full'))
+      }
+      auditPending++
+      let expired = false, timer
+      const write = auditTail.then(() => expired ? undefined : writeAudit(event))
+      auditTail = write.catch(() => {}).finally(() => { auditPending--; if (auditPending < 64) auditOverflowReported = false })
+      const timeout = new Promise((_, reject) => { timer = setTimeout(() => { expired = true; reject(new Error('private_audit_timeout')) }, 5000) })
+      return Promise.race([write, timeout]).finally(() => clearTimeout(timer))
     }
     // Import worker events are numeric/fixed-code only (no names, emails or
     // rows), so they also go to the container log for operators.
