@@ -55,9 +55,10 @@ const nav=performance.getEntriesByType('navigation')[0];
 const click=previous&&previous.route===route(location.pathname)&&['click','submit'].includes(previous.kind)&&Number.isFinite(previous.at)&&epoch()-previous.at>=0&&epoch()-previous.at<=120000;
 const start=click?previous.kind:nav?.type==='back_forward'?'history':'navigation',at=click?previous.at:performance.timeOrigin;
 const extras=()=>({...(nav?.responseStart>0?{ttfb_ms:Math.round(nav.responseStart)}:{}),...(nav?.responseEnd>0?{render_ms:Math.round(performance.now()-nav.responseEnd)}:{})});
-const ready=()=>painted(()=>{if(!restored)measure('content_ready',start,at,location.pathname,${status >= 400 ? "'error'" : "'ok'"},extras())});
+const outcome=()=>${status >= 400 ? "'error'" : "document.querySelector('[data-page-load-error]')?'error':'ok'"};
+const ready=()=>painted(()=>{if(!restored)measure('content_ready',start,at,location.pathname,outcome(),extras())});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready,{once:true});else ready();
-addEventListener('load',()=>setTimeout(()=>{if(!restored)measure('page_load',start,at,location.pathname,${status >= 400 ? "'error'" : "'ok'"},extras())},0),{once:true});
+addEventListener('load',()=>setTimeout(()=>{if(!restored)measure('page_load',start,at,location.pathname,outcome(),extras())},0),{once:true});
 addEventListener('pageshow',event=>{if(event.persisted){restored=true;pending=null;try{sessionStorage.removeItem(key)}catch{}const at=epoch();painted(()=>measure('bfcache','history',at,location.pathname))}});
 globalThis.unlinkedPerformance={start(metric,path){if(!['filter','connections_filter'].includes(metric))return;const current=epoch(),at=interactionAt&&current-interactionAt<=2000?interactionAt:current;interactionAt=0;let done=false;return{finish(outcome='ok'){if(done)return;done=true;if(outcome==='ok')painted(()=>measure(metric,'interaction',at,path,outcome));else measure(metric,'interaction',at,path,outcome)}}}};
 })();`

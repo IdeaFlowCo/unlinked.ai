@@ -24,6 +24,7 @@ function browser(initial='https://unlinked.invalid/network') {
     const root = {
       setAttribute: (key, value) => attributes.set(key, value),
       removeAttribute: key => attributes.delete(key),
+      hasAttribute: key => attributes.has(key),
       contains: element => [...elements.values()].includes(element),
       querySelector: selector => elements.get(selector),
       querySelectorAll: selector => selector === 'details' ? disclosures : selector === 'details[open]' ? disclosures.filter(d => d.open) : [...elements.values()].filter(e => e.focus),
@@ -89,7 +90,7 @@ function browser(initial='https://unlinked.invalid/network') {
     document, URL, URLSearchParams, AbortController,
     FormData: class { constructor() { return [['q', current.querySelector('#network-query').value], ['sort', current.querySelector('#network-sort').value], ...[...current.querySelector('#network-filters').fields.values()].map(field => [field.name, field.value])] } },
     fetch: (url, options) => new Promise((resolve, reject) => pending.push({ resolve, reject, signal: options.signal, url: new URL(url) })),
-    DOMParser: class { parseFromString() { const next = makeRoot(pending.at(-1).url); return { title: 'People', querySelector: () => next } } },
+    DOMParser: class { parseFromString(text) { const next = makeRoot(pending.at(-1).url); if(text.includes("data-page-load-error")) next.setAttribute("data-page-load-error", ""); return { title: 'People', querySelector: () => next } } },
     history,
     location,
     addEventListener: (name, callback) => listeners.set(name, callback),
@@ -460,4 +461,14 @@ test('failed first typing fetch leaves committed history unchanged', async () =>
   await flush()
   assert.deepEqual(b.historyEntries, original)
   assert.equal(b.location.href, original.at(-1))
+})
+
+test('HTTP 200 fallback retains existing results and restores native retry',async()=>{
+ const b=browser(),before=b.root(),form=before.querySelector('#network-filters')
+ b.dispatch('submit',form)
+ b.pending[0].resolve({ok:true,redirected:false,text:async()=>'<section data-page-load-error>'})
+ await flush()
+ assert.equal(b.root(),before)
+ assert.match(before.querySelector('.network-count').textContent,/Could not update results/)
+ assert.equal(b.dispatch('submit',form).defaultPrevented,false)
 })
