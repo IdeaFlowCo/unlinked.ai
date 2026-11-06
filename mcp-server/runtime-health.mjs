@@ -9,11 +9,13 @@ import { getHeapStatistics } from 'node:v8'
 // owner, route or error content can enter a row.
 const MB = 1024 * 1024
 const mb = value => Number.isFinite(value) && value >= 0 ? Math.round(value / MB) : undefined
+// The histogram measures timer-to-timer spacing, so subtract its own period.
+const LOOP_RESOLUTION_MS = 20
 const ms = value => Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), 3_600_000) : undefined
 
 export const RUNTIME_HEALTH_FIELDS = Object.freeze(['uptime_s', 'interval_ms', 'rss_mb', 'heap_used_mb', 'heap_total_mb', 'heap_limit_mb', 'external_mb', 'array_buffers_mb', 'gc_major_count', 'gc_major_ms', 'gc_major_max_ms', 'gc_minor_count', 'gc_minor_ms', 'gc_incremental_count', 'gc_incremental_ms', 'loop_delay_p50_ms', 'loop_delay_p99_ms', 'loop_delay_max_ms', 'cpu_user_ms', 'cpu_system_ms'])
 
-export function startRuntimeHealth({ emit, intervalMs = 60000, now = () => new Date(), memoryUsage = () => process.memoryUsage(), heapStatistics = getHeapStatistics, cpuUsage = previous => process.cpuUsage(previous), uptime = () => process.uptime(), observeGc = true, loopDelay = monitorEventLoopDelay({ resolution: 20 }) } = {}) {
+export function startRuntimeHealth({ emit, intervalMs = 60000, now = () => new Date(), memoryUsage = () => process.memoryUsage(), heapStatistics = getHeapStatistics, cpuUsage = previous => process.cpuUsage(previous), uptime = () => process.uptime(), observeGc = true, loopDelay = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS }) } = {}) {
   if (typeof emit !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 1000 || intervalMs > 3600000) throw new Error('runtime_health_configuration_invalid')
   const gc = { major: 0, majorMs: 0, majorMax: 0, minor: 0, minorMs: 0, incremental: 0, incrementalMs: 0 }
   let observer = null
@@ -33,8 +35,9 @@ export function startRuntimeHealth({ emit, intervalMs = 60000, now = () => new D
   const sample = () => {
     const tick = performance.now(), memory = memoryUsage(), heap = heapStatistics(), used = cpuUsage(cpu)
     cpu = cpuUsage()
-    // monitorEventLoopDelay reports nanoseconds.
-    const delay = loopDelay && loopDelay.count !== 0 ? { p50: loopDelay.percentile(50) / 1e6, p99: loopDelay.percentile(99) / 1e6, max: loopDelay.max / 1e6 } : null
+    // monitorEventLoopDelay reports nanoseconds of timer spacing; report delay beyond the period.
+    const late = ns => Math.max(0, ns / 1e6 - LOOP_RESOLUTION_MS)
+    const delay = loopDelay && loopDelay.count !== 0 ? { p50: late(loopDelay.percentile(50)), p99: late(loopDelay.percentile(99)), max: late(loopDelay.max) } : null
     const row = {
       schema: 1, event: 'runtime_health', at: now().toISOString(),
       uptime_s: Math.round(uptime()), interval_ms: ms(tick - last),

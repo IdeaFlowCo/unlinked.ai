@@ -6,7 +6,7 @@ import { createRequestDiagnostics, safeDiagnosticRecord } from '../mcp-server/re
 import { summarizeRuntimeHealth } from '../scripts/read-runtime-health.mjs'
 
 const MB = 1024 * 1024
-const fakeLoop = () => ({ count: 3, enabled: false, enable() { this.enabled = true }, disable() { this.enabled = false }, percentile: p => (p === 50 ? 2 : 1500) * 1e6, max: 4200 * 1e6, reset() { this.count = 0 } })
+const fakeLoop = () => ({ count: 3, enabled: false, enable() { this.enabled = true }, disable() { this.enabled = false }, percentile: p => (p === 50 ? 22 : 1520) * 1e6, max: 4220 * 1e6, reset() { this.count = 0 } })
 
 test('a runtime health sample reports heap, loop delay and CPU as whole numbers only', () => {
   const rows = [], loop = fakeLoop()
@@ -65,6 +65,9 @@ test('the operator summary infers restarts and per-hour stalls', () => {
   const report = summarizeRuntimeHealth([row('2026-11-06T10:01:00.000Z', 60, 1400, 300, 200), row('2026-11-06T10:02:00.000Z', 120, 1560, 6000, 2500), row('2026-11-06T10:03:00.000Z', 30, 700, 200, 100), { event: 'agent_request' }])
   assert.equal(report.samples, 3)
   assert.deepEqual(report.restarts, [{ last_seen_at: '2026-11-06T10:02:00.000Z', last_heap_used_mb: 1560, last_uptime_s: 120, next_at: '2026-11-06T10:03:00.000Z' }])
+  // A process that lived only ~1 minute: uptime does not drop, but grew far less than the wall clock.
+  const loop = summarizeRuntimeHealth([row('2026-11-06T11:00:00.000Z', 62, 1500, 0, 0), row('2026-11-06T11:02:30.000Z', 64, 600, 0, 0)])
+  assert.equal(loop.restarts.length, 1)
   const [hour] = report.hours
   assert.equal(hour.minutes_with_stall, 1)
   assert.equal(hour.heap_headroom_min_mb, 24)

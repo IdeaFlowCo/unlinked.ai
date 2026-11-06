@@ -12,9 +12,10 @@ const max = values => values.length ? values.reduce((a, b) => Math.max(a, b), 0)
 
 export function summarizeRuntimeHealth(records, { stallMs = 1000 } = {}) {
   const rows = records.map(safeDiagnosticRecord).filter(row => row?.event === 'runtime_health').sort((a, b) => a.at.localeCompare(b.at))
-  // A drop in uptime between consecutive rows is a process restart.
+  // A restart: uptime grew less than wall-clock time between consecutive rows
+  // (with slack), so a process that lived only a minute or two is still caught.
   const restarts = []
-  for (let i = 1; i < rows.length; i++) if ((rows[i].uptime_s ?? 0) < (rows[i - 1].uptime_s ?? 0)) restarts.push({ last_seen_at: rows[i - 1].at, last_heap_used_mb: rows[i - 1].heap_used_mb ?? null, last_uptime_s: rows[i - 1].uptime_s ?? null, next_at: rows[i].at })
+  for (let i = 1; i < rows.length; i++) if ((rows[i].uptime_s ?? 0) < (rows[i - 1].uptime_s ?? 0) + (Date.parse(rows[i].at) - Date.parse(rows[i - 1].at)) / 1000 - 30) restarts.push({ last_seen_at: rows[i - 1].at, last_heap_used_mb: rows[i - 1].heap_used_mb ?? null, last_uptime_s: rows[i - 1].uptime_s ?? null, next_at: rows[i].at })
   const hours = new Map()
   for (const row of rows) {
     const key = row.at.slice(0, 13) + ':00Z', hour = hours.get(key) ?? { hour: key, samples: 0, heap: [], headroom: [], gcMajorMs: 0, gcMajorMax: 0, gcMajorCount: 0, loopP99: [], loopMax: [], stalls: 0, cpuMs: 0, intervalMs: 0 }
