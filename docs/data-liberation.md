@@ -6,6 +6,9 @@ TikTok, Amazon and Microsoft, plus WhatsApp's in-app steps. It also covers what
 to do when a service has no export button (GDPR/CCPA requests) and how to bring a
 LinkedIn export into Unlinked.
 
+- One line under the lead says why: taking your data with you helps build an
+  open, agent-friendly web. Keep it aspirational; it must not promise an
+  Unlinked integration that does not exist.
 - Two sections: **Start here** (LinkedIn, Facebook, Instagram — where most
   people's network lives) and **More services**, led by WhatsApp and Apple
   (contacts), then Google, X, TikTok, Amazon and Microsoft. The order is the

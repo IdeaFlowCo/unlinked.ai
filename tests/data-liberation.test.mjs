@@ -36,6 +36,8 @@ test('the page answers without a session and links each service’s own export p
   for (const method of ['GET', 'HEAD']) assert.equal((await app.request('/data-liberation', { method })).status, 200, method)
   const body = await (await app.request('/data-liberation')).text()
   assert.match(body, /<h1 class="hq">Data liberation<\/h1>/)
+  // One aspirational line under the lead; it names a direction, not an Unlinked feature.
+  assert.match(body, /<\/p><p class="liberate-why">Taking your data with you helps build an open, agent-friendly web, where your information moves with you and works with the tools and agents you choose\.<\/p><nav class="liberate-jump"/)
   assert.match(body, /<title>Data liberation · Unlinked<\/title>/)
   const links = Object.fromEntries(DATA_EXPORTS.map(value => [value.id, value.url]))
   assert.equal(links.linkedin, 'https://www.linkedin.com/mypreferences/d/download-my-data')
