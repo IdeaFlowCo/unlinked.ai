@@ -92,14 +92,27 @@ every shared-string use, UTF-8 bytes, quote escaping and row padding before
 allocation; the 200,000-cell budget also counts sparse-cell padding. Inspection
 and staging enforce the same bounds. DTD/entity declarations and external workbook links
 are rejected. No external resources are fetched. Selected-sheet formulas and
-error cells fail explicitly; provide a values-only copy or CSV. Rich text and
+error cells fail explicitly; formula errors identify the cell and offer a values-only
+copy or CSV. For `HYPERLINK` formulas, put the actual LinkedIn URL in the mapped
+URL column: a values-only export may otherwise retain only the displayed name. Rich text and
 shared/inline strings are read as plain text; number/date values retain stored
-lexical values, not display formatting. Hyperlinks, styles, images and Excel
-comments are not imported: map actual cell text (including URL text and a notes
-column). The original workbook preserves these for owner recovery.
+lexical values, not display formatting. New XLSX imports read single-cell external
+hyperlink relationships in the explicitly mapped LinkedIn column. Targets must be
+valid HTTPS LinkedIn profile addresses; conflicting visible profile URLs fail closed.
+Only the address supplies identity: names and notes retain their visible cell text.
+Receipts retain that text plus `sourceHyperlink` (cell, relationship id/part and target).
+Other-column and internal-location links do not supply identity. Link ranges and
+over-limit references are refused; no link is fetched. Styles, images and Excel
+comments are not imported. The original workbook preserves these for owner recovery.
+
+New XLSX jobs use parser version `investor-xlsx-v2`. Existing v1 jobs keep their
+text-only parsing on resume and receipt recovery; upgrading never reinterprets a
+pending old row. Restaging the same workbook under v2 creates a distinct import,
+so resume an existing import by its id rather than restaging it to retry.
 
 Parsing uses the existing bounded ZIP reader and pinned saxes 6.0.0 (released
-2021-11-07), a strict streaming XML parser; no SheetJS dependency or formula engine.
+2021-11-07), a strict streaming XML parser; its transitive `xmlchars` is locked to
+2.2.0 in `package-lock.json`. No SheetJS dependency or formula engine.
 See its [upstream documentation](https://github.com/lddubeau/saxes).
 
 ## Identity and retention

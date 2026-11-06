@@ -11,6 +11,86 @@ import { exportAccountData, deleteAccountData } from '../src/utils/private-impor
 const grant = (ownerId = 'alice', scope = 'owner_network_and_private_notes') => ({ ownerId, userId: ownerId, scope, agent: 'synthetic-xlsx',
   version: CURRENT_ACCOUNT_GRANT_VERSION, tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] })
 const parse = (bytes, options = {}) => { const input = { ...workbookInput(bytes), ...options }; const file = investorFileInput(input); return parseInvestorFile(file.bytes, file.source, input.mapping, { inspectOnly: input.inspectOnly }) }
+const hyperlinkPart = 'xl/worksheets/_rels/sheet1.xml.rels'
+const linkedSheet = (cells, links) => worksheet(cells).replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ').replace('</worksheet>', `<hyperlinks>${links}</hyperlinks></worksheet>`)
+const linkedWorkbook = (target = 'https://www.linkedin.com/in/Synthetic-Maya', overrides = {}) => workbook({
+  'xl/worksheets/sheet1.xml': linkedSheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'LinkedIn')}</row><row r="2">${inline('A2', 'Synthetic Maya')}${inline('B2', 'Profile')}</row>`, '<hyperlink ref="B2" r:id="profile"/>'),
+  [hyperlinkPart]: `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="profile" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${target}" TargetMode="External"/></Relationships>`,
+  ...overrides,
+})
+const linkedInput = bytes => ({ ...workbookInput(bytes), mapping: { name: 'Name', linkedinUrl: 'LinkedIn' } })
+
+test('formula refusal names the cell and offers values-only recovery without echoing formula data or writing', async () => {
+  const bytes = await workbook({ 'xl/worksheets/sheet1.xml': worksheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'LinkedIn')}</row><row r="2">${inline('A2', 'Person')}<c r="B2"><f>HYPERLINK("https://linkedin.com/in/private-formula-person","Private Name")</f><v>Private Name</v></c></row>`) })
+  for (const inspectOnly of [false, true]) {
+    const f = fixture()
+    await assert.rejects(f.tools().unlinked_stage_investor_csv(grant(), { ...linkedInput(bytes), inspectOnly }), error => {
+      assert.equal(error.code, 'invalid_input')
+      assert.deepEqual(error.details, { failureReason: 'xlsx_formula_unsupported', cell: 'B2', row: 2, column: 2, recovery: 'values_only_export' })
+      assert.match(error.message, /cell B2/); assert.match(error.message, /values-only CSV/)
+      assert.match(error.message, /actual LinkedIn URL/); assert.doesNotMatch(error.message, /private-formula-person|Private Name/)
+      return true
+    })
+    assert.equal(f.resources.size, 0); assert.equal(f.assets.size, 0)
+  }
+})
+
+test('mapped LinkedIn hyperlink supplies exact identity while original text, private source and replay stay intact', async () => {
+  const bytes = await linkedWorkbook(), f = fixture(), owner = grant(), input = linkedInput(bytes)
+  const result = parse(bytes, input)
+  assert.equal(result.parserVersion, 'investor-xlsx-v2')
+  assert.equal(result.accepted[0].fields.LinkedIn, 'Profile')
+  const hash = createHash('sha256').update('synthetic-maya').digest('hex')
+  assert.equal(result.accepted[0].identity.linkedinRefHash, hash)
+  const staged = await f.tools().unlinked_stage_investor_csv(owner, input)
+  assert.equal((await f.tools().unlinked_stage_investor_csv(owner, input)).importId, staged.importId)
+  await f.tools().unlinked_resume_investor_import(owner, { importId: staged.importId })
+  await f.tools().unlinked_resume_investor_import(owner, { importId: staged.importId })
+  const state = f.state('alice'), person = [...state.entities.values()].find(e => e.kind === 'person')
+  assert.ok(person.refs.includes(`linkedin:in:${hash}`)); assert.equal(state.links.size, 1)
+  const status = await f.tools().unlinked_get_investor_import(owner, { importId: staged.importId })
+  assert.equal(status.receipts[0].fields.LinkedIn, 'Profile')
+  assert.deepEqual(status.receipts[0].sourceHyperlink, { cell: 'B2', relationshipId: 'profile', part: hyperlinkPart, target: 'https://www.linkedin.com/in/Synthetic-Maya' })
+  await assert.rejects(f.tools().unlinked_get_investor_import(grant('bob'), { importId: staged.importId }), error => error.code === 'not_found')
+  assert.deepEqual(f.assets.get(`alice:${staged.sourceDigest}`), bytes)
+})
+
+test('hyperlinks never change names or notes and conflicting or non-LinkedIn identity targets fail before writes', async () => {
+  const nonIdentity = await linkedWorkbook('javascript:alert(1)')
+  const ordinary = parse(nonIdentity, { mapping: { name: 'Name', notes: ['LinkedIn'] } })
+  assert.equal(ordinary.accepted[0].notes[0].text, 'Profile')
+  assert.equal(ordinary.accepted[0].identity.status, 'unresolved')
+  const conflict = await linkedWorkbook(undefined, { 'xl/worksheets/sheet1.xml': linkedSheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'LinkedIn')}</row><row r="2">${inline('A2', 'Person')}${inline('B2', 'https://www.linkedin.com/in/another-person')}</row>`, '<hyperlink ref="B2" r:id="profile"/>') })
+  for (const [bytes, code] of [[nonIdentity, 'xlsx_hyperlink_target_unsupported'], [conflict, 'xlsx_hyperlink_identity_conflict']]) {
+    const f = fixture()
+    await assert.rejects(f.tools().unlinked_stage_investor_csv(grant(), linkedInput(bytes)), new RegExp(code))
+    assert.equal(f.resources.size, 0); assert.equal(f.assets.size, 0)
+  }
+})
+
+test('hyperlink XML and reference bounds fail closed without following external targets', async () => {
+  for (const reference of ['B2:C2', 'XFD1048576', 'B999999', 'B0']) {
+    const bytes = await linkedWorkbook(undefined, { 'xl/worksheets/sheet1.xml': linkedSheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'LinkedIn')}</row><row r="2">${inline('A2', 'Person')}</row>`, `<hyperlink ref="${reference}" r:id="profile"/>`) })
+    assert.throws(() => parse(bytes, linkedInput(bytes)), /xlsx_(invalid_hyperlink_reference|hyperlink_limit)/)
+  }
+  const bytes = await linkedWorkbook(undefined, { [hyperlinkPart]: '<!DOCTYPE Relationships [<!ENTITY bomb "bad">]><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>' })
+  assert.throws(() => parse(bytes, linkedInput(bytes)), /xlsx_doctype_forbidden/)
+})
+
+test('old XLSX jobs keep v1 text-only parsing during resume and receipt recovery', async () => {
+  const bytes = await linkedWorkbook(), input = linkedInput(bytes), file = investorFileInput(input)
+  const old = parseInvestorFile(file.bytes, file.source, input.mapping, { parserVersion: 'investor-xlsx-v1' })
+  assert.equal(old.accepted[0].identity.status, 'invalid_linkedin_url'); assert.equal(old.accepted[0].sourceHyperlink, undefined)
+  const f = fixture(), owner = grant(), staged = await f.tools().unlinked_stage_investor_csv(owner, input)
+  // Synthetic persisted pre-upgrade job: its recorded parser controls resumption.
+  f.resources.get(`alice:${staged.importId}`).payload.parserVersion = 'investor-xlsx-v1'
+  await f.tools().unlinked_resume_investor_import(owner, { importId: staged.importId })
+  const person = [...f.state('alice').entities.values()].find(e => e.kind === 'person')
+  assert.ok(person.refs.every(ref => !ref.startsWith('linkedin:in:')))
+  const status = await f.tools().unlinked_get_investor_import(owner, { importId: staged.importId })
+  assert.equal(status.receipts[0].rowId, old.accepted[0].rowId)
+  assert.equal(status.receipts[0].sourceHyperlink, undefined)
+})
 
 test('workbook discovery is read-only; exact tab selection and full-original retention acknowledgement precede storage', async () => {
   const f = fixture(), tools = f.tools(), owner = grant(), input = workbookInput(await workbook())

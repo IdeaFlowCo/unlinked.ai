@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import Papa from 'papaparse'
 import { SaxesParser } from 'saxes'
-import { unpackArchive } from './archive.mjs'
+import { unpackArchive, linkedinUrl } from './archive.mjs'
+import { linkedinRefHash, linkedinSlug } from '../public-people/url-identity.mjs'
 import { parseInvestorCsv, normalizeInvestorHeaders, INVESTOR_CSV_LIMITS } from './investor-csv.mjs'
 
 export const INVESTOR_FILE_BYTES = 512 * 1024
@@ -11,7 +12,19 @@ const MAIN = new Set(['http://schemas.openxmlformats.org/spreadsheetml/2006/main
 const REL = new Set(['http://schemas.openxmlformats.org/package/2006/relationships', 'http://purl.oclc.org/ooxml/package/relationships'])
 const DOCREL = new Set(['http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'http://purl.oclc.org/ooxml/officeDocument/relationships'])
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
-const invalid = code => { throw new Error(code) }
+const invalid = (code, details) => { throw Object.assign(new Error(code), details ? { details } : {}) }
+const cellName = (column, row) => {
+  let letters = ''
+  for (let n = column + 1; n; n = Math.floor((n - 1) / 26)) letters = String.fromCharCode(65 + (n - 1) % 26) + letters
+  return `${letters}${row}`
+}
+function cellPosition(reference) {
+  const match = reference?.match(/^([A-Z]{1,3})([1-9][0-9]{0,5})$/)
+  if (!match) invalid('xlsx_invalid_hyperlink_reference')
+  const row = Number(match[2]), column = [...match[1]].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0) - 1
+  if (row > INVESTOR_CSV_LIMITS.rows + 1 || column >= INVESTOR_CSV_LIMITS.columns) invalid('xlsx_hyperlink_limit')
+  return { row, column }
+}
 const attr = (node, name) => Object.values(node.attributes).find(a => a.local === name && !a.uri)?.value
 const relId = node => Object.values(node.attributes).find(a => a.local === 'id' && DOCREL.has(a.uri))?.value
 const decode = bytes => { try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { invalid('file_invalid_utf8') } }
@@ -113,8 +126,22 @@ function stringsFor(book) {
   })
   return strings
 }
-function sheetRows(book, selected) {
+function sheetHyperlinks(book, selected) {
+  const part = `${path.posix.dirname(selected.path)}/_rels/${path.posix.basename(selected.path)}.rels`
+  const relations = new Map()
+  if (book.files.has(part)) xml(book.files.get(part), 'Relationships', REL, { open(node) {
+    if (node.local !== 'Relationship' || !REL.has(node.uri)) return
+    const id = attr(node, 'Id'), target = attr(node, 'Target'), type = attr(node, 'Type')
+    if (!id || id.length > 256 || !type || !target || relations.has(id)) invalid('xlsx_invalid_relationship')
+    if (relations.size >= XLSX_LIMITS.cells) invalid('xlsx_hyperlink_limit')
+    const hyperlink = [...DOCREL].some(namespace => type === `${namespace}/hyperlink`)
+    relations.set(id, { hyperlink, external: attr(node, 'TargetMode') === 'External', target })
+  } })
+  return { part, relations }
+}
+function sheetRows(book, selected, hyperlinksEnabled) {
   const strings = stringsFor(book), rows = [], budget = tableBudget()
+  const hyperlinks = new Map(), relationships = hyperlinksEnabled ? sheetHyperlinks(book, selected) : null
   let row = null, cell = null, count = 0, previous = 0, previousColumn = -1
   xml(book.files.get(selected.path), 'worksheet', MAIN, {
     open(node, stack) {
@@ -132,8 +159,19 @@ function sheetRows(book, selected) {
         if (column <= previousColumn || column >= INVESTOR_CSV_LIMITS.columns) invalid('xlsx_column_limit_or_order')
         previousColumn = column
         cell = { column, type: attr(node, 't') ?? 'n', value: '', inline: '', valueNodes: 0 }
-      } else if (cell && node.local === 'f') invalid('xlsx_formula_unsupported')
+      } else if (cell && node.local === 'f') invalid('xlsx_formula_unsupported', { cell: cellName(cell.column, row.number), row: row.number, column: cell.column + 1 })
       else if (cell && node.local === 'v' && ++cell.valueNodes > 1) invalid('xlsx_invalid_cell')
+      else if (hyperlinksEnabled && node.local === 'hyperlink' && stack.at(-2)?.local === 'hyperlinks') {
+        const reference = attr(node, 'ref'), position = cellPosition(reference), id = relId(node)
+        if (!id) return // Internal workbook locations do not supply person identity.
+        const relation = relationships.relations.get(id)
+        if (!relation?.hyperlink || !relation.external || attr(node, 'location')) invalid('xlsx_invalid_hyperlink_relationship')
+        if (relation.target.length > 2048) invalid('xlsx_hyperlink_limit')
+        if (hyperlinks.has(reference)) invalid('xlsx_duplicate_hyperlink')
+        if (hyperlinks.size >= XLSX_LIMITS.cells) invalid('xlsx_hyperlink_limit')
+        budget.value(relation.target)
+        hyperlinks.set(reference, { ...position, cell: reference, relationshipId: id, part: relationships.part, target: relation.target })
+      }
     },
     text(text, stack) {
       if (!cell || !main(stack.at(-1))) return
@@ -166,7 +204,7 @@ function sheetRows(book, selected) {
       }
     },
   })
-  return { rows, budget }
+  return { rows, budget, hyperlinks }
 }
 
 export function investorFileInput({ csv, fileBase64, filename, sheet, headerRow = 1 }) {
@@ -188,7 +226,7 @@ export function investorFileInput({ csv, fileBase64, filename, sheet, headerRow 
   return { bytes, source: { format, filename, ...(format === 'xlsx' ? { sheet, headerRow } : {}) } }
 }
 
-export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false } = {}) {
+export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false, parserVersion = 'investor-xlsx-v2' } = {}) {
   const sourceDigest = sha(bytes)
   if (source?.format !== 'xlsx') {
     if (!inspectOnly) return parseInvestorCsv(bytes, mapping)
@@ -197,12 +235,13 @@ export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false 
     if (headers.length > INVESTOR_CSV_LIMITS.columns || headers.some(v => v.length > INVESTOR_CSV_LIMITS.fieldChars) || Buffer.byteLength(JSON.stringify(headers)) > 60000) invalid('csv_invalid_header')
     return { sourceDigest, format: 'csv', headers, retained: false }
   }
+  if (!['investor-xlsx-v1', 'investor-xlsx-v2'].includes(parserVersion)) invalid('xlsx_parser_version_unsupported')
   const book = packageInfo(bytes)
   const inventory = { sourceDigest, format: 'xlsx', sheets: book.sheets, retained: false }
   if (source.sheet === undefined) { if (inspectOnly) return inventory; invalid('xlsx_sheet_selection_required') }
   const selected = book.sheets.find(s => s.name === source.sheet)
   if (!selected) invalid('xlsx_sheet_not_found')
-  const { rows, budget } = sheetRows(book, selected), headerIndex = rows.findIndex(row => row.number === source.headerRow)
+  const { rows, budget, hyperlinks } = sheetRows(book, selected, parserVersion === 'investor-xlsx-v2'), headerIndex = rows.findIndex(row => row.number === source.headerRow)
   if (headerIndex < 0) invalid('xlsx_header_row_missing')
   const table = rows.slice(headerIndex), width = table[0].values.length
   if (Buffer.byteLength(JSON.stringify(table[0].values)) > 60000) invalid('xlsx_header_size_limit')
@@ -217,7 +256,18 @@ export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false 
   const parsed = parseInvestorCsv(Buffer.from(csv), mapping)
   for (const row of [...parsed.accepted, ...parsed.rejected]) {
     row.row = table[row.row - 1].number
-    row.rowId = sha(`investor-xlsx-v1\n${sourceDigest}\n${selected.id}\n${selected.path}\n${row.row}`)
+    row.rowId = sha(`${parserVersion}\n${sourceDigest}\n${selected.id}\n${selected.path}\n${row.row}`)
+    const column = parsed.headers.indexOf(mapping.linkedinUrl), link = hyperlinks.get(cellName(column, row.row))
+    if (!row.reason && column >= 0 && link) {
+      const target = link.target.length <= 2048 && linkedinUrl(link.target)
+      if (!target) invalid('xlsx_hyperlink_target_unsupported', { cell: link.cell })
+      const slug = linkedinSlug(target), visible = row.linkedinUrl && linkedinUrl(row.linkedinUrl)
+      if (!slug) invalid('xlsx_hyperlink_target_unsupported', { cell: link.cell })
+      if (visible && linkedinSlug(visible) !== slug) invalid('xlsx_hyperlink_identity_conflict', { cell: link.cell })
+      row.linkedinUrl = target
+      row.identity = { status: 'candidate', linkedinRefHash: linkedinRefHash(slug) }
+      row.sourceHyperlink = { cell: link.cell, relationshipId: link.relationshipId, part: link.part, target }
+    }
   }
-  return { ...parsed, sourceDigest, parserVersion: 'investor-xlsx-v1', selectedSheet: selected }
+  return { ...parsed, sourceDigest, parserVersion, selectedSheet: selected }
 }
