@@ -33,7 +33,8 @@ import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
 import { createNeo4jProfileHandleStore, createProfileHandles } from './profile-handles.mjs'
 import { createNeo4jSafetyReportStore, createSafetyReports } from './safety-reports.mjs'
 import { createNeo4jBlockStore, createMemberBlocks } from './member-blocks.mjs'
-import { createProfilePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
+import { createProfilePhotoStore, createMemberAwarePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
+import { fetchLinkedinPhoto } from '../src/utils/private-import/profile-photo.mjs'
 import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
 import { isTestProfileId, testProfile, CLAIMED_PROFILE_FOR_OWNER, OWNER_FOR_CLAIMED_PROFILE, CLAIMED_MEMBER_PROFILES } from './test-profiles.mjs'
@@ -210,6 +211,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // The signed-in home's display choices (docs/member-home.md); UI preferences only.
     const homePreferences = typeof dependencies.createHomePreferenceStore === 'function' ? dependencies.createHomePreferenceStore(driver, 'neo4j') : undefined
     await homePreferences?.initialize()
+    // Member photo index (profile id -> owner + blob), refreshed by each public index build.
+    let memberPhotos = new Map()
     // Members' choice of who can see their connections (docs/connection-privacy.md).
     const connectionPrivacy = typeof dependencies.createConnectionPrivacyStore === 'function' ? dependencies.createConnectionPrivacyStore(driver, 'neo4j') : undefined
     await connectionPrivacy?.initialize()
@@ -478,8 +481,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       await audit(line)
     }
     if (typeof store.listPendingImportJobs !== 'function' || typeof store.listImportJobIds !== 'function') throw new Error('private_background_store_required')
+    // Profile photos from members' own exports (docs/profile-photos.md); kill
+    // switch UNLINKED_IMPORT_PHOTOS=off in runtime.env.
     worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend, coordination: coordinatorFor(sessionStore),
-      onError: importEvent })
+      onError: importEvent, ...(process.env.UNLINKED_IMPORT_PHOTOS === 'off' ? {} : { fetchProfilePhoto: fetchLinkedinPhoto }) })
     worker.start()
     // The notification mailer runs on its own timer; startup never waits for it.
     memberEmail?.start()
@@ -535,7 +540,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // sharing one LinkedIn address fold into one page; the copy already holding
     // the person's readable address survives (docs/profile-handles.md).
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true,
-      preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list, readConnectionPrivacy: connectionPrivacy ? () => connectionPrivacy.list() : undefined,
+      preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list, readConnectionPrivacy: connectionPrivacy ? () => connectionPrivacy.list() : undefined, onMemberPhotos: map => { memberPhotos = map },
       includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')
@@ -687,7 +692,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // Operator-published photos (publish-profile-photos.mjs), read-only here.
       // No member hide-photo choice exists yet; when it does, pass it as
       // `hidden` so it outranks the operator set (docs/profile-photos.md).
-      profilePhotos: createProfilePhotoStore({ directory: join(assetRoot, PHOTO_DIRECTORY) }),
+      // Members' own photos from their exports (owner-private assets) win for
+      // their own profile; the operator set covers everyone else.
+      profilePhotos: createMemberAwarePhotoStore({ operator: createProfilePhotoStore({ directory: join(assetRoot, PHOTO_DIRECTORY) }),
+        members: () => memberPhotos, readOwnerAsset: async (owner, sha256) => (await getBackend(owner)).readAsset(sha256) }),
       memberInvitations,
       memberConnections,
       notifications,

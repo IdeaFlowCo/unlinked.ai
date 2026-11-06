@@ -21,8 +21,10 @@ export const MAX_PHOTO_BYTES = 2 * 1024 * 1024
 export const MAX_PHOTOS = 20000
 export const MAX_HISTORY = 20
 // Public People profile ids that photos are keyed by: the legacy profile uuid.
-export const PHOTO_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-export const PHOTO_URL = /^\/people\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/photo\?v=[a-f0-9]{16}$/
+// Legacy profile uuids, plus members' own profiles (signup or import ids) for
+// photos from their own export (docs/profile-photos.md).
+export const PHOTO_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|member-(?:signup|import)-[a-f0-9]{64})$/
+export const PHOTO_URL = /^\/people\/(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|member-(?:signup|import)-[a-f0-9]{64})\/photo\?v=[a-f0-9]{16}$/
 export const PHOTO_TYPES = Object.freeze(['image/jpeg', 'image/png', 'image/webp'])
 const SHA256 = /^[a-f0-9]{64}$/
 
@@ -109,3 +111,29 @@ export function createProfilePhotoStore({ directory, hidden = () => false, refre
     },
   }
 }
+
+// Members' own photos from their LinkedIn export (unlinked-ff0p), layered over
+// the operator set: a member's photo wins for their own profile. `members()`
+// returns the latest map from the public index (profile id -> { owner, sha256,
+// type, bytes }); `readOwnerAsset(owner, sha256)` reads that owner's private
+// asset. Every read re-checks size, hash and magic bytes.
+export function createMemberAwarePhotoStore({ operator, members, readOwnerAsset, hidden = () => false }) {
+  if (!operator || ['refresh', 'urlFor', 'read'].some(key => typeof operator[key] !== 'function') || typeof members !== 'function' || typeof readOwnerAsset !== 'function' || typeof hidden !== 'function') throw new TypeError('profile_photo_configuration_invalid')
+  const memberEntry = id => {
+    if (typeof id !== 'string' || !PHOTO_ID.test(id) || hidden(id)) return null
+    const entry = members()?.get?.(id)
+    return entry && SHA256.test(entry.sha256) && PHOTO_TYPES.includes(entry.type) && Number.isSafeInteger(entry.bytes) && entry.bytes > 0 && entry.bytes <= MAX_PHOTO_BYTES ? entry : null
+  }
+  return {
+    refresh: () => operator.refresh(),
+    urlFor(id) { const entry = memberEntry(id); return entry ? photoUrl(id, entry) : operator.urlFor(id) },
+    async read(id) {
+      const entry = memberEntry(id)
+      if (!entry) return operator.read(id)
+      const bytes = await readOwnerAsset(entry.owner, entry.sha256)
+      if (!Buffer.isBuffer(bytes) || bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256 || sniffImageType(bytes) !== entry.type) throw new Error('profile_photo_blob_invalid')
+      return { bytes, type: entry.type, sha256: entry.sha256 }
+    },
+  }
+}
+
