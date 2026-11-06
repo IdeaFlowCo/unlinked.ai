@@ -34,3 +34,14 @@ test('natural second-degree request selects recorded two-hop while ordinary AI s
  assert.deepEqual(knownConnectionQuery('Engineer',1),{degree:1,query:'Engineer'})
  assert.throws(()=>knownConnectionQuery('Engineer',3),/input_invalid/)
 })
+
+
+test('recorded connections expose independent public status and legacy snapshot fallback', async () => {
+ const enriched={...snapshot,members:['c'],legacyMembers:['b'],profiles:snapshot.profiles.map(p=>p.id==='c'?{...p,about:'A detailed profile',enrichmentStatus:'enriched'}:p)}
+ const two=(await make({readPublishedSnapshot:async()=>enriched})({degree:2})).profiles[0]
+ assert.equal(two.presence,'member'); assert.equal(two.enrichmentStatus,'enriched'); assert.equal(two.detailLevel,'detailed')
+ const one=(await make({readPublishedSnapshot:async()=>enriched})()).profiles.find(p=>p.id==='b')
+ assert.equal(one.presence,'legacy'); assert.equal(one.enrichmentStatus,'unknown')
+ const old=(await make()({degree:2})).profiles[0]
+ assert.equal(old.presence,'unknown'); assert.equal(old.enrichmentStatus,'unknown'); assert.equal(old.detailLevel,'basic')
+})

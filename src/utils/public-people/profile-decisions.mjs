@@ -68,7 +68,7 @@ export function usableProfileDecisions(decisions, { limit = PROFILE_DECISION_LIM
   return usable.filter(value => value.kind !== 'merge' || !merged.has(value.survivorId))
 }
 
-export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISION_LIMIT } = {}) {
+export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISION_LIMIT, identityRefs } = {}) {
   const decisions = usableProfileDecisions(stored, { limit })
   if (!decisions.length) return snapshot
   const known = new Map(snapshot.profiles.map(profile => [profile.id, profile]))
@@ -86,10 +86,17 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
   // decision, and the suspended profile's own while it is still published.
   const suspensions = decisions.filter(value => value.kind === 'suspend')
   const suspendedRefs = new Set(suspensions.map(value => value.linkedinRefHash).filter(refHash))
-  const profileRef = profile => { const slug = parseLinkedinProfileUrl(profile?.linkedinUrl)?.slug; return slug ? linkedinRefHash(slug) : null }
-  for (const value of suspensions) { const ref = known.has(value.profileId) ? profileRef(known.get(point(value.profileId))) : null; if (ref) suspendedRefs.add(ref) }
+  const profileRefs = profile => {
+    if (!profile) return []
+    if (typeof identityRefs === 'function') return identityRefs(profile)
+    const slug = parseLinkedinProfileUrl(profile.linkedinUrl)?.slug
+    return slug ? [linkedinRefHash(slug)] : []
+  }
+  for (const value of suspensions) if (known.has(value.profileId)) {
+    for (const ref of [...profileRefs(known.get(value.profileId)), ...profileRefs(known.get(point(value.profileId)))]) if (refHash(ref)) suspendedRefs.add(ref)
+  }
   const suspended = new Set(suspensions.filter(value => known.has(value.profileId)).map(value => point(value.profileId)))
-  if (suspendedRefs.size) for (const profile of snapshot.profiles) if (suspendedRefs.has(profileRef(profile))) suspended.add(point(profile.id))
+  if (suspendedRefs.size) for (const profile of snapshot.profiles) if (profileRefs(profile).some(ref => suspendedRefs.has(ref))) suspended.add(point(profile.id))
   const removedByDecision = new Set(removals.values())
   const removed = new Set([...removedByDecision, ...suspended])
   // Unlisting follows merges to the profile shown; a removed profile has nothing to unlist.

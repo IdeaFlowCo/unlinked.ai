@@ -3,7 +3,7 @@ import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limit
 import { PUBLIC_UPLOAD_CONSENT } from '../private-import/consent.mjs'
 import { createScopedImportReader } from '../private-import/noos-adapter.mjs'
 import { publicLinkedinUrl } from './profile-links.mjs'
-import { applyProfileDecisions, usableProfileDecisions } from './profile-decisions.mjs'
+import { applyProfileDecisions } from './profile-decisions.mjs'
 import { linkedinIdentityMerges, linkedinRefHash } from './url-identity.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { CONNECTION_AUDIENCES, connectionPrivacyValue, isDefaultConnectionPrivacy } from './connection-privacy.mjs'
@@ -131,9 +131,18 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const refFor = profile => protectedIds.has(profile.id) ? profileLinkedinRef(profile) : profileLinkedinRef(curated.get(profile.id)) ?? profileLinkedinRef(profile)
     const identity = mergeSameLinkedin ? linkedinIdentityMerges({ profiles: snapshot.profiles, members: [...members], absorbers: [...verified], decisions: stored, refFor, prefer: preferSurvivor }) : null
     const decisions = identity ? [...identity.decisions, ...identity.merges] : stored
-    const limit = identity ? PUBLIC_INDEX_MAX_PROFILES : undefined
-    const renamed = new Set(usableProfileDecisions(decisions, limit === undefined ? {} : { limit }).filter(value => value.kind === 'rename').map(value => value.profileId))
-    return { result: applyProfileDecisions(snapshot, decisions, limit === undefined ? {} : { limit }), renamed }
+    const identityRefs = new Map(snapshot.profiles.map(profile => [profile.id, [...new Set([profileLinkedinRef(profile), profileLinkedinRef(curated.get(profile.id))].filter(Boolean))]]))
+    const options = { ...(identity ? { limit: PUBLIC_INDEX_MAX_PROFILES } : {}), identityRefs: profile => identityRefs.get(profile.id) ?? [] }
+    const initial = applyProfileDecisions(snapshot, decisions, options)
+    const finalMembers = new Set([...(initial.members ?? members), ...(initial.legacyMembers ?? [])])
+    const prepared = { ...snapshot, profiles: snapshot.profiles.map(profile => {
+      const row = curated.get(profile.id), target = initial.aliases?.[profile.id] ?? profile.id
+      if (!row || finalMembers.has(target)) return profile
+      const supplemental = {}
+      for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profile[key]) supplemental[key] = profile[key]
+      return { ...row, ...supplemental, id: profile.id }
+    }) }
+    return applyProfileDecisions(prepared, decisions, options)
   }
   const build = async () => {
     const legacy = await readLegacy()
@@ -332,27 +341,14 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const finalize = async snapshot => {
       for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
       for (const profile of snapshot.profiles) if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id)
-      const { result: decided, renamed } = await decide(snapshot, ownerMerges, members, verified, curated)
+      const decided = await decide(snapshot, ownerMerges, members, verified, curated)
       const enriched = new Set([...evidence].map(id => decided.aliases?.[id] ?? id))
       // Enrichment fills the profiles shown, after every merge and removal, and
       // never members' or historical members' own words. Bounded, so a large
       // publication cannot push the reader past its text budget.
       const own = new Set([...(decided.members ?? members), ...(decided.legacyMembers ?? [])])
-      const curatedBySurvivor = new Map()
-      for (const [id, row] of curated) {
-        const target = decided.aliases?.[id] ?? id
-        if (!curatedBySurvivor.has(target) || id === target) curatedBySurvivor.set(target, row)
-      }
-      const enrichedProfiles = decided.profiles.map(profile => {
-        const row = curatedBySurvivor.get(profile.id)
-        if (!row || own.has(profile.id)) return profile
-        const supplemental = {}
-        for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profile[key]) supplemental[key] = profile[key]
-        return { ...row, ...supplemental, id: profile.id, ...(renamed.has(profile.id) ? { name: profile.name } : {}) }
-      })
-      const curatedResult = { ...decided, profiles: enrichedProfiles }
       let budget = linkedinEnrichmentTextBudget
-      let result = byLinkedin.size ? { ...curatedResult, profiles: curatedResult.profiles.map(profile => {
+      let result = byLinkedin.size ? { ...decided, profiles: decided.profiles.map(profile => {
         if (own.has(profile.id) || budget <= 0) return profile
         const ref = profileLinkedinRef(profile), row = ref ? byLinkedin.get(ref) : undefined
         if (!row) return profile
@@ -363,7 +359,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
           budget -= Math.max(0, added)
         }
         return value
-      }) } : curatedResult
+      }) } : decided
       if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
       result = { ...result, profiles: result.profiles.map(profile => ({ ...profile, enrichmentStatus: enriched.has(profile.id) ? 'enriched' : 'not_recorded' })) }
       // Member photos for the photo route: resolved profile id -> owner + blob.

@@ -117,3 +117,24 @@ test('curated shadow names yield to explicit operator renames', async () => {
  assert.equal(result.profiles.find(p=>p.id==='shadow').name,'Corrected name')
  assert.equal(result.profiles.find(p=>p.id==='renamed').name,'Operator name')
 })
+
+
+test('suspension follows curated-only identity across otherwise distinct profiles', async () => {
+ const url='https://www.linkedin.com/in/suspended-person'
+ for (const suspended of ['first','second']) {
+  const profiles=[person('first'),person('second',{linkedinUrl:url})]
+  const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>[],readDecisions:async()=>[{id:'suspend',kind:'suspend',profileId:suspended}],publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('first',{linkedinUrl:url})],connections:[]})}})
+  const result=await read()
+  assert.deepEqual(result.profiles,[]); assert.ok(result.suspended.includes('first')); assert.ok(result.suspended.includes('second'))
+ }
+})
+
+test('curated replacement precedes shadow merge filling and preserves explicit decisions', async () => {
+ const profiles=[person('survivor',{name:'Original',headline:'Old'}),person('merged',{about:'Merged about',skills:['Merged skill']})]
+ let decisions=[{id:'merge',kind:'merge',profileId:'merged',survivorId:'survivor'},{id:'rename',kind:'rename',profileId:'survivor',name:'Renamed'}], reads=0
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>[],readDecisions:async()=>{reads++;return decisions},publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('survivor',{name:'Curated',headline:'Curated headline'})],connections:[]})}})
+ let result=await read(), survivor=result.profiles[0]
+ assert.equal(reads,1); assert.equal(survivor.name,'Renamed'); assert.equal(survivor.headline,'Curated headline'); assert.equal(survivor.about,'Merged about'); assert.deepEqual(survivor.skills,['Merged skill'])
+ decisions=[{id:'merge',kind:'merge',profileId:'merged',survivorId:'survivor',fill:false}]
+ survivor=(await read()).profiles[0]; assert.equal(survivor.about,undefined); assert.deepEqual(survivor.skills,[]); assert.equal(survivor.name,'Curated')
+})
