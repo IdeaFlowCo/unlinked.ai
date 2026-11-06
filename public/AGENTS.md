@@ -52,7 +52,7 @@ An explicit account grant authorizes current/future owner imports, same-owner sa
 Never derive owner authority from typed email, archive fields, profile IDs or a URL.
 The backend binds signed Ideaflow issuer/subject to the owner; recovered-profile confirmation uses only server-held signed email evidence plus CSRF and can be revoked.
 It enforces owner/publication/grant state on each call.
-Raw archives, recovered original files, contact emails and phone numbers are excluded. OpenAI receives bounded relevant professional details.
+Raw LinkedIn archives, recovered original files, and archive contact emails and phone numbers are excluded from network search. OpenAI receives bounded relevant professional details. Private investor CSV access is described below.
 Everyone browsing is public at GET /api/people?q=&mode=&cursor= and GET /api/people/:id. The default mode `best` matches every word in any form and order ("investors" finds "investor"), and returns people who match some of the words when nobody has them all; the response's `match` is `all`, `some` or `none`. `mode=exact` matches the typed phrase as written. A person with an operator-published profile photo carries `photo`, a same-origin versioned URL of GET /people/:id/photo (JPEG, PNG or WebP; 404 when there is none).
 Everyone AI retrieval considers all public profiles, then ranks at most200 matching professional candidates. No archive is required.
 Old single-tool grants retain their original narrower scope.

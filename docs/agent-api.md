@@ -250,8 +250,10 @@ This vocabulary may be extended, never renamed.
 Hard fences, identical on both surfaces and strictly narrower than the
 human-facing profile card (card-only opt-ins such as phone never appear here):
 
-- **Never returned:** contact email/phone, raw archives/original files,
-  credential or signed URLs, other owners' private imports.
+- **Never returned by network and profile reads:** archive contact email/phone,
+  raw LinkedIn archives or recovered original files, credential or signed URLs,
+  and other owners' private imports. The separate private-notes permission permits
+  access to the owner's investor CSV source and fields; see [the CSV workflow](investor-csv.md).
 - Every entry/result is labeled `visibility: "public"` (published People
   index / recorded public paths) or `"owner_private"` (the grant owner's own
   imported observations, visible only to that grant).
