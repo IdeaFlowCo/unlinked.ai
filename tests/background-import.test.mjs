@@ -635,3 +635,46 @@ test('the import form saves who can see your connections before staging; Setting
   assert.deepEqual(await privacy.get(owner), { audience: 'only_me', scope: 'all' })
   assert.match(await page('/settings?privacy=saved'), /Saved\.[\s\S]*Only you can see your connections\./)
 })
+
+test('worker reports a repeatedly failing job with a fixed reason, throttled, and flags it stuck once', async () => {
+  const events = []
+  let clock = 1000
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-1', owner: { ownerId: 'owner-a', userId: 'a' } }],
+    getBackend: async () => { throw new Error('backend_unavailable') }, onError: event => { events.push(event) }, now: () => clock })
+  for (let i = 0; i < 9; i++) { await worker.tick(); clock += 2000 }
+  await worker.stop()
+  const retries = events.filter(e => e.event === 'import_worker_retry')
+  assert.deepEqual(retries.map(e => e.attempt), [1, 2, 4, 8])
+  assert.ok(retries.every(e => e.reason === 'backend_unavailable' && e.importId === 'job-1'))
+  assert.equal(retries[3].failingForMs, 14000)
+  const stuck = events.filter(e => e.event === 'import_worker_stuck')
+  assert.equal(stuck.length, 1); assert.equal(stuck[0].attempt, 5)
+})
+
+test('worker never reports a free-text error message', async () => {
+  const events = []
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-1', owner: { ownerId: 'owner-a', userId: 'a' } }],
+    getBackend: async () => { throw new Error('Jane Doe jane@example.com failed') }, onError: event => { events.push(event) } })
+  await worker.tick(); await worker.stop()
+  assert.equal(events[0].reason, 'unknown')
+  assert.ok(!JSON.stringify(events).includes('jane'))
+})
+
+test('worker throttles discovery failures and reports a finished job with counts only', async t => {
+  const events = []
+  const failing = createArchiveWorker({ listPendingImports: async () => { throw new Error('noos_unreachable') }, getBackend: async () => ({}), onError: event => { events.push(event) } })
+  for (let i = 0; i < 5; i++) await failing.tick()
+  await failing.stop()
+  assert.deepEqual(events.filter(e => e.event === 'import_worker_discovery_failed').map(e => [e.attempt, e.reason]), [[1, 'noos_unreachable'], [2, 'noos_unreachable'], [4, 'noos_unreachable']])
+
+  const f = await fixture(t), a = f.backend('owner-a'), bytes = await fullArchive(3)
+  const job = await stageArchive({ ownerId: 'owner-a', filename: 'small.zip', bytes, adapter: a.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const done = []
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: job.id, owner: { ownerId: 'owner-a', userId: 'a' } }], getBackend: async () => a, onError: event => { done.push(event) } })
+  await worker.tick(); await worker.tick(); await worker.stop()
+  const finished = done.filter(e => e.event === 'import_job_finished')
+  assert.equal(finished.length, 1)
+  assert.equal(finished[0].status, 'indexed'); assert.equal(finished[0].indexed, 5)
+  assert.ok(Number.isInteger(finished[0].durationMs))
+  assert.deepEqual(Object.keys(finished[0]).sort(), ['accepted', 'durationMs', 'event', 'failedFiles', 'importId', 'indexed', 'phase', 'rejected', 'sources', 'status'])
+})

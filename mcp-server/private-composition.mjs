@@ -38,7 +38,7 @@ import { createSelfClaims } from './self-claims.mjs'
 import { isTestProfileId, testProfile, CLAIMED_PROFILE_FOR_OWNER, OWNER_FOR_CLAIMED_PROFILE, CLAIMED_MEMBER_PROFILES } from './test-profiles.mjs'
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { lstat, mkdir, open, readFile, readdir, rm } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
@@ -262,7 +262,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await safetyReportStore?.initialize()
     const safetyReports = safetyReportStore ? createSafetyReports({ store: safetyReportStore, origin: base.origin,
       ...(emailSettings?.enabled ? { transport: emailTransportFactory({ apiKey: emailSettings.apiKey }), from: memberEmail?.from ?? null } : {}),
-      onError: event => audit({ ...event, at: new Date().toISOString() }) }) : undefined
+      onError: importEvent }) : undefined
     const sessionStore = typeof dependencies.createSessionStore === 'function' ? dependencies.createSessionStore(driver, 'neo4j') : null
     await sessionStore?.initialize()
     // Member blocks (docs/report-and-block.md): refuse connection requests either way.
@@ -444,18 +444,37 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       await mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
       const state = await lstat(directory)
       if (!state.isDirectory() || state.isSymbolicLink() || (state.mode & 0o077) || state.uid !== process.getuid?.()) throw new Error('private_audit_directory_required')
-      const descriptor = await open(join(directory, 'browser-events.jsonl'), constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
+      let descriptor = await open(join(directory, 'browser-events.jsonl'), constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
       try {
         const stat = await descriptor.stat()
         if (!stat.isFile() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_audit_file_required')
         const line = JSON.stringify(event) + '\n'
-        if (stat.size + Buffer.byteLength(line) > 8 * 1024 * 1024) throw new Error('private_audit_capacity')
+        if (Buffer.byteLength(line) > 64 * 1024) throw new Error('private_audit_event_too_large')
+        if (stat.size + Buffer.byteLength(line) > 8 * 1024 * 1024) {
+          // Full: keep one previous file (bounded to 2 x 8 MiB) instead of
+          // dropping every later event, and say so in the container log. The
+          // inode check stops a concurrent writer rotating the fresh file away.
+          await descriptor.close(); descriptor = null
+          const live = join(directory, 'browser-events.jsonl'), current = await lstat(live).catch(() => null)
+          if (current && current.ino === stat.ino) {
+            await rename(live, join(directory, 'browser-events.1.jsonl'))
+            console.error(JSON.stringify({ event: 'private_audit_rotated', at: new Date().toISOString() }))
+          }
+          return audit(event)
+        }
         await descriptor.write(line); await descriptor.sync()
-      } finally { await descriptor.close() }
+      } finally { await descriptor?.close() }
+    }
+    // Import worker events are numeric/fixed-code only (no names, emails or
+    // rows), so they also go to the container log for operators.
+    const importEvent = async event => {
+      const line = { ...event, at: new Date().toISOString() }
+      console.log(JSON.stringify({ unlinkedImportWorker: line }))
+      await audit(line)
     }
     if (typeof store.listPendingImportJobs !== 'function' || typeof store.listImportJobIds !== 'function') throw new Error('private_background_store_required')
     worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend, coordination: coordinatorFor(sessionStore),
-      onError: event => audit({ ...event, at: new Date().toISOString() }) })
+      onError: importEvent })
     worker.start()
     // The notification mailer runs on its own timer; startup never waits for it.
     memberEmail?.start()

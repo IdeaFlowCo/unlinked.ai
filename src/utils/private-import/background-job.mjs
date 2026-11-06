@@ -7,6 +7,10 @@ const terminal = job => ['indexed', 'partial', 'failed'].includes(job.status)
 const ownCategories = new Set(['profile', 'positions', 'education', 'skills'])
 const counts = () => ({ accepted: 0, rejected: 0, skippedFiles: 0, failedFiles: 0, indexed: 0 })
 const LEASE_MS = 180000
+// Only fixed lower-case codes leave the worker; never messages with data in them.
+const safeCode = value => typeof value === 'string' && /^[a-z0-9_]{1,64}$/.test(value) ? value : 'unknown'
+const jobNumbers = job => ({ accepted: job.counts?.accepted ?? 0, rejected: job.counts?.rejected ?? 0, indexed: job.counts?.indexed ?? 0,
+  failedFiles: job.counts?.failedFiles ?? 0, sources: Array.isArray(job.sources) ? job.sources.length : 0 })
 
 // The original private asset and uploaded receipt must be durable before the
 // browser receives a redirect. A browser disconnect never owns the worker.
@@ -104,10 +108,13 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
 
 // One process-wide worker; Noos discovery + CAS leases make restart and a
 // second process safe. There is no separate people database or fixture fallback.
-export function createArchiveWorker({ listPendingImports, getBackend, coordination, intervalMs = 2000, onError = () => {}, now = Date.now }) {
+export function createArchiveWorker({ listPendingImports, getBackend, coordination, intervalMs = 2000, slowAfterMs = 10 * 60 * 1000, onError = () => {}, now = Date.now }) {
   if (typeof listPendingImports !== 'function' || typeof getBackend !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 100 || intervalMs > 60000) throw new Error('private_worker_configuration_required')
-  let closed = false, discovery = null, timer, active = 0
+  let closed = false, discovery = null, timer, active = 0, discoveryFailures = 0
   const scheduled = new Map(), ownerTails = new Map(), waiters = []
+  // Per-job failure history, so a job that keeps failing is visible (reason,
+  // attempt, first failure) instead of retrying silently every interval.
+  const failures = new Map(), finished = new Set()
   const notify = async event => { try { await onError(event) } catch {} }
   const slot = () => new Promise(resolve => {
     const enter = () => { active++; resolve(() => { active--; waiters.shift()?.() }) }
@@ -124,12 +131,36 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
         if (closed) return
         const release = coordination ? coordination.tryAcquireShared('owner:' + ownerId) : () => {}
         if (!release) return
+        const startedAt = now()
+        // A run still going after slowAfterMs is reported once (long delay, no error).
+        const slow = setTimeout(() => { void notify({ event: 'import_job_running_long', importId: item.id, elapsedMs: now() - startedAt }) }, slowAfterMs)
+        slow.unref?.()
         try {
           const backend = await getBackend(item.owner)
-          await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
-        } finally { release() }
+          const result = await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
+          const history = failures.get(key)
+          failures.delete(key)
+          if (result && terminal(result) && !finished.has(key)) {
+            if (finished.size > 5000) finished.clear()
+            finished.add(key)
+            await notify({ event: 'import_job_finished', importId: item.id, status: result.status, phase: safeCode(result.phase),
+              durationMs: now() - startedAt, ...jobNumbers(result), ...(history ? { attemptsBeforeSuccess: history.attempt } : {}) })
+          } else if (result && !terminal(result) && result.backgroundVersion !== 'profile-first-v1') {
+            // listPendingImports keeps returning a job this worker never runs.
+            await notify({ event: 'import_job_not_runnable', importId: item.id, reason: 'background_version_unsupported' })
+          }
+        } finally { clearTimeout(slow); release() }
       } finally { releaseSlot() }
-    }).catch(() => notify({ event: 'import_worker_retry', importId: item.id }))
+    }).catch(error => {
+      if (closed && error?.message === 'private_worker_stopped') return
+      const previous = failures.get(key)
+      const attempt = (previous?.attempt ?? 0) + 1, firstFailedAt = previous?.firstFailedAt ?? now()
+      failures.set(key, { attempt, firstFailedAt })
+      // Report attempts 1, 2, 4, 8, ... so a poison job cannot fill the
+      // bounded audit file; flag it as stuck once, at the fifth attempt.
+      if ((attempt & (attempt - 1)) === 0) return notify({ event: 'import_worker_retry', importId: item.id, reason: safeCode(error?.message), attempt, failingForMs: now() - firstFailedAt })
+      if (attempt === 5) return notify({ event: 'import_worker_stuck', importId: item.id, reason: safeCode(error?.message), attempt, failingForMs: now() - firstFailedAt })
+    })
     const settled = work.finally(() => { scheduled.delete(key); if (ownerTails.get(ownerId) === settled) ownerTails.delete(ownerId) })
     scheduled.set(key, settled)
     ownerTails.set(ownerId, settled)
@@ -142,7 +173,12 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
       const pending = await listPendingImports()
       if (!Array.isArray(pending) || pending.length > 200) throw new Error('private_worker_discovery_limit')
       return pending.map(schedule)
-    })().catch(async () => { await notify({ event: 'import_worker_discovery_failed' }); return [] }).finally(() => { discovery = null })
+    })().then(jobs => { discoveryFailures = 0; return jobs }, async error => {
+      discoveryFailures++
+      // Same 1, 2, 4, 8, ... throttle: a lasting outage stays visible without flooding.
+      if ((discoveryFailures & (discoveryFailures - 1)) === 0) await notify({ event: 'import_worker_discovery_failed', reason: safeCode(error?.message), attempt: discoveryFailures })
+      return []
+    }).finally(() => { discovery = null })
     return discovery.then(jobs => Promise.all(jobs))
   }
   return { tick, start() { if (!timer && !closed) { timer = setInterval(tick, intervalMs); timer.unref?.(); void tick() } },

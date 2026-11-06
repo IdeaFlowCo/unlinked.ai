@@ -56,3 +56,24 @@ grant authority or block a valid callback.
 
 Parser `linkedin-archive-v7` added numbered Connections parts and headerless continuation parts. Receipts staged by v6 still run after an upgrade; they keep `parserVersion` and record `parsedWith`.
 
+
+## Worker observability
+
+The import worker reports to the private audit file (`audit/browser-events.jsonl`) and, as one JSON line
+prefixed `unlinkedImportWorker`, to the runtime container log. Events carry only the opaque import id,
+fixed lower-case codes and numbers; never names, emails, filenames or rows.
+
+| Event | When |
+|---|---|
+| `import_job_finished` | A run ends terminal: `status`, `phase`, `durationMs`, `accepted`, `rejected`, `indexed`, `failedFiles`, `sources` (and `attemptsBeforeSuccess` after failures). Once per job per process. |
+| `import_job_running_long` | A single run is still going after 10 minutes (`elapsedMs`). A long delay with no error. |
+| `import_worker_retry` | A run threw: `reason` (fixed code or `unknown`), `attempt`, `failingForMs`. Reported at attempts 1, 2, 4, 8, ... |
+| `import_worker_stuck` | The same job failed a fifth time in a row. Reported once. |
+| `import_job_not_runnable` | Discovery keeps returning a job this worker never runs (unsupported `backgroundVersion`). |
+| `import_worker_discovery_failed` | Listing pending jobs failed: `reason`, `attempt`, same 1, 2, 4, 8 throttle. |
+
+When the audit file would pass 8 MiB it is renamed to `browser-events.1.jsonl` (one previous file kept)
+and `private_audit_rotated` is logged; before, every later event was silently dropped.
+
+Operator triage for a slow import: `docker logs <runtime> 2>&1 | grep unlinkedImportWorker | grep <import id>`.
+No `import_job_finished`, no retry and no `running_long` means the worker never picked the job up.
