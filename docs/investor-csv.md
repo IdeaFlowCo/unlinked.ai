@@ -116,8 +116,9 @@ hold the source digest, mapping, list target, progress and one receipt per sourc
 row. XLSX jobs also retain whole-workbook disclosure acknowledgement and selected-sheet metadata. Notes include the import id and row/field/part; membership receipts keep the
 entity/link/note ids. Different imports retain independent note contributions.
 No existing profile fields or manual notes are overwritten. A replay of identical
-bytes, mapping, list name and list target reuses the import and never reapplies completed
-rows after the owner changes/deletes them.
+bytes, mapping, list name and list target reuses the import; XLSX replay also
+requires the same selected sheet, header row and parser version. A replay never
+reapplies completed rows after the owner changes/deletes them.
 
 The private import catalog is separate from archive discovery, background workers,
 publication and connection indexes. Staging publishes the job and catalog entry in
