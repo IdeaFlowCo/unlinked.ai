@@ -101,3 +101,20 @@ the LinkedIn-keyed datasets, filling empty fields only; see
 
 On 2026-11-06 the People index was unavailable for about 7 minutes after a restart (People pages returned 503 from 10:16:02Z to 10:23:13Z). The startup warm-up gives up after 8 s and the build continues in the background, so the claim above that the first request never pays the rebuild holds only once a build exists. The main cold cost is re-reading every import's assertions: the detail cache lives in memory. `createMemberPublicIndex` now prefetches missing import details four imports at a time (`IMPORT_PREFETCH`) before its sequential loop. The loop still re-validates every source and is the only thing that uses the results, so a source that changed is still rejected. On a synthetic test this made the cold build about 2.8× faster. Two smaller fixes: overlay lookups use an id → position map, and edge de-duplication keys use string concatenation instead of `JSON.stringify`. Still open: the per-revision compile and per-build loops run on the main thread and stall every request while they run. Moving them to a worker thread is the next step.
 
+
+## No-change rebuilds (2026-11-06)
+
+`createMemberPublicIndex` rebuilds on its freshness interval: every 45 s through the warm keeper, and whenever a read comes after the fresh window. A rebuild used to reassemble the whole snapshot even when nothing had changed, which allocated about 120 MB per rebuild at the index caps.
+
+Now a due rebuild first computes a fingerprint of everything the build reads:
+
+- the legacy and enrichment revisions;
+- the discovered imports, plus each import's live resource and legacy link;
+- signups and connection-privacy choices, including how unresolved owners resolve to legacy profiles;
+- invites, members, legacy members and decisions.
+
+If this fingerprint equals the one read before the kept build, the kept snapshot is reused as the same object, with nothing assembled. The fingerprint is always read before the build it describes. A change that races a rebuild can therefore cause one extra rebuild, never a stale reuse.
+
+A changed source still rebuilds, and the build reuses the legacy snapshot and import list the fingerprint read, so its read count is the same as before. The first due rebuild after a cold start still builds, because there is no fingerprint to compare yet. `invalidate()` drops the kept build, so a connection-privacy change still forces a full rebuild on the next read. A fingerprint read that fails falls back to a full build, which fails closed as before.
+
+The fingerprint leaves out one input: `preferSurvivor`'s live handle state. It does not change the revision, and readers already pin compiled indexes to the revision.
