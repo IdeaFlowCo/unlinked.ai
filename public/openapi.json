@@ -2643,7 +2643,7 @@
     "/api/agent/v1/private/investor-imports/status": {
       "get": {
         "operationId": "unlinked_get_investor_import",
-        "summary": "Read an investor import’s status and private original row fields with outcome receipts. Page with nextOffset until null, at most 20 rows per call. A partial import has rejected rows; inspect reasons. This reads the original outcome, not a guarantee that the owner has not subsequently edited/deleted graph records. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "Read an investor import’s status and private original row fields with outcome receipts. Page with nextOffset until null, at most 20 rows per call, fewer when encoded fields are large. Oversized individual rows explicitly report sourceRecovery instead of inline fields. To recover the exact original CSV, set sourceOffset:0, concatenate source.text chunks, and follow source.nextOffset until null (offsets count JavaScript UTF-16 code units; each chunk is at most 32768). A partial import has rejected rows; inspect reasons. This reads the original outcome, not a guarantee that the owner has not subsequently edited/deleted graph records. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
         "security": [
           {
             "accountGrant": []
@@ -2683,6 +2683,17 @@
               "minimum": 1,
               "maximum": 20
             }
+          },
+          {
+            "name": "sourceOffset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 524288
+            },
+            "description": "Retrieve the original CSV in bounded chunks; offsets are UTF-16 code units. Follow source.nextOffset."
           }
         ],
         "responses": {

@@ -50,13 +50,16 @@ export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBacken
     if (!(request.headers['content-type'] ?? '').startsWith('application/json')) return fail(400, 'JSON required')
     try {
     const chunks = []; let length = 0
-    for await (const chunk of request) { length += chunk.length; if (length > 1024*1024) return fail(413, 'Request too large'); chunks.push(chunk) }
+    for await (const chunk of request) { length += chunk.length; if (length > 4*1024*1024) return fail(413, 'Request too large'); chunks.push(chunk) }
     const bytes = Buffer.concat(chunks)
     const identity = verify(request.headers.authorization?.replace(/^Bearer /, '') ?? '', bytes)
     if (!identity) { requestDiagnostic().denied('not_linked'); return fail(401, 'Invalid connector assertion') }
     requestDiagnostic().gateway(identity)
     let body
     try { body = JSON.parse(bytes.toString('utf8')) } catch { return fail(400, 'Invalid JSON') }
+    // CSV source bytes can expand sixfold in JSON. Keep the larger envelope
+    // exclusive to the separately consented import tool; its source cap remains.
+    if (length > 1024*1024 && !(body?.method === 'tools/call' && body.params?.name === 'unlinked_stage_investor_csv' && identity.scope.split(' ').includes('unlinked:private_notes'))) return fail(413, 'Request too large')
     const owner = await resolveOwner({ issuer: identity.identity_issuer, subject: identity.sub })
     if (!owner) { requestDiagnostic().denied('account_link_required'); return fail(409, 'account_link_required') }
     const publicEnabled = typeof readPublishedSnapshot === 'function'

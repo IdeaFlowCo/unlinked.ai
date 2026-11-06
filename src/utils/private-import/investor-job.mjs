@@ -33,9 +33,13 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       throw error
     }
   }
-  const rowsFor = async (backend, job) => {
+  const sourceFor = async (backend, job) => {
     const bytes = await backend.readAsset(job.sourceDigest)
     if (sha(bytes) !== job.sourceDigest) throw fail('upstream_unavailable', 'The private CSV source could not be verified.')
+    return bytes
+  }
+  const rowsFor = async (backend, job) => {
+    const bytes = await sourceFor(backend, job)
     const parsed = parseInvestorCsv(bytes, job.mapping)
     return [...parsed.accepted, ...parsed.rejected].sort((a, b) => a.row - b.row)
   }
@@ -80,17 +84,32 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
         separatePeople: parsed.accepted.filter(row => !row.identity.linkedinRefHash).length },
         policy: 'Private only. Exact LinkedIn references may match; names and emails never merge. No connections or public profiles are created. Resume to commit.' }
     },
-    async status(grant, { importId, offset = 0, limit = 20 }, signal) {
+    async status(grant, { importId, offset = 0, limit = 20, sourceOffset }, signal) {
       const backend = await backendFor(grant), job = await read(backend, grant.ownerId, importId)
+      if (sourceOffset !== undefined) {
+        const csv = (await sourceFor(backend, job)).toString('utf8')
+        if (!Number.isSafeInteger(sourceOffset) || sourceOffset < 0 || sourceOffset > csv.length) throw fail('invalid_input', 'Source offset exceeds this import.')
+        signal?.throwIfAborted()
+        const text = csv.slice(sourceOffset, sourceOffset + 32768), next = sourceOffset + text.length
+        return { ...summary(job), source: { text, offset: sourceOffset, nextOffset: next < csv.length ? next : null, offsetUnit: 'utf16_code_units' } }
+      }
       if (offset > job.total) throw fail('invalid_input', 'Offset exceeds this import.')
       const rows = await rowsFor(backend, job), receipts = []
+      let receiptBytes = 0
       for (let i = offset; i < Math.min(offset + limit, job.total); i++) {
         signal?.throwIfAborted()
         const resource = await backend.readResource('import', investorReceiptId(grant.ownerId, importId, i))
         const receipt = resource ? await read(backend, grant.ownerId, investorReceiptId(grant.ownerId, importId, i), `${KIND}_row`) : null
-        receipts.push({ ordinal: i, sourceRow: rows[i].row, rowId: rows[i].rowId, fields: rows[i].fields ?? null,
+        let entry = { ordinal: i, sourceRow: rows[i].row, rowId: rows[i].rowId, fields: rows[i].fields ?? null,
           ...(rows[i].sourceValues ? { sourceValues: rows[i].sourceValues } : {}),
-          result: receipt?.result ?? { status: rows[i].reason ? 'rejected' : 'pending', ...(rows[i].reason ? { reason: rows[i].reason } : {}) } })
+          result: receipt?.result ?? { status: rows[i].reason ? 'rejected' : 'pending', ...(rows[i].reason ? { reason: rows[i].reason } : {}) } }
+        if (Buffer.byteLength(JSON.stringify(entry)) > 512 * 1024) {
+          const { fields, sourceValues, ...metadata } = entry
+          entry = { ...metadata, fields: null, sourceRecovery: { reason: 'encoded_row_limit', sourceOffset: 0 } }
+        }
+        const size = Buffer.byteLength(JSON.stringify(entry))
+        if (receipts.length && receiptBytes + size > 512 * 1024) break
+        receipts.push(entry); receiptBytes += size
       }
       return { ...summary(job), receipts, nextOffset: offset + receipts.length < job.total ? offset + receipts.length : null }
     },

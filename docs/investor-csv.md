@@ -71,7 +71,8 @@ not the current existence of a graph record.
 
 ## Bounds and recovery
 
-512 KiB of UTF-8 CSV per part, within a 1 MiB HTTP request. Split larger uploads at
+512 KiB of UTF-8 CSV per part. Investor upload envelopes allow 4 MiB to accommodate
+JSON escaping; unrelated shared-connector calls retain their 1 MiB bound. Split larger uploads at
 complete CSV records, repeat headers and pass the first part’s `listId` on later
 parts. Exact identities deduplicate across parts; unnamed identities stay separate.
 The graph retains its existing 5,000 entities and 5,000 links per owner, 200 notes
@@ -79,6 +80,14 @@ per entity, and 4,000 characters per note. Long source comments are split into
 attributed notes. Exceeding a graph quota stops at the current durable row and
 returns an error; it never silently drops the rest or claims completion. The
 private import catalog is bounded at 500 imports. No paid enrichment runs.
+
+Status pages also have an encoded byte budget, so they can contain fewer than the
+requested rows. Always follow `nextOffset`. An individual row too large to return
+inline has `fields:null` and explicit `sourceRecovery` metadata. Retrieve the exact
+original CSV through the same status tool with `sourceOffset:0`, concatenate
+`source.text`, and follow `source.nextOffset` until null. Each chunk is at most
+32,768 JavaScript UTF-16 code units; offsets use the same unit. Recovery verifies
+the stored source digest and requires the same live owner/private permission.
 
 Each batch acquires a persisted compare-and-set lease, renews before graph writes,
 uses idempotent graph keys and saves a row receipt before advancing its checkpoint.
