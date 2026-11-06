@@ -198,7 +198,7 @@ test('the search bar QR button opens a scan sheet: Scan for visitors, My card fi
   assert.match(html, /<a role="tab" id="tab-scan" href="\/scan\?tab=scan" aria-controls="panel-scan" aria-selected="true">Scan<\/a>/)
   assert.match(html, /<a role="tab" id="tab-card" href="\/scan\?tab=card" aria-controls="panel-card" aria-selected="false" tabindex="-1">My card<\/a>/)
   for (const id of ['camera', 'start', 'stop', 'confirm', 'confirm-label', 'confirm-open', 'confirm-cancel', 'paste', 'card-url', 'status']) assert.match(html, new RegExp(`id="${id}"`), id)
-  assert.match(html, /src="\/public-assets\/jsqr\.js"/); assert.match(html, /classifyMeetCode/)
+  assert.match(html, /src="\/public-assets\/jsqr\.js\?v=[a-f0-9]{16}" defer/); assert.match(html, /classifyMeetCode/)
   assert.match(html, /href="\/login\?next=%2Fcard">Sign in to show your card/)
   assert.doesNotMatch(html, /name="csrf"|action="\/logout"|aria-label="QR code opening/)
   assert.match((await (await fetch(`${signed.endpoint}/scan?tab=card`)).text()), /id="panel-scan" aria-labelledby="tab-scan" hidden>/)
