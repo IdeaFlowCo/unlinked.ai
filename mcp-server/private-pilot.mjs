@@ -17,7 +17,7 @@ import { createAccountToolService } from './account-tools.mjs'
 import { createOAuthServer } from './oauth-server.mjs'
 import { createPrivateContext } from './private-context.mjs'
 import { warmPublicPeopleIndex } from './public-people-warmup.mjs'
-import { createPublicIndexHost, installPublicIndexHost } from '../src/utils/public-people/index-host.mjs'
+import { activePublicIndexHost, createPublicIndexHost, installPublicIndexHost } from '../src/utils/public-people/index-host.mjs'
 
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
@@ -99,5 +99,5 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   // Best effort: publication failure leaves account routes available.
   await warmPublicPeopleIndex({ readPublishedSnapshot })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve) })
-  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { health?.stop(); if (indexHost) { installPublicIndexHost(null); void indexHost.close() } return new Promise(resolve => server.close(resolve)) } }
+  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { health?.stop(); if (indexHost) { if (activePublicIndexHost() === indexHost) installPublicIndexHost(null); void indexHost.close() } return new Promise(resolve => server.close(resolve)) } }
 }

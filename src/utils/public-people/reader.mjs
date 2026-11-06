@@ -351,6 +351,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     const { signal, ...rest } = request
     const { host, sourceKey, cacheKey } = data.remote
     const call = host.call(sourceKey, cacheKey, { pageSize, limits: { maxProfiles, maxConnections, maxTextBytes } }, method, rest)
+    // An abort can settle this call first; a later rejection must not go unhandled.
+    call.catch(() => {})
     let result
     try {
       result = await (signal ? new Promise((resolve, reject) => {

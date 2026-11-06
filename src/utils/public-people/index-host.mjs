@@ -45,7 +45,7 @@ export const installPublicIndexHost = host => { active = host ?? null; return ac
 
 export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs', import.meta.url), resourceLimits, chunkSize = CHUNK, callTimeoutMs = CALL_TIMEOUT_MS, installTimeoutMs = INSTALL_TIMEOUT_MS, backoffMs = RESPAWN_BACKOFF_MS, onDisabled = () => process.stderr.write('unlinked_public_index_worker_disabled\n'), createWorker = (url, options) => new Worker(url, options), now = Date.now } = {}) {
   if (!Number.isSafeInteger(chunkSize) || chunkSize < 1 || !Number.isSafeInteger(callTimeoutMs) || callTimeoutMs < 1 || !Number.isSafeInteger(installTimeoutMs) || installTimeoutMs < 1 || !Number.isSafeInteger(backoffMs) || backoffMs < 0) throw new TypeError('public_index_host_configuration_invalid')
-  let worker = null, generation = 0, nextId = 1, crashedAt = -Infinity, closed = false, disabled = false, failuresWithoutInstall = 0
+  let worker = null, generation = 0, nextId = 1, crashedAt = -Infinity, previousCrashAt = -Infinity, closed = false, disabled = false, failuresWithoutInstall = 0
   const pending = new Map() // id -> { resolve, reject, timer }
   const installed = new Map() // sourceKey -> Set(cacheKey) believed installed in the current worker
   const installing = new Map() // `${sourceKey}\0${cacheKey}` -> Promise
@@ -56,13 +56,20 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
   // Referenced only while a reply is awaited: an idle index never keeps the
   // process alive, and a pending call always does.
   const settle = () => { if (pending.size === 0) worker?.unref?.() }
+  const noteFailure = () => {
+    previousCrashAt = crashedAt; crashedAt = now()
+    if (++failuresWithoutInstall >= MAX_FAILURES_WITHOUT_INSTALL && stats.installs === 0 && !disabled) { disabled = true; try { onDisabled() } catch {} }
+  }
   const failAll = error => { for (const [id, entry] of pending) { clearTimeout(entry.timer); entry.reject(error); pending.delete(id) } }
   const spawn = () => {
     if (closed) throw unavailable()
     if (worker) return worker
-    if (now() - crashedAt < backoffMs) throw unavailable()
+    // A single loss restarts at once; back off only when losses repeat.
+    if (now() - crashedAt < backoffMs && crashedAt - previousCrashAt < 30000) throw unavailable()
     const mine = ++generation
-    const created = createWorker(workerUrl, { ...(resourceLimits ? { resourceLimits } : {}) })
+    let created
+    try { created = createWorker(workerUrl, { ...(resourceLimits ? { resourceLimits } : {}) }) }
+    catch { noteFailure(); throw unavailable() }
     created.on('message', message => {
       if (Number.isSafeInteger(message?.heap?.usedMb)) { stats.workerHeapUsedMb = message.heap.usedMb; stats.workerHeapLimitMb = message.heap.limitMb }
       const entry = pending.get(message?.id)
@@ -73,8 +80,8 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
     })
     const lost = () => {
       if (generation !== mine || worker !== created) return
-      worker = null; installed.clear(); crashedAt = now(); stats.crashed++; stats.workerHeapUsedMb = null
-      if (++failuresWithoutInstall >= MAX_FAILURES_WITHOUT_INSTALL && stats.installs === 0 && !disabled) { disabled = true; try { onDisabled() } catch {} }
+      worker = null; installed.clear(); stats.crashed++; stats.workerHeapUsedMb = null
+      noteFailure()
       failAll(unavailable())
     }
     created.on('error', lost)
@@ -105,7 +112,9 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
       work = (async () => {
         const target = spawn()
         const meta = {}
-        for (const [field, value] of Object.entries(snapshot)) if (!CHUNKED.includes(field)) meta[field] = value
+        // A chunked field that is not an array travels as-is, so the worker's
+        // validation rejects it exactly as an in-process compile would.
+        for (const [field, value] of Object.entries(snapshot)) if (!CHUNKED.includes(field) || !Array.isArray(value)) meta[field] = value
         const lengths = Object.fromEntries(CHUNKED.filter(field => Array.isArray(snapshot[field])).map(field => [field, snapshot[field].length]))
         const transfer = await send({ type: 'begin', sourceKey, cacheKey, meta, lengths })
         for (const field of Object.keys(lengths)) {
@@ -124,7 +133,7 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
           if (!installed.has(sourceKey)) installed.set(sourceKey, new Set())
           const keys = installed.get(sourceKey)
           // The worker keeps the newest two per source; mirror that.
-          keys.add(cacheKey)
+          keys.delete(cacheKey); keys.add(cacheKey)
           while (keys.size > 2) keys.delete(keys.values().next().value)
         }
         stats.installs++; failuresWithoutInstall = 0
