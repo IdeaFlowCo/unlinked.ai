@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { digest, LIMITS, parseArchive, PARSER_VERSION, RUNNABLE_PARSER_VERSIONS } from './archive.mjs'
 import { privateId } from './job.mjs'
 import { requireCombinedUploadConsent } from './consent.mjs'
+import { firstWorkingPhoto } from './profile-photo.mjs'
 
 const terminal = job => ['indexed', 'partial', 'failed'].includes(job.status)
 const ownCategories = new Set(['profile', 'positions', 'education', 'skills'])
@@ -51,7 +52,7 @@ export async function stageArchive({ ownerId, filename, bytes, adapter, consent,
 
 // CAS on every lease/progress receipt fences delayed publishers. Immutable
 // chunks may survive a crash, but search/MCP require the final job publication.
-export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Date.now, leaseId = randomUUID(), stopped = () => false, onProgress = () => {}, onParsedSources = () => {} }) {
+export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Date.now, leaseId = randomUUID(), stopped = () => false, onProgress = () => {}, onParsedSources = () => {}, fetchProfilePhoto }) {
   return adapter.withImport(ownerId, id, async store => {
     let current = await store.getJob(id)
     if (!current || terminal(current) || current.backgroundVersion !== 'profile-first-v1') return current
@@ -76,6 +77,18 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
       return current
     }
     onParsedSources(parsed.sources.length)
+    // The owner's profile photo (docs/profile-photos.md): the newest link that
+    // downloads becomes one owner-private asset and one observation holding
+    // only its hash, type and size. Without a fetcher, or when none works,
+    // the source is skipped with a reason; the import itself is unaffected.
+    for (const source of parsed.sources) {
+      if (source.category !== 'profile_photo' || !source.accepted.length) continue
+      const found = typeof fetchProfilePhoto === 'function' ? await firstWorkingPhoto(source.accepted, { fetchPhoto: fetchProfilePhoto, now }) : { reason: 'photo_import_off' }
+      if (!found.photo) { Object.assign(source, { accepted: [], skipped: true, photoSkipped: found.reason }); continue }
+      await store.putAsset(found.photo.sha256, found.photo.bytes)
+      source.accepted = [{ rowId: found.row.rowId, category: 'profile_photo', subject: 'archive_owner_observation',
+        fields: { 'photo sha256': found.photo.sha256, 'photo type': found.photo.type, 'photo bytes': String(found.photo.bytes.length), 'uploaded at': new Date(found.row.uploadedAt).toISOString() } }]
+    }
     const sources = [], assertions = [], totals = counts()
     // Stable source IDs preserve old receipts. Only staging order changes:
     // profile observations precede connections, regardless of ZIP entry order.
@@ -116,7 +129,7 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
 
 // One process-wide worker; Noos discovery + CAS leases make restart and a
 // second process safe. There is no separate people database or fixture fallback.
-export function createArchiveWorker({ listPendingImports, getBackend, coordination, intervalMs = 2000, slowAfterMs = 10 * 60 * 1000, onError = () => {}, now = Date.now }) {
+export function createArchiveWorker({ listPendingImports, getBackend, coordination, intervalMs = 2000, slowAfterMs = 10 * 60 * 1000, onError = () => {}, now = Date.now, fetchProfilePhoto }) {
   if (typeof listPendingImports !== 'function' || typeof getBackend !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 100 || intervalMs > 60000) throw new Error('private_worker_configuration_required')
   let closed = false, discovery = null, timer, active = 0, discoveryFailures = 0
   const scheduled = new Map(), ownerTails = new Map(), waiters = []
@@ -146,7 +159,7 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
         try {
           const backend = await getBackend(item.owner)
           let progressed = false, parsedSources
-          const result = await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed, onProgress: () => { progressed = true }, onParsedSources: count => { parsedSources = count } })
+          const result = await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed, onProgress: () => { progressed = true }, onParsedSources: count => { parsedSources = count }, fetchProfilePhoto })
           const history = failures.get(key)
           if (progressed || (result && terminal(result))) failures.delete(key)
           if (result && terminal(result) && !finished.has(key)) {

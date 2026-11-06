@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises'
@@ -799,4 +800,31 @@ test('right after a restart, an import in progress shows its progress, not a bus
   const card = await fetch(endpoint + '/card', { headers: { Cookie: cookie } })
   assert.equal(card.status, 503)
   assert.match(await card.text(), /server is restarting or busy/)
+})
+
+test('a full export imports the owner’s profile photo as a private asset; no link or caption is kept; no photo never degrades the import', async t => {
+  const f = await fixture(t), ownerId = 'owner-photo', backend = f.backend(ownerId)
+  const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(300, 9)])
+  const zipWith = async rich => { const zip = new JSZip()
+    zip.file('Profile.csv', 'First Name,Last Name,Headline\nPhoto,Owner,Builder\n')
+    zip.file('Connections.csv', 'First Name,Last Name,URL\nAda,Lovelace,https://www.linkedin.com/in/ada-photo\n')
+    if (rich) zip.file('Rich_Media.csv', rich)
+    return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) }
+  const rich = 'Date/Time,Media Description,Media Link\n"You uploaded a profile photo on March 3, 2024 at 9:15 AM (GMT)",,https://media.licdn.com/dms/image/v2/X/profile/0/1?e=2147483647&v=beta&t=SIGNED\n"You uploaded a feed photo on November 15, 2024 at 8:18 PM (GMT)","Secret caption",https://media.licdn.com/dms/image/v2/Y/feed/0/2?e=2147483647&v=beta&t=SIGNED2\n'
+  const fetched = []
+  const run = async (bytes, name, fetchProfilePhoto) => {
+    const staged = await stageArchive({ ownerId, filename: name, bytes, adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+    return runArchiveJob({ ownerId, id: staged.id, adapter: backend.adapter, readAsset: backend.readAsset, fetchProfilePhoto })
+  }
+  const job = await run(await zipWith(rich), 'full.zip', async link => { fetched.push(link); return { bytes: JPEG, type: 'image/jpeg', sha256: createHash('sha256').update(JPEG).digest('hex') } })
+  assert.equal(job.status, 'indexed')
+  assert.equal(fetched.length, 1); assert.match(fetched[0], /\/X\/profile\//, 'only the profile photo link is fetched')
+  const digest = createHash('sha256').update(JPEG).digest('hex')
+  assert.deepEqual(await backend.readAsset(digest), JPEG, 'stored as an owner-private asset')
+  const snapshot = JSON.stringify(await f.snapshot())
+  assert.match(snapshot, new RegExp(`"photo sha256":"${digest}"`))
+  assert.doesNotMatch(snapshot, /t=SIGNED|Secret caption|media\.licdn\.com/, 'no signed link or caption outside the original archive')
+  // No working photo, or no Rich_Media.csv at all: the import is still complete.
+  assert.equal((await run(await zipWith(rich), 'full-again.zip', async () => { throw Error('photo_fetch_status') })).status, 'indexed')
+  assert.equal((await run(await zipWith(null), 'basic.zip', undefined)).status, 'indexed')
 })

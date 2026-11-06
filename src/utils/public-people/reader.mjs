@@ -25,7 +25,7 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 const SUGGESTED_PEOPLE = 5
 // Faces on a profile header's mutual connections line.
 const MUTUAL_PREVIEW = 3
-const PHOTO_URL = /^\/people\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/photo\?v=[a-f0-9]{16}$/
+const PHOTO_URL = /^\/people\/(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|member-(?:signup|import)-[a-f0-9]{64})\/photo\?v=[a-f0-9]{16}$/
 
 const dense = value => {
   if (!Array.isArray(value)) return false

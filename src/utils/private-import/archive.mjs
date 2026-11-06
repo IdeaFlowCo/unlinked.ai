@@ -86,6 +86,26 @@ const categories = {
   'positions.csv': { category: 'positions', required: ['company name', 'title'] },
   'education.csv': { category: 'education', required: ['school name'] },
   'skills.csv': { category: 'skills', required: ['name'] },
+  // Only "You uploaded a profile photo" rows: the export has no image file,
+  // just a signed media.licdn.com link per upload (docs/profile-photos.md).
+  // Every other row (feed photos and their captions) is never read.
+  'rich_media.csv': { category: 'profile_photo', required: ['date/time', 'media link'], keep: fields => profilePhotoRow(fields) },
+}
+const PROFILE_PHOTO_ROW = /^You uploaded a profile photo on (.+?) at (\d{1,2}:\d{2} [AP]M) \(GMT\)$/
+// The upload time (ms) when a row is the owner's own profile photo with a
+// LinkedIn media link, else null.
+export function profilePhotoRow(fields) {
+  const match = PROFILE_PHOTO_ROW.exec(fields['date/time'] ?? '')
+  if (!match || !linkedinMediaUrl(fields['media link'])) return null
+  const at = Date.parse(`${match[1]} ${match[2]} GMT`)
+  return Number.isFinite(at) ? at : null
+}
+// Only LinkedIn's own image CDN, over HTTPS, with no credentials or port.
+export function linkedinMediaUrl(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'media.licdn.com' && !url.username && !url.password && !url.port && url.pathname.startsWith('/dms/image/') ? url : null
+  } catch { return null }
 }
 // LinkedIn sometimes delivers a large network as numbered parts
 // ("Connections.csv" + "Connections_2.csv", "Connections (1).csv"), inside a
@@ -151,7 +171,16 @@ function* csvRecords(text) {
   yield { text: text.slice(recordStart), newline: newline ?? '\n' }
 }
 
+// The profile-photo file is optional garnish: it has its own row budget (a
+// long Rich_Media.csv never starves Connections.csv) and every outcome other
+// than an accepted photo row is "skipped", never failed, rejected or partial.
 export function parseSource(source, budget = { remaining: LIMITS.rows }, limitError = 'csv_row_limit') {
+  if (categoryKey(source.path.split('/').pop().toLowerCase(), { direct: source.direct }) !== 'rich_media.csv') return parseSourceRows(source, budget, limitError)
+  const base = parseSourceRows(source, { remaining: LIMITS.rows }, 'csv_row_limit')
+  if (!base.error && base.accepted.length) return { ...base, rejected: [] }
+  return { ...base, accepted: [], rejected: [], skipped: true, photoSkipped: base.error ?? 'no_profile_photo_rows', error: undefined }
+}
+function parseSourceRows(source, budget, limitError) {
   const filename = source.path.split('/').pop().toLowerCase()
   // A CSV uploaded on its own is often renamed ("Connections (1).csv",
   // "Connections_sans_email.csv"); ZIP entries keep LinkedIn's names, plus
@@ -196,13 +225,15 @@ export function parseSource(source, budget = { remaining: LIMITS.rows }, limitEr
     if (error) continue
     if (row.length !== headers.length) { base.rejected.push({ rowId, reason: 'csv_column_count' }); continue }
     const fields = Object.fromEntries(headers.map((key, i) => [key, row[i].trim()]))
+    const kept = spec.keep ? spec.keep(fields) : undefined
+    if (kept === null) continue
     if (spec.required.some(key => !fields[key])) { base.rejected.push({ rowId, reason: 'missing_required_field' }); continue }
     // Without a LinkedIn address, a hand-added person is identified by what was typed.
     const subject = spec.category !== 'connections' ? 'archive_owner_observation'
       : spec.optionalUrl && !fields.url ? `unlinked:added-person:${digest(JSON.stringify([fields['first name'], fields['last name'] ?? '', fields.company ?? '', fields.position ?? '']))}`
       : linkedinUrl(fields.url)
     if (!subject) { base.rejected.push({ rowId, reason: 'invalid_or_missing_linkedin_url' }); continue }
-    base.accepted.push({ rowId, category: spec.category, subject, fields })
+    base.accepted.push({ rowId, category: spec.category, subject, fields, ...(kept !== undefined ? { uploadedAt: kept } : {}) })
   }
   if (!headers && !base.error) base.error = 'csv_header_not_found'
   if (base.error) { base.accepted = []; base.rejected = [] }
