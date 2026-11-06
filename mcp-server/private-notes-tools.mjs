@@ -103,7 +103,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
 
   // An Unlinked person, named only from data the owner can already read: a
   // published profile, or the owner's own import (validated against it).
-  const person = async (grant, value, signal) => {
+  const person = async (grant, value, signal, { requireComplete = false } = {}) => {
     const tries = /linkedin\.com\/in\//i.test(value) ? [{ linkedinUrl: value }]
       : [...(value.length <= 128 ? [{ connectionId: value }] : []), ...(value.length <= 160 ? [{ profileId: value }] : [])]
     let unavailable = null
@@ -118,6 +118,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       }
       const contact = found?.contact
       if (!contact) continue
+      if (requireComplete && found.publicReconciliationComplete === false) throw fail('upstream_unavailable', 'The published public People index is not configured; private identity cannot be reconciled for a write.')
       const owned = found.visibility === 'owner_private'
       const refs = [...(HASH.test(contact.linkedinRefHash ?? '') ? [`linkedin:in:${contact.linkedinRefHash}`] : []),
         ...([...new Set([contact.sourceLinkedinRefHash, ...(contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(value => `linkedin:in:${value}`)),
@@ -145,7 +146,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       if (!found) throw fail('not_found', 'The owner has no private notes about that OpenChat person yet. Record OpenChat people through the shared Ideaflow connector (openchat__ tools) first; this key can then link to them.')
       return { id: found.id }
     }
-    const named = await person(grant, value, signal)
+    const named = await person(grant, value, signal, { requireComplete: create })
     const found = []
     for (const ref of named.refs) { const entity = await existingByRef(identity, ref); if (entity && !found.some(value => value.id === entity.id)) found.push(entity) }
     if (!create) return { ...named, entities: found }
@@ -270,6 +271,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       if ((createNew || clientRequestId !== undefined) && toName === undefined) throw fail('invalid_input', 'createNew and clientRequestId apply only with toName.')
       if (createNew && !clientRequestId) throw fail('invalid_input', 'createNew needs a clientRequestId so a retry returns the same entity.')
       const identity = await who(grant)
+      if (toKind === 'unlinked') await person(grant, toId, signal, { requireComplete: true })
       const from = await subject(grant, identity, kind, value, { create: true }, signal)
       let to
       if (named) to = await subject(grant, identity, toKind, toId, { create: true }, signal)

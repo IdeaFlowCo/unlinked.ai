@@ -501,7 +501,10 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       }
       if (mode === 'connectionId') candidate = ordered.find(value => value.entry.id === input.connectionId) ?? null
       else if (mode === 'linkedinUrl' && !published) candidate = ordered.find(value => value.slug === wantedSlug) ?? null
-      if (!published && !candidate) throw new AccountToolError('not_found', mode === 'connectionId' ? 'No connection of the owner has that id.' : 'Neither the owner’s contacts nor a published profile have that LinkedIn address.')
+      if (!published && !candidate) {
+        if (mode === 'linkedinUrl' && !reader) throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
+        throw new AccountToolError('not_found', mode === 'connectionId' ? 'No connection of the owner has that id.' : 'Neither the owner’s contacts nor a published profile have that LinkedIn address.')
+      }
       const summaries = await publishedFor(ordered)
       let refs = new Map(), targetRef = null
       try {
@@ -542,9 +545,9 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         const contact = await contactOf(primary, summary)
         const sourceLinkedinRefHashes = [...hashes].filter(hash => hash !== contact.linkedinRefHash)
         const publishedProfileIds = [...publicIds].filter(id => id !== contact.publishedProfileId)
-        return { kind: 'unlinked_lookup_contact', contact: { ...contact, ...(sourceLinkedinRefHashes.length ? { sourceLinkedinRefHashes } : {}), ...(publishedProfileIds.length ? { publishedProfileIds } : {}) }, visibility: 'owner_private' }
+        return { kind: 'unlinked_lookup_contact', publicReconciliationComplete: Boolean(reader), contact: { ...contact, ...(sourceLinkedinRefHashes.length ? { sourceLinkedinRefHashes } : {}), ...(publishedProfileIds.length ? { publishedProfileIds } : {}) }, visibility: 'owner_private' }
       }
-      return { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: targetRef, publishedProfileId: published.id, ...([...publicIds].some(id => id !== published.id) ? { publishedProfileIds: [...publicIds].filter(id => id !== published.id) } : {}) }, visibility: 'public' }
+      return { kind: 'unlinked_lookup_contact', publicReconciliationComplete: true, contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: targetRef, publishedProfileId: published.id, ...([...publicIds].some(id => id !== published.id) ? { publishedProfileIds: [...publicIds].filter(id => id !== published.id) } : {}) }, visibility: 'public' }
     },
     async unlinked_ai_search(grant, { query, scope, timeoutMs = 40000 }, signal) {
       // Default to the widest scope the grant actually covers, so the natural

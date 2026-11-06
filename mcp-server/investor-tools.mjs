@@ -39,7 +39,7 @@ export function createInvestorTools({ getBackend, who, overlayCall, existingByRe
       const identity = await who(grant), refs = []
       if (row.identity.linkedinRefHash) {
         refs.push(`linkedin:in:${row.identity.linkedinRefHash}`)
-        try { refs.push(...(await person(grant, row.linkedinUrl, signal)).refs) }
+        try { refs.push(...(await person(grant, row.linkedinUrl, signal, { requireComplete: true })).refs) }
         catch (error) { if (error?.code !== 'not_found') throw error }
       } else {
         refs.push(`unlinked:private:${createHash('sha256').update(`investor-row:${job.id}:${row.rowId}`).digest('hex').slice(0, 32)}`)

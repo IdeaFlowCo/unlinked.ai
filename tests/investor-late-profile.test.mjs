@@ -253,3 +253,40 @@ test('exact identity closure follows owner sources and public targets in both di
   assert.equal(corrected.entityId, made[0].id)
   assert.equal(writes, before + 1)
 })
+
+test('missing public evidence permits owner reads but blocks identity-dependent writes and resumes safely', async () => {
+  const f = fixture(), alice = grant('alice'), ownerSlug = 'incomplete-source', address = `https://linkedin.com/in/${ownerSlug}`
+  const row = { id: 'private-source', category: 'connections', fields: { 'first name': 'Private', url: address }, provenance: { source: 'private-import' } }
+  let writes = 0
+  const overlay = { request: async (identity, method, path, body) => {
+    if (method !== 'GET' && path !== 'lookup') writes++
+    return f.options.overlay.request(identity, method, path, body)
+  } }
+  const getBackend = async who => ({ ...await f.getBackend(who), listImportIds: async () => [], readLegacyObservations: async () => ({ assertions: [row] }) })
+  const serviceFor = readPublishedSnapshot => createAccountToolService({ ...f.options, getBackend, overlay, readPublishedSnapshot })
+  const offline = serviceFor(undefined)
+  const call = (service, name, input) => service.call({ grant: alice, name, input }).then(value => value.result)
+  const identity = await f.options.identityFor(alice)
+  const existing = (await overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'Private', refs: [`linkedin:in:${sha(ownerSlug)}`] })).body.entity
+  const before = writes
+  for (const subjectId of ['private-source', address]) {
+    const found = await call(offline, 'unlinked_lookup_contact', subjectId === address ? { linkedinUrl: address } : { connectionId: subjectId })
+    assert.equal(found.publicReconciliationComplete, false)
+    assert.equal((await call(offline, 'unlinked_get_person_private', { profileId: subjectId })).entities[0].id, existing.id)
+    await assert.rejects(call(offline, 'unlinked_add_private_note', { subjectKind: 'unlinked', subjectId, text: 'Must wait' }), e => e.code === 'upstream_unavailable')
+  }
+  await assert.rejects(call(offline, 'unlinked_add_private_link', { subjectKind: 'thing', subjectId: existing.id, relation: 'knows', toKind: 'unlinked', toId: address }), e => e.code === 'upstream_unavailable')
+  assert.equal(writes, before)
+  const explicit = await call(offline, 'unlinked_add_private_note', { subjectKind: 'thing', subjectId: existing.id, text: 'Selected by owner' })
+  assert.equal(explicit.entityId, existing.id)
+  for (const url of [address, 'https://linkedin.com/in/no-owner-match']) {
+    const staged = await call(offline, 'unlinked_stage_investor_csv', { csv: `Name,URL\nPrivate,${url}`, listName: url, mapping: { name: 'Name', linkedinUrl: 'URL' } })
+    const peopleBefore = [...f.state('alice').entities.values()].filter(value => value.kind === 'person').length
+    await assert.rejects(call(offline, 'unlinked_resume_investor_import', { importId: staged.importId }), e => e.code === 'upstream_unavailable')
+    assert.equal([...f.state('alice').entities.values()].filter(value => value.kind === 'person').length, peopleBefore)
+    const online = serviceFor(async () => ({ state: 'published', complete: true, revision: 'empty', profiles: [], connections: [] }))
+    assert.equal((await call(online, 'unlinked_resume_investor_import', { importId: staged.importId })).status, 'complete')
+  }
+  const online = serviceFor(async () => ({ state: 'published', complete: true, revision: 'empty', profiles: [], connections: [] }))
+  assert.equal((await call(online, 'unlinked_lookup_contact', { connectionId: 'private-source' })).publicReconciliationComplete, true)
+})

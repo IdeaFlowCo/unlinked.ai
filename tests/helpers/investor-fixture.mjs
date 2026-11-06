@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import { createPrivateNotesTools } from '../../mcp-server/private-notes-tools.mjs'
 import { AccountToolError } from '../../mcp-server/account-tools.mjs'
+import { createPublicPeopleReader } from '../../src/utils/public-people/reader.mjs'
 const sha = value => createHash('sha256').update(value).digest('hex')
 export function fixture(customOverlay) {
   const owners = new Map(), resources = new Map(), assets = new Map()
@@ -54,7 +55,8 @@ export function fixture(customOverlay) {
     adapter: { async withImport(ownerId, id, work) { assert.equal(ownerId, owner.ownerId); return work({ async putAsset(hash, bytes) { assets.set(`${ownerId}:${hash}`, Buffer.from(bytes)) } }) } },
     async readAsset(hash) { const bytes = assets.get(`${owner.ownerId}:${hash}`); assert.ok(bytes); return bytes },
   })
+  const publicReader = createPublicPeopleReader({ readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'synthetic-empty', profiles: [], connections: [] }) })
   const options = { getBackend, overlay: customOverlay ?? overlay, identityFor: async owner => ({ issuer: 'https://synthetic.invalid', subject: owner.ownerId }),
-    lookupContact: async () => { throw new AccountToolError('not_found', 'Synthetic no public profile') }, createError: (code, message, details) => new AccountToolError(code, message, details) }
+    lookupContact: async (_grant, input, signal) => { if (input.linkedinUrl) await publicReader.lookupLinkedin({ address: input.linkedinUrl, signal }); throw new AccountToolError('not_found', 'Synthetic no public profile') }, createError: (code, message, details) => new AccountToolError(code, message, details) }
   return { resources, assets, state, getBackend, options, tools: () => createPrivateNotesTools(options), pauseNote: () => { let enter, release; const entered = new Promise(resolve => { enter = resolve }); const wait = new Promise(resolve => { release = resolve }); notePause = { enter, wait }; return { entered, release } }, failReceipt: () => { failReceipt = true }, failNote: () => { failNote = true } }
 }
