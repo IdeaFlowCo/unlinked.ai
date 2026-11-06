@@ -1,3 +1,4 @@
+import { INVESTOR_TOOLS } from './investor-tools.mjs'
 import { requestDiagnostic, instrumentMcpTransport } from './request-diagnostics.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
@@ -41,7 +42,7 @@ const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list
   // Registered only for grants whose opt-in scope includes them.
   'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request',
   // Registered only for grants with the private-notes permission (catalog v7).
-  ...PRIVATE_NOTES_TOOLS, 'unlinked_list_person_targets']
+  ...PRIVATE_NOTES_TOOLS, 'unlinked_list_person_targets', ...INVESTOR_TOOLS]
 
 export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
   const base = new URL(origin)
@@ -113,7 +114,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
     for (const name of SERVICE_TOOLS) {
       if (!grant.tools.includes(name)) continue
       // Clients that ask before acting see which tools change something.
-      const annotations = MUTATING_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: PRIVATE_NOTES_DESTRUCTIVE.has(name), idempotentHint: PRIVATE_NOTES_TOOLS.includes(name), openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
+      const annotations = MUTATING_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: PRIVATE_NOTES_DESTRUCTIVE.has(name), idempotentHint: PRIVATE_NOTES_TOOLS.includes(name) || name === 'unlinked_stage_investor_csv', openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
       server.registerTool(name, { description: ACCOUNT_TOOL_DESCRIPTIONS[name], inputSchema: ACCOUNT_TOOL_SCHEMAS[name], annotations }, async input => {
         const controller = new AbortController()
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])

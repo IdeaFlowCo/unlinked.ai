@@ -1663,6 +1663,23 @@
               "minLength": 1,
               "maxLength": 64
             }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
           }
         ],
         "responses": {
@@ -1723,8 +1740,26 @@
                 "person",
                 "company",
                 "idea",
-                "project"
+                "project",
+                "list"
               ]
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             }
           }
         ],
@@ -1777,7 +1812,8 @@
                       "person",
                       "company",
                       "idea",
-                      "project"
+                      "project",
+                      "list"
                     ]
                   },
                   "name": {
@@ -1879,7 +1915,8 @@
                 "person",
                 "company",
                 "idea",
-                "project"
+                "project",
+                "list"
               ]
             }
           },
@@ -2248,7 +2285,8 @@
                       "person",
                       "company",
                       "idea",
-                      "project"
+                      "project",
+                      "list"
                     ]
                   },
                   "toId": {
@@ -2443,6 +2481,227 @@
           },
           "503": {
             "description": "upstream_unavailable"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/investor-imports": {
+      "post": {
+        "operationId": "unlinked_stage_investor_csv",
+        "summary": "Stage an uploaded investor/contact CSV in the owner’s private database. Supply exact header names in mapping; map private comments with notes (an array of column names). Retains the original file and fields. Returns importId and, for a newly staged import, a validation preview; then call unlinked_resume_investor_import to commit. Same bytes, mapping, listName and list target replay the same import. Name/email never auto-match; exact LinkedIn addresses can match existing private/public personas. Each unmatched source row becomes a separate private person. At most 512 KiB per part: split larger files by complete CSV rows, repeating the header, and use the first resulting listId for subsequent parts. listId appends to an existing private list; otherwise creates a distinct list. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "security": [
+          {
+            "accountGrant": []
+          },
+          {
+            "connectorOAuth": [
+              "private_notes"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "csv": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 524288
+                  },
+                  "listName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "listId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,80}$"
+                  },
+                  "mapping": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32768
+                      },
+                      "firstName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32768
+                      },
+                      "lastName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32768
+                      },
+                      "linkedinUrl": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32768
+                      },
+                      "email": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32768
+                      },
+                      "company": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32768
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32768
+                      },
+                      "notes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32768
+                        },
+                        "maxItems": 256
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "csv",
+                  "listName",
+                  "mapping"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-private import status"
+          },
+          "403": {
+            "description": "Private notes permission is not granted"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/investor-imports/resume": {
+      "post": {
+        "operationId": "unlinked_resume_investor_import",
+        "summary": "Commit/resume one bounded batch (default 10, maximum 25 rows) from a staged CSV. Repeat with the same importId until status complete or partial; never report completion before then. Durable row receipts and idempotent graph writes survive process restarts. import_busy means retry later. On other errors, progress is retained: inspect status and retry after fixing the cause. Existing graph quotas apply (5,000 entities and links per owner). Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "security": [
+          {
+            "accountGrant": []
+          },
+          {
+            "connectorOAuth": [
+              "private_notes"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "importId": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "batchSize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25
+                  }
+                },
+                "required": [
+                  "importId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-private import status"
+          },
+          "403": {
+            "description": "Private notes permission is not granted"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/private/investor-imports/status": {
+      "get": {
+        "operationId": "unlinked_get_investor_import",
+        "summary": "Read an investor import’s status and private original row fields with outcome receipts. Page with nextOffset until null, at most 20 rows per call, fewer when encoded fields are large. Oversized individual rows explicitly report sourceRecovery instead of inline fields. To recover the exact original CSV, set sourceOffset:0, concatenate source.text chunks, and follow source.nextOffset until null (offsets count JavaScript UTF-16 code units; each chunk is at most 32768). A partial import has rejected rows; inspect reasons. This reads the original outcome, not a guarantee that the owner has not subsequently edited/deleted graph records. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "security": [
+          {
+            "accountGrant": []
+          },
+          {
+            "connectorOAuth": [
+              "private_notes"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "importId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            }
+          },
+          {
+            "name": "sourceOffset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 524288
+            },
+            "description": "Retrieve the original CSV in bounded chunks; offsets are UTF-16 code units. Follow source.nextOffset."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-private import status"
+          },
+          "403": {
+            "description": "Private notes permission is not granted"
           }
         }
       }

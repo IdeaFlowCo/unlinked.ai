@@ -90,8 +90,53 @@ test('hosted MCP reuses scoped tool catalog and exact live account binding witho
   assert.equal(JSON.parse(who.body.result.content[0].text).ownerId,'exact-owner')
   const write=await request('tools/list',undefined,{scope:'unlinked:read unlinked:write'})
   assert.ok(write.body.result.tools.some(x=>x.name==='unlinked_send_connection_request'))
+  assert.ok(!write.body.result.tools.some(x=>x.name==='unlinked_stage_investor_csv'))
+  const privateList=await request('tools/list',undefined,{scope:'unlinked:read unlinked:private_notes'})
+  assert.ok(privateList.body.result.tools.some(x=>x.name==='unlinked_stage_investor_csv'))
+  assert.ok(!privateList.body.result.tools.some(x=>x.name==='unlinked_send_connection_request'))
+  const privateCall=await request('tools/call',{name:'unlinked_stage_investor_csv',arguments:{csv:'Name\nMaya',mapping:{name:'Name'},listName:'Investors'}},{scope:'unlinked:read unlinked:private_notes'})
+  assert.equal(privateCall.body.result.isError,undefined)
+  assert.equal(calls.at(-1).name,'unlinked_stage_investor_csv')
   assert.equal((await request('tools/list',undefined,{},'wrong')).status,401)
   const sent=await request('tools/call',{name:'unlinked_send_connection_request',arguments:{profileId:'published-member'}},{scope:'unlinked:read unlinked:write'}); assert.equal(sent.body.result.isError,undefined); assert.equal(calls.at(-1).name,'unlinked_send_connection_request')
   linked=false; const unmapped=await request('tools/list'); assert.equal(unmapped.status,409); assert.equal(unmapped.body.error.message,'account_link_required')
   broken=true; const unavailable=await request('tools/list'); assert.equal(unavailable.status,503); assert.ok(!JSON.stringify(unavailable).includes('database-password-private'))
 })
+
+for (const expiryPoint of ['before revalidation', 'during owner resolution', 'during backend authorization', 'owner changed']) {
+  test(`connector stops subsequent writes when ${expiryPoint}`, async t => {
+    let now = 1_700_000_000_000, inFlight = false, writes = 0, ownerChecks = 0
+    t.mock.method(Date, 'now', () => now)
+    const resolveOwner = async () => {
+      ownerChecks++
+      if (inFlight && expiryPoint === 'during owner resolution') now += 60_000
+      return inFlight && expiryPoint === 'owner changed' ? { ...owner, userId: 'other-user' } : owner
+    }
+    const getBackend = async () => {
+      if (inFlight && expiryPoint === 'during backend authorization') now += 60_000
+      return {}
+    }
+    const service = { call: async ({ revalidate }) => {
+      await revalidate()
+      writes++
+      inFlight = true
+      if (expiryPoint === 'before revalidation') now += 60_000
+      await revalidate()
+      writes++
+      return { text: '{}' }
+    } }
+    let handler
+    const server = createServer((req, res) => void handler(req, res))
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    t.after(() => new Promise(resolve => server.close(resolve)))
+    const host = `127.0.0.1:${server.address().port}`
+    handler = createIdeaflowConnectorHandler({ secret, origin: `https://${host}`, resolveOwner, getBackend, complete: async () => ({}), service })
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'unlinked_stage_investor_csv', arguments: { csv: 'Name\nMaya', mapping: { name: 'Name' }, listName: 'Investors' } } })
+    const response = await fetch(`http://${host}/api/connector/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${signed(body, { scope: 'unlinked:read unlinked:private_notes' })}` }, body })
+    const result = await response.json()
+    assert.equal(result.result.isError, true)
+    assert.equal(JSON.parse(result.result.content[0].text).error.code, 'grant_revoked')
+    assert.equal(writes, 1)
+    assert.ok(ownerChecks >= (expiryPoint === 'before revalidation' ? 3 : 4))
+  })
+}

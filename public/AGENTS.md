@@ -52,7 +52,7 @@ An explicit account grant authorizes current/future owner imports, same-owner sa
 Never derive owner authority from typed email, archive fields, profile IDs or a URL.
 The backend binds signed Ideaflow issuer/subject to the owner; recovered-profile confirmation uses only server-held signed email evidence plus CSRF and can be revoked.
 It enforces owner/publication/grant state on each call.
-Raw archives, recovered original files, contact emails and phone numbers are excluded. OpenAI receives bounded relevant professional details.
+Raw LinkedIn archives, recovered original files, and archive contact emails and phone numbers are excluded from network search. OpenAI receives bounded relevant professional details. Private investor CSV access is described below.
 Everyone browsing is public at GET /api/people?q=&mode=&cursor= and GET /api/people/:id. The default mode `best` matches every word in any form and order ("investors" finds "investor"), and returns people who match some of the words when nobody has them all; the response's `match` is `all`, `some` or `none`. `mode=exact` matches the typed phrase as written. A person with an operator-published profile photo carries `photo`, a same-origin versioned URL of GET /people/:id/photo (JPEG, PNG or WebP; 404 when there is none).
 Everyone AI retrieval considers all public profiles, then ranks at most200 matching professional candidates. No archive is required.
 Old single-tool grants retain their original narrower scope.
@@ -66,7 +66,7 @@ Anonymous discovery, professional People browsing and Meet are public. Owner dat
 For /meet scanning and supported links, see the [Meet guide](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/README.md#meet-someone). Signed-in members show their QR business card at /card; its contact version opens a revocable contact link, while the public-only version opens their published profile. The web app is installable (manifest at /manifest.webmanifest); the service worker precaches only fixed public shell assets and never caches member content.
 Legacy Supabase APIs and legacy stdio tools remain historical code, not current onboarding instructions.
 
-Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
+Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve these recovered LinkedIn files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
 
 Grant catalog v5 supports optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing read-only grants and default issuance stay read-only. Owner-only grants can enable actions without gaining public reads. Direct Unlinked grants cannot send messages or post; use separate OpenChat permissions through the shared connector, or a direct OpenChat key, for messaging and Context. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
 
@@ -110,3 +110,20 @@ Browser-only card joining is not an agent capability. The repository guide `docs
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures.
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract `docs/public-people-reader.md` (Historical membership); filter values are published in [OpenAPI](https://www.unlinked.ai/openapi.json).
+
+## Private investor/contact CSV lists
+
+With Private people notes & relations permission, an agent can read investor
+CSVs you provide, including contact fields and private notes. Call
+`unlinked_stage_investor_csv(csv,listName,mapping,listId?)`, then repeat
+`unlinked_resume_investor_import(importId,batchSize?)` until complete or partial.
+Read original fields and outcomes with `unlinked_get_investor_import`, paging with
+nextOffset. CSV parts are at most 512 KiB; split larger files at complete records
+with repeated headers and append parts to the same listId. Names/emails never
+merge people; exact LinkedIn addresses may match. No public profiles, social
+connections or notifications are created. List membership is a private contains
+edge. Find lists with `unlinked_list_private_things(kind:list,limit:100)` and their
+members with `unlinked_get_private_thing(thingId:listId,limit:100)`, following
+nextCursor as after. The shared connector prefixes tools with `unlinked__` and
+requires separately consented `unlinked:private_notes`; connection-write access
+alone is insufficient. Existing graph quotas apply; errors never mean completion.

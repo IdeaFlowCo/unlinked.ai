@@ -11,7 +11,7 @@ const sha = value => createHash('sha256').update(value).digest('hex')
 const BASE = ['owner_network', 'owner_network_and_public', 'owner_network_and_write', 'owner_network_and_public_and_write']
 
 test('catalog v7: historical entries unchanged; every base scope keeps v6 tools and gains a private-notes twin', () => {
-  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION, 8)
+  assert.equal(CURRENT_ACCOUNT_GRANT_VERSION, 9)
   // Frozen history: v6 = v5 + lookup, and v7 base scopes equal v6 exactly.
   for (const scope of BASE) {
     assert.deepEqual(ACCOUNT_GRANT_TOOL_VERSIONS[6][scope].filter(name => name !== 'unlinked_lookup_contact'), [...ACCOUNT_GRANT_TOOL_VERSIONS[5][scope]])
