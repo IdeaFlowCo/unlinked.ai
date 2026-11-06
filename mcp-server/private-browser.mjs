@@ -2034,7 +2034,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
         return { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
-      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, createdAt: payload.createdAt, kind: payload.origin?.kind, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts?.accepted ?? 0, indexed: payload.counts?.indexed ?? 0, rejected: payload.counts?.rejected ?? 0, failedFiles: payload.counts?.failedFiles ?? 0, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
+      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, createdAt: payload.createdAt, kind: payload.origin?.kind, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, consent: payload.consent, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts?.accepted ?? 0, indexed: payload.counts?.indexed ?? 0, rejected: payload.counts?.rejected ?? 0, failedFiles: payload.counts?.failedFiles ?? 0, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
       // What this member has imported, from both sources that count (uploads
       // here and files recovered from their original Unlinked account), so no
       // page tells someone with an import to bring one (unlinked-5e5). Reads only.
@@ -2608,14 +2608,17 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         }
         const metadataAvailable = typeof homePreferences?.getImportMetadataBatch === 'function' && typeof homePreferences?.setImportMetadata === 'function'
         const allImports = summaries(jobs).filter(item => item.kind !== ADDED_PERSON).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-        const pages = Math.max(1, Math.ceil(allImports.length / 30))
+        const history = [...allImports.map(item => ({ type: 'upload', item })), ...(recovered?.objects ?? []).map(item => ({ type: 'recovered', item }))]
+        const pages = Math.max(1, Math.ceil(history.length / 30))
         const requested = Number(url.searchParams.get('page') || 1)
         const page = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, pages) : 1
-        const selected = allImports.slice((page - 1) * 30, page * 30)
+        const selected = history.slice((page - 1) * 30, page * 30)
+        const selectedImports = selected.filter(entry => entry.type === 'upload').map(entry => entry.item)
+        const selectedRecovered = selected.filter(entry => entry.type === 'recovered').map(entry => entry.item)
         let labels = {}, metadataUnavailable = false
-        if (metadataAvailable) { try { labels = await homePreferences.getImportMetadataBatch(session.owner, selected.map(item => item.id)) } catch { metadataUnavailable = true } }
-        const imports = selected.map(item => ({ ...item, metadata: labels[item.id] ?? null }))
-        journey(response, renderImports({ ...props, imports, recovered: recovered?.objects ?? [], recoveredUnavailable, metadataAvailable: metadataAvailable && !metadataUnavailable, metadataUnavailable, page, pages }), props.importJob)
+        if (metadataAvailable) { try { labels = await homePreferences.getImportMetadataBatch(session.owner, selectedImports.map(item => item.id)) } catch { metadataUnavailable = true } }
+        const imports = selectedImports.map(item => ({ ...item, metadata: labels[item.id] ?? null }))
+        journey(response, renderImports({ ...props, imports, recovered: selectedRecovered, recoveredUnavailable, metadataAvailable: metadataAvailable && !metadataUnavailable, metadataUnavailable, page, pages }), props.importJob)
         return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {

@@ -315,3 +315,34 @@ test('history survives unavailable labels and isolates other owners and deleted 
   const csrf = home.csrfFrom(page.body)
   for (const n of [2, 3]) assert.equal((await home.post(`/imports/${id(n)}/metadata`, { csrf, name: 'Wrong', tags: '' })).status, 404)
 })
+
+
+test('history reports recorded consent only for supported complete records', async t => {
+  const { COMBINED_UPLOAD_CONSENT, PUBLIC_UPLOAD_CONSENT } = await import('../src/utils/private-import/consent.mjs')
+  const home = await site(t, { jobs: [job(1, 'indexed', { consent: COMBINED_UPLOAD_CONSENT }), job(2, 'indexed', { consent: PUBLIC_UPLOAD_CONSENT }), job(3, 'indexed'), job(4, 'indexed', { consent: { ...COMBINED_UPLOAD_CONSENT, boundedOpenAIProcessing: false } })] })
+  const page = await home.get('/imports')
+  const articles = [...page.body.matchAll(/<article class="card sec">(.*?)<\/article>/gs)].map(match => match[1])
+  const row = n => articles.find(article => article.includes(`Fictional-${n}.zip`))
+  assert.match(row(1), /private retention.*bounded OpenAI processing.*remain private/)
+  assert.match(row(2), /private retention.*bounded OpenAI processing.*may be published/)
+  for (const n of [3, 4]) assert.match(row(n), /Recorded consent: unknown/)
+})
+
+test('history pages uploads and recovered files together with bounded metadata reads', async t => {
+  const preferences = createMemoryHomePreferenceStore()
+  const batches = []
+  const batch = preferences.getImportMetadataBatch
+  preferences.getImportMetadataBatch = async (member, ids) => { batches.push(ids); return batch(member, ids) }
+  const recovered = { objects: Array.from({ length: 35 }, (_, i) => ({ filename: `Legacy-${i}.csv`, accepted: i })) }
+  const home = await site(t, { jobs: [job(1, 'indexed')], recovered, preferences })
+  const first = await home.get('/imports'), second = await home.get('/imports?page=2')
+  assert.match(first.body, /Page 1 of 2/)
+  assert.match(first.body, /Fictional-1.zip/)
+  assert.match(first.body, /Legacy-28.csv/)
+  assert.doesNotMatch(first.body, /Legacy-29.csv/)
+  assert.match(second.body, /Page 2 of 2/)
+  assert.match(second.body, /Legacy-29.csv/)
+  assert.match(second.body, /Legacy-34.csv/)
+  assert.doesNotMatch(second.body, /Legacy-28.csv|Fictional-1.zip|No imported files/)
+  assert.deepEqual(batches, [[id(1)], []])
+})
