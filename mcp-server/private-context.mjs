@@ -109,6 +109,10 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
     return value && typeof value.issuer === 'string' && typeof value.subject === 'string' ? value : null
   }
   const contact = async (owner, input) => { try { return await lookupContact(owner, input) } catch { return null } }
+  const identityContact = async (owner, input) => {
+    try { return await lookupContact(owner, input) }
+    catch (error) { if (error?.code === 'not_found') return null; throw new OverlayUnavailable() }
+  }
   // Where a relation's other end lives in Unlinked, for the owner: a published
   // profile, else their own imported contact (at its owner-private slug when
   // it has one, docs/contact-slugs.md); other ends are plain text.
@@ -165,16 +169,16 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
     // identity. A private prospect can predate this public profile entirely.
     async forProfile(owner, profileId) {
       if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return { state: 'empty' }
-      const found = await contact(owner, { profileId })
+      const found = await identityContact(owner, { profileId })
       const hash = HASH.test(found?.contact?.linkedinRefHash ?? '') ? found.contact.linkedinRefHash : null
       return read(owner, [refOf.person(profileId), ...(hash ? [refOf.linkedin(hash)] : []), ...([...new Set([found?.contact?.sourceLinkedinRefHash, ...(found?.contact?.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin))])
     },
     // One of the owner's own imported contacts; null when it is not theirs.
     async forContact(owner, connectionId) {
-      const found = await contact(owner, { connectionId })
+      const found = await identityContact(owner, { connectionId })
       if (!found?.contact || found.visibility !== 'owner_private') return null
       const refs = [...(HASH.test(found.contact.linkedinRefHash ?? '') ? [refOf.linkedin(found.contact.linkedinRefHash)] : []),
-        ...(HASH.test(found.contact.sourceLinkedinRefHash ?? '') ? [refOf.linkedin(found.contact.sourceLinkedinRefHash)] : []),
+        ...([...new Set([found.contact.sourceLinkedinRefHash, ...(found.contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin)),
         ...(found.contact.publishedProfileId ? [refOf.person(found.contact.publishedProfileId)] : [])]
       return refs.length ? read(owner, refs) : { state: 'empty' }
     },

@@ -113,3 +113,51 @@ test('current public identity and owner source refs are reconciled without joini
   profiles = [{ ...profile, linkedinUrl: 'https://linkedin.com/in/changed-address' }]
   await assert.rejects(call('unlinked_get_person_private', { profileId: `https://linkedin.com/in/${slug}` }), e => e.code === 'not_found')
 })
+
+test('all entry paths reconcile owner sources, preserve source annotations, and fail closed on outages', async () => {
+  const f = fixture(), alice = grant('alice'), bob = grant('bob')
+  const oldSlugs = ['first-owner-source', 'second-owner-source'], hashes = oldSlugs.map(sha)
+  const rows = oldSlugs.map((value, i) => ({ id: `row-${i}`, category: 'connections', fields: { 'first name': `Person ${i}`, url: `https://linkedin.com/in/${value}` }, provenance: { source: 'recovered-legacy-public-v1', toId: profile.id } }))
+  let networkDown = false, addressesDown = false, writes = 0
+  const overlay = { request: async (identity, method, path, body) => {
+    if (method !== 'GET' && path !== 'lookup') writes++
+    return f.options.overlay.request(identity, method, path, body)
+  } }
+  const service = createAccountToolService({ ...f.options, overlay,
+    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'test', profiles: [profile], connections: [] }),
+    contactAddresses: async () => { if (addressesDown) throw Error('unavailable'); return new Map() },
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => { if (networkDown) throw Error('unavailable'); return [] },
+      readLegacyObservations: async () => ({ assertions: who.ownerId === 'alice' ? rows : [] }) }) })
+  const call = (name, input, who = alice) => service.call({ grant: who, name, input }).then(value => value.result)
+  const identity = await f.options.identityFor(alice)
+  const entities = []
+  for (const hash of hashes) entities.push((await overlay.request(identity, 'POST', 'entities', { kind: 'person', name: hash, refs: [`linkedin:in:${hash}`] })).body.entity)
+  const before = writes
+  for (const subjectId of ['row-0', 'row-1', profile.id, `https://linkedin.com/in/${slug}`, `https://linkedin.com/in/${oldSlugs[0]}`]) {
+    assert.deepEqual(new Set((await call('unlinked_get_person_private', { profileId: subjectId })).entities.map(e => e.id)), new Set(entities.map(e => e.id)))
+    await assert.rejects(call('unlinked_add_private_note', { subjectKind: 'unlinked', subjectId, text: 'Do not choose' }), e => e.code === 'identity_conflict')
+  }
+  assert.equal(writes, before)
+  assert.equal((await call('unlinked_get_private_thing', { thingId: entities[0].id })).entity.connectionId, 'row-0')
+  assert.equal((await call('unlinked_lookup_contact', { refHashes: hashes })).contacts[1].linkedinRefHash, hashes[1])
+  assert.deepEqual((await call('unlinked_get_person_private', { profileId: profile.id }, bob)).entities, [])
+  const context = createPrivateContext({ identityFor: f.options.identityFor, lookupContact: (who, input) => call('unlinked_lookup_contact', input, who),
+    overlay: { lookup: async (who, value) => (await overlay.request(who, 'POST', 'lookup', { ref: value })).body?.entity ?? null } })
+  assert.equal((await context.forContact(alice, 'row-0')).entities.length, 2)
+  for (const outage of ['network', 'addresses']) {
+    networkDown = outage === 'network'; addressesDown = outage === 'addresses'
+    for (const subjectId of ['row-0', profile.id, `https://linkedin.com/in/${slug}`]) {
+      await assert.rejects(call('unlinked_add_private_note', { subjectKind: 'unlinked', subjectId, text: 'Unavailable' }), e => e.code === 'upstream_unavailable')
+    }
+    await assert.rejects(context.forProfile(alice, profile.id), e => e.code === 'overlay_unavailable')
+    assert.equal(writes, before)
+  }
+})
+
+test('published LinkedIn lookup uses current snapshot and prefers a member', async () => {
+  let profiles = [{ ...profile, id: 'z-member' }, { ...profile, id: 'a-shadow' }], revision = 1
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: `${revision}`, profiles, connections: [], members: ['z-member'] }) })
+  assert.equal((await reader.lookupLinkedin({ address: profile.linkedinUrl })).id, 'z-member')
+  profiles = [{ ...profile, id: 'z-member', linkedinUrl: undefined }, profiles[1]]; revision++
+  assert.equal((await reader.lookupLinkedin({ address: profile.linkedinUrl })).id, 'a-shadow')
+})

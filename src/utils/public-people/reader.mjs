@@ -226,7 +226,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // Addresses an operator removal took out; never published, only named.
       const removed = new Set()
       if (Array.isArray(value.removed)) for (const id of value.removed) if (idValid(id) && !summaries.has(id)) removed.add(id)
-      const data = { revision: value.revision, ordered, summaries, details, connected, policies, listedBy, tokens, aliases, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
+      const linkedinProfiles = new Map()
+      for (const detail of details.values()) {
+        const slug = parseLinkedinProfileUrl(detail.linkedinUrl)?.slug
+        if (!slug) continue
+        const previous = linkedinProfiles.get(slug)
+        if (!previous || Number(detail.presence === 'member') > Number(previous.presence === 'member') ||
+          (Number(detail.presence === 'member') === Number(previous.presence === 'member') && compare(detail.id, previous.id) < 0)) linkedinProfiles.set(slug, detail)
+      }
+      const data = { revision: value.revision, ordered, summaries, details, linkedinProfiles, connected, policies, listedBy, tokens, aliases, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
@@ -413,10 +421,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { address, signal } = requestValue(request), parsed = parseLinkedinProfileUrl(address)
       if (!parsed) invalid()
       const data = await snapshot(signal)
-      const matches = [...data.details.values()].filter(profile => parseLinkedinProfileUrl(profile.linkedinUrl)?.slug === parsed.slug)
-      // Prefer a live member when two published sources describe one person.
-      matches.sort((a, b) => Number(b.presence === 'member') - Number(a.presence === 'member') || compare(a.id, b.id))
-      return matches.length ? withPhoto(data.summaries.get(matches[0].id)) : null
+      const match = data.linkedinProfiles.get(parsed.slug)
+      return match ? withPhoto(data.summaries.get(match.id)) : null
     },
     // Exact identity from a currently readable public address, never an id's
     // spelling, a name, or an email. Private callers use it only in their own overlay.

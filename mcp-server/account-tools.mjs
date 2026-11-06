@@ -452,16 +452,12 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       // The owner's own connection rows; never anyone else's.
       let rows
       try { rows = (await createAccountNetwork({ owner: owner(grant), getBackend }).readNetwork(undefined, { signal })).assertions.filter(row => row.category === 'connections') }
-      catch {
-        // A published profile still resolves without the owner's network; it just has no connection id.
-        if (mode !== 'profileId') throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.')
-        rows = []
-      }
+      catch { throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
       // A row without its own LinkedIn address uses the one the owner attached
       // to that contact privately (contact enrichment), so the owner's private
       // card can be keyed linkedin:in:<hash>. Only the hash leaves this tool.
       let attached = new Map()
-      if (typeof contactAddresses === 'function') { try { attached = await contactAddresses(owner(grant)) } catch { attached = new Map() } }
+      if (typeof contactAddresses === 'function') { try { attached = await contactAddresses(owner(grant)) } catch { throw new AccountToolError('upstream_unavailable', 'The owner contact addresses are unavailable right now.') } }
       const privateSlug = row => { const value = attached.get(row.id); return value && value.fingerprint === contactFingerprint(row) ? rowSlug({ fields: { url: value.address } }) : null }
       const ordered = rows.map(row => ({ row, entry: connectionEntry(row), slug: rowSlug(row) ?? privateSlug(row) }))
         .sort((a, b) => a.entry.name.localeCompare(b.entry.name) || a.entry.id.localeCompare(b.entry.id))
@@ -469,6 +465,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       const publishedFor = async candidates => {
         if (!reader || !candidates.length) return candidates.map(() => null)
         try {
+          await reader.lookup({ ids: [], signal })
           return await Promise.all(candidates.map(async candidate => {
             const target = usableProfileId(rowPublicTarget(candidate.row))
             const explicit = target ? (await reader.lookup({ ids: [target], signal })).get(target) : null
@@ -495,7 +492,16 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
           if (value && wanted.has(value) && !seen.has(value)) { seen.add(value); picked.push(candidate) }
         }
         const summaries = await publishedFor(picked)
-        return { kind: 'unlinked_lookup_contact', contacts: await Promise.all(picked.map((candidate, index) => contactOf(candidate, summaries[index]))), visibility: 'owner_private' }
+        return { kind: 'unlinked_lookup_contact', contacts: await Promise.all(picked.map(async (candidate, index) => ({ ...await contactOf(candidate, summaries[index]), linkedinRefHash: linkedinRefHash(candidate.slug) }))), visibility: 'owner_private' }
+      }
+      const reconcile = async (target, preferred = null) => {
+        const summaries = await publishedFor(ordered)
+        const indexes = summaries.flatMap((summary, index) => summary?.id === target.id ? [index] : [])
+        if (!indexes.length) return null
+        const contacts = await Promise.all(indexes.map(index => contactOf(ordered[index], summaries[index])))
+        const contact = contacts.find(value => value.connectionId === preferred?.entry.id) ?? contacts[0]
+        const sourceLinkedinRefHashes = [...new Set(contacts.flatMap(value => [value.sourceLinkedinRefHash, value.linkedinRefHash]).filter(value => value && value !== contact.linkedinRefHash))]
+        return { ...contact, ...(sourceLinkedinRefHashes.length ? { sourceLinkedinRefHashes } : {}) }
       }
       let candidate = null
       if (mode === 'linkedinUrl' && reader) {
@@ -505,14 +511,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       if (mode === 'connectionId') candidate = ordered.find(value => value.entry.id === input.connectionId) ?? null
       else if (mode === 'linkedinUrl' && !published) candidate = ordered.find(value => value.slug === wantedSlug) ?? null
       else {
-        const summaries = await publishedFor(ordered)
-        const indexes = summaries.flatMap((summary, index) => summary?.id === published.id ? [index] : [])
-        if (indexes.length) {
-          const contacts = await Promise.all(indexes.map(index => contactOf(ordered[index], summaries[index])))
-          const contact = contacts[0]
-          const sourceLinkedinRefHashes = [...new Set(contacts.flatMap(value => [value.sourceLinkedinRefHash, value.linkedinRefHash]).filter(value => value && value !== contact.linkedinRefHash))]
-          return { kind: 'unlinked_lookup_contact', contact: { ...contact, ...(sourceLinkedinRefHashes.length ? { sourceLinkedinRefHashes } : {}) }, visibility: 'owner_private' }
-        }
+        const contact = await reconcile(published)
+        if (contact) return { kind: 'unlinked_lookup_contact', contact, visibility: 'owner_private' }
         // Published, but not among the owner's contacts: public data only.
         let publicRef
         try { publicRef = await reader.linkedinRef({ id: published.id, signal }) }
@@ -521,7 +521,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       }
       if (candidate) {
         const [summary] = await publishedFor([candidate])
-        return { kind: 'unlinked_lookup_contact', contact: await contactOf(candidate, summary), visibility: 'owner_private' }
+        const contact = summary ? await reconcile(summary, candidate) : await contactOf(candidate, summary)
+        return { kind: 'unlinked_lookup_contact', contact, visibility: 'owner_private' }
       }
       if (mode === 'linkedinUrl' && reader) {
         let summary
