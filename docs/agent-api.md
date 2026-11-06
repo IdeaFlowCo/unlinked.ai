@@ -288,15 +288,15 @@ read `importCount: 0` while `unlinked_list_connections` listed them.
 `grant.toolRefresh` explains same-key tool refresh and explicit permissions; see the
 [permission and tool-refresh policy](#optional-connection-actions).
 
-### `GET /api/agent/v1/people?q&mode&presence&sort&cursor&limit` ⇄ `unlinked_list_people`
+### `GET /api/agent/v1/people?q&mode&presence&enrichmentStatus&sort&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
 `q` ≤ 200 chars; `mode` `best` (default) or `exact`; `presence` uses the
 [public People presence contract](public-people-reader.md#historical-membership),
-omitted for everyone. `sort` `best` (default: relevance
+omitted for everyone. `enrichmentStatus` filters by the [enrichment status contract](public-people-reader.md#enrichment-status). `sort` `best` (default: relevance
 with `q`, else the stored name order), `name`, `name-desc` or `raw` (see
 [Name ordering](#name-ordering)). The filter and sort are bound into the cursor.
 Response: `{ kind, revision, sort? (when not best), total, match?, profiles: [{ id, name, headline?,
-location?, presence?, connectionCount? }], nextCursor?, visibility: "public" }`.
+location?, presence?, enrichmentStatus, detailLevel, connectionCount? }], nextCursor?, visibility: "public" }`.
 `presence` and `connectionCount` (connections counted from both ends) are present
 whenever the published snapshot names its members.
 
@@ -380,10 +380,10 @@ own contacts without paging; give exactly one input:
 
 Response: `{ kind, contact: { connectionId | null, name, headline?, company?,
 linkedinRefHash | null, sourceLinkedinRefHash?, sourceLinkedinRefHashes?,
-publishedProfileId | null, publishedProfileIds?, provenance? },
+publishedProfileId | null, publishedProfileIds?, provenance?, presence, enrichmentStatus, detailLevel },
 publicReconciliationComplete?, visibility }`. Additional source hashes and
 published IDs identify related exact references; `publicReconciliationComplete`
-indicates whether the public index was available for reconciliation.
+indicates whether the public index was available for reconciliation. The three status fields are `unknown` when public evidence is unavailable; see the [status contract](public-people-reader.md#enrichment-status).
 `linkedinRefHash` is the SHA-256 hex of the canonical LinkedIn slug
 (`linkedinSlug()` in `src/utils/public-people/url-identity.mjs`: decoded,
 lowercased) — the value of the Ideaflow people-overlay ref `linkedin:in:<hash>`
@@ -736,4 +736,3 @@ See [agent access](agent-access.md) for public comparisons, Muse custom API setu
 See the [investor list workflow](investor-csv.md) for private CSV/XLSX staging,
 sheet selection and retention consent, resumable imports, recovery and list queries.
 
-MCP profile/list/contact results expose enrichmentStatus independently of presence and detailLevel. Values are enriched (current published enrichment evidence), not_recorded (no such evidence in the composed index), and unknown (source has no status). not_recorded does not prove a person was never enriched. unlinked_list_people accepts presence and enrichmentStatus filters.

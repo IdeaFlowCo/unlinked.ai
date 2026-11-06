@@ -61,7 +61,7 @@ test('LinkedIn evidence survives member merges and budgets, then disappears on r
  const reader=createPublicPeopleReader({readPublishedSnapshot:read})
  const member=(await reader.profile({id:'member'})).profile
  assert.equal(member.headline,'Member words'); assert.equal(member.enrichmentStatus,'enriched'); assert.equal(member.presence,'member')
- assert.equal((await reader.profile({id:'alias'})).profile.enrichmentStatus,'enriched')
+ assert.deepEqual(await reader.profile({id:'alias'}),{moved:'member'})
  assert.equal((await reader.profile({id:'complete'})).profile.enrichmentStatus,'enriched')
  rows=null
  assert.equal((await reader.profile({id:'member'})).profile.enrichmentStatus,'not_recorded')

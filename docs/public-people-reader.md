@@ -26,7 +26,7 @@ Only these DTO fields are copied; email, phone, raw imports, notes, auth metadat
 The publication provider must separately sanitize the contents of public biography/professional text, since a whitelist cannot prove free text contains no private information.
 Connections are `{fromId,toId}` and remain directed; reciprocal relationships and mutual status are not inferred.
 
-`reader.list({query?,mode?,presence?,sort?,includeTotal?,cursor?,signal?})` returns `{profiles:[{id,name,headline?,location?}],nextCursor?}` with `match` and `total` for a nonempty query, and `total` for a presence filter or explicit `includeTotal: true`. `exclude` (array of published ids, merged ids resolved) leaves those people out after ranking and before paging and totals; the exclusion set is bound into the cursor scope.
+`reader.list({query?,mode?,presence?,enrichmentStatus?,sort?,includeTotal?,cursor?,signal?})` returns `{profiles:[{id,name,headline?,location?}],nextCursor?}` with `match` and `total` for a nonempty query, and `total` for a presence or enrichment status filter or explicit `includeTotal: true`. `exclude` (array of published ids, merged ids resolved) leaves those people out after ranking and before paging and totals; the exclusion set is bound into the cursor scope.
 `reader.profile({id,cursor,signal?})` returns `{profile:{...summary,about?,positions,education,skills,connections,nextConnectionsCursor?}}`, or null for an unknown/unpublished profile in an otherwise valid published snapshot.
 A profile's connections are its edges from both ends: an edge is stored only from the person whose export listed it, and an edge recorded by both people appears once.
 When the snapshot carries `members` (profile IDs supplied by the shared index), every summary and detail adds `presence: 'member'|'legacy'|'shadow'` and `connectionCount` (both directions). See [signup source precedence](signup-profile-lookup.md#public-projection-and-export-precedence) for member identity sources. Snapshots without `members` add neither field. A member or legacy-member ID missing from the profiles is a malformed snapshot (503).
@@ -67,6 +67,18 @@ The shared projection keeps current `members` separate from `legacyMembers`. The
 Presence resolves in order: `member` (**On Unlinked**, current membership from the [member identity sources](signup-profile-lookup.md#public-projection-and-export-precedence)), then `legacy` (**Legacy member · awaiting claim**, verified recovered account), otherwise `shadow` (**Not on Unlinked**, imported contact). Historical display records create no owners, sessions, login permissions or member messaging. A legacy profile offers **Sign in to reclaim it** at `/legacy-account`, which still requires verified sign-in and explicit confirmation; its existing profile and connections remain available.
 
 Historical IDs follow [profile merge decisions](profile-decisions.md), including aliases, without becoming current members. Both membership sets contribute to the snapshot revision, so claim or revocation changes invalidate filtered cursors after the existing freshness windows above. Regression coverage: `tests/legacy-membership.test.mjs`; published filter parity: `tests/public-presence-contract.test.mjs`.
+
+## Enrichment status
+
+Summaries and details expose `enrichmentStatus` independently of membership
+(`presence`) and visible content depth (`detailLevel`). `enriched` means there
+is current published enrichment evidence in the composed index; `not_recorded`
+means there is no such evidence, not that the person was never enriched. A
+source without a status yields `unknown`. Published evidence follows profile
+merges. The list accepts these three values as an `enrichmentStatus` filter,
+which is bound into the cursor; invalid values are rejected. Contact lookup
+uses `unknown` when public evidence is unavailable. See the
+[agent API](agent-api.md) for the exposed endpoints.
 
 ## Enrichment shards
 
