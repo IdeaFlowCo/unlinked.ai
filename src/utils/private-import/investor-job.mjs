@@ -102,12 +102,13 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
         signal?.throwIfAborted()
         const resource = await backend.readResource('import', investorReceiptId(grant.ownerId, importId, i))
         const receipt = resource ? await read(backend, grant.ownerId, investorReceiptId(grant.ownerId, importId, i), `${KIND}_row`) : null
-        let entry = { ordinal: i, sourceRow: rows[i].row, rowId: rows[i].rowId, fields: rows[i].fields ?? null,
+        const entry = { ordinal: i, sourceRow: rows[i].row, rowId: rows[i].rowId, fields: rows[i].fields ?? null,
           ...(rows[i].sourceValues ? { sourceValues: rows[i].sourceValues } : {}),
           result: receipt?.result ?? { status: rows[i].reason ? 'rejected' : 'pending', ...(rows[i].reason ? { reason: rows[i].reason } : {}) } }
         if (Buffer.byteLength(JSON.stringify(entry)) > 512 * 1024) {
-          const { fields, sourceValues, ...metadata } = entry
-          entry = { ...metadata, fields: null, sourceRecovery: { reason: 'encoded_row_limit', sourceOffset: 0 } }
+          delete entry.sourceValues
+          entry.fields = null
+          entry.sourceRecovery = { reason: 'encoded_row_limit', sourceOffset: 0 }
         }
         const size = Buffer.byteLength(JSON.stringify(entry))
         if (receipts.length && receiptBytes + size > 512 * 1024) break
