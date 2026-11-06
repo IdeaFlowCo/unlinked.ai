@@ -71,3 +71,11 @@ test('the operator summary infers restarts and per-hour stalls', () => {
   assert.equal(hour.gc_major_max_ms, 2500)
   assert.equal(hour.cpu_percent, 50)
 })
+
+test('expired owner-network reads are dropped; fresh and in-flight ones stay', async () => {
+  const { dropExpiredNetworks } = await import('../mcp-server/private-browser.mjs')
+  const pending = Promise.resolve()
+  const cache = new Map([['old', { pending: null, value: { rows: 12000 }, at: 1000 }], ['fresh', { pending: null, value: {}, at: 15000 }], ['loading', { pending, value: null, at: 0 }]])
+  dropExpiredNetworks(cache, 15000, 20000)
+  assert.deepEqual([...cache.keys()], ['fresh', 'loading'])
+})
