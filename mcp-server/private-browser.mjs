@@ -61,7 +61,7 @@ import { publicSearchDocument } from './public-web-search.mjs'
 import { createMembersOnlySnapshotReader, iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 import { BlockError } from './member-blocks.mjs'
-import { renderSavedSearchList, renderPeopleError, MAX_UPLOAD_FILES, renderListImport } from './private-onboarding-views.mjs'
+import { renderListsDirectory, renderPrivateList, renderSavedSearchList, renderPeopleError, MAX_UPLOAD_FILES, renderListImport } from './private-onboarding-views.mjs'
 import { LIST_ERRORS, LIST_UPLOAD_BYTES, DEFAULT_LIST_NAME } from './private-list-imports.mjs'
 
 import { coordinatorFor } from './owner-coordination.mjs'
@@ -178,7 +178,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ privateListImports, savedSearchLists, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ privateLists, privateListImports, savedSearchLists, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -2517,6 +2517,30 @@ export function createPrivateBrowserHandler({ privateListImports, savedSearchLis
         if (outcome === 'accepted' && (session.legacyCandidate || session.selfClaim)) view.content = view.content.replace('href="/profile"', `href="${session.legacyCandidate ? '/legacy-account' : '/find-me'}"`)
         journey(response, view); return
       }
+      const privateListMatch = /^\/lists\/private\/([A-Za-z0-9_-]{1,80})$/.exec(url.pathname)
+      if (request.method === 'GET' && (url.pathname === '/lists' || privateListMatch)) {
+        response.setHeader('Cache-Control', 'no-store')
+        const chrome = { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf }
+        const values = url.searchParams.getAll('after'), after = values[0]
+        if (values.length > 1 || (after !== undefined && (!after || after.length > 512))) {
+          journey(response, renderPrivateList({ ...chrome, error: 'That page link is invalid. Open Lists and try again.' }), null, '', 400); return
+        }
+        if (privateListMatch) {
+          if (!privateLists) { journey(response, renderPrivateList({ ...chrome, error: 'Private lists are unavailable right now. Please try again later.' }), null, '', 503); return }
+          try {
+            const result = await privateLists.get(session.owner, privateListMatch[1], after)
+            journey(response, renderPrivateList({ ...chrome, ...result })); return
+          } catch (error) {
+            if (error?.code === 'not_found') { journey(response, renderNotFound(chrome), null, '', 404); return }
+            const badPage = error?.code === 'invalid_input' || error?.code === 'invalid_cursor'
+            journey(response, renderPrivateList({ ...chrome, error: badPage ? 'That page link is invalid. Open Lists and try again.' : 'Private lists are unavailable right now. Please try again later.' }), null, '', badPage ? 400 : 503); return
+          }
+        }
+        let privatePage, saved, privateError, savedError
+        try { if (privateLists) privatePage = await privateLists.list(session.owner, after); else privateError = true } catch { privateError = true }
+        try { if (savedSearchLists) saved = await savedSearchLists.list(session.owner); else savedError = true } catch { savedError = true }
+        journey(response, renderListsDirectory({ ...chrome, privatePage, saved, privateError, savedError })); return
+      }
       const savedListMatch = /^\/lists\/([0-9a-f-]{36})(?:\/(share|unshare|delete))?$/.exec(url.pathname)
       if (savedSearchLists && (url.pathname === '/lists' || savedListMatch)) {
         const listChrome = { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf }
@@ -2528,7 +2552,6 @@ export function createPrivateBrowserHandler({ privateListImports, savedSearchLis
           const byRow = new Map(contacts.map(person => [person.sourceRowId,person]))
           return refs.map(ref => ref.startsWith('public:') ? profiles.get(ref.slice(7)) : byRow.get(ref.slice(8))).filter(Boolean)
         }
-        if (request.method === 'GET' && !savedListMatch) { journey(response, renderSavedSearchList({ ...listChrome, lists: await savedSearchLists.list(session.owner) })); return }
         const saved = savedListMatch ? await savedSearchLists.get(session.owner,savedListMatch[1]) : null
         if (savedListMatch && !saved) { journey(response, renderNotFound(listChrome), null, '', 404); return }
         if (request.method === 'GET' && !savedListMatch?.[2]) {

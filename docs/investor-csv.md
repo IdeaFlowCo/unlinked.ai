@@ -197,3 +197,26 @@ This browser upload accepts CSV only; use the agent workflow above for XLSX.
 - A paced background runner resumes batches of 25, about one every 1.5 s, well under the owner's per-minute tool budget. One owner's imports run one at a time. Runners live in the process, so a restart pauses them. After five consecutive transient failures, or three batches without progress, a runner stops, and `/import/list/<importId>` offers **Continue importing**. That page shows counts and the rows with their outcomes (20 per page), named through the import's mapping.
 - The people are owner-private list members (`contains`), never connections, never public, and nobody is notified. They appear in each person's private notes panel and through the list tools for the owner's agent.
 - Not yet: a "Follows you" label in My people, which needs list membership joined to network rows.
+
+## Finding existing lists in Unlinked (unlinked-ms39)
+
+Signed-in members open **Lists** in the desktop navigation or **Me → Lists** on
+mobile. `/lists` shows private graph lists and saved search result sets in
+separate sections. Private lists created through the connector, CSV/XLSX imports
+or OpenChat are read from the existing owner-private Noos overlay; there is no
+new list store or copy. Noos research collections (such as node-page lists) are
+a different data model and are not automatically included.
+
+`/lists/private/:id` pages through outgoing `contains` person members, retaining
+the next cursor even when a page contains only other links. Names and descriptions
+are escaped; public-profile references may link to existing profile pages. These
+pages require the current browser owner, use `Cache-Control: no-store`, never
+create a share link, and show an unavailable state when the overlay fails. The
+browser adapter has only the two existing private read tools. Import-result pages
+link directly to the resulting list once a `listId` exists. List editing remains
+in OpenChat/the existing agent tools.
+
+Focused checks: `node --test tests/private-lists.test.mjs
+ tests/saved-search-lists.test.mjs tests/private-list-imports.test.mjs` (one line).
+Runtime rollout remains subject to the existing qualified Unlinked/Noos release;
+source delivery and synthetic browser verification do not establish deployment.
