@@ -112,7 +112,7 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
   const pairs = new Map()
   for (const edge of snapshot.connections) {
     const fromId = point(edge.fromId), toId = point(edge.toId)
-    if (fromId !== toId && !removed.has(fromId) && !removed.has(toId)) pairs.set(JSON.stringify([fromId, toId]), { fromId, toId })
+    if (fromId !== toId && !removed.has(fromId) && !removed.has(toId)) pairs.set(`${fromId}\u0000${toId}`, { fromId, toId })
   }
   const suspendedList = [...suspended].sort()
   const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : value.kind === 'remove' ? removals.has(value.profileId) : value.kind === 'unlist' ? unlists.has(value.profileId) : value.kind === 'suspend' ? true : renames.has(value.profileId))
