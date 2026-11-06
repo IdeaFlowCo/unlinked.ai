@@ -438,3 +438,33 @@ test('investor import propagates unrelated identity and availability errors', as
     assert.equal([...f.state(owner.ownerId).entities.values()].filter(entity => entity.kind === 'person').length, 0)
   }
 })
+
+test('private annotations resolve every owner source hash and preserve multiple contacts', async () => {
+  const f = fixture(), alice = grant('annotation-alice'), bob = grant('annotation-bob')
+  const sources = [['source-a', 'annotation-old-a'], ['source-b', 'annotation-old-a'], ['source-c', 'annotation-old-b']]
+  const rows = sources.map(([id, address]) => ({ id, category: 'connections', fields: { 'first name': id, url: `https://linkedin.com/in/${address}` }, provenance: { source: 'recovered-legacy-public-v1', toId: profile.id } }))
+  const service = createAccountToolService({ ...f.options,
+    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'annotation', profiles: [profile], connections: [] }),
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [], readLegacyObservations: async () => ({ assertions: who.ownerId === alice.ownerId ? rows : [] }) }) })
+  const call = (who, name, input) => service.call({ grant: who, name, input }).then(value => value.result)
+  const saved = await call(alice, 'unlinked_add_private_note', { subjectKind: 'unlinked', subjectId: profile.id, text: 'Private note' })
+  const card = await call(alice, 'unlinked_get_private_thing', { thingId: saved.entityId })
+  assert.equal(card.entity.linkedinRefHash, ref)
+  assert.equal(card.entity.connectionId, 'source-a')
+  assert.deepEqual(card.entity.connectionIds, ['source-a', 'source-b', 'source-c'])
+  const matched = await call(alice, 'unlinked_lookup_contact', { refHashes: [sha('annotation-old-a')] })
+  assert.deepEqual(matched.contacts[0].connectionIds, ['source-a', 'source-b'])
+  assert.deepEqual((await call(bob, 'unlinked_lookup_contact', { refHashes: [sha('annotation-old-a')] })).contacts, [])
+})
+
+test('aborting the first alternate lookup stops fallback even when wrapped as unavailable', async () => {
+  const f = fixture(), controller = new AbortController(), calls = []
+  const reason = new Error('synthetic cancellation')
+  f.options.lookupContact = async (_grant, input) => {
+    calls.push(input)
+    controller.abort(reason)
+    throw new AccountToolError('upstream_unavailable', 'Wrapped cancellation')
+  }
+  await assert.rejects(f.tools().unlinked_get_person_private(grant('abort-owner'), { profileId: 'alternate-id' }, controller.signal), error => error === reason)
+  assert.deepEqual(calls, [{ connectionId: 'alternate-id' }])
+})

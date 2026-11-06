@@ -108,9 +108,11 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       : [...(value.length <= 128 ? [{ connectionId: value }] : []), ...(value.length <= 160 ? [{ profileId: value }] : [])]
     let unavailable = null
     for (const input of tries) {
+      signal?.throwIfAborted()
       let found
-      try { found = await lookupContact(grant, input, signal) }
+      try { found = await lookupContact(grant, input, signal); signal?.throwIfAborted() }
       catch (error) {
+        signal?.throwIfAborted()
         if (['not_found', 'invalid_input'].includes(error?.code)) continue
         // One lookup path down (e.g. the People index): try the others first.
         if (error?.code === 'upstream_unavailable') { unavailable = error; continue }
@@ -170,8 +172,13 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
     if (hashes.size) {
       try {
         const found = await lookupContact(grant, { refHashes: [...hashes].slice(0, 100) }, signal)
-        for (const contact of found?.contacts ?? []) connections.set(contact.linkedinRefHash, contact.connectionId)
-      } catch { /* annotation is best-effort */ }
+        signal?.throwIfAborted()
+        for (const contact of found?.contacts ?? []) {
+          const ids = connections.get(contact.linkedinRefHash) ?? new Set()
+          for (const id of [contact.connectionId, ...(contact.connectionIds ?? [])]) if (id) ids.add(id)
+          connections.set(contact.linkedinRefHash, ids)
+        }
+      } catch { signal?.throwIfAborted() }
     }
     const rewrite = node => {
       if (Array.isArray(node)) return node.map(rewrite)
@@ -180,10 +187,15 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       for (const [key, child] of Object.entries(node)) if (key !== 'refs' && key !== 'ownerKey') out[key] = rewrite(child)
       if (Array.isArray(node.refs)) {
         const profileId = node.refs.map(ref => PERSON_REF.exec(ref)?.[1]).find(Boolean)
-        const hash = node.refs.map(ref => LINKEDIN_REF.exec(ref)?.[1]).find(Boolean)
+        const exactHashes = [...new Set(node.refs.map(ref => LINKEDIN_REF.exec(ref)?.[1]).filter(Boolean))]
+        const hash = exactHashes[0]
         const user = node.refs.map(ref => OPENCHAT_USER_REF.exec(ref)?.[1]).find(Boolean)
         if (profileId) out.profileId = profileId
-        if (hash) { out.linkedinRefHash = hash; out.connectionId = connections.get(hash) ?? null }
+        if (hash) {
+          const ids = [...new Set(exactHashes.flatMap(value => [...(connections.get(value) ?? [])]))].sort()
+          out.linkedinRefHash = hash; out.connectionId = ids[0] ?? null
+          if (ids.length > 1) out.connectionIds = ids
+        }
         if (user) out.openchatUserId = user
       }
       return out

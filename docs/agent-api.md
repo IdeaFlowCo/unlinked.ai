@@ -374,7 +374,9 @@ own contacts without paging; give exactly one input:
 - `profileId`: a published profile id; answers with the owner's connection to
   that person when there is one, otherwise the public profile only.
 - `refHashes`: up to 100 `linkedinRefHash` values; answers the owner's contacts
-  among them (`{ kind, contacts: [...] }`, unmatched hashes are omitted).
+  among them (`{ kind, contacts: [...] }`, unmatched hashes are omitted). When
+  multiple owner contacts share a source hash, the contact includes sorted
+  `connectionIds` alongside the existing `connectionId`.
 
 Response: `{ kind, contact: { connectionId | null, name, headline?, company?,
 linkedinRefHash | null, sourceLinkedinRefHash?, sourceLinkedinRefHashes?,
@@ -669,7 +671,8 @@ independent of "Send and manage connection requests".
   `assertion` `stated` (default) or `inferred`. Unlinked and
   OpenChat label each agent-written note and relation with it.
 - **Results** never include raw overlay refs: entity ends carry `profileId`,
-  `linkedinRefHash` (+ `connectionId` when the owner imported them) or
+  `linkedinRefHash` (+ `connectionId` when the owner imported them, and sorted
+  `connectionIds` when multiple owner contacts match its exact hashes) or
   `openchatUserId`. Every result is `visibility: "owner_private"`.
 - **Budgets.** Shared with the deterministic budget (120 calls per owner per
   minute). Writes revalidate the key before running and report a landed write

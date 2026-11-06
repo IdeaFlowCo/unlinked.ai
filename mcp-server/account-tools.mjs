@@ -487,13 +487,20 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
           publishedProfileId: summary?.id ?? null, provenance: candidate.entry.provenance }
       }
       if (mode === 'refHashes') {
-        const wanted = new Set(input.refHashes), seen = new Set(), picked = []
+        const wanted = new Set(input.refHashes), grouped = new Map()
         for (const candidate of ordered) {
           const value = linkedinRefHash(candidate.slug)
-          if (value && wanted.has(value) && !seen.has(value)) { seen.add(value); picked.push(candidate) }
+          if (value && wanted.has(value)) {
+            if (!grouped.has(value)) grouped.set(value, [])
+            grouped.get(value).push(candidate)
+          }
         }
+        const picked = [...grouped.values()].map(candidates => candidates[0])
         const summaries = await publishedFor(picked)
-        return { kind: 'unlinked_lookup_contact', contacts: await Promise.all(picked.map(async (candidate, index) => ({ ...await contactOf(candidate, summaries[index][0] ?? null), linkedinRefHash: linkedinRefHash(candidate.slug) }))), visibility: 'owner_private' }
+        return { kind: 'unlinked_lookup_contact', contacts: await Promise.all(picked.map(async (candidate, index) => {
+          const hash = linkedinRefHash(candidate.slug), ids = [...new Set(grouped.get(hash).map(value => value.entry.id))].sort()
+          return { ...await contactOf(candidate, summaries[index][0] ?? null), linkedinRefHash: hash, ...(ids.length > 1 ? { connectionIds: ids } : {}) }
+        })), visibility: 'owner_private' }
       }
       let candidate = null
       if (mode === 'linkedinUrl' && reader) {
