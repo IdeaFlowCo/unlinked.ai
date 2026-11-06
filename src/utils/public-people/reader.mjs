@@ -38,6 +38,17 @@ const dense = value => {
   }
   return true
 }
+// A provider returns the same kept snapshot to every call; its profile and
+// edge arrays (100k+ entries) were walked for holes and accessors on each one
+// (up to ~80 ms per call on the production host). An array already found
+// dense at its current length is not walked again.
+const denseChecked = new WeakMap()
+const denseOnce = value => {
+  if (Array.isArray(value) && denseChecked.get(value) === value.length) return true
+  const ok = dense(value)
+  if (ok) denseChecked.set(value, value.length)
+  return ok
+}
 const immutableIdentity = (value, ancestors = new Set()) => {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
   if (typeof value === 'number') return Number.isFinite(value)
@@ -133,7 +144,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (combined.aborted) abortHandler()
       })
       const value = await Promise.race([Promise.resolve().then(() => readPublishedSnapshot({ maxProfiles, maxConnections, maxTextBytes, signal: combined, viewer })), interruption])
-      if (!plain(value) || value.state !== 'published' || value.complete !== true || !revisionValid(value.revision) || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !dense(value.profiles) || !Array.isArray(value.connections) || value.connections.length > maxConnections || !dense(value.connections)) unavailable()
+      if (!plain(value) || value.state !== 'published' || value.complete !== true || !revisionValid(value.revision) || !Array.isArray(value.profiles) || value.profiles.length > maxProfiles || !denseOnce(value.profiles) || !Array.isArray(value.connections) || value.connections.length > maxConnections || !denseOnce(value.connections)) unavailable()
       // A wrapper that only observes the source names it (`compiledSource`), so
       // its readers share the source's compiled index instead of rebuilding it.
       const source = typeof readPublishedSnapshot.compiledSource === 'function' ? readPublishedSnapshot.compiledSource : readPublishedSnapshot

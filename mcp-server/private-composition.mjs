@@ -20,7 +20,7 @@ import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-read
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS, LINKEDIN_ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 import { cachePublicPeopleReads, publishedRevisionReader } from '../src/utils/public-people/cached-store.mjs'
-import { normalizeLinkedinSlug, urlIdentityMerges, urlIdentitySuspensions } from '../src/utils/public-people/url-identity.mjs'
+import { normalizeLinkedinSlug, urlIdentityMergesAsync, urlIdentitySuspensionsAsync } from '../src/utils/public-people/url-identity.mjs'
 import { createMemberInvitations, createNeo4jInvitationStore } from './member-invitations.mjs'
 import { createConnectionRequests, createNeo4jConnectionStore } from './member-connections.mjs'
 import { createNotifications, createNeo4jNotificationStore } from './member-notifications.mjs'
@@ -589,10 +589,10 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           const explicit = result.records.map(record => Object.fromEntries(['id', 'kind', 'profileId', 'survivorId', 'name', 'group', 'linkedinRefHash'].filter(key => record.get(key) !== null).map(key => [key, record.get(key)])))
           // Imported copies of legacy people, matched by LinkedIn address only.
           let automatic = [], rows = null
-          try { rows = await readImportRows(session); automatic = urlIdentityMerges({ rows, slugIndex: await slugIndex(), explicit }) } catch { automatic = [] }
+          try { rows = await readImportRows(session); automatic = await urlIdentityMergesAsync({ rows, slugIndex: await slugIndex(), explicit }) } catch { automatic = [] }
           // Imported copies of suspended people. Unlike merges this must not
           // fail open: without the import rows the snapshot does not build.
-          const suspensions = explicit.some(value => value.kind === 'suspend' && value.linkedinRefHash) ? urlIdentitySuspensions({ rows: rows ?? await readImportRows(session), explicit }) : []
+          const suspensions = explicit.some(value => value.kind === 'suspend' && value.linkedinRefHash) ? await urlIdentitySuspensionsAsync({ rows: rows ?? await readImportRows(session), explicit }) : []
           // Suspensions before automatic merges: a long list is truncated from the end (usableProfileDecisions).
           return [...explicit, ...suspensions, ...automatic]
         } finally { await session.close() }

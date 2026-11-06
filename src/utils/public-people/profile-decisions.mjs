@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { runAsync, runSync, ticker } from '../cooperative.mjs'
 import { UNLISTED_GROUP } from './unlisted.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { linkedinRefHash } from './url-identity.mjs'
@@ -68,10 +69,15 @@ export function usableProfileDecisions(decisions, { limit = PROFILE_DECISION_LIM
   return usable.filter(value => value.kind !== 'merge' || !merged.has(value.survivorId))
 }
 
-export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISION_LIMIT, identityRefs } = {}) {
+export function applyProfileDecisions(snapshot, stored, options) { return runSync(applyProfileDecisionsSteps(snapshot, stored, options)) }
+// The same application, giving the event loop a turn between slices (cold builds).
+export function applyProfileDecisionsAsync(snapshot, stored, options) { return runAsync(applyProfileDecisionsSteps(snapshot, stored, options)) }
+function* applyProfileDecisionsSteps(snapshot, stored, { limit = PROFILE_DECISION_LIMIT, identityRefs } = {}) {
   const decisions = usableProfileDecisions(stored, { limit })
   if (!decisions.length) return snapshot
-  const known = new Map(snapshot.profiles.map(profile => [profile.id, profile]))
+  const tick = ticker(512)
+  const known = new Map()
+  for (const profile of snapshot.profiles) { known.set(profile.id, profile); if (tick()) yield }
   const members = new Set(snapshot.members ?? [])
   // A decision about a profile that is not published, or that would merge a
   // claimed profile away, is inert rather than fatal.
@@ -94,6 +100,7 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
   }
   const refsByProfile = new Map(), profilesByRef = new Map()
   for (const profile of snapshot.profiles) {
+    if (tick()) yield
     const id = point(profile.id)
     if (!refsByProfile.has(id)) refsByProfile.set(id, new Set())
     for (const ref of profileRefs(profile)) if (refHash(ref)) {
@@ -135,13 +142,17 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
     }
     survivors.set(survivorId, merged.enrichmentStatus === 'enriched' ? { ...value, enrichmentStatus: 'enriched' } : value)
   }
-  const profiles = snapshot.profiles.filter(profile => !merges.has(profile.id) && !removed.has(profile.id)).map(profile => {
+  const profiles = []
+  for (const profile of snapshot.profiles) {
+    if (tick()) yield
+    if (merges.has(profile.id) || removed.has(profile.id)) continue
     const value = survivors.get(profile.id) ?? profile
-    return renames.has(profile.id) ? { ...value, name: renames.get(profile.id) } : value
-  })
+    profiles.push(renames.has(profile.id) ? { ...value, name: renames.get(profile.id) } : value)
+  }
   const survivingIds = new Set(profiles.map(profile => profile.id))
   const pairs = new Map()
   for (const edge of snapshot.connections) {
+    if (tick()) yield
     const fromId = point(edge.fromId), toId = point(edge.toId)
     if (fromId !== toId && !removed.has(fromId) && !removed.has(toId)) pairs.set(`${fromId}\u0000${toId}`, { fromId, toId })
   }

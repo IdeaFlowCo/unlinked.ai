@@ -1,3 +1,5 @@
+import { runAsync, runSync, ticker } from '../src/utils/cooperative.mjs'
+
 // Reviewed company facts. The static list below was reviewed by the operator
 // on 2026-10-02 and is the floor: the operator-published graph dataset `curated-companies-v1`
 // (docs/company-facts.md, mcp-server/publish-company-facts.mjs) is merged over
@@ -46,33 +48,48 @@ const CHECKS = {
 // The one whitelist for company rows: the offline publisher, the graph store
 // and the runtime reader all apply it, so a bad row can never reach a page.
 // Every name and alias must normalize to a non-empty key no other row claims.
-export function validateCompanyRows(rows) {
+function* validateCompanyRowsSteps(rows) {
   if (!Array.isArray(rows) || rows.length < 1 || rows.length > COMPANY_ROW_LIMIT) throw new Error('company_rows_invalid')
-  const claimed = new Set()
-  return rows.map((row, index) => {
+  const claimed = new Set(), out = new Array(rows.length), tick = ticker(256)
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index]
     if (!plain(row) || !short(row.name)) throw new Error(`company_row_invalid:${index}`)
     for (const [field, value] of Object.entries(row)) if (!COMPANY_FIELDS.includes(field) || !CHECKS[field](value)) throw new Error(`company_row_invalid:${index}:${field}`)
     for (const key of new Set(keysOf(row))) {
       if (!key || claimed.has(key)) throw new Error(`company_row_duplicate:${index}`)
       claimed.add(key)
     }
-    return Object.fromEntries(COMPANY_FIELDS.filter(field => row[field] !== undefined).map(field => [field, field === 'aliases' ? [...row[field]] : row[field]]))
-  })
+    out[index] = Object.fromEntries(COMPANY_FIELDS.filter(field => row[field] !== undefined).map(field => [field, field === 'aliases' ? [...row[field]] : row[field]]))
+    if (tick()) yield
+  }
+  validatedRows.add(out)
+  return out
 }
+// Row arrays this module produced by validation: validating one again yields
+// an equal copy, so a reader may build its index from it directly.
+const validatedRows = new WeakSet()
+export const isValidatedCompanyRows = rows => validatedRows.has(rows)
+export function validateCompanyRows(rows) { return runSync(validateCompanyRowsSteps(rows)) }
+// The same validation, giving the event loop a turn between slices.
+export function validateCompanyRowsAsync(rows) { return runAsync(validateCompanyRowsSteps(rows)) }
 
 // Graph rows win: a static company that shares any normalized name or alias
 // with a graph row is superseded whole. Its other static aliases keep
 // resolving, but to the graph row, so a stale static fact is never served and
 // positions written as e.g. "Smartcar, Inc." still find the published company.
-export function buildCompanyIndex(graphRows = []) {
-  const index = new Map(), graph = new Map(graphRows.flatMap(company => keysOf(company).map(key => [key, company])))
+function* buildCompanyIndexSteps(graphRows = []) {
+  const index = new Map(), graph = new Map(), tick = ticker(256)
+  for (const company of graphRows) { for (const key of keysOf(company)) graph.set(key, company); if (tick()) yield }
   for (const company of COMPANIES) {
     const keys = keysOf(company), winner = keys.map(key => graph.get(key)).find(Boolean) ?? company
     for (const key of keys) if (!graph.has(key)) index.set(key, winner)
+    if (tick()) yield
   }
-  for (const [key, company] of graph) index.set(key, company)
+  for (const [key, company] of graph) { index.set(key, company); if (tick()) yield }
   return index
 }
+export function buildCompanyIndex(graphRows = []) { return runSync(buildCompanyIndexSteps(graphRows)) }
+export function buildCompanyIndexAsync(graphRows = []) { return runAsync(buildCompanyIndexSteps(graphRows)) }
 
 const copy = company => company ? { ...company, ...(company.aliases ? { aliases: [...company.aliases] } : {}) } : null
 const staticIndex = buildCompanyIndex()
@@ -95,7 +112,10 @@ export function createCompanyFacts({ readDataset, ttlMs = 60000, now = Date.now,
     try {
       const dataset = await readDataset({ knownRevision: revision })
       if (dataset?.unchanged === true && revision !== null && dataset.revision === revision) return { index: cached, revision }
-      return { index: buildCompanyIndex(dataset ? validateCompanyRows(dataset.companies) : []), revision: dataset ? dataset.revision ?? null : null }
+      // Rows the graph store already validated are used as they are; others are
+      // validated here. Both steps give the event loop a turn between slices.
+      const rows = !dataset ? [] : isValidatedCompanyRows(dataset.companies) ? dataset.companies : await validateCompanyRowsAsync(dataset.companies)
+      return { index: await buildCompanyIndexAsync(rows), revision: dataset ? dataset.revision ?? null : null }
     } catch (error) {
       try { onError(error) } catch { /* reporting never breaks a page */ }
       return { index: staticIndex, revision: null }

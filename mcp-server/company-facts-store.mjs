@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { COMPANY_DATASET, validateCompanyRows } from './company-metadata.mjs'
+import { COMPANY_DATASET, validateCompanyRows, validateCompanyRowsAsync } from './company-metadata.mjs'
 
 // Graph storage for operator-published company facts (docs/company-facts.md).
 // Noos's UnlinkedPublicPeopleStore only accepts person-shaped rows, so company
@@ -16,6 +16,17 @@ const identifier = value => typeof value === 'string' && /^[A-Za-z0-9:_-]{1,160}
 const CHUNK_BYTES = 128 * 1024, CHUNK_ROWS = 200, MAX_CHUNKS = 512
 
 export const companyRevision = companies => COMPANY_DATASET + ':' + hash(JSON.stringify(companies))
+// sha256(JSON.stringify(rows)) for an array of plain rows, fed row by row with
+// an event-loop turn between slices: the array's JSON is exactly
+// '[' + rows' JSON joined by ',' + ']'.
+export async function hashRowsJson(rows, { slice = 500 } = {}) {
+  const digest = createHash('sha256').update('[')
+  for (let index = 0; index < rows.length; index++) {
+    digest.update((index ? ',' : '') + JSON.stringify(rows[index]))
+    if (index % slice === slice - 1) await new Promise(resolve => setImmediate(resolve))
+  }
+  return digest.update(']').digest('hex')
+}
 
 export function chunksOf(companies) {
   const chunks = []
@@ -112,14 +123,20 @@ export function createNeo4jCompanyFactsStore(driver, database = 'neo4j') {
         if (!result.records.length) return null
         const first = result.records[0], chunkCount = Number(first.get('chunkCount'))
         if (result.records.length !== chunkCount || chunkCount > MAX_CHUNKS) throw new Error('company_dataset_corrupt')
+        // Same checks as before, with an event-loop turn between chunks and
+        // validation slices: a cold read of a large dataset must not stall
+        // every other request (it was a ~3 s block at startup).
         const companies = []
-        result.records.forEach((record, index) => {
+        for (const [index, record] of result.records.entries()) {
           const json = record.get('json')
           if (Number(record.get('ordinal')) !== index || typeof json !== 'string' || hash(json) !== record.get('sha256')) throw new Error('company_dataset_corrupt')
           companies.push(...JSON.parse(json))
-        })
-        const valid = validateCompanyRows(companies)
-        if (hash(JSON.stringify(valid)) !== first.get('digest') || companyRevision(valid) !== first.get('revision')) throw new Error('company_dataset_corrupt')
+          if (index % 8 === 7) await new Promise(resolve => setImmediate(resolve))
+        }
+        const valid = await validateCompanyRowsAsync(companies)
+        // The digest and the revision hash the same JSON: serialize it once.
+        const digest = await hashRowsJson(valid)
+        if (digest !== first.get('digest') || COMPANY_DATASET + ':' + digest !== first.get('revision')) throw new Error('company_dataset_corrupt')
         return { dataset, revision: first.get('revision'), companies: valid }
       } finally { await session.close() }
     },
