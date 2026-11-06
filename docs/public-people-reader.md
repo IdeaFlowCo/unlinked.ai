@@ -22,7 +22,7 @@ Empty published snapshots are valid, distinguishable from unavailable publicatio
 Each published profile has `id`, `name`, optional `headline`, `location`, `about`, optional search-only `company`, and arrays `positions`, `education`, `skills`.
 Position fields are `title`, `company`, optional `startDate`, `endDate`, `description`.
 Education fields are `institution`, optional `degree`, `startDate`, `endDate`.
-Only these DTO fields are copied; email, phone, raw imports, notes, auth metadata and search-only company are never returned as profile properties.
+The reader also returns the derived status fields described below; email, phone, raw imports, notes, auth metadata and search-only company are never returned as profile properties.
 The publication provider must separately sanitize the contents of public biography/professional text, since a whitelist cannot prove free text contains no private information.
 Connections are `{fromId,toId}` and remain directed; reciprocal relationships and mutual status are not inferred.
 
@@ -74,8 +74,10 @@ Summaries and details expose `enrichmentStatus` independently of membership
 (`presence`) and visible content depth (`detailLevel`). `enriched` means there
 is current published enrichment evidence in the composed index; `not_recorded`
 means there is no such evidence, not that the person was never enriched. A
-source without a status yields `unknown`. Published evidence follows profile
-merges. The list accepts these three values as an `enrichmentStatus` filter,
+source without a status yields `unknown`. Evidence includes matching published
+ID-keyed or LinkedIn-keyed enrichment, including matches from every linked owner
+upload even when an older overlay is discarded. Evidence follows profile merges
+and does not imply that enrichment text was applied. The list accepts these three values as an `enrichmentStatus` filter,
 which is bound into the cursor; invalid values are rejected. Contact lookup
 uses `unknown` when public evidence is unavailable. See the
 [agent API](agent-api.md) for the exposed endpoints.
@@ -87,6 +89,8 @@ Operator enrichment comes from `curated-enrichment-v1` plus the bulk shard datas
 so bulk data is split across shards. The runtime index reads all five datasets (`ENRICHMENT_DATASETS`).
 It applies the shards first and `curated-enrichment-v1` last, so for the same legacy id the
 per-person reads in `curated-enrichment-v1` win.
+ID-keyed rows do not override confirmed or historical members' own profile text,
+including when a member absorbs an imported copy.
 Publish a shard with `publish-enrichment-people.mjs <rows> <root> --dataset=curated-enrichment-exa-N [--execute]`.
 Roll it back with `UnlinkedPublicPeopleStore.revoke(<dataset>, <revision>)`.
 Imported profiles without a legacy id are enriched by LinkedIn address instead, from

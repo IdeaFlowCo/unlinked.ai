@@ -436,3 +436,43 @@ test('owner AI HTTP contract preserves keys and provenance while omitting gaming
     assert.doesNotMatch(match.headline, /founder|ceo/i)
   }
 })
+
+test('MCP and REST expose independent profile status and enforce public scope', async t => {
+  const f = fixture()
+  const p = (id, extra = {}) => publicProfile(id, id, extra)
+  const source = async () => ({ state: 'published', complete: true, revision: 'status-interface-v1',
+    members: ['current'], legacyMembers: ['historical'],
+    profiles: [p('current', { enrichmentStatus: 'not_recorded', headline: 'Member-authored headline' }), p('historical', { enrichmentStatus: 'enriched' }), p('shadow', { enrichmentStatus: 'enriched' }), p('old-snapshot')], connections: [] })
+  const app = await launch(t, { f, readPublishedSnapshot: source, complete: async () => ({ matches: [] }) })
+  f.register(app.owner)
+  const { accessToken } = await app.grants.issueGrant(app.owner)
+  const client = new Client({ name: 'status-interface-test', version: '1.0' })
+  const transport = new StreamableHTTPClientTransport(new URL(`${app.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${accessToken}` } } })
+  try {
+    await client.connect(transport)
+    const tool = async (name, args) => {
+      const response = await client.callTool({ name, arguments: args })
+      assert.ok(!response.isError)
+      return JSON.parse(response.content[0].text)
+    }
+    const list = await tool('unlinked_list_people', {})
+    const status = Object.fromEntries(list.profiles.map(({ id, presence, enrichmentStatus }) => [id, { presence, enrichmentStatus }]))
+    assert.deepEqual(status, { current: { presence: 'member', enrichmentStatus: 'not_recorded' }, historical: { presence: 'legacy', enrichmentStatus: 'enriched' }, 'old-snapshot': { presence: 'shadow', enrichmentStatus: 'unknown' }, shadow: { presence: 'shadow', enrichmentStatus: 'enriched' } })
+    const filtered = await tool('unlinked_list_people', { presence: 'legacy', enrichmentStatus: 'enriched' })
+    assert.deepEqual(filtered.profiles.map(x => x.id), ['historical'])
+    const profile = await tool('unlinked_get_profile', { id: 'current' })
+    assert.equal(profile.profile.headline, 'Member-authored headline')
+    assert.equal(profile.profile.enrichmentStatus, 'not_recorded')
+    const contact = await tool('unlinked_lookup_contact', { profileId: 'historical' })
+    assert.equal(contact.contact.presence, 'legacy')
+    assert.equal(contact.contact.enrichmentStatus, 'enriched')
+    const rest = await call(app.endpoint, accessToken, 'people?presence=shadow&enrichmentStatus=enriched')
+    assert.equal(rest.status, 200)
+    const restBody = await rest.json()
+    assert.deepEqual(restBody.profiles.map(x => x.id), ['shadow'])
+    const { accessToken: restricted } = await app.grants.issueGrant(app.owner, undefined, { scope: 'owner_network' })
+    const denied = await call(app.endpoint, restricted, 'people?enrichmentStatus=enriched')
+    assert.equal(denied.status, 403)
+    if (process.env.STATUS_INTERFACE_EVIDENCE) console.log('STATUS_INTERFACE_EVIDENCE ' + JSON.stringify({ mcpList: status, mcpFiltered: filtered.profiles, mcpProfile: profile.profile, mcpContact: contact.contact, restFiltered: restBody.profiles, restrictedRestStatus: denied.status }))
+  } finally { await client.close() }
+})
