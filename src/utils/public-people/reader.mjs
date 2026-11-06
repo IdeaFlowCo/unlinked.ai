@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES, PUBLIC_INDEX_MAX_TEXT_BYTES } from './limits.mjs'
 import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
+import { PROFILE_DECISION_LIMIT } from './profile-decisions.mjs'
 import { SEARCH_MODES, companyPageName, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-index.mjs'
 import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
@@ -230,10 +231,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // so an account's own pages and photos can stay hidden too
       // (docs/profile-suspension.md).
       const suspended = new Set()
-      if (value.suspended !== undefined) for (const id of array(value.suspended, maxProfiles)) { if (!idValid(id) || summaries.has(id) || aliases.has(id)) unavailable(); suspended.add(id) }
+      if (value.suspended !== undefined) for (const id of array(value.suspended, maxProfiles + Math.max(maxProfiles, PROFILE_DECISION_LIMIT))) { if (!idValid(id) || summaries.has(id) || aliases.has(id)) unavailable(); suspended.add(id) }
       // SHA-256 LinkedIn slug references of suspended people, for owner-private rows.
       const suspendedRefs = new Set()
-      if (value.suspendedRefs !== undefined) for (const ref of array(value.suspendedRefs, maxProfiles)) { if (typeof ref !== 'string' || !/^[a-f0-9]{64}$/.test(ref)) unavailable(); suspendedRefs.add(ref) }
+      if (value.suspendedRefs !== undefined) for (const ref of array(value.suspendedRefs, 2 * maxProfiles + Math.max(maxProfiles, PROFILE_DECISION_LIMIT))) { if (typeof ref !== 'string' || !/^[a-f0-9]{64}$/.test(ref)) unavailable(); suspendedRefs.add(ref) }
       // Addresses an operator removal took out; never published, only named.
       const removed = new Set()
       if (Array.isArray(value.removed)) for (const id of value.removed) if (idValid(id) && !summaries.has(id)) removed.add(id)

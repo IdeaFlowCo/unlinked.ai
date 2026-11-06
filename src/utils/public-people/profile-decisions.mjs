@@ -145,9 +145,9 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
     const fromId = point(edge.fromId), toId = point(edge.toId)
     if (fromId !== toId && !removed.has(fromId) && !removed.has(toId)) pairs.set(`${fromId}\u0000${toId}`, { fromId, toId })
   }
-  const suspendedList = [...suspended].sort()
+  const suspendedDigest = suspensions.length ? hash(JSON.stringify([...suspended].sort())) : ''
   const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : value.kind === 'remove' ? removals.has(value.profileId) : value.kind === 'unlist' ? unlists.has(value.profileId) : value.kind === 'suspend' ? true : renames.has(value.profileId))
-    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.kind === 'unlist' ? `${unlists.get(value.profileId).id}#${unlists.get(value.profileId).group ?? ''}` : value.kind === 'suspend' ? `${value.linkedinRefHash ?? ''}#${suspendedList.join(',')}` : value.name.trim()])
+    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.kind === 'unlist' ? `${unlists.get(value.profileId).id}#${unlists.get(value.profileId).group ?? ''}` : value.kind === 'suspend' ? `${value.linkedinRefHash ?? ''}#${suspendedDigest}` : value.name.trim()])
   // One entry per shown profile; the first decision about it wins.
   const unlisted = [...new Map([...unlists.values()].reverse().map(value => [value.id, value])).values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   return {
