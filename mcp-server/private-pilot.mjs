@@ -87,9 +87,11 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   server.requestTimeout = 120000
   server.headersTimeout = 15000
   server.maxHeadersCount = 32
+  // Started before the cold build so warm-up heap and GC pauses are recorded.
+  const health = requestDiagnostics?.startRuntimeHealth?.() ?? null
   // Finish the cold public index build before accepting the first visitor.
   // Best effort: publication failure leaves account routes available.
   await warmPublicPeopleIndex({ readPublishedSnapshot })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve) })
-  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => new Promise(resolve => server.close(resolve)) }
+  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { health?.stop(); return new Promise(resolve => server.close(resolve)) } }
 }

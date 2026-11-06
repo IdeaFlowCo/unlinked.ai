@@ -30,6 +30,9 @@ services:
   runtime:
     image: ${PILOT_RUNTIME_IMAGE:?approved dependency-complete image required}
     container_name: unlinked-private-guest-pilot-20261001-runtime
+    # An init process as PID 1: a fatal V8 abort then exits 134 instead of
+    # PID 1's SIGABRT-ignored trap (exit 139, libc 'general protection fault').
+    init: true
     user: ${PILOT_UID:?explicit host operator uid required}:${PILOT_GID:?explicit host operator gid required}
     networks: [frontend, backend]
     read_only: true
