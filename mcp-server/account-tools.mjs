@@ -31,6 +31,7 @@ export const ACCOUNT_TOOL_ERROR_STATUS = Object.freeze({
   not_a_member: 409, already_connected: 409, request_pending: 409, request_unavailable: 409, cooldown_active: 429,
   // Private people notes & relations (grant catalog version 7, separate permission).
   ambiguous_name: 409, identity_unavailable: 409,
+  import_busy: 409, identity_conflict: 409,
 })
 
 // unlinked_search_network's text-first path: name the AI fallback's own

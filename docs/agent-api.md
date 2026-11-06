@@ -209,6 +209,8 @@ an extra sanitized `cause` identifier).
 | `cooldown_active` | 429 | The withdrawal cooldown has not elapsed. |
 | `ambiguous_name` | 409 | (private notes) Several of the owner's saved things share that name. The body adds `candidates` (`id`, `kind`, `name`, the owner's own); ask the user, then pass an id, or `createNew` with `clientRequestId`. |
 | `identity_unavailable` | 409 | (private notes) The account has no Ideaflow sign-in identity, so it has no people overlay. Sign in to Unlinked with Ideaflow once. |
+| `import_busy` | 409 | An investor import is being changed or has an active batch; retry after the lease expires. |
+| `identity_conflict` | 409 | Exact references changed during an investor import; inspect the private person before retrying. |
 
 Private-notes input refusals from the overlay are `invalid_input` with an extra
 `overlayCode` (for example `invalid_relation`).
