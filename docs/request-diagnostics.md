@@ -157,3 +157,40 @@ release source/version and rollback before declaring live diagnostic coverage.
 The same default-off collection gate also records `public_admission` schema-1 aggregates: UTC minute, lane (`anonymous`/`arrival`/`viewer`; `arrival` = a light visitor or card scan admitted ahead of the shared fuse), route family (`profile`/`connections`/`company`/`search`), reason (`admitted`/`minute`/`capacity`/`cancelled`) and count. At most 48 rows per completed minute, flushed on the next admission; the current partial minute may be lost on shutdown. No account, IP, user agent, handle or query is collected; the per-visitor budget key lives only in process memory. Retention, file size and queue bounds are identical to agent diagnostics. This distinguishes minute exhaustion from concurrency pressure without enabling access logs.
 
 Read only aggregate counters with `node scripts/read-request-diagnostics.mjs --directory /absolute/private/audit/requests --event public_admission --since 2026-10-24T00:00:00Z`. The explicit UTC time boundary is required. This mode excludes agent request rows and cannot be combined with account/request filters; those retain their existing exact-filter requirement. All file ownership, mode, link and 500-record bounds remain in force.
+
+## Runtime health rows
+
+With diagnostics on, the runtime also writes one `event: runtime_health` row
+per minute to the same private sink. Every signed-in page and agent call is
+served by this one Node process, so a long major garbage collection or a
+synchronous rebuild stalls all of them at once. These rows put that next to
+request and [browser timings](browser-performance.md). Rows contain numbers
+only, and no request, owner, route or error content:
+
+- `uptime_s`, `interval_ms`
+- memory: `rss_mb`, `heap_used_mb`, `heap_total_mb`, `heap_limit_mb`
+  (V8's effective limit), `external_mb`, `array_buffers_mb`
+- garbage collection during the interval: `gc_major_count`, `gc_major_ms`,
+  `gc_major_max_ms`, `gc_minor_count`, `gc_minor_ms`, `gc_incremental_count`,
+  `gc_incremental_ms`
+- event-loop delay at 20 ms resolution: `loop_delay_p50_ms`,
+  `loop_delay_p99_ms`, `loop_delay_max_ms`
+- CPU during the interval: `cpu_user_ms`, `cpu_system_ms`
+
+Sampling starts before the cold public index build, so warm-up pressure is
+included. A process that aborts loses its final partial minute.
+
+The operator report infers restarts from uptime resets. Per UTC hour it reports
+maximum heap use, minimum heap headroom, major-GC totals, the worst loop delay,
+minutes with a stall of at least 1 s, and CPU percentage:
+
+```sh
+node scripts/read-runtime-health.mjs --directory <private requests dir> --since 2026-11-06T00:00:00Z
+```
+
+Container PID 1 note: Node runs as the container's PID 1 without an init
+process. A fatal V8 error (for example `Reached heap limit`) calls `abort()`.
+PID 1 ignores SIGABRT, so glibc falls back to a trapping instruction, and the
+process exits **139**. The kernel logs `general protection fault ... in
+libc.so.6`. Read that combination as an abort, usually heap exhaustion, rather
+than a native memory bug. With `init: true` the same abort exits 134.

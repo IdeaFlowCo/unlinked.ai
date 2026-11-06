@@ -1,4 +1,5 @@
 import { safeBrowserPerformance } from './browser-performance.mjs'
+import { RUNTIME_HEALTH_FIELDS, startRuntimeHealth } from './runtime-health.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomUUID } from 'node:crypto'
 
@@ -26,6 +27,8 @@ export function createRequestDiagnostics({ emit, now = () => new Date(), monoton
   const publicAdmission = createPublicAdmissionDiagnostics({ emit, now })
   return {
     publicAdmission,
+    // Per-minute process health rows (heap, GC, event-loop delay, CPU).
+    startRuntimeHealth: (options = {}) => startRuntimeHealth({ ...options, emit: row => { Promise.resolve(emit(row)).catch(() => {}) } }),
     run(request, response, transport, work) {
       if (!['rest', 'direct_mcp', 'gateway_mcp'].includes(transport)) return work()
       const started = now(), tick = monotonic()
@@ -136,6 +139,12 @@ export function safeDiagnosticRecord(value) {
     const row = safeBrowserPerformance(value)
     if (!row || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.at ?? '') || !Number.isFinite(Date.parse(value.at)) || !/^(?:\d+\.\d+\.\d+|unknown)$/.test(value.release ?? '')) return null
     return { schema:1,event:'browser_performance',at:value.at,release:value.release,...row,...(count(value.dropped_since_last_emit) !== undefined ? { dropped_since_last_emit:count(value.dropped_since_last_emit) } : {}) }
+  }
+  if (value?.schema === 1 && value.event === 'runtime_health') {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.at ?? '') || !Number.isFinite(Date.parse(value.at))) return null
+    const row = { schema: 1, event: 'runtime_health', at: value.at }
+    for (const key of RUNTIME_HEALTH_FIELDS) if (count(value[key]) !== undefined) row[key] = count(value[key])
+    return row
   }
   if (value?.schema === 1 && value.event === 'public_admission') {
     if (!['anonymous', 'arrival', 'viewer'].includes(value.lane) || !['profile', 'connections', 'company', 'search'].includes(value.route) || !['admitted', 'minute', 'capacity', 'cancelled'].includes(value.reason) || count(value.count) === undefined || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.at ?? '') || !Number.isFinite(Date.parse(value.at))) return null

@@ -178,6 +178,12 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
+// Drops finished owner-network reads past their freshness window (never
+// served again; a fresh read replaces them). In-flight reads stay shared.
+export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
+  for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
+}
+
 export function createPrivateBrowserHandler({ privateLists, privateListImports, savedSearchLists, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
@@ -586,8 +592,12 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
   // accepting, adding or revoking shows on the next page; background import
   // completion is visible within the window. /export and owner AI search keep
   // their own live reads.
+  // Expired entries are never served, so they are dropped rather than held
+  // (a whole owner network each) until 64 newer owners push them out.
   const networkCache = new Map(), NETWORK_CACHE_CAPACITY = 64
+  if (networkFreshMs > 0) setInterval(() => dropExpiredNetworks(networkCache, networkFreshMs), Math.max(networkFreshMs, 30000)).unref?.()
   const accountNetwork = async owner => {
+    dropExpiredNetworks(networkCache, networkFreshMs)
     const key = `${owner.ownerId}\u0000${owner.userId}`
     const held = networkCache.get(key)
     if (held && (held.pending || Date.now() - held.at < networkFreshMs)) return held.pending ?? held.value

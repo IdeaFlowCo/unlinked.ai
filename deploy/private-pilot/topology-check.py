@@ -40,6 +40,7 @@ for service in services.values():
             # Compose JSON omits this normalized field when it is false.
             assert mount.get('bind', {}).get('create_host_path', False) is False
 assert services['runtime']['restart'] == 'unless-stopped'
+assert services['runtime']['init'] is True
 assert int(services['runtime']['mem_limit']) == 1536 * 1024 * 1024
 runtime_tmpfs = services['runtime']['tmpfs']
 private_parent = '/srv/unlinked-private-guest-pilot-20261001:mode=700,uid=1002,gid=1003'
