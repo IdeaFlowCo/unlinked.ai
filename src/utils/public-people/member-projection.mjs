@@ -3,8 +3,8 @@ import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limit
 import { PUBLIC_UPLOAD_CONSENT } from '../private-import/consent.mjs'
 import { createScopedImportReader } from '../private-import/noos-adapter.mjs'
 import { publicLinkedinUrl } from './profile-links.mjs'
-import { applyProfileDecisions } from './profile-decisions.mjs'
-import { linkedinIdentityMerges, linkedinRefHash } from './url-identity.mjs'
+import { applyProfileDecisionsAsync } from './profile-decisions.mjs'
+import { linkedinIdentityMergesAsync, linkedinRefHash } from './url-identity.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { CONNECTION_AUDIENCES, connectionPrivacyValue, isDefaultConnectionPrivacy } from './connection-privacy.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -127,25 +127,42 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   // Same-address merges come last: explicit and earlier automatic decisions win.
   const decide = async (snapshot, own = [], members = new Set(), verified = new Set(), curated = new Map()) => {
     const stored = [...own, ...(typeof readDecisions === 'function' ? await readDecisions() : [])]
-    const identityRefs = new Map(snapshot.profiles.map(profile => [profile.id, [...new Set([profileLinkedinRef(profile), profileLinkedinRef(curated.get(profile.id))].filter(Boolean))]]))
+    // Cold builds walk every profile several times; each pass gives the event
+    // loop a turn between slices (same steps and result as a plain loop).
+    const identityRefs = new Map()
+    let slice = performance.now()
+    const turn = async () => { if (performance.now() - slice >= 15) { await new Promise(resolve => setImmediate(resolve)); slice = performance.now() } }
+    for (const [index, profile] of snapshot.profiles.entries()) {
+      identityRefs.set(profile.id, [...new Set([profileLinkedinRef(profile), profileLinkedinRef(curated.get(profile.id))].filter(Boolean))])
+      if (index % 512 === 511) await turn()
+    }
     const historical = snapshot.legacyMembers ?? []
-    const identity = mergeSameLinkedin ? linkedinIdentityMerges({ profiles: snapshot.profiles, members: [...new Set([...members, ...historical])], absorbers: [...new Set([...verified, ...historical])], decisions: stored, refFor: profile => identityRefs.get(profile.id) ?? [], prefer: preferSurvivor }) : null
+    const identity = mergeSameLinkedin ? await linkedinIdentityMergesAsync({ profiles: snapshot.profiles, members: [...new Set([...members, ...historical])], absorbers: [...new Set([...verified, ...historical])], decisions: stored, refFor: profile => identityRefs.get(profile.id) ?? [], prefer: preferSurvivor }) : null
     const decisions = identity ? [...identity.decisions, ...identity.merges] : stored
     const options = { ...(identity ? { limit: PUBLIC_INDEX_MAX_PROFILES } : {}), identityRefs: profile => identityRefs.get(profile.id) ?? [] }
-    const initial = applyProfileDecisions(snapshot, decisions, options)
+    const initial = await applyProfileDecisionsAsync(snapshot, decisions, options)
     const finalMembers = new Set([...(initial.members ?? members), ...(initial.legacyMembers ?? [])])
-    const prepared = { ...snapshot, profiles: snapshot.profiles.map(profile => {
+    const preparedProfiles = []
+    for (const [index, profile] of snapshot.profiles.entries()) {
       const row = curated.get(profile.id), target = initial.aliases?.[profile.id] ?? profile.id
-      if (!row || finalMembers.has(target)) return profile
-      const supplemental = {}
-      for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profile[key]) supplemental[key] = profile[key]
-      return { ...row, ...supplemental, id: profile.id }
-    }) }
-    return applyProfileDecisions(prepared, decisions, options)
+      if (!row || finalMembers.has(target)) preparedProfiles.push(profile)
+      else {
+        const supplemental = {}
+        for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profile[key]) supplemental[key] = profile[key]
+        preparedProfiles.push({ ...row, ...supplemental, id: profile.id })
+      }
+      if (index % 512 === 511) await turn()
+    }
+    const prepared = { ...snapshot, profiles: preparedProfiles }
+    return applyProfileDecisionsAsync(prepared, decisions, options)
   }
   // `preread`: the legacy snapshot and import list a fingerprint just read,
   // so a changed rebuild reads them once, exactly as before.
   const build = async (preread = null) => {
+    // Cold builds walk every profile and edge; each long loop gives the event
+    // loop a turn between ~15 ms slices (same steps, same result).
+    let slice = performance.now()
+    const turn = async () => { if (performance.now() - slice >= 15) { await new Promise(resolve => setImmediate(resolve)); slice = performance.now() } }
     const legacy = preread?.legacy ?? await readLegacy()
     if (!legacy) return null
     const items = preread ? preread.items : await discover()
@@ -156,7 +173,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     // confirmed recovered account, never from a URL typed at signup.
     const verified = new Set()
     const evidence = new Set(), curated = new Map()
-    const positions = new Map(profiles.map((value, index) => [value.id, index]))
+    const positions = new Map()
+    for (const [index, value] of profiles.entries()) { positions.set(value.id, index); if (index % 4096 === 4095) await turn() }
     for (const dataset of enrichmentDatasets) {
       const enrichment = await publicPeople.read(dataset)
       if (!enrichment) continue
@@ -323,7 +341,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       for (const older of ordered.slice(1)) { members.delete(older.id); ownerMerges.push({ id: `owner:${older.id}`, kind: 'merge', profileId: older.id, survivorId: ordered[0].id }) }
     }
     for (const check of linkedChecks) await check()
-    for (const profile of profiles) if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id)
+    // With no LinkedIn-keyed enrichment nothing can match, so no ref is computed.
+    if (byLinkedin.size) for (const [index, profile] of profiles.entries()) { if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id); if (index % 512 === 511) await turn() }
     // First index per id, exactly as findIndex returned.
     const positionOf = new Map()
     if (overlays.size) profiles.forEach((profile, index) => { if (!positionOf.has(profile.id)) positionOf.set(profile.id, index) })
@@ -337,11 +356,13 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       revisions.push('invites:' + hash(JSON.stringify(edges.map(edge => [edge.fromId, edge.toId]).sort())))
     }
     // Replayed source edges are canonicalized without changing their receipts.
-    const uniqueConnections = [...new Map(connections.map(edge => [`${edge.fromId}\u0000${edge.toId}`, edge])).values()]
+    const unique = new Map()
+    for (const [index, edge] of connections.entries()) { unique.set(`${edge.fromId}\u0000${edge.toId}`, edge); if (index % 4096 === 4095) await turn() }
+    const uniqueConnections = [...unique.values()]
     if (uniqueConnections.length > PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('shared_public_capacity_limit')
     const finalize = async snapshot => {
       for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
-      for (const profile of snapshot.profiles) if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id)
+      if (byLinkedin.size) for (const [index, profile] of snapshot.profiles.entries()) { if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id); if (index % 512 === 511) await turn() }
       const decided = await decide(snapshot, ownerMerges, members, verified, curated)
       const enriched = new Set([...evidence].map(id => decided.aliases?.[id] ?? id))
       // Enrichment fills the profiles shown, after every merge and removal, and

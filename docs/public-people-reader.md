@@ -142,3 +142,25 @@ The fingerprint leaves out one input: `preferSurvivor`'s live handle state. It d
 - **Fix: pointers only.** The fingerprint now uses each dataset's live published pointer (`revision` and `digest`, from `publicPeople.revisionOf`) and the legacy pointer (`readLegacyRevision`). A no-change check reads no dataset. A build still reads them when something changed.
 - **Recompiling under memory pressure.** A worker whose heap is above 45% of its cap releases the old index for a source when a new revision's install begins, instead of holding two compiled indexes. Calls for the old revision then answer `stale`, and readers install the new one and retry. As after any revision change, a cursor from the old revision fails closed. Below 45%, the old index is kept as before.
 - **Heap limit reporting (corrected in v0.6.93).** `index_worker_heap_limit_mb` is V8's own effective limit. 0.6.92 reported the smaller of that and the configured cap, on the mistaken belief that the cap applied.
+
+### Cold-start slices (2026-11-06, v0.6.94)
+
+After 0.6.93, the stall profiles showed what blocks the main thread in the cold window after a deploy or restart. The worst windows reached 3.1–3.8 s:
+
+- **The company-facts cold read.** Per-chunk hashing and parsing, validation of every row, the full row JSON serialized twice, and then a second validation and the index build.
+- **Member projection's `decide()`.** Identity references for every profile, `linkedinIdentityMerges`, two `applyProfileDecisions` passes over every profile and edge, the URL-identity passes in `readDecisions`, and `build()`'s own loops over every profile and edge.
+
+These are now written once as generators (`src/utils/cooperative.mjs`). `runSync` drives a generator to completion for existing synchronous callers, such as the publisher and tests. `runAsync` gives the event loop a turn every ~15 ms on the cold paths. The steps, results and exceptions are the same either way.
+
+Pure savings with the same results:
+
+- the store computes the company digest once, incrementally (`hashRowsJson` equals `sha256(JSON.stringify(rows))`), instead of serializing all rows twice;
+- rows the store already validated are not validated again by the facts lookup;
+- the per-profile LinkedIn reference is not computed when there is no LinkedIn-keyed enrichment to match.
+
+Bench on the M5 (`bench-cold.mjs`; 50k company rows; 100k profiles, 400k edges, 3,000 decisions, same-LinkedIn merging):
+
+| Path | Longest main-thread block, before | After | Wall time, before | After |
+|---|---|---|---|---|
+| Company facts cold read | 350 ms | 26 ms | 355 ms | 234 ms |
+| Member cold build | 686 ms | 31 ms | 691 ms | 581 ms |

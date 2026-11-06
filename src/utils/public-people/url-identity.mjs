@@ -1,3 +1,4 @@
+import { runAsync, runSync, ticker } from '../cooperative.mjs'
 import { createHash } from 'node:crypto'
 // A member's import mints a `public-<row>` person for every connection row. When
 // that row's LinkedIn address is the address of a recovered legacy profile, it
@@ -31,12 +32,16 @@ export function normalizedSlugIndex(entries) {
   return index
 }
 
-export function urlIdentityMerges({ rows, slugIndex, explicit = [] }) {
+export function urlIdentityMerges(input) { return runSync(urlIdentityMergesSteps(input)) }
+export function urlIdentityMergesAsync(input) { return runAsync(urlIdentityMergesSteps(input)) }
+function* urlIdentityMergesSteps({ rows, slugIndex, explicit = [] }) {
+  const tick = ticker(512)
   const decided = new Set(explicit.map(value => value.profileId))
   const survivorOf = new Map(explicit.filter(value => value.kind === 'merge').map(value => [value.profileId, value.survivorId]))
   const merges = []
   const index = normalizedSlugIndex(slugIndex)
   for (const row of rows) {
+    if (tick()) yield
     if (typeof row?.publicId !== 'string' || !row.publicId.startsWith('public-') || decided.has(row.publicId)) continue
     const slug = linkedinSlug(row.subject), legacyId = slug && index.get(slug)
     if (!legacyId) continue
@@ -57,12 +62,16 @@ export function linkedinRefHash(slug) {
 // Imported copies of a suspended person (docs/profile-suspension.md): every
 // minted `public-<row>` whose LinkedIn address matches a suspension's stored
 // address is suspended with it, so a new import cannot re-list the person.
-export function urlIdentitySuspensions({ rows, explicit = [] }) {
+export function urlIdentitySuspensions(input) { return runSync(urlIdentitySuspensionsSteps(input)) }
+export function urlIdentitySuspensionsAsync(input) { return runAsync(urlIdentitySuspensionsSteps(input)) }
+function* urlIdentitySuspensionsSteps({ rows, explicit = [] }) {
+  const tick = ticker(512)
   const refs = new Set(explicit.filter(value => value.kind === 'suspend' && typeof value.linkedinRefHash === 'string').map(value => value.linkedinRefHash))
   const decided = new Set(explicit.filter(value => value.kind === 'suspend').map(value => value.profileId))
   if (!refs.size) return []
   const suspensions = []
   for (const row of rows) {
+    if (tick()) yield
     if (typeof row?.publicId !== 'string' || !row.publicId.startsWith('public-') || decided.has(row.publicId)) continue
     const ref = linkedinRefHash(linkedinSlug(row.subject))
     if (!ref || !refs.has(ref)) continue
@@ -89,7 +98,11 @@ export function urlIdentitySuspensions({ rows, explicit = [] }) {
 // never moved. Same address is the only evidence; names never are. Returns the
 // merges plus every earlier merge whose survivor folded away, re-pointed at the
 // new survivor so no chain is left.
-export function linkedinIdentityMerges({ profiles, members = [], absorbers = members, decisions = [], refFor, prefer = () => null }) {
+export function linkedinIdentityMerges(input) { return runSync(linkedinIdentityMergesSteps(input)) }
+// The same grouping, giving the event loop a turn between slices (cold builds).
+export function linkedinIdentityMergesAsync(input) { return runAsync(linkedinIdentityMergesSteps(input)) }
+function* linkedinIdentityMergesSteps({ profiles, members = [], absorbers = members, decisions = [], refFor, prefer = () => null }) {
+  const tick = ticker(512)
   const memberSet = new Set(members), absorbing = new Set(absorbers)
   const named = new Set(), mergedAway = new Set(), removed = new Set()
   for (const decision of decisions) {
@@ -102,6 +115,7 @@ export function linkedinIdentityMerges({ profiles, members = [], absorbers = mem
   const parent = new Map(candidates.map(profile => [profile.id, profile.id])), owners = new Map()
   const root = id => { let value = id; while (parent.get(value) !== value) value = parent.get(value); while (parent.get(id) !== id) { const next = parent.get(id); parent.set(id, value); id = next } return value }
   for (const profile of candidates) {
+    if (tick()) yield
     const value = refFor(profile), refs = Array.isArray(value) ? value : [value]
     for (const ref of new Set(refs.filter(Boolean))) {
       if (!owners.has(ref)) { owners.set(ref, profile.id); continue }
@@ -111,6 +125,7 @@ export function linkedinIdentityMerges({ profiles, members = [], absorbers = mem
   }
   const groups = new Map()
   for (const profile of candidates) {
+    if (tick()) yield
     const key = root(profile.id)
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(profile.id)
