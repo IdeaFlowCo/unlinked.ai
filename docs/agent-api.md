@@ -171,7 +171,7 @@ tools for each scope; historical entries are immutable.
   reconnection to consent to `private_notes`. Manual-key permissions
   (connection requests, private notes) are switched in Settings; OAuth apps
   require actual consent/reconsent for additional permissions. Current issuance is
-  catalog v9; its investor tools are described in the [CSV workflow](investor-csv.md).
+  catalog v9; its investor tools are described in the [investor list workflow](investor-csv.md).
 
 OpenChat's production integration — stateless JSON-RPC `tools/call` POSTs to
 `/mcp` invoking `unlinked_search_network` / `unlinked_search_everyone` — is
@@ -253,7 +253,7 @@ human-facing profile card (card-only opt-ins such as phone never appear here):
 - **Never returned by network and profile reads:** archive contact email/phone,
   raw LinkedIn archives or recovered original files, credential or signed URLs,
   and other owners' private imports. The separate private-notes permission permits
-  access to the owner's investor CSV source and fields; see [the CSV workflow](investor-csv.md).
+  access to the owner's investor CSV/XLSX source and fields; see [the investor list workflow](investor-csv.md).
 - Every entry/result is labeled `visibility: "public"` (published People
   index / recorded public paths) or `"owner_private"` (the grant owner's own
   imported observations, visible only to that grant).
@@ -722,18 +722,5 @@ See [agent access](agent-access.md) for public comparisons, Muse custom API setu
 
 ### Private investor CSV/XLSX files and lists (catalog v9)
 
-See [the durable CSV workflow](investor-csv.md) for staging, resumable batches,
-row receipts, exact identity matching and paginated list/member queries. The three
-investor tools require the existing private-notes permission, independent of
-connection requests. No name/email matching, public publication or connection
-creation occurs. Use `limit` and follow `nextCursor` for complete private graph
-reads; legacy unpaged reads remain bounded. Source CSVs and receipts participate
-in account export/deletion under the documented shared-overlay retention policy.
-
-The same three investor tools also accept XLSX via `fileBase64` and `filename`.
-Use `inspectOnly:true` for a no-write sheet inventory, select an exact `sheet`
-and optional `headerRow`, then stage with mapping/listName and explicit
-`retainOriginalConfirmed:true` after disclosing retention of the entire original
-workbook (including unselected/hidden sheets). Only the chosen sheet is imported.
-Original XLSX recovery returns base64 chunks with byte offsets; see the durable
-workflow for limits, parser refusals and account export/deletion.
+See the [investor list workflow](investor-csv.md) for private CSV/XLSX staging,
+sheet selection and retention consent, resumable imports, recovery and list queries.

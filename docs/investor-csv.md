@@ -23,7 +23,9 @@ inside an already enabled private-notes permission.
    notes:["Comments"]}`. `firstName`, `lastName`, `email` and `title` are also
    supported. A names-only, single-column CSV is valid; malformed quoting is
    rejected. The response includes an `importId`; a newly staged import also
-   includes a validation preview.
+   includes a validation preview. Alternatively supply canonical `fileBase64` and
+   a `.csv` filename instead of `csv`; `inspectOnly:true` previews headers without
+   writing. Supply exactly one of `csv` and `fileBase64`.
 2. Call `unlinked_resume_investor_import` with that `importId`. Each call commits
    10 rows by default (1–25 configurable). Repeat until `complete` or `partial`.
    When creating a list, the first successful resume returns its `listId`.
@@ -176,6 +178,8 @@ credential destinations are required by this change.
 ## Browser upload: followers and other lists (unlinked-h2e4)
 
 LinkedIn's data export has no followers file. `Member_Follows.csv` lists the people the member follows, not their followers. Members who have followers in a CSV (from LinkedIn analytics, another tool or a spreadsheet) can upload it on the import page under **Upload a list of people, such as your LinkedIn followers**, which is closed by default.
+
+This browser upload accepts CSV only; use the agent workflow above for XLSX.
 
 - `mcp-server/private-list-imports.mjs` detects the mapping from the header row (case and spacing are ignored):
   - Name / Full Name, or First Name + Last Name

@@ -158,7 +158,7 @@ export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false 
   const sourceDigest = sha(bytes)
   if (source?.format !== 'xlsx') {
     if (!inspectOnly) return parseInvestorCsv(bytes, mapping)
-    const parsed = Papa.parse(decode(bytes).replace(/^\uFEFF/, ''), { preview: 1, skipEmptyLines: 'greedy', dynamicTyping: false })
+    const parsed = Papa.parse(decode(bytes).replace(/^\uFEFF/, ''), { skipEmptyLines: 'greedy', dynamicTyping: false })
     const headers = normalizeInvestorHeaders(parsed.data[0] ?? [])
     if (headers.length > INVESTOR_CSV_LIMITS.columns || headers.some(v => v.length > INVESTOR_CSV_LIMITS.fieldChars) || Buffer.byteLength(JSON.stringify(headers)) > 60000) invalid('csv_invalid_header')
     return { sourceDigest, format: 'csv', headers, retained: false }
