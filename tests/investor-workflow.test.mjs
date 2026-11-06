@@ -149,3 +149,41 @@ test('concurrent runtimes respect the durable lease and cannot double-count a ba
   assert.equal(f.state('alice').links.size, 1)
   assert.equal((await f.tools().unlinked_resume_investor_import(owner, { importId: staged.importId })).imported, 3)
 })
+
+test('account cleanup bounds staged-list reads and preserves a receipt ahead of its checkpoint', async () => {
+  const f = fixture(), owner = grant(), base = await f.getBackend(owner)
+  let reads = 0, loseCheckpoint = false
+  const backend = { ...base,
+    async readResource(...args) { reads++; return base.readResource(...args) },
+    async writeResource(value) {
+      if (loseCheckpoint && value.payload?.kind === 'investor_csv_v1' && value.payload.offset === 1) {
+        loseCheckpoint = false
+        throw Error('synthetic_checkpoint_outage')
+      }
+      return base.writeResource(value)
+    },
+  }
+  const service = createAccountToolService({ ...f.options, getBackend: async () => backend })
+  const call = async (name, input) => (await service.call({ grant: owner, name, input })).result
+  const csv = `Name,Tag\n${'A,\n'.repeat(100000)}`
+  const staged = await call('unlinked_stage_investor_csv', { csv, mapping: { name: 'Name' }, listName: 'Large staged list' })
+  reads = 0
+  const untouched = await exportAccountData({ owner, backend, jobs: [] })
+  assert.equal(untouched.investorImports[0].csv, csv)
+  assert.equal(untouched.investorImports[0].receipts.length, 0)
+  assert.ok(reads <= 5, `staged export made ${reads} backend reads`)
+
+  loseCheckpoint = true
+  await assert.rejects(call('unlinked_resume_investor_import', { importId: staged.importId, batchSize: 1 }), /synthetic_checkpoint_outage/)
+  assert.equal((await base.readResource('import', staged.importId)).payload.offset, 0)
+  const receiptId = investorReceiptId(owner.ownerId, staged.importId, 0)
+  assert.equal((await base.readResource('import', receiptId)).payload.result.status, 'imported')
+  reads = 0
+  const interrupted = await exportAccountData({ owner, backend, jobs: [] })
+  assert.equal(interrupted.investorImports[0].receipts.length, 1)
+  assert.ok(reads <= 5, `interrupted export made ${reads} backend reads`)
+  reads = 0
+  await deleteAccountData({ owner, backend, jobs: [] })
+  assert.ok(reads <= 8, `interrupted deletion made ${reads} backend reads`)
+  for (const id of [receiptId, staged.importId, investorCatalogId(owner.ownerId)]) assert.equal((await base.readResource('import', id)).deleted, true)
+})

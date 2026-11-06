@@ -3,6 +3,12 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { parseInvestorCsv } from '../src/utils/private-import/investor-csv.mjs'
 
+test('accepts a names-only CSV without weakening malformed quote validation', () => {
+  const result = parseInvestorCsv(Buffer.from('Name\nAda Lovelace\nGrace Hopper\n'), { name: 'Name' })
+  assert.deepEqual(result.accepted.map(row => row.name), ['Ada Lovelace', 'Grace Hopper'])
+  assert.throws(() => parseInvestorCsv(Buffer.from('Name\n"unterminated'), { name: 'Name' }), /csv_invalid_format/)
+})
+
 test('investor CSV retains private source fields, comments and repeated people without guessing identity', () => {
   const csv = 'Name,LinkedIn,Comment,Other\n"Alex Doe",https://example.com/a,"Met in 2022, follow up",private\nAlex Doe,,Second meeting,more\n'
   const mapping = { name: 'Name', linkedinUrl: 'LinkedIn', notes: ['Comment'] }

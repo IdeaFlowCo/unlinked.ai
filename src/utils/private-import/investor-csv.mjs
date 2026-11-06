@@ -19,7 +19,10 @@ export function parseInvestorCsv(input, mapping) {
   let text
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { invalid('csv_invalid_utf8') }
   const parsed = Papa.parse(text.replace(/^\uFEFF/, ''), { skipEmptyLines: 'greedy', dynamicTyping: false })
-  if (parsed.errors.length) invalid('csv_invalid_format')
+  // A names-only CSV has no delimiter to infer. Papa still parses its single
+  // column correctly; retain fatal handling for malformed quoting and rows.
+  const singleColumn = parsed.data.every(row => row.length === 1)
+  if (parsed.errors.some(error => error.code !== 'UndetectableDelimiter' || !singleColumn)) invalid('csv_invalid_format')
   if (!parsed.data.length) invalid('csv_missing_header')
   if (parsed.data.length - 1 > INVESTOR_CSV_LIMITS.rows) invalid('csv_row_limit')
   const headers = parsed.data[0].map(value => value.trim())

@@ -8,6 +8,10 @@ const SHA = /^[a-f0-9]{64}$/
 const TOMBSTONE_BATCH = 400
 const RECEIPT_PROBE_LIMIT = 600
 
+// A row receipt is durable before its checkpoint. At most one extra receipt
+// can exist beyond offset, including after an interrupted first row.
+const investorReceiptCount = job => Math.min(job.total, job.offset + 1)
+
 // The whole account in one reviewable JSON document. Reads use the same
 // owner-fenced readers as the pages; nothing bypasses tombstones or consent.
 export async function exportAccountData({ owner, backend, jobs, grants = [], signupLookup, signal }) {
@@ -50,7 +54,7 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
   for (const resource of (await investorJobsForAccount(owner.ownerId, backend)).jobs) {
     signal?.throwIfAborted()
     const job = resource.payload, receipts = []
-    for (let ordinal = 0; ordinal < job.total; ordinal++) {
+    for (let ordinal = 0; ordinal < investorReceiptCount(job); ordinal++) {
       signal?.throwIfAborted()
       const receipt = await backend.readResource('import', investorReceiptId(owner.ownerId, job.id, ordinal))
       if (receipt && !receipt.deleted && receipt.sourceOwnerId === owner.ownerId) receipts.push(receipt.payload)
@@ -139,7 +143,7 @@ async function eraseAccountData({ owner, backend, jobs, grantIds = [], signupLoo
   const investor = await investorJobsForAccount(ownerId, backend)
   for (const resource of investor.jobs) {
     const job = resource.payload
-    for (let ordinal = 0; ordinal < job.total; ordinal++) {
+    for (let ordinal = 0; ordinal < investorReceiptCount(job); ordinal++) {
       signal?.throwIfAborted()
       await eraseOne({ type: 'import', sourceId: investorReceiptId(ownerId, job.id, ordinal) })
     }
