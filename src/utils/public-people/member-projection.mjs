@@ -127,11 +127,10 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   // Same-address merges come last: explicit and earlier automatic decisions win.
   const decide = async (snapshot, own = [], members = new Set(), verified = new Set(), curated = new Map()) => {
     const stored = [...own, ...(typeof readDecisions === 'function' ? await readDecisions() : [])]
-    const protectedIds = new Set([...members, ...(snapshot.legacyMembers ?? [])])
-    const refFor = profile => protectedIds.has(profile.id) ? profileLinkedinRef(profile) : profileLinkedinRef(curated.get(profile.id)) ?? profileLinkedinRef(profile)
-    const identity = mergeSameLinkedin ? linkedinIdentityMerges({ profiles: snapshot.profiles, members: [...members], absorbers: [...verified], decisions: stored, refFor, prefer: preferSurvivor }) : null
-    const decisions = identity ? [...identity.decisions, ...identity.merges] : stored
     const identityRefs = new Map(snapshot.profiles.map(profile => [profile.id, [...new Set([profileLinkedinRef(profile), profileLinkedinRef(curated.get(profile.id))].filter(Boolean))]]))
+    const historical = snapshot.legacyMembers ?? []
+    const identity = mergeSameLinkedin ? linkedinIdentityMerges({ profiles: snapshot.profiles, members: [...new Set([...members, ...historical])], absorbers: [...new Set([...verified, ...historical])], decisions: stored, refFor: profile => identityRefs.get(profile.id) ?? [], prefer: preferSurvivor }) : null
+    const decisions = identity ? [...identity.decisions, ...identity.merges] : stored
     const options = { ...(identity ? { limit: PUBLIC_INDEX_MAX_PROFILES } : {}), identityRefs: profile => identityRefs.get(profile.id) ?? [] }
     const initial = applyProfileDecisions(snapshot, decisions, options)
     const finalMembers = new Set([...(initial.members ?? members), ...(initial.legacyMembers ?? [])])

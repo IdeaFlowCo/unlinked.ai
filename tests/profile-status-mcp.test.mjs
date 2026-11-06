@@ -138,3 +138,28 @@ test('curated replacement precedes shadow merge filling and preserves explicit d
  decisions=[{id:'merge',kind:'merge',profileId:'merged',survivorId:'survivor',fill:false}]
  survivor=(await read()).profiles[0]; assert.equal(survivor.about,undefined); assert.deepEqual(survivor.skills,[]); assert.equal(survivor.name,'Curated')
 })
+
+
+test('historical curated identity merges without changing authored fields', async () => {
+ const url='https://www.linkedin.com/in/historical-example'
+ const profiles=[person('public-historical',{name:'Historical member',headline:'Original words'}),person('public-shadow',{linkedinUrl:url,headline:'Shadow words'})]
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>[],readLegacyMembers:async()=>['public-historical'],mergeSameLinkedin:true,publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('public-historical',{linkedinUrl:url,headline:'Curated words'})],connections:[]})}})
+ const result=await read(), profile=result.profiles[0]
+ assert.equal(result.profiles.length,1); assert.equal(result.aliases['public-shadow'],'public-historical'); assert.equal(profile.name,'Historical member'); assert.equal(profile.headline,'Original words'); assert.equal(profile.linkedinUrl,undefined); assert.equal(profile.enrichmentStatus,'enriched'); assert.deepEqual(result.legacyMembers,['public-historical'])
+})
+
+test('suspension closes over multiple identity references without automatic merging', async () => {
+ const x='https://www.linkedin.com/in/person-x', y='https://www.linkedin.com/in/person-y'
+ const profiles=[person('first',{linkedinUrl:x}),person('bridge',{linkedinUrl:x}),person('last',{linkedinUrl:y}),person('unrelated')]
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>[],mergeSameLinkedin:false,readDecisions:async()=>[{id:'suspend',kind:'suspend',profileId:'first'}],publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('bridge',{linkedinUrl:y})],connections:[]})}})
+ const result=await read()
+ assert.deepEqual(result.profiles.map(p=>p.id),['unrelated']); assert.deepEqual(new Set(result.suspended),new Set(['first','bridge','last'])); assert.equal(result.suspendedRefs.length,2)
+})
+
+test('automatic matching uses both original and curated identity evidence', async () => {
+ const x='https://www.linkedin.com/in/original-person', y='https://www.linkedin.com/in/curated-person'
+ const profiles=[person('public-a',{linkedinUrl:x}),person('public-b',{linkedinUrl:x}),person('public-c',{linkedinUrl:y})]
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>[],mergeSameLinkedin:true,publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('public-b',{linkedinUrl:y})],connections:[]})}})
+ const result=await read()
+ assert.equal(result.profiles.length,1); assert.deepEqual(result.aliases,{'public-b':'public-a','public-c':'public-a'})
+})
