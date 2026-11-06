@@ -91,7 +91,12 @@ test('the import page offers list upload under its own closed disclosure, and th
   assert.match(status, /Importing “LinkedIn followers”…/); assert.match(status, /Ada &lt;b&gt;/); assert.match(status, /Continue importing/)
   const resumed = await go(`/import/list/${id}/continue`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf }) })
   assert.equal(resumed.status, 303)
-  assert.deepEqual(calls.map(call => call[0]), ['stage', 'stage', 'status', 'resume'])
+  assert.deepEqual(calls.map(call => call[0]), ['stage', 'stage', 'status', 'status', 'resume'])
+  // Continue on an import this owner does not have is a 404, not a runner.
+  privateListImports.status = async () => { throw Object.assign(Error('nope'), { code: 'not_found' }) }
+  const unknown = await go(`/import/list/${'e'.repeat(64)}/continue`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf }) })
+  assert.equal(unknown.status, 404)
+  assert.equal(calls.filter(call => call[0] === 'resume').length, 1)
   assert.equal(calls[0][1], 'list-owner', 'staged for the signed-in owner only')
 })
 
@@ -102,5 +107,29 @@ test('a persistent outage stops the background runner after a few tries instead 
   await lists.stage({ ownerId: 'o', userId: 'u' }, { csv: followers, listName: 'L' })
   for (let i = 0; i < 50 && lists.running({ ownerId: 'o', userId: 'u' }, 'i'.repeat(64)); i++) await new Promise(resolve => setTimeout(resolve, 2))
   assert.equal(calls, 5)
+})
+
+test('one owner’s imports run one at a time, and a batch that stops making progress ends the runner', async () => {
+  let active = 0, peak = 0
+  const progress = new Map()
+  const lists = createPrivateListImports({ pauseMs: 1, sleep: async () => {},
+    call: async (who, name, input) => {
+      if (name === 'unlinked_stage_investor_csv') return { importId: input.listName.padEnd(64, '0') }
+      active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 1)); active--
+      const done = (progress.get(input.importId) ?? 0) + 1; progress.set(input.importId, done)
+      return { status: done >= 3 ? 'complete' : 'running', processed: done }
+    } })
+  const owner = { ownerId: 'serial', userId: 'u' }
+  const a = await lists.stage(owner, { csv: followers, listName: 'a' }), b = await lists.stage(owner, { csv: followers, listName: 'b' })
+  for (let i = 0; i < 200 && (lists.running(owner, a.importId) || lists.running(owner, b.importId)); i++) await new Promise(resolve => setTimeout(resolve, 2))
+  assert.equal(peak, 1, 'never two batches for the same owner at once')
+  assert.equal(progress.get(a.importId), 3); assert.equal(progress.get(b.importId), 3)
+  // Stalled: the same `processed` three times in a row stops the runner.
+  let resumes = 0
+  const stuck = createPrivateListImports({ pauseMs: 1, sleep: async () => {},
+    call: async (who, name) => { if (name === 'unlinked_stage_investor_csv') return { importId: 's'.repeat(64) }; resumes++; return { status: 'running', processed: 7 } } })
+  await stuck.stage(owner, { csv: followers, listName: 'L' })
+  for (let i = 0; i < 50 && stuck.running(owner, 's'.repeat(64)); i++) await new Promise(resolve => setTimeout(resolve, 2))
+  assert.equal(resumes, 4)
 })
 

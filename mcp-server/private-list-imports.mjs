@@ -51,16 +51,20 @@ export const LIST_ERRORS = Object.freeze({
 })
 
 // `call(owner, name, input)` runs one of LIST_TOOLS for the signed-in owner
-// (an in-process owner grant; see private-pilot.mjs). One runner per owner;
-// batches are paced well under the owner's per-minute tool budget.
+// (an in-process owner grant; see private-pilot.mjs). One owner's imports run
+// one at a time; batches are paced well under the per-minute tool budget.
+// Runners live in this process only: after a restart the status page offers
+// Continue (progress itself is durable).
 export function createPrivateListImports({ call, pauseMs = 1500, batchSize = 25, maxBatches = 4000, sleep = ms => new Promise(resolve => setTimeout(resolve, ms).unref?.()) }) {
   if (typeof call !== 'function') throw new TypeError('private_list_imports_configuration_required')
-  const running = new Map()
+  // Imports that are running or queued; one owner's imports run one after
+  // another (`tails`), so several uploads never multiply call volume.
+  const running = new Map(), tails = new Map()
   const run = (owner, importId) => {
-    const key = `${owner.ownerId}\u0000${importId}`
+    const key = `${owner.ownerId}\u0000${importId}`, ownerKey = owner.ownerId
     if (running.has(key)) return running.get(key)
-    const work = (async () => {
-      let failures = 0
+    const work = (tails.get(ownerKey) ?? Promise.resolve()).then(async () => {
+      let failures = 0, stalled = 0, lastProcessed = -1
       for (let batch = 0; batch < maxBatches; batch++) {
         let result
         try { result = await call(owner, 'unlinked_resume_investor_import', { importId, batchSize }); failures = 0 }
@@ -72,10 +76,14 @@ export function createPrivateListImports({ call, pauseMs = 1500, batchSize = 25,
           return
         }
         if (['complete', 'partial'].includes(result?.status)) return
+        // No progress for three batches in a row: stop; Continue can retry later.
+        if (result?.processed === lastProcessed) { if (++stalled >= 3) return } else stalled = 0
+        lastProcessed = result?.processed
         await sleep(pauseMs)
       }
-    })().finally(() => running.delete(key))
-    running.set(key, work)
+    }).catch(() => {}).finally(() => { running.delete(key); if (tails.get(ownerKey) === settled) tails.delete(ownerKey) })
+    const settled = work
+    running.set(key, work); tails.set(ownerKey, work)
     return work
   }
   return {

@@ -2812,7 +2812,7 @@ export function createPrivateBrowserHandler({ privateListImports, connectionPriv
           if (!bytes) { await listFailure('list_too_large'); return }
           const form = await new Request(new URL('/import/list', base), { method: 'POST', headers: { 'Content-Type': request.headers['content-type'] ?? '' }, body: bytes }).formData()
           if (form.getAll('csrf').length !== 1 || form.get('csrf') !== session.csrf || form.getAll('listFile').length !== 1 || form.getAll('listName').length > 1 || [...form.keys()].some(key => !['csrf', 'listFile', 'listName'].includes(key))) throw new Error('private_browser_csrf')
-          const file = form.get('listFile'), listName = String(form.get('listName') ?? DEFAULT_LIST_NAME).trim().slice(0, 120) || DEFAULT_LIST_NAME
+          const file = form.get('listFile'), listName = [...String(form.get('listName') ?? DEFAULT_LIST_NAME).trim()].slice(0, 120).join('') || DEFAULT_LIST_NAME
           if (!file || typeof file.arrayBuffer !== 'function' || !/\.csv$/i.test(file.name ?? '')) { await listFailure('list_not_csv'); return }
           let csv
           try { csv = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(await file.arrayBuffer())) } catch { await listFailure('list_not_utf8'); return }
@@ -2825,6 +2825,9 @@ export function createPrivateBrowserHandler({ privateListImports, connectionPriv
         if (request.method === 'POST' && listMatch[2]) {
           const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
           if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => key !== 'csrf')) throw new Error('private_browser_csrf')
+          // Only an import this owner has: an unknown id is a 404, not a runner.
+          try { await privateListImports.status(session.owner, importId, 0) }
+          catch (error) { if (error?.code === 'not_found') { response.writeHead(404).end(); return } await listFailure('list_unavailable'); return }
           privateListImports.resume(session.owner, importId)
           redirect(response, `/import/list/${importId}`); return
         }
