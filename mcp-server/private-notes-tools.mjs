@@ -124,7 +124,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
         ...([...new Set([contact.sourceLinkedinRefHash, ...(contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(value => `linkedin:in:${value}`)),
         ...([...new Set([contact.publishedProfileId, ...(contact.publishedProfileIds ?? [])])].filter(Boolean).map(id => `unlinked:person:${id}`))]
       const unique = [...new Set(refs)]
-      if (unique.length > MAX_PRIVATE_PERSON_REFS) throw fail('identity_conflict', 'Too many exact references for one private person. Inspect or edit the existing private thing by its id.')
+      if (unique.length > MAX_PRIVATE_PERSON_REFS) throw fail('identity_conflict', 'Too many exact references for one private person. Inspect or edit the existing private thing by its id.', { reason: 'too_many_exact_references' })
       if (unique.length) return { refs: unique, name: clean(contact.name, 120) || 'Unnamed', person: { name: contact.name ?? null, profileId: contact.publishedProfileId ?? null, connectionId: owned ? contact.connectionId ?? null : null, linkedinRefHash: owned ? contact.linkedinRefHash ?? null : null } }
     }
     if (unavailable) throw unavailable

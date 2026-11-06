@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { fixture } from './helpers/investor-fixture.mjs'
-import { createAccountToolService } from '../mcp-server/account-tools.mjs'
+import { AccountToolError, createAccountToolService } from '../mcp-server/account-tools.mjs'
 import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION } from '../mcp-server/account-grants.mjs'
 import { createPrivateContext } from '../mcp-server/private-context.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
@@ -393,4 +393,48 @@ test('oversized public identity stops before overlay reads in connector and brow
   count = 3; cancel = true
   await assert.rejects(call('unlinked_get_person_private', { profileId: 'bounded-0' }, controller.signal), e => e.name === 'AbortError')
   assert.equal(lookups, 1)
+})
+
+
+test('oversized investor row is durably rejected and later rows resume without retrying it', async () => {
+  const f = fixture(), owner = grant('import-bounded-owner')
+  let lookups = 0, snapshots = 0
+  const service = createAccountToolService({ ...f.options,
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [] }),
+    readPublishedSnapshot: async () => { snapshots++; return { state: 'published', complete: true, revision: 'import-bounded', connections: [],
+      profiles: Array.from({ length: 8 }, (_, i) => ({ ...profile, id: `import-bounded-${i}` })) } },
+    overlay: { request: async (...args) => { if (args[2] === 'lookup') lookups++; return f.options.overlay.request(...args) } } })
+  const call = (name, input) => service.call({ grant: owner, name, input }).then(value => value.result)
+  const staged = await call('unlinked_stage_investor_csv', { csv: `Name,URL\nOversized,${profile.linkedinUrl}\nValid,https://linkedin.com/in/valid-independent-person`, listName: 'Bounded list', mapping: { name: 'Name', linkedinUrl: 'URL' } })
+  const first = await call('unlinked_resume_investor_import', { importId: staged.importId, batchSize: 1 })
+  assert.equal(first.processed, 1)
+  assert.equal(first.rejected, 1)
+  assert.equal(lookups, 0)
+  const status = await call('unlinked_get_investor_import', { importId: staged.importId })
+  assert.deepEqual(status.receipts.map(row => row.result), [{ status: 'rejected', reason: 'too_many_exact_references' }, { status: 'pending' }])
+  const second = await call('unlinked_resume_investor_import', { importId: staged.importId, batchSize: 1 })
+  assert.equal(second.status, 'partial')
+  assert.equal(second.imported, 1)
+  assert.equal(second.rejected, 1)
+  const final = await call('unlinked_get_investor_import', { importId: staged.importId })
+  assert.equal(final.receipts[1].result.status, 'imported')
+  const before = { lookups, snapshots, entities: f.state(owner.ownerId).entities.size, links: f.state(owner.ownerId).links.size, notes: f.state(owner.ownerId).notes.size }
+  await call('unlinked_resume_investor_import', { importId: staged.importId })
+  assert.deepEqual({ lookups, snapshots, entities: f.state(owner.ownerId).entities.size, links: f.state(owner.ownerId).links.size, notes: f.state(owner.ownerId).notes.size }, before)
+  assert.deepEqual((await call('unlinked_get_investor_import', { importId: staged.importId })).receipts, final.receipts)
+})
+
+
+test('investor import propagates unrelated identity and availability errors', async () => {
+  for (const code of ['identity_conflict', 'upstream_unavailable', 'permission_denied']) {
+    const f = fixture(), owner = grant(`error-${code}`)
+    f.options.lookupContact = async () => { throw new AccountToolError(code, 'Synthetic failure', { reason: 'other' }) }
+    const tools = f.tools()
+    const staged = await tools.unlinked_stage_investor_csv(owner, { csv: 'Name,URL\nPerson,https://linkedin.com/in/synthetic-error', listName: 'Errors', mapping: { name: 'Name', linkedinUrl: 'URL' } })
+    await assert.rejects(tools.unlinked_resume_investor_import(owner, { importId: staged.importId }), error => error.code === code)
+    const status = await tools.unlinked_get_investor_import(owner, { importId: staged.importId })
+    assert.equal(status.processed, 0)
+    assert.equal(status.receipts[0].result.status, 'pending')
+    assert.equal([...f.state(owner.ownerId).entities.values()].filter(entity => entity.kind === 'person').length, 0)
+  }
 })

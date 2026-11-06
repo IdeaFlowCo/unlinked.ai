@@ -41,7 +41,10 @@ export function createInvestorTools({ getBackend, who, overlayCall, existingByRe
       if (row.identity.linkedinRefHash) {
         refs.push(`linkedin:in:${row.identity.linkedinRefHash}`)
         try { refs.push(...(await person(grant, row.linkedinUrl, signal, { requireComplete: true })).refs) }
-        catch (error) { if (error?.code !== 'not_found') throw error }
+        catch (error) {
+          if (error?.code === 'identity_conflict' && error.details?.reason === 'too_many_exact_references') return { status: 'rejected', reason: 'too_many_exact_references' }
+          if (error?.code !== 'not_found') throw error
+        }
       } else {
         refs.push(`unlinked:private:${createHash('sha256').update(`investor-row:${job.id}:${row.rowId}`).digest('hex').slice(0, 32)}`)
       }
