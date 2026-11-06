@@ -161,7 +161,7 @@ test('People keeps the empty global header search above its own scoped toolbar s
     assert.match(toolbar, /method="get" action="\/network" role="search"/)
     assert.match(toolbar, /name="q" type="search"/)
     assert.doesNotMatch(toolbar, /name="csrf"/)
-    assert.equal([...view.content.matchAll(/<input\b[^>]*type="(?:search|text)"/g)].length, 2)
+    assert.equal([...view.content.matchAll(/<input\b[^>]*type="search"/g)].length, 2)
     if (props.query) { assert.match(toolbar, /value="&lt;&quot;climate&amp;&gt;"/); assert.doesNotMatch(header, /climate/) }
   }
   for (const view of [renderLanding(), renderJoin(), renderSignInRequired({ next: '/profile' }), renderPerson({ profile: { id: 'p', name: 'Maya Chen' } })]) {
@@ -485,7 +485,7 @@ test('fixture previews cover every requested screen and are reproducible without
     for (const file of ['people-welcome.html', 'people-empty.html', 'people-no-match.html']) {
       const content = first[files.findIndex(path => path.endsWith('/' + file))]
       // The header search (everyone) and the toolbar filter.
-      assert.equal([...content.matchAll(/<input\b[^>]*type="(?:search|text)"/g)].length, 2)
+      assert.equal([...content.matchAll(/<input\b[^>]*type="search"/g)].length, 2)
     }
     assert.match(first[files.findIndex(file => file.endsWith('/people-empty.html'))], /Bring your LinkedIn export to see your people\./)
     assert.match(first[files.findIndex(file => file.endsWith('/people-no-match.html'))], /No people matched\. Try another name or company\./)
