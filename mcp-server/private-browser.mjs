@@ -2606,9 +2606,16 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         if (typeof backend.readLegacyFiles === 'function') {
           try { recovered = await backend.readLegacyFiles() } catch { recoveredUnavailable = true }
         }
-        const metadataAvailable = typeof homePreferences?.getImportMetadata === 'function' && typeof homePreferences?.setImportMetadata === 'function'
-        const imports = await Promise.all(summaries(jobs).map(async item => ({ ...item, metadata: metadataAvailable ? await homePreferences.getImportMetadata(session.owner, item.id) : null })))
-        journey(response, renderImports({ ...props, imports, recovered: recovered?.objects ?? [], recoveredUnavailable, metadataAvailable }), props.importJob)
+        const metadataAvailable = typeof homePreferences?.getImportMetadataBatch === 'function' && typeof homePreferences?.setImportMetadata === 'function'
+        const allImports = summaries(jobs).filter(item => item.kind !== ADDED_PERSON).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+        const pages = Math.max(1, Math.ceil(allImports.length / 30))
+        const requested = Number(url.searchParams.get('page') || 1)
+        const page = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, pages) : 1
+        const selected = allImports.slice((page - 1) * 30, page * 30)
+        let labels = {}, metadataUnavailable = false
+        if (metadataAvailable) { try { labels = await homePreferences.getImportMetadataBatch(session.owner, selected.map(item => item.id)) } catch { metadataUnavailable = true } }
+        const imports = selected.map(item => ({ ...item, metadata: labels[item.id] ?? null }))
+        journey(response, renderImports({ ...props, imports, recovered: recovered?.objects ?? [], recoveredUnavailable, metadataAvailable: metadataAvailable && !metadataUnavailable, metadataUnavailable, page, pages }), props.importJob)
         return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
@@ -2667,11 +2674,9 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const jobs = await jobResources()
         const grants = await backend.listAccountGrantIds()
         const data = await exportAccountData({ owner: session.owner, backend, jobs, grants, signupLookup })
-        if (typeof homePreferences?.getImportMetadata === 'function') {
-          for (const item of data.imports) {
-            const metadata = await homePreferences.getImportMetadata(session.owner, item.id)
-            if (metadata) item.organization = metadata
-          }
+        if (typeof homePreferences?.getImportMetadataBatch === 'function') {
+          const metadata = await homePreferences.getImportMetadataBatch(session.owner, data.imports.map(item => item.id))
+          for (const item of data.imports) if (metadata[item.id]) item.organization = metadata[item.id]
         }
         data.account.accountLabel = session.accountLabel
         data.account.displayName = session.displayName
@@ -2843,7 +2848,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const id = importMatch[1], resource = await backend.readResource('import', id)
         if (!resource || resource.deleted || resource.sourceOwnerId !== session.owner.ownerId || resource.payload?.id !== id || resource.payload.receiptOf || resource.payload.kind) { response.writeHead(404).end(); return }
         const job = resource.payload
-        render(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><p>Search uses the bounded OpenAI processing authorized at upload.</p><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Query-time search; no shared people index.</small>'}</form>${!signup && typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a search-only agent to search this import using the bounded OpenAI processing authorized at upload. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : signup ? '<p><a href="/network">Search my whole network</a> · <a href="/settings">Connect my agent</a></p>' : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
+        render(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><p>Search uses the bounded OpenAI processing authorized at upload.</p><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Search this import privately.</small>'}</form>${!signup && typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a search-only agent to search this import using the bounded OpenAI processing authorized at upload. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : signup ? '<p><a href="/network">Search my whole network</a> · <a href="/settings">Connect my agent</a></p>' : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
         return
       }
       if (request.method === 'POST' && ['/search', '/setup', '/logout', '/switch-account'].includes(url.pathname)) {

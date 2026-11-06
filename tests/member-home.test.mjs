@@ -233,6 +233,7 @@ test('real Neo4j home preferences: owner-keyed upsert, user check and removal', 
   assert.equal(await store.get({ ...member, userId: 'other' }), null)
   await store.setImportMetadata(member, id(1), 'Network', 'friends, founders')
   assert.deepEqual(await store.getImportMetadata(member, id(1)), { name: 'Network', tags: ['friends', 'founders'] })
+  assert.deepEqual(await store.getImportMetadataBatch(member, [id(1), id(2)]), { [id(1)]: { name: 'Network', tags: ['friends', 'founders'] }, [id(2)]: null })
   assert.equal(await store.getImportMetadata({ ...member, userId: 'other' }, id(1)), null)
   await assert.rejects(store.setImportMetadata({ ...member, userId: 'other' }, id(1), 'Wrong', ''), /mismatch/)
   await store.removeOwner(member)
@@ -297,4 +298,20 @@ test('import labels are isolated by owner, bounded, and removed with account pre
   await assert.rejects(store.setImportMetadata(owner, id(1), 'x'.repeat(121), ''), /invalid/)
   await store.removeOwner(owner)
   assert.equal(await store.getImportMetadata(owner, id(1)), null)
+})
+
+
+test('history survives unavailable labels and isolates other owners and deleted jobs', async t => {
+  const foreign = job(2, 'indexed'); foreign.sourceOwnerId = 'other-owner'
+  const removed = { ...job(3, 'indexed'), deleted: true }
+  const preferences = createMemoryHomePreferenceStore()
+  preferences.getImportMetadataBatch = async () => { throw new Error('unavailable') }
+  const home = await site(t, { jobs: [job(1, 'indexed'), foreign, removed], preferences })
+  const page = await home.get('/imports')
+  assert.equal(page.status, 200)
+  assert.match(page.body, /names and tags are unavailable/)
+  assert.match(page.body, /Fictional-1.zip/)
+  assert.doesNotMatch(page.body, /Fictional-[23].zip/)
+  const csrf = home.csrfFrom(page.body)
+  for (const n of [2, 3]) assert.equal((await home.post(`/imports/${id(n)}/metadata`, { csrf, name: 'Wrong', tags: '' })).status, 404)
 })
