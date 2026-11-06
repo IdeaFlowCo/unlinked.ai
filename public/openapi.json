@@ -521,7 +521,7 @@
     },
     "/api/agent/v1/connections": {
       "get": {
-        "summary": "Deterministic owner connections: degree 1 includes owner-imported contacts, one entry per person with sources[] (or one row per source with grouping=none); degree 2 only recorded public paths with proving provenance",
+        "summary": "Deterministic owner connections: degree 1 includes owner-imported contacts, one entry per person with sources[] (or one row per source with grouping=none); degree 2 only recorded public paths with proving provenance; entries include public presence, enrichmentStatus and detailLevel, or unknown when public evidence is unavailable",
         "security": [
           {
             "accountGrant": []

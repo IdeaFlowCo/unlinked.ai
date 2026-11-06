@@ -103,10 +103,15 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
   // A merge marked `fill: false` (a member absorbing an imported copy of
   // themselves) keeps only the survivor's own fields.
   const keepOwn = new Set(decisions.filter(value => value.kind === 'merge' && value.fill === false).map(value => value.profileId))
+  const legacyMembers = new Set(snapshot.legacyMembers ?? [])
   const survivors = new Map()
   for (const [mergedId, survivorId] of merges) {
     const survivor = survivors.get(survivorId) ?? known.get(survivorId), merged = known.get(mergedId)
-    const value = keepOwn.has(mergedId) ? survivor : fill(survivor, merged)
+    let value = keepOwn.has(mergedId) ? survivor : fill(survivor, merged)
+    if (!keepOwn.has(mergedId) && legacyMembers.has(mergedId) && !members.has(survivorId) && !legacyMembers.has(survivorId)) {
+      value = { ...value }
+      for (const key of ['name', 'headline', 'location', 'about', 'company', 'industry', 'linkedinUrl', 'website', 'positions', 'education', 'skills']) if (merged[key] !== undefined) value[key] = merged[key]
+    }
     survivors.set(survivorId, merged.enrichmentStatus === 'enriched' ? { ...value, enrichmentStatus: 'enriched' } : value)
   }
   const profiles = snapshot.profiles.filter(profile => !merges.has(profile.id) && !removed.has(profile.id)).map(profile => {

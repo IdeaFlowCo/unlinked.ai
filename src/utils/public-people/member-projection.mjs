@@ -326,15 +326,6 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const uniqueConnections = [...new Map(connections.map(edge => [`${edge.fromId}\u0000${edge.toId}`, edge])).values()]
     if (uniqueConnections.length > PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('shared_public_capacity_limit')
     const finalize = async snapshot => {
-      // Membership is known now: curated text must never replace members' words.
-      const protectedIds = new Set([...members, ...(snapshot.legacyMembers ?? [])])
-      snapshot = { ...snapshot, profiles: snapshot.profiles.map(profile => {
-        const row = curated.get(profile.id)
-        if (!row || protectedIds.has(profile.id)) return profile
-        const supplemental = {}
-        for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profile[key]) supplemental[key] = profile[key]
-        return { ...row, ...supplemental }
-      }) }
       for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
       for (const profile of snapshot.profiles) if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id)
       const decided = await decide(snapshot, ownerMerges, members, verified)
@@ -343,8 +334,21 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       // never members' or historical members' own words. Bounded, so a large
       // publication cannot push the reader past its text budget.
       const own = new Set([...(decided.members ?? members), ...(decided.legacyMembers ?? [])])
+      const curatedBySurvivor = new Map()
+      for (const [id, row] of curated) {
+        const target = decided.aliases?.[id] ?? id
+        if (!curatedBySurvivor.has(target) || id === target) curatedBySurvivor.set(target, row)
+      }
+      const enrichedProfiles = decided.profiles.map(profile => {
+        const row = curatedBySurvivor.get(profile.id)
+        if (!row || own.has(profile.id)) return profile
+        const supplemental = {}
+        for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profile[key]) supplemental[key] = profile[key]
+        return { ...row, ...supplemental, id: profile.id, name: profile.name }
+      })
+      const curatedResult = { ...decided, profiles: enrichedProfiles }
       let budget = linkedinEnrichmentTextBudget
-      let result = byLinkedin.size ? { ...decided, profiles: decided.profiles.map(profile => {
+      let result = byLinkedin.size ? { ...curatedResult, profiles: curatedResult.profiles.map(profile => {
         if (own.has(profile.id) || budget <= 0) return profile
         const ref = profileLinkedinRef(profile), row = ref ? byLinkedin.get(ref) : undefined
         if (!row) return profile
@@ -355,7 +359,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
           budget -= Math.max(0, added)
         }
         return value
-      }) } : decided
+      }) } : curatedResult
       if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
       result = { ...result, profiles: result.profiles.map(profile => ({ ...profile, enrichmentStatus: enriched.has(profile.id) ? 'enriched' : 'not_recorded' })) }
       // Member photos for the photo route: resolved profile id -> owner + blob.

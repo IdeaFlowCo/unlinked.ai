@@ -337,11 +337,11 @@ another value is `cursor_invalid`).
 
 Response: `{ kind, degree, grouping (degree 1), sort, revision, total,
 anchorId? (degree 2), connections: [{ id, name, headline?, company?,
-linkedinUrl?, publishedProfileId?, linkedinRefHash?, connectedAt?, importedAt?,
+linkedinUrl?, publishedProfileId?, linkedinRefHash?, presence, enrichmentStatus, detailLevel, connectedAt?, importedAt?,
 provenance, visibility, sources: [{ id, name, provenance, visibility }] }],
 nextCursor? }`. Grouped `provenance` is the primary source's; `visibility` is
 `owner_private` when any source is. Every source `id` (and the entry `id`) is a
-valid `connectionId` for `unlinked_lookup_contact`.
+valid `connectionId` for `unlinked_lookup_contact`. Status comes from the published profile and is `unknown` when public evidence is unavailable, for both grouping modes.
 
 #### Name ordering
 `name` compares a key that starts at the first Unicode letter or number

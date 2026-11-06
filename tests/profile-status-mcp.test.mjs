@@ -90,3 +90,12 @@ test('every linked owner upload contributes evidence even when only the newest s
  result=(await read()).profiles.find(p=>p.id==='claimed')
  assert.equal(result.name,'Newest'); assert.equal(result.enrichmentStatus,'not_recorded')
 })
+
+
+test('historical member words survive a merge into a curated shadow', async () => {
+ const profiles=[person('historical',{name:'Member name',headline:'Member headline',about:'Member about',skills:['Member skill']}),person('shadow',{headline:'Shadow headline'})]
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readLegacyMembers:async()=>['historical'],readDecisions:async()=>[{id:'merge',kind:'merge',profileId:'historical',survivorId:'shadow'}],publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('shadow',{headline:'Curated headline',about:'Curated about'})],connections:[]})}})
+ const result=await read(), survivor=result.profiles.find(p=>p.id==='shadow')
+ assert.equal(survivor.name,'Member name'); assert.equal(survivor.headline,'Member headline'); assert.equal(survivor.about,'Member about'); assert.deepEqual(survivor.skills,['Member skill']); assert.equal(survivor.enrichmentStatus,'enriched')
+ assert.deepEqual(result.legacyMembers,['shadow']); assert.equal(result.aliases.historical,'shadow')
+})
