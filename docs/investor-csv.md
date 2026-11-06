@@ -92,7 +92,8 @@ every shared-string use, UTF-8 bytes, quote escaping and row padding before
 allocation; the 200,000-cell budget also counts sparse-cell padding. Inspection
 and staging enforce the same bounds. DTD/entity declarations and external workbook links
 are rejected. No external resources are fetched. Selected-sheet formulas and
-error cells fail explicitly; formula errors identify the cell and offer a values-only
+error cells fail explicitly; formula errors report `xlsx_formula_unsupported`, the
+cell, row and column, and a `values_only_export` recovery. Provide a values-only
 copy or CSV. For `HYPERLINK` formulas, put the actual LinkedIn URL in the mapped
 URL column: a values-only export may otherwise retain only the displayed name. Rich text and
 shared/inline strings are read as plain text; number/date values retain stored
@@ -111,7 +112,6 @@ pending old row. Restaging the same workbook under v2 creates a distinct import,
 so resume an existing import by its id rather than restaging it to retry.
 On operational rollback, retain the original workbooks and do not resume v2 jobs
 with a pre-v2 parser; restore a v2-capable runtime before resuming those jobs.
-Existing v1 jobs retain their text-only semantics.
 
 Parsing uses the existing bounded ZIP reader and pinned saxes 6.0.0 (released
 2021-11-07), a strict streaming XML parser; its transitive `xmlchars` is locked to
