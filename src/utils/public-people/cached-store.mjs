@@ -61,7 +61,10 @@ export function cachePublicPeopleReads(store, currentRevision, { maxEntries = MA
     }
     return snapshot
   }
-  return new Proxy(store, { get: (target, key) => key === 'read' ? read : typeof target[key] === 'function' ? target[key].bind(target) : target[key] })
+  // The live published revision and digest only (one pointer read, no chunks),
+  // for callers that need to know whether a dataset changed, not its content.
+  const revisionOf = dataset => Promise.resolve().then(() => currentRevision(dataset))
+  return new Proxy(store, { get: (target, key) => key === 'read' ? read : key === 'revisionOf' ? revisionOf : typeof target[key] === 'function' ? target[key].bind(target) : target[key] })
 }
 
 // The pointer read the Noos public store uses, without its chunks.

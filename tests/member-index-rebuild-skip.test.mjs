@@ -102,3 +102,28 @@ test('invalidate during a fingerprint read is never answered by the old snapshot
   assert.equal(w.importReads(), reads + 2, 'after invalidate the next read builds in full')
   assert.ok(after)
 })
+
+test('with live dataset pointers the fingerprint reads no dataset; a moved pointer rebuilds', async () => {
+  const id = createHash('sha256').update('pointer-import').digest('hex'), owner = { ownerId: 'owner-p', userId: 'user-p' }
+  const rows = [{ id: createHash('sha256').update('own-p').digest('hex'), importId: id, ownerId: owner.ownerId, category: 'profile', fields: { 'first name': 'Pointer', 'last name': 'Member' } }]
+  const job = { id, ownerId: owner.ownerId, archiveSha256: createHash('sha256').update('ap').digest('hex'), consent: PUBLIC_UPLOAD_CONSENT, status: 'indexed', counts: { accepted: 1, indexed: 1, rejected: 0, skippedFiles: 0, failedFiles: 0 }, assertionIds: rows.map(row => row.id) }
+  let clock = 0, datasetReads = 0, legacyReads = 0, legacyRevision = 'legacy-v1', enrichmentDigest = 'd1'
+  const read = createMemberPublicIndex({ includeDetails: true, freshMs: 1000, now: () => clock,
+    readLegacy: async () => { legacyReads++; return { ...legacy, revision: legacyRevision } }, readLegacyRevision: async () => legacyRevision,
+    discover: async () => [{ id, owner, revision: 4 }],
+    getBackend: async () => ({ readResource: async (type, key) => type === 'import' ? { sourceId: key, sourceOwnerId: owner.ownerId, sourceRevision: 4, payload: job } : { sourceOwnerId: owner.ownerId, payload: rows.find(row => row.id === key) } }),
+    publicPeople: { revisionOf: async dataset => ENRICHMENT_DATASETS.includes(dataset) ? { revision: dataset + ':r1', digest: enrichmentDigest } : null,
+      read: async dataset => { datasetReads++; return ENRICHMENT_DATASETS.includes(dataset) ? null : projectPublicMemberImport({ job, assertions: rows }) }, publish: async () => {} } })
+  await read(); clock += 2000; await read(); clock += 2000
+  const [reads, legacies] = [datasetReads, legacyReads]
+  const reused = await read()
+  assert.deepEqual([datasetReads, legacyReads], [reads, legacies], 'a reused rebuild reads no dataset and not the legacy snapshot')
+  enrichmentDigest = 'd2'
+  clock += 2000; const rebuilt = await read()
+  assert.ok(datasetReads > reads, 'a moved enrichment pointer rebuilds')
+  assert.notEqual(rebuilt, reused)
+  clock += 2000; await read(); const steady = datasetReads
+  legacyRevision = 'legacy-v2'
+  clock += 2000; await read()
+  assert.ok(datasetReads > steady, 'a moved legacy pointer rebuilds')
+})

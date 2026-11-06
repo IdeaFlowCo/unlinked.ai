@@ -134,3 +134,11 @@ If this fingerprint equals the one read before the kept build, the kept snapshot
 A changed source still rebuilds, and the build reuses the legacy snapshot and import list the fingerprint read, so its read count is the same as before. The first due rebuild after a cold start still builds, because there is no fingerprint to compare yet. `invalidate()` drops the kept build, so a connection-privacy change still forces a full rebuild on the next read. A fingerprint read that fails falls back to a full build, which fails closed as before.
 
 The fingerprint leaves out one input: `preferSurvivor`'s live handle state. It does not change the revision, and readers already pin compiled indexes to the revision.
+
+### Steady-state dataset reads and recompile memory (2026-11-06, v0.6.92)
+
+- **The leftover stalls.** After 0.6.91, `runtime_health` still showed a main-thread block of about 1 s nearly every minute, with no index recompiles in that time.
+- **The cause.** The no-change rebuild check read whole datasets: the recovered legacy dataset (~40 MB of JSON at production shape) and the enrichment shards. A dataset above the 64 MiB retained-size estimate is never cached, so each check fetched, parsed, hashed and validated it again, every 20–45 s.
+- **Fix: pointers only.** The fingerprint now uses each dataset's live published pointer (`revision` and `digest`, from `publicPeople.revisionOf`) and the legacy pointer (`readLegacyRevision`). A no-change check reads no dataset. A build still reads them when something changed.
+- **Recompiling under memory pressure.** A worker whose heap is above 45% of its cap releases the old index for a source when a new revision's install begins, instead of holding two compiled indexes. Calls for the old revision then answer `stale`, and readers install the new one and retry. As after any revision change, a cursor from the old revision fails closed. Below 45%, the old index is kept as before.
+- **Heap limit reporting.** The worker's reported heap limit is now the configured `UNLINKED_PUBLIC_INDEX_WORKER_HEAP_MB`. V8 reports the process flag instead when `--max-old-space-size` is set.

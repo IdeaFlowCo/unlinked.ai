@@ -17,6 +17,7 @@ import { createAccountToolService } from './account-tools.mjs'
 import { createOAuthServer } from './oauth-server.mjs'
 import { createPrivateContext } from './private-context.mjs'
 import { warmPublicPeopleIndex } from './public-people-warmup.mjs'
+import { startStallProfiler } from './stall-profiler.mjs'
 import { activePublicIndexHost, createPublicIndexHost, installPublicIndexHost } from '../src/utils/public-people/index-host.mjs'
 
 // Explicitly invoked isolated runtime. Never imported by the production app.
@@ -95,9 +96,12 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   const indexHost = process.env.UNLINKED_PUBLIC_INDEX_WORKER === 'off' ? null : installPublicIndexHost(createPublicIndexHost({ ...(Number.isSafeInteger(workerHeapMb) && workerHeapMb >= 256 ? { resourceLimits: { maxOldGenerationSizeMb: workerHeapMb } } : {}) }))
   // Started before the cold build so warm-up heap and GC pauses are recorded.
   const health = requestDiagnostics?.startRuntimeHealth?.({ extra: () => { if (!indexHost) return {}; const stats = indexHost.stats(); return { index_worker_heap_used_mb: stats.workerHeapUsedMb ?? undefined, index_worker_heap_limit_mb: stats.workerHeapLimitMb ?? undefined, index_worker_restarts: Math.max(0, stats.spawned - 1), index_worker_installs: stats.installs } } }) ?? null
+  // Opt-in main-thread stall profiles (docs/request-diagnostics.md § Stall
+  // profiles): only when UNLINKED_STALL_PROFILE_DIR names a private directory.
+  const stallProfiler = process.env.UNLINKED_STALL_PROFILE_DIR ? await startStallProfiler({ directory: process.env.UNLINKED_STALL_PROFILE_DIR }).catch(() => { process.stderr.write('unlinked_stall_profiler_unavailable\n'); return null }) : null
   // Finish the cold public index build before accepting the first visitor.
   // Best effort: publication failure leaves account routes available.
   await warmPublicPeopleIndex({ readPublishedSnapshot })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve) })
-  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { health?.stop(); if (indexHost) { if (activePublicIndexHost() === indexHost) installPublicIndexHost(null); void indexHost.close() } return new Promise(resolve => server.close(resolve)) } }
+  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { health?.stop(); void stallProfiler?.stop(); if (indexHost) { if (activePublicIndexHost() === indexHost) installPublicIndexHost(null); void indexHost.close() } return new Promise(resolve => server.close(resolve)) } }
 }

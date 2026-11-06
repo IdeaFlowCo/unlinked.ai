@@ -43,7 +43,7 @@ let active = null
 export const activePublicIndexHost = () => isMainThread ? active : null
 export const installPublicIndexHost = host => { active = host ?? null; return active }
 
-export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs', import.meta.url), resourceLimits, chunkSize = CHUNK, callTimeoutMs = CALL_TIMEOUT_MS, installTimeoutMs = INSTALL_TIMEOUT_MS, backoffMs = RESPAWN_BACKOFF_MS, onDisabled = () => process.stderr.write('unlinked_public_index_worker_disabled\n'), createWorker = (url, options) => new Worker(url, options), now = Date.now } = {}) {
+export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs', import.meta.url), resourceLimits, keepOldBelow, chunkSize = CHUNK, callTimeoutMs = CALL_TIMEOUT_MS, installTimeoutMs = INSTALL_TIMEOUT_MS, backoffMs = RESPAWN_BACKOFF_MS, onDisabled = () => process.stderr.write('unlinked_public_index_worker_disabled\n'), createWorker = (url, options) => new Worker(url, options), now = Date.now } = {}) {
   if (!Number.isSafeInteger(chunkSize) || chunkSize < 1 || !Number.isSafeInteger(callTimeoutMs) || callTimeoutMs < 1 || !Number.isSafeInteger(installTimeoutMs) || installTimeoutMs < 1 || !Number.isSafeInteger(backoffMs) || backoffMs < 0) throw new TypeError('public_index_host_configuration_invalid')
   let worker = null, generation = 0, nextId = 1, crashedAt = -Infinity, previousCrashAt = -Infinity, closed = false, disabled = false, failuresWithoutInstall = 0
   const pending = new Map() // id -> { resolve, reject, timer }
@@ -68,10 +68,12 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
     if (now() - crashedAt < backoffMs && crashedAt - previousCrashAt < 30000) throw unavailable()
     const mine = ++generation
     let created
-    try { created = createWorker(workerUrl, { ...(resourceLimits ? { resourceLimits } : {}) }) }
+    // The worker cannot read its own cap reliably when the process sets --max-old-space-size.
+    const workerData = { ...(resourceLimits ? { heapLimitMb: resourceLimits.maxOldGenerationSizeMb } : {}), ...(typeof keepOldBelow === 'number' ? { keepOldBelow } : {}) }
+    try { created = createWorker(workerUrl, { ...(resourceLimits ? { resourceLimits } : {}), workerData }) }
     catch { noteFailure(); throw unavailable() }
     created.on('message', message => {
-      if (Number.isSafeInteger(message?.heap?.usedMb)) { stats.workerHeapUsedMb = message.heap.usedMb; stats.workerHeapLimitMb = message.heap.limitMb }
+      if (Number.isSafeInteger(message?.heap?.usedMb)) { stats.workerHeapUsedMb = message.heap.usedMb; stats.workerHeapLimitMb = message.heap.limitMb; stats.releasedBeforeInstall = message.heap.released ?? 0 }
       const entry = pending.get(message?.id)
       if (!entry) return
       pending.delete(message.id); clearTimeout(entry.timer); settle()
