@@ -37,7 +37,7 @@ import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
 import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
 import { CONNECTION_FEEDBACK_SCRIPT, CONNECTION_FEEDBACK_SRC, CONNECTION_FEEDBACK_VERSION } from './connection-feedback.mjs'
-import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
+import { FEEDBACK_TOKEN_PATH, FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, FEEDBACK_UPLOAD_ORIGIN, exchangeFeedbackToken, feedbackWidgetTag } from './feedback-widget.mjs'
 import { ANALYTICS_ORIGIN, analyticsTag, queueAnalyticsEvent, takeAnalyticsEvents } from './ideaflow-analytics.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
 import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
@@ -138,7 +138,11 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
       // Prototype policy accepts the authenticated IdP email for display, even
       // without email_verified. Owner authority remains exact signed issuer/sub.
       // No access/ID token reaches an agent, cookie or imported source record.
-      return { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), emailEvidence: 'signed-ideaflow-beta-v1', providerEmailVerified: claims.email_verified === true, verifiedEmail: typeof claims.email === 'string' ? claims.email : null, displayName: typeof claims.name === 'string' && claims.name.length <= 256 ? claims.name : null }
+      // The ID token is kept only for the WIT feedback exchange, as a
+      // non-enumerable property so it never serializes with the identity.
+      const identity = { issuer: claims.iss, subject: claims.sub, clientId, verifiedAt: now, provenanceReceiptId: token(), emailEvidence: 'signed-ideaflow-beta-v1', providerEmailVerified: claims.email_verified === true, verifiedEmail: typeof claims.email === 'string' ? claims.email : null, displayName: typeof claims.name === 'string' && claims.name.length <= 256 ? claims.name : null }
+      if (typeof tokens.id_token === 'string' && tokens.id_token.length <= 8192) Object.defineProperty(identity, 'feedbackIdToken', { value: Object.freeze({ value: tokens.id_token, expiresAt: claims.exp * 1000 }), enumerable: false })
+      return identity
     },
   }
 }
@@ -171,7 +175,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, ideaflowProfiles = null }) {
+export function createPrivateBrowserHandler({ connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -688,7 +692,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
     // whose redirect chain ends at the configured Ideaflow ID origin.
     const signInFormAction = authorizationOrigin ? ` ${authorizationOrigin}` : ''
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
-    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+    response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
     script = `${TOP_BAR_SCRIPT}${LINKEDIN_EMAIL_HELP_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${CARD_SHARE_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
@@ -750,7 +754,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
     const csrf = token()
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
     if (sessionStore) await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, subject: identity.subject, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() })
-    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), subject: identity.subject, accountLabel, displayName, csrf, expiresAt, analyticsEvents: newOwner ? ['signup'] : [] })
+    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), subject: identity.subject, accountLabel, displayName, csrf, expiresAt, analyticsEvents: newOwner ? ['signup'] : [], feedbackIdToken: identity.feedbackIdToken ?? null, feedbackToken: null })
     response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     if (cardToken) {
@@ -1260,6 +1264,20 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
 
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
+      // WIT feedback: the signed-in member's Ideaflow ID token, kept only in
+      // this process's memory, becomes a 15-minute create-issue-only token.
+      // Signed out, restored-after-restart or expired sessions get 204 and the
+      // widget files anonymously. The ID token itself never leaves the server.
+      if (url.pathname === FEEDBACK_TOKEN_PATH) {
+        if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
+        const headers = { 'Cache-Control': 'no-store, private', Vary: 'Cookie' }
+        const id = viewer?.feedbackIdToken
+        if (!viewer || !id || id.expiresAt - Date.now() < 60000) { response.writeHead(204, headers).end(); return }
+        if (!viewer.feedbackToken || viewer.feedbackToken.expires_at * 1000 - Date.now() < 120000) viewer.feedbackToken = await exchangeFeedback(id.value)
+        if (!viewer.feedbackToken) { response.writeHead(204, headers).end(); return }
+        response.writeHead(200, { ...headers, 'Content-Type': 'application/json; charset=utf-8' })
+        response.end(JSON.stringify(viewer.feedbackToken)); return
+      }
       // Automatic sign-in: one silent round trip to Ideaflow ID before a
       // signed-out page renders. Only open-account runtimes (signup), only
       // ordinary pages, once per browser session and never after an explicit

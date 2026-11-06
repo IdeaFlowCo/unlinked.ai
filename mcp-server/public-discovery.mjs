@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { renderAgents, renderDataLiberation, renderImportGuide, renderMeet, renderSupport, fillMeHeadline, fillNavAlerts, iosAppView, TOP_BAR_SCRIPT, PRIVACY_URL, TERMS_URL } from './private-onboarding-views.mjs'
 import { iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
-import { FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
+import { FEEDBACK_UPLOAD_ORIGIN, FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
 import { ANALYTICS_ORIGIN, analyticsTag } from './ideaflow-analytics.mjs'
 
 const root = new URL('../', import.meta.url)
@@ -85,13 +85,13 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     type = 'text/html; charset=utf-8'
     const nonce = randomBytes(24).toString('base64url'), page = { headline: chrome.headline, nonce, alerts: chrome.alerts, ios: iosAppUserAgent(request.headers['user-agent']) }
     const formAction = `form-action 'self'${typeof signInOrigin === 'string' && /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/.test(signInOrigin) ? ` ${signInOrigin}` : ''}`
-    response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+    response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (pathname === '/agents') content = document(renderAgents(chrome), page)
     if (pathname === '/import-linkedin') content = document(renderImportGuide(chrome), page)
     if (pathname === '/support') content = document(renderSupport(chrome), page)
     if (pathname === '/data-liberation') content = document(renderDataLiberation(chrome), page)
     if (pathname === '/meet') {
-      response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
+      response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
       response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
       content = document(renderMeet(chrome), page).replace(/<\/html>$/, '') + `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}</script></html>`
     }
