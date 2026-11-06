@@ -223,11 +223,10 @@ const enabled = /^bolt:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uri ?? '') && pro
 test('real Neo4j home preferences: owner-keyed upsert, user check and removal', { skip: !enabled }, async t => {
   const neo4j = createRequire(import.meta.url)(process.env.UNLINKED_TEST_NEO4J_DRIVER)
   const driver = neo4j.driver(uri, neo4j.auth.basic('neo4j', process.env.UNLINKED_TEST_NEO4J_PASSWORD))
-  t.after(() => driver.close())
   const store = createNeo4jHomePreferenceStore(driver, 'neo4j', { now: () => 5 })
   await store.initialize()
   const member = { ownerId: randomUUID(), userId: 'user-' + randomUUID() }
-  t.after(() => store.removeOwner(member))
+  t.after(async () => { try { await store.removeOwner(member) } finally { await driver.close() } })
   await store.set(member, { importReminder: 'dismissed' })
   await store.set(member, { importReminder: 'shown' })
   assert.deepEqual(await store.get(member), { importReminder: 'shown', updatedAt: 5 })
