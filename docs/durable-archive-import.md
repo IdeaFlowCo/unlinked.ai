@@ -76,7 +76,7 @@ When the audit file would pass 8 MiB it is renamed to `browser-events.1.jsonl` (
 and `private_audit_rotated` is logged. A single runtime process must own this audit file; it serializes
 all appends and rotations through one in-process queue with an inode check. Do not share the audit
 directory between runtime processes. The queue is limited to 64 writes, and each caller waits at most
-five seconds; overload is logged as `private_audit_queue_full`. Worker event delivery never waits for
+five seconds; timeouts and dropped writes are counted in rate-limited `private_audit_dropped` logs. Worker event delivery never waits for
 the audit write, and worker events remain available in the container log.
 
 Operator triage for a slow import: `docker logs <runtime> 2>&1 | grep unlinkedImportWorker | grep <import id>`.

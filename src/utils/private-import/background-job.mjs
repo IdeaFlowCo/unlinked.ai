@@ -51,7 +51,7 @@ export async function stageArchive({ ownerId, filename, bytes, adapter, consent,
 
 // CAS on every lease/progress receipt fences delayed publishers. Immutable
 // chunks may survive a crash, but search/MCP require the final job publication.
-export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Date.now, leaseId = randomUUID(), stopped = () => false, onProgress = () => {} }) {
+export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Date.now, leaseId = randomUUID(), stopped = () => false, onProgress = () => {}, onParsedSources = () => {} }) {
   return adapter.withImport(ownerId, id, async store => {
     let current = await store.getJob(id)
     if (!current || terminal(current) || current.backgroundVersion !== 'profile-first-v1') return current
@@ -75,6 +75,7 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
       await save({ status: 'failed', phase: 'failed', error: 'archive_parse_failed', failureReason: /^[a-z0-9_]{1,64}$/.test(error?.message) ? error.message : 'unknown', progress: { processed: 0, total: null, profileReady: false } })
       return current
     }
+    onParsedSources(parsed.sources.length)
     const sources = [], assertions = [], totals = counts()
     // Stable source IDs preserve old receipts. Only staging order changes:
     // profile observations precede connections, regardless of ZIP entry order.
@@ -144,14 +145,14 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
         slow.unref?.()
         try {
           const backend = await getBackend(item.owner)
-          let progressed = false
-          const result = await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed, onProgress: () => { progressed = true } })
+          let progressed = false, parsedSources
+          const result = await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed, onProgress: () => { progressed = true }, onParsedSources: count => { parsedSources = count } })
           const history = failures.get(key)
           if (progressed || (result && terminal(result))) failures.delete(key)
           if (result && terminal(result) && !finished.has(key)) {
             finished.add(key)
             notify({ event: 'import_job_finished', importId: item.id, status: result.status, phase: phases.has(result.phase) ? result.phase : 'unknown',
-              durationMs: now() - startedAt, ...jobNumbers(result), ...(history ? { attemptsBeforeSuccess: history.attempt } : {}) })
+              durationMs: now() - startedAt, ...jobNumbers(result), ...(parsedSources === undefined ? {} : { sources: parsedSources }), ...(history ? { attemptsBeforeSuccess: history.attempt } : {}) })
           } else if (result && !terminal(result) && result.backgroundVersion !== 'profile-first-v1' && !notRunnable.has(key)) {
             notRunnable.add(key)
             notify({ event: 'import_job_not_runnable', importId: item.id, reason: 'background_version_unsupported' })

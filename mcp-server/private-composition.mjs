@@ -1,3 +1,4 @@
+import { createAuditQueue } from './audit-queue.mjs'
 import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
@@ -440,7 +441,6 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       requestDiagnostics = createRequestDiagnostics({ emit: diagnosticsStore.emit })
     }
     // One runtime process owns this audit file; all its appends and rotations share this queue.
-    let auditTail = Promise.resolve(), auditPending = 0, auditOverflowReported = false
     const writeAudit = async event => {
       const directory = join(root, 'audit')
       await mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
@@ -467,19 +467,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         } finally { await descriptor?.close() }
       }
     }
-    const audit = event => {
-      if (auditPending >= 64) {
-        if (!auditOverflowReported) console.error(JSON.stringify({ event: 'private_audit_queue_full' }))
-        auditOverflowReported = true
-        return Promise.reject(new Error('private_audit_queue_full'))
-      }
-      auditPending++
-      let expired = false, timer
-      const write = auditTail.then(() => expired ? undefined : writeAudit(event))
-      auditTail = write.catch(() => {}).finally(() => { auditPending--; if (auditPending < 64) auditOverflowReported = false })
-      const timeout = new Promise((_, reject) => { timer = setTimeout(() => { expired = true; reject(new Error('private_audit_timeout')) }, 5000) })
-      return Promise.race([write, timeout]).finally(() => clearTimeout(timer))
-    }
+    const audit = createAuditQueue(writeAudit)
     // Import worker events are numeric/fixed-code only (no names, emails or
     // rows), so they also go to the container log for operators.
     const importEvent = async event => {

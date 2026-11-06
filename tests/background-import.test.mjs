@@ -724,3 +724,23 @@ test('hanging event delivery does not hold the worker or owner coordination', as
     assert.equal(events.length, 2)
   } finally { clearTimeout(timer) }
 })
+
+
+test('failed imports report parsed source counts without changing saved receipts', async t => {
+  for (const unsupported of [false, true]) {
+    const f = await fixture(t), backend = f.backend('owner-a')
+    const bytes = unsupported ? await fullArchive(1) : Buffer.from('First Name,Last Name,URL\n,,\n')
+    const job = await stageArchive({ ownerId: 'owner-a', filename: unsupported ? 'input.zip' : 'Connections.csv', bytes, adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+    const adapter = unsupported ? { withImport: (owner, id, fn) => backend.adapter.withImport(owner, id, store =>
+      fn({ ...store, validatePublication: () => 'private_publication_support_limit' })) } : backend.adapter
+    const events = []
+    const worker = createArchiveWorker({ listPendingImports: async () => [{ id: job.id, owner: { ownerId: 'owner-a' } }],
+      getBackend: async () => ({ ...backend, adapter }), onError: event => events.push(event) })
+    await worker.tick(); await worker.stop()
+    const finished = events.find(event => event.event === 'import_job_finished')
+    assert.equal(finished.phase, unsupported ? 'unsupported_private_publication' : 'no_accepted_rows')
+    assert.equal(finished.sources, unsupported ? 3 : 1)
+    const saved = await backend.adapter.withImport('owner-a', job.id, store => store.getJob(job.id))
+    assert.deepEqual(saved.sources, [])
+  }
+})
