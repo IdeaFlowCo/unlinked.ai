@@ -96,7 +96,10 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       { candidates: (Array.isArray(answer.body.candidates) ? answer.body.candidates : []).slice(0, 20).map(value => ({ id: value.id, kind: value.kind, name: value.name })) })
     throw fail('invalid_input', `The private overlay refused the input (${code}).`, { overlayCode: code })
   }
-  const provenance = (grant, value) => ({ author: `agent:${clean(grant.agent, 80) || 'API key'}`, source: grant.grantId?.startsWith('ideaflow:') ? 'connector' : 'direct-key', assertion: value ?? 'stated' })
+  // `app: true` is the in-process owner grant of Unlinked's own pages (the
+  // browser list upload, private-list-imports.mjs): the owner wrote it in the app.
+  const provenance = (grant, value) => grant.app === true ? { author: 'owner', source: 'app', assertion: value ?? 'stated' }
+    : ({ author: `agent:${clean(grant.agent, 80) || 'API key'}`, source: grant.grantId?.startsWith('ideaflow:') ? 'connector' : 'direct-key', assertion: value ?? 'stated' })
 
   // An Unlinked person, named only from data the owner can already read: a
   // published profile, or the owner's own import (validated against it).
