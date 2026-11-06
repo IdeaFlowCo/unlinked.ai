@@ -171,7 +171,7 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
       if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return { state: 'empty' }
       const found = await identityContact(owner, { profileId })
       const hash = HASH.test(found?.contact?.linkedinRefHash ?? '') ? found.contact.linkedinRefHash : null
-      return read(owner, [refOf.person(profileId), ...(hash ? [refOf.linkedin(hash)] : []), ...([...new Set([found?.contact?.sourceLinkedinRefHash, ...(found?.contact?.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin))])
+      return read(owner, [refOf.person(profileId), ...((found?.contact?.publishedProfileIds ?? []).filter(Boolean).map(refOf.person)), ...(found?.contact?.publishedProfileId && found.contact.publishedProfileId !== profileId ? [refOf.person(found.contact.publishedProfileId)] : []), ...(hash ? [refOf.linkedin(hash)] : []), ...([...new Set([found?.contact?.sourceLinkedinRefHash, ...(found?.contact?.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin))])
     },
     // One of the owner's own imported contacts; null when it is not theirs.
     async forContact(owner, connectionId) {
@@ -179,7 +179,7 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
       if (!found?.contact || found.visibility !== 'owner_private') return null
       const refs = [...(HASH.test(found.contact.linkedinRefHash ?? '') ? [refOf.linkedin(found.contact.linkedinRefHash)] : []),
         ...([...new Set([found.contact.sourceLinkedinRefHash, ...(found.contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin)),
-        ...(found.contact.publishedProfileId ? [refOf.person(found.contact.publishedProfileId)] : [])]
+        ...([...new Set([found.contact.publishedProfileId, ...(found.contact.publishedProfileIds ?? [])])].filter(Boolean).map(refOf.person))]
       return refs.length ? read(owner, refs) : { state: 'empty' }
     },
     async neighbourhood(owner, entityId, depth) {

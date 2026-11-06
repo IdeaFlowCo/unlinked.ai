@@ -161,3 +161,59 @@ test('published LinkedIn lookup uses current snapshot and prefers a member', asy
   profiles = [{ ...profile, id: 'z-member', linkedinUrl: undefined }, profiles[1]]; revision++
   assert.equal((await reader.lookupLinkedin({ address: profile.linkedinUrl })).id, 'a-shadow')
 })
+
+test('signaled reconciliation uses one revision and rejects duplicate-public identity conflicts', async () => {
+  const f = fixture(), alice = grant('alice')
+  const twin = { ...profile, id: 'second-public-person' }
+  const oldSlugs = ['duplicate-source-one', 'duplicate-source-two']
+  const rows = oldSlugs.map((value, i) => ({ id: `duplicate-${i}`, category: 'connections', fields: { 'first name': `Person ${i}`, url: `https://linkedin.com/in/${value}` }, provenance: { source: 'recovered-legacy-public-v1', toId: i ? twin.id : profile.id } }))
+  let reads = 0, writes = 0
+  const overlay = { request: async (identity, method, path, body) => {
+    if (method !== 'GET' && path !== 'lookup') writes++
+    return f.options.overlay.request(identity, method, path, body)
+  } }
+  const service = createAccountToolService({ ...f.options, overlay,
+    readPublishedSnapshot: async () => { reads++; return { state: 'published', complete: true, revision: `${reads}`, profiles: reads % 2 ? [profile, twin] : [{ ...profile, linkedinUrl: undefined }, twin], connections: [] } },
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [], readLegacyObservations: async () => ({ assertions: rows }) }) })
+  const call = (name, input) => service.call({ grant: alice, name, input, signal: new AbortController().signal }).then(value => value.result)
+  const identity = await f.options.identityFor(alice)
+  for (const value of oldSlugs) await overlay.request(identity, 'POST', 'entities', { kind: 'person', name: value, refs: [`linkedin:in:${sha(value)}`] })
+  const before = writes
+  for (const subjectId of [profile.id, twin.id, 'duplicate-0', 'duplicate-1', `https://linkedin.com/in/${slug}`]) {
+    reads = 0
+    await assert.rejects(call('unlinked_add_private_note', { subjectKind: 'unlinked', subjectId, text: 'Ambiguous' }), e => e.code === 'identity_conflict')
+    assert.equal(reads, 1)
+  }
+  assert.equal(writes, before)
+  reads = 0
+  const card = await call('unlinked_get_person_private', { profileId: profile.id })
+  assert.equal(card.entities.length, 2)
+})
+
+test('request-scoped reader shares signaled snapshot and honors cancellation', async () => {
+  let reads = 0, release
+  const gate = new Promise(resolve => { release = resolve })
+  const reader = createPublicPeopleReader({ reuse: true, readPublishedSnapshot: async () => { reads++; await gate; return { state: 'published', complete: true, revision: `${reads}`, profiles: [profile], connections: [] } } })
+  const controller = new AbortController(), cancelled = new AbortController()
+  const first = reader.lookup({ ids: [profile.id], signal: controller.signal })
+  const second = reader.linkedinRef({ id: profile.id, signal: controller.signal })
+  const third = reader.linkedinRef({ id: profile.id, signal: cancelled.signal })
+  cancelled.abort()
+  await assert.rejects(third, e => e.code === 'public_people_unavailable')
+  release()
+  assert.equal((await first).get(profile.id).id, profile.id)
+  assert.equal(await second, ref)
+  assert.equal(reads, 1)
+  controller.abort()
+  await assert.rejects(reader.lookup({ ids: [profile.id], signal: controller.signal }), e => e.code === 'public_people_unavailable')
+})
+
+test('duplicate published profile references conflict even without owner connections', async () => {
+  const f = fixture(), alice = grant('alice'), twin = { ...profile, id: 'public-twin' }
+  const service = createAccountToolService({ ...f.options,
+    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'twins', profiles: [profile, twin], connections: [] }),
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [] }) })
+  const identity = await f.options.identityFor(alice)
+  for (const person of [profile, twin]) await f.options.overlay.request(identity, 'POST', 'entities', { kind: 'person', name: person.id, refs: [`unlinked:person:${person.id}`] })
+  await assert.rejects(service.call({ grant: alice, name: 'unlinked_add_private_note', input: { subjectKind: 'unlinked', subjectId: profile.id, text: 'Ambiguous' } }), e => e.code === 'identity_conflict')
+})

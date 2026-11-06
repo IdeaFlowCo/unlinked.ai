@@ -121,7 +121,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       const owned = found.visibility === 'owner_private'
       const refs = [...(HASH.test(contact.linkedinRefHash ?? '') ? [`linkedin:in:${contact.linkedinRefHash}`] : []),
         ...([...new Set([contact.sourceLinkedinRefHash, ...(contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(value => `linkedin:in:${value}`)),
-        ...(contact.publishedProfileId ? [`unlinked:person:${contact.publishedProfileId}`] : [])]
+        ...([...new Set([contact.publishedProfileId, ...(contact.publishedProfileIds ?? [])])].filter(Boolean).map(id => `unlinked:person:${id}`))]
       if (refs.length) return { refs, name: clean(contact.name, 120) || 'Unnamed', person: { name: contact.name ?? null, profileId: contact.publishedProfileId ?? null, connectionId: owned ? contact.connectionId ?? null : null, linkedinRefHash: owned ? contact.linkedinRefHash ?? null : null } }
     }
     if (unavailable) throw unavailable
