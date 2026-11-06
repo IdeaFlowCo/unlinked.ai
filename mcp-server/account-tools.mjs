@@ -15,7 +15,7 @@ import { PRIVATE_NOTES_DESCRIPTIONS, PRIVATE_NOTES_MUTATING, PRIVATE_NOTES_SCHEM
 import { linkedinRefHash, linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
 import { linkedinUrl as canonicalLinkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { CONNECTION_SORTS, PUBLIC_LIST_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
-import { groupConnectionRows, publishedPeopleFor, rowSlug, rowPublicTarget, usableProfileId } from './connection-identity.mjs'
+import { groupConnectionRows, rowSlug, rowPublicTarget, usableProfileId } from './connection-identity.mjs'
 import { contactFingerprint } from './contact-enrichment.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')

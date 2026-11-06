@@ -211,7 +211,7 @@ an extra sanitized `cause` identifier).
 | `ambiguous_name` | 409 | (private notes) Several of the owner's saved things share that name. The body adds `candidates` (`id`, `kind`, `name`, the owner's own); ask the user, then pass an id, or `createNew` with `clientRequestId`. |
 | `identity_unavailable` | 409 | (private notes) The account has no Ideaflow sign-in identity, so it has no people overlay. Sign in to Unlinked with Ideaflow once. |
 | `import_busy` | 409 | An investor import is being changed or has an active batch; retry after the lease expires. |
-| `identity_conflict` | 409 | Exact references changed during an investor import; inspect the private person before retrying. |
+| `identity_conflict` | 409 | Exact references identify conflicting private records or could not be attached; inspect them and have the owner select the intended record before retrying. |
 
 Private-notes input refusals from the overlay are `invalid_input` with an extra
 `overlayCode` (for example `invalid_relation`).
@@ -377,11 +377,15 @@ own contacts without paging; give exactly one input:
   among them (`{ kind, contacts: [...] }`, unmatched hashes are omitted).
 
 Response: `{ kind, contact: { connectionId | null, name, headline?, company?,
-linkedinRefHash | null, publishedProfileId | null, provenance? }, visibility }`.
+linkedinRefHash | null, sourceLinkedinRefHash?, sourceLinkedinRefHashes?,
+publishedProfileId | null, publishedProfileIds?, provenance? },
+publicReconciliationComplete?, visibility }`. Additional source hashes and
+published IDs identify related exact references; `publicReconciliationComplete`
+indicates whether the public index was available for reconciliation.
 `linkedinRefHash` is the SHA-256 hex of the canonical LinkedIn slug
 (`linkedinSlug()` in `src/utils/public-people/url-identity.mjs`: decoded,
 lowercased) — the value of the Ideaflow people-overlay ref `linkedin:in:<hash>`
-OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`). A public-only profile lookup also returns this hash when the readable public profile has an exact LinkedIn URL. Private tools use it to find the owner’s earlier private prospect without requiring an archive connection; reads never create or merge records.
+OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`). A public-only profile lookup also returns this hash when the readable public profile has an exact LinkedIn URL. See [private context](private-context.md#private-prospects-before-a-public-profile) for the identity and read boundaries.
 `publishedProfileId` is set when the same person has a published profile (the
 row's own published profile, or one with the same LinkedIn address).
 `visibility` is `owner_private` when the answer comes from the owner's own
