@@ -1,6 +1,6 @@
 {
   "name": "aili3",
-  "version": "0.6.79",
+  "version": "0.6.79+rowcache",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
