@@ -1,3 +1,4 @@
+import { safeBrowserPerformance } from './browser-performance.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomUUID } from 'node:crypto'
 
@@ -131,6 +132,11 @@ export function instrumentMcpTransport(transport) {
 // Defense in depth for persistence and the operator reader: even accidental
 // extra fields supplied by another internal caller cannot become log content.
 export function safeDiagnosticRecord(value) {
+  if (value?.schema === 1 && value.event === 'browser_performance') {
+    const row = safeBrowserPerformance(value)
+    if (!row || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.at ?? '') || !Number.isFinite(Date.parse(value.at)) || !/^(?:\d+\.\d+\.\d+|unknown)$/.test(value.release ?? '')) return null
+    return { schema:1,event:'browser_performance',at:value.at,release:value.release,...row,...(count(value.dropped_since_last_emit) !== undefined ? { dropped_since_last_emit:count(value.dropped_since_last_emit) } : {}) }
+  }
   if (value?.schema === 1 && value.event === 'public_admission') {
     if (!['anonymous', 'arrival', 'viewer'].includes(value.lane) || !['profile', 'connections', 'company', 'search'].includes(value.route) || !['admitted', 'minute', 'capacity', 'cancelled'].includes(value.reason) || count(value.count) === undefined || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.at ?? '') || !Number.isFinite(Date.parse(value.at))) return null
     return { schema: 1, event: 'public_admission', at: value.at, lane: value.lane, route: value.route, reason: value.reason, count: count(value.count) }

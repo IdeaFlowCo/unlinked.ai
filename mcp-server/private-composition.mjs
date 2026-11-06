@@ -1,3 +1,4 @@
+import { createBrowserPerformanceRecorder } from './browser-performance.mjs'
 import { createNeo4jSavedSearchLists } from './saved-search-lists.mjs'
 import { createAuditQueue } from './audit-queue.mjs'
 import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
@@ -141,13 +142,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
+  let server, worker, memberEmail, diagnosticsStore, browserPerformanceStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
   const close = async () => {
     if (closed) return
     closed = true
     indexWarmKeeper?.stop()
     await contactEnrichment?.stop()
     await diagnosticsStore?.close()
+    await browserPerformanceStore?.close()
     await connectionSync?.stop()
     await worker?.stop()
     await memberEmail?.stop()
@@ -439,7 +441,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       } catch { /* the stored decisions alone still apply */ }
       return { ids, refs, complete, decided }
     }
-    let requestDiagnostics
+    let requestDiagnostics, recordBrowserPerformance
     if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {
       const auditDirectory = join(root, 'audit')
       await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
@@ -447,6 +449,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       if (!auditStat.isDirectory() || auditStat.isSymbolicLink() || (auditStat.mode & 0o777) !== 0o700 || auditStat.uid !== process.getuid()) throw new Error('diagnostics_audit_directory_not_private')
       diagnosticsStore = await createDiagnosticsStore({ directory: join(auditDirectory, 'requests') })
       requestDiagnostics = createRequestDiagnostics({ emit: diagnosticsStore.emit })
+    }
+    if (diagnosticsEnv.UNLINKED_BROWSER_PERFORMANCE !== 'off') {
+      const auditDirectory=join(root,'audit')
+      await mkdir(auditDirectory,{mode:0o700}).catch(error=>{if(error.code!=='EEXIST')throw error})
+      const auditStat=await lstat(auditDirectory)
+      if(!auditStat.isDirectory()||auditStat.isSymbolicLink()||(auditStat.mode&0o777)!==0o700||auditStat.uid!==process.getuid())throw Error('performance_audit_directory_not_private')
+      browserPerformanceStore = await createDiagnosticsStore({ directory: join(root, 'audit', 'browser-performance') })
+      recordBrowserPerformance = createBrowserPerformanceRecorder({ emit: browserPerformanceStore.emit, release: JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version })
     }
     // One runtime process owns this audit file; all its appends and rotations share this queue.
     const writeAudit = async event => {
@@ -668,7 +678,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       })
       contactEnrichment.start()
     }
-    return { login, getBackend, close, audit, requestDiagnostics, backgroundImports: true,
+    return { login, getBackend, close, audit, requestDiagnostics, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),

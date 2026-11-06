@@ -18,7 +18,7 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
   const focusKey=element=>{if(element.id)return JSON.stringify(['id',element.id]);const section=element.closest('section[aria-label]');const form=element.closest('form'),row=element.closest('article'),person=row?.querySelector('a[href^="/people/"]');return JSON.stringify([section?.getAttribute('class')||section?.getAttribute('aria-label'),row?.getAttribute('data-network-row'),element.tagName,form?.getAttribute('action'),form?.querySelector('input[name="profileId"],input[name="id"]')?.value,person?.getAttribute('href'),element.name,element.type,element.tagName==='BUTTON'?element.value:null,['A','BUTTON','SUMMARY'].includes(element.tagName)?element.textContent.trim():null])};
   const busy=value=>root.querySelector('[data-network-results]')?.setAttribute('aria-busy',String(value));
   async function load(url,{historyMode='push',typing=false}={}){
-    cancel();pendingURL=new URL(url);syncControls();const current=version;controller=new AbortController();busy(true);
+    cancel();pendingURL=new URL(url);syncControls();const current=version;controller=new AbortController();busy(true);const timing=globalThis.unlinkedPerformance?.start('filter',url.pathname);let outcome='cancelled';
     try{
       const response=await fetch(url,{credentials:'same-origin',signal:controller.signal,headers:{'Accept':'text/html'}});
       if(!response.ok||response.redirected)throw Error('network_filter_failed');
@@ -33,13 +33,14 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
       document.title=doc.title;
       for(const details of root.querySelectorAll('details')){const summary=details.querySelector('summary');if(summary&&openDisclosures.includes(focusKey(summary)))details.open=true}
       if(focused){const target=[...root.querySelectorAll(focusables)].find(element=>focusKey(element)===focused);target?.focus({preventScroll:true});if(target===oldInput)try{target.setSelectionRange(start,end)}catch{}}
-    }catch(error){if(current!==version||error.name==='AbortError')return;const status=root.querySelector('.network-count');if(status)status.textContent='Could not update results. Press Enter or Apply to try again.';const form=root.querySelector('#network-filters');syncControls();
+      outcome='ok';
+    }catch(error){if(current!==version||error.name==='AbortError')return;outcome='error';const status=root.querySelector('.network-count');if(status)status.textContent='Could not update results. Press Enter or Apply to try again.';const form=root.querySelector('#network-filters');syncControls();
       for(const key of ['presence','connected','mode','scope','page','cursor']){
         let field=form.querySelector('input[name="'+key+'"]');const wanted=pendingURL.searchParams.get(key);
         if(wanted===null){field?.remove();continue}if(!field){field=document.createElement('input');field.type='hidden';field.name=key;form.append(field)}field.value=wanted;
       }
       enhanced=false;root.removeAttribute('data-network-enhanced');}
-    finally{if(current===version)busy(false)}
+    finally{timing?.finish(outcome);if(current===version)busy(false)}
   }
   document.addEventListener('input',event=>{
     if(!enhanced||!['network-query',...filterKeys.map(key=>'network-'+key)].includes(event.target.id)||!root.contains(event.target))return;
@@ -88,7 +89,7 @@ export const PROFILE_CONNECTIONS_SCRIPT = `(()=>{
   const target=(href)=>{const url=new URL(href,location.href);url.hash='';return url};
   const fromForm=()=>{const form=root.querySelector('.pconn-filter'),url=target(form.action);const fields=new URLSearchParams(new FormData(form));for(const [key,value] of [...fields])if(!value)fields.delete(key);url.search=fields.toString();return url};
   async function load(url,{focusHref=null,reveal=false}={}){
-    cancel();const current=version;controller=new AbortController();root.setAttribute('aria-busy','true');
+    cancel();const current=version;controller=new AbortController();root.setAttribute('aria-busy','true');const timing=globalThis.unlinkedPerformance?.start('connections_filter',url.pathname);let outcome='cancelled';
     try{
       const response=await fetch(url,{credentials:'same-origin',signal:controller.signal,headers:{'Accept':'text/html'}});
       if(!response.ok||response.redirected)throw Error('profile_connections_failed');
@@ -101,8 +102,9 @@ export const PROFILE_CONNECTIONS_SCRIPT = `(()=>{
       if(reveal)root.scrollIntoView({block:'start'});
       if(typing){input.focus({preventScroll:true});try{input.setSelectionRange(start,end)}catch{}}
       else if(focusHref){const link=[...root.querySelectorAll('.pconn-shows a')].find(a=>target(a.href).search===focusHref);link?.focus({preventScroll:true})}
-    }catch(error){if(current!==version||error.name==='AbortError')return;location.assign(url.pathname+url.search+'#connections')}
-    finally{if(current===version)root.removeAttribute('aria-busy')}
+      outcome='ok';
+    }catch(error){if(current!==version||error.name==='AbortError')return;outcome='error';location.assign(url.pathname+url.search+'#connections')}
+    finally{timing?.finish(outcome);if(current===version)root.removeAttribute('aria-busy')}
   }
   document.addEventListener('input',event=>{if(event.target.id!=='pconn-q'||!root.contains(event.target))return;cancel();if(composing)return;timer=setTimeout(()=>load(fromForm()),300)});
   document.addEventListener('compositionstart',event=>{if(event.target.id==='pconn-q'){composing=true;cancel()}});
