@@ -34,13 +34,12 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
   for (const path of ['/', '/join', '/scan', '/agents', '/meet', '/import-linkedin']) {
     const page = await fetch(endpoint + path)
     const markup = await page.text()
-    // world-issue-tracker-uonq: the footer's static "Feedback ↗" link out to
-    // the WIT board was replaced by the widget's own inline text-link
-    // trigger, mounted via data-mount-selector into this slot — assert the
-    // mount point exists instead of the old static href.
-    assert.ok(markup.includes('<span id="wit-feedback-slot">'), path)
+    // Menu-launched WIT feedback: a footer "Send feedback" item (a /support
+    // link without script) and a launcher-free widget on the app's board.
+    assert.ok(markup.includes('<a href="/support" data-wit-feedback>Send feedback</a>'), path)
     const nonce = markup.match(/<script nonce="([^"]+)"/)[1]
-    assert.ok(markup.includes(`<script nonce="${nonce}" src="https://worldissuetracker.com/widget/wit-feedback.js" data-tracker-slug="unlinked-ai" data-mount-selector="#wit-feedback-slot"`), path)
+    assert.ok(markup.includes(`<script nonce="${nonce}" src="https://worldissuetracker.com/widget/wit-feedback.js" data-tracker-slug="unlinked-feedback" data-trigger="none" data-app="Unlinked" data-app-version="`), path)
+    assert.doesNotMatch(markup, /data-mount-selector/, path)
     const csp = page.headers.get('content-security-policy')
     assert.ok(csp.includes(`'nonce-${nonce}' https://worldissuetracker.com`), path)
     assert.ok(csp.includes("connect-src 'self' https://api.worldissuetracker.com https://worldissuetracker.com"), path)

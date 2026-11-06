@@ -465,15 +465,11 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .foot-brand{display:flex;flex-direction:column;gap:2px}
 .unlinked-onboarding .foot-brand b{color:var(--fg);font-size:15px;font-weight:700;letter-spacing:-.01em}
 .unlinked-onboarding .foot-links{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px}
-/* The WIT feedback widget's inline trigger lives in a shadow root; its host
-   takes the footer's colors and type through the widget's own variables. */
-.unlinked-onboarding #wit-feedback-slot,.unlinked-onboarding #wit-feedback-widget{display:inline-flex;align-items:center;font-family:inherit;color:inherit;--wit-muted:var(--muted);--wit-text:var(--fg)}
-.unlinked-onboarding #wit-feedback-slot:empty{display:none}
 .unlinked-onboarding .foot-meta{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 24px;margin-top:24px;font-size:13px}
 .unlinked-onboarding .foot-legal{display:flex;flex-wrap:wrap;align-items:center;gap:6px 20px}
 @media(max-width:600px){.unlinked-onboarding footer{padding:24px 0 28px}.unlinked-onboarding .foot-main{flex-direction:column;gap:6px}.unlinked-onboarding .foot-links{gap:0 20px}.unlinked-onboarding .foot-meta{flex-direction:column;align-items:flex-start;gap:4px;margin-top:16px}.unlinked-onboarding .foot-legal{gap:0 20px}}
 /* Touch screens: every footer link is a 44px tap target. */
-@media(pointer:coarse),(max-width:600px){.unlinked-onboarding footer :is(.foot-links,.foot-legal)>a,.unlinked-onboarding footer .link-button,.unlinked-onboarding footer #wit-feedback-slot{display:inline-flex;align-items:center;min-height:44px}}
+@media(pointer:coarse),(max-width:600px){.unlinked-onboarding footer :is(.foot-links,.foot-legal)>a,.unlinked-onboarding footer .link-button{display:inline-flex;align-items:center;min-height:44px}}
 .unlinked-onboarding .account{margin:0}
 .unlinked-onboarding :is(a,button,input,textarea,summary):focus-visible{outline:3px solid var(--brand);outline-offset:3px}
 .unlinked-onboarding [hidden]{display:none!important}

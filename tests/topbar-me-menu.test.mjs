@@ -32,7 +32,7 @@ test('the current page is marked in the main navigation, and the search field QR
   assert.doesNotMatch(nav(renderLanding()), /aria-current/)
 })
 
-test('signed-in members get one Me menu: profile header, card, settings, help, then switch account and sign-out last', () => {
+test('signed-in members get one Me menu: profile header, card, settings, help, send feedback, then switch account and sign-out last', () => {
   const nav = header(renderPeople({ ...account, state: 'ready' })).match(/<nav[^>]*>(.*?)<\/nav>/s)[1]
   // The bar itself carries no separate profile, name chip or sign-out.
   const outside = nav.replace(/<details class="me">.*<\/details>/s, '')
@@ -43,9 +43,11 @@ test('signed-in members get one Me menu: profile header, card, settings, help, t
   assert.match(menu, /<div class="me-panel" role="menu" aria-label="Account">/)
   assert.match(menu, /<div class="me-who"><b>Sam Rivera<\/b><!--me-headline--><\/div><a class="button sec sm me-view" role="menuitem" href="\/profile">View profile<\/a>/)
   const items = [...menu.matchAll(/role="menuitem"[^>]*?(?:href="([^"]+)")?>([^<]*)/g)].map(match => match[1] ?? match[2])
-  assert.deepEqual(items, ['/profile', '/card', '/scan', '/settings', '/support', 'Switch account', 'Sign out'])
+  assert.deepEqual(items, ['/profile', '/card', '/scan', '/settings', '/support', '/support', 'Switch account', 'Sign out'])
   // Switch account and Sign out are CSRF-protected POSTs, never links.
   assert.match(menu, /<div class="me-sep" role="separator"><\/div><form method="post" action="\/switch-account" role="none"><input type="hidden" name="csrf" value="csrf-value"><button type="submit" class="me-out" role="menuitem">Switch account<\/button><\/form><form method="post" action="\/logout" role="none"><input type="hidden" name="csrf" value="csrf-value"><button type="submit" class="me-out" role="menuitem">Sign out<\/button><\/form><\/div>$/)
+  // Send feedback opens the WIT panel (FEEDBACK_MENU_SCRIPT); without script it is the support page.
+  assert.match(menu, /<a role="menuitem" data-wit-feedback href="\/support"><svg[^>]*>.*?<\/svg>Send feedback<\/a>/)
   assert.doesNotMatch(header(renderLanding()), /class="me"|role="menu"/)
 })
 
