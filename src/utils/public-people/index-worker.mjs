@@ -1,4 +1,4 @@
-import { parentPort } from 'node:worker_threads'
+import { parentPort, workerData } from 'node:worker_threads'
 import { getHeapStatistics } from 'node:v8'
 import { createPublicPeopleReader } from './reader.mjs'
 
@@ -8,10 +8,19 @@ import { createPublicPeopleReader } from './reader.mjs'
 // reader code the main thread used to run in-process.
 
 const PREVIOUS_GRACE_MS = 60000
+// Keeping an older index while compiling a new one roughly doubles the heap.
+// It is kept only while the heap is below this share of its limit; otherwise
+// it is released when the new install begins, and calls for it wait for the
+// new index (answered `stale`, the reader installs and retries).
+const KEEP_OLD_BELOW = typeof workerData?.keepOldBelow === 'number' ? workerData.keepOldBelow : 0.45
 const METHODS = new Set(['suggest', 'list', 'profile', 'card', 'unlistedGroup', 'suspended', 'suspensions', 'addresses', 'lookupLinkedin', 'linkedinProfileIds', 'linkedinRef', 'lookup', 'linked', 'neighbors', 'company'])
 const sources = new Map() // sourceKey -> { current, previous, timer }
 const transfers = new Map() // transfer id -> { sourceKey, cacheKey, snapshot }
-let nextTransfer = 1
+let nextTransfer = 1, released = 0
+// The configured cap (from the host) wins over V8's report, which shows the
+// process flag instead of resourceLimits when --max-old-space-size is set.
+const configuredLimit = Number.isSafeInteger(workerData?.heapLimitMb) ? workerData.heapLimitMb * 1048576 : Infinity
+const heapNow = () => { const stats = getHeapStatistics(); return { used: stats.used_heap_size, limit: Math.min(stats.heap_size_limit, configuredLimit) } }
 
 const entryFor = (sourceKey, cacheKey) => {
   const slot = sources.get(sourceKey)
@@ -34,6 +43,11 @@ const errorOf = error => ({ status: Number.isSafeInteger(error?.status) ? error.
 
 async function handle(message) {
   if (message.type === 'begin') {
+    const slot = sources.get(message.sourceKey)
+    if (slot && slot.current?.cacheKey !== message.cacheKey) {
+      const stats = heapNow()
+      if (stats.used > KEEP_OLD_BELOW * stats.limit) { clearTimeout(slot.timer); slot.previous = null; slot.current = null; released++ }
+    }
     const id = nextTransfer++
     const snapshot = { ...message.meta }
     for (const [field, length] of Object.entries(message.lengths)) { snapshot[field] = []; snapshot[field].expected = length }
@@ -89,7 +103,7 @@ async function handle(message) {
 }
 
 // Every reply carries this isolate's heap use, for the main thread's runtime health.
-const heap = () => { const stats = getHeapStatistics(); return { usedMb: Math.round(stats.used_heap_size / 1048576), limitMb: Math.round(stats.heap_size_limit / 1048576) } }
+const heap = () => { const stats = heapNow(); return { usedMb: Math.round(stats.used / 1048576), limitMb: Math.round(stats.limit / 1048576), released } }
 parentPort.on('message', message => {
   Promise.resolve().then(() => handle(message)).then(
     result => parentPort.postMessage({ id: message.id, result, heap: heap() }),

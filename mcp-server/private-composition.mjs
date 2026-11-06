@@ -555,6 +555,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true,
       preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list, readConnectionPrivacy: connectionPrivacy ? () => connectionPrivacy.list() : undefined, onMemberPhotos: map => { memberPhotos = map },
       includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
+      // The live legacy pointer, so a no-change rebuild check never reads the dataset.
+      readLegacyRevision: typeof publicPeople.revisionOf === 'function' ? async () => { const pointer = await publicPeople.revisionOf('recovered-legacy-public-v1'); return pointer ? `${pointer.revision}\u0000${pointer.digest ?? ''}` : null } : undefined,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')
         const digest = snapshot?.revision?.match(/^legacy-public-v1:([a-f0-9]{64})$/)?.[1]

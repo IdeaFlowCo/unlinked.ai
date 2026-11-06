@@ -112,7 +112,7 @@ const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.
 const IMPORT_PREFETCH = 4
 const detailKey = item => JSON.stringify([item.id, item.owner.ownerId, item.owner.userId, item.revision])
 const sourceValid = (resource, item) => Boolean(resource) && !resource.deleted && resource.sourceOwnerId === item.owner.ownerId && resource.sourceRevision === item.revision && resource.payload?.ownerId === item.owner.ownerId && resource.payload.id === item.id && permitted(resource.payload)
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, readConnectionPrivacy, onMemberPhotos, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readLegacyRevision, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, readConnectionPrivacy, onMemberPhotos, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!validEnrichmentDatasets(enrichmentDatasets)) throw Error('public_enrichment_datasets_invalid')
   if (!Array.isArray(linkedinEnrichmentDatasets) || !linkedinEnrichmentDatasets.every((value, index) => LINKEDIN_ENRICHMENT_DATASETS.includes(value) && linkedinEnrichmentDatasets.indexOf(value) === index) || typeof mergeSameLinkedin !== 'boolean' || typeof preferSurvivor !== 'function') throw Error('public_enrichment_datasets_invalid')
   if (!Number.isSafeInteger(linkedinEnrichmentTextBudget) || linkedinEnrichmentTextBudget < 0 || linkedinEnrichmentTextBudget > LINKEDIN_ENRICHMENT_TEXT_BUDGET) throw Error('public_enrichment_text_budget_invalid')
@@ -146,7 +146,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   // `preread`: the legacy snapshot and import list a fingerprint just read,
   // so a changed rebuild reads them once, exactly as before.
   const build = async (preread = null) => {
-    const legacy = preread ? preread.legacy : await readLegacy()
+    const legacy = preread?.legacy ?? await readLegacy()
     if (!legacy) return null
     const items = preread ? preread.items : await discover()
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
@@ -406,13 +406,22 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   // a change racing the rebuild can only cause one more rebuild, never a stale
   // reuse. `preferSurvivor` (live handle state) is not part of it; readers
   // already pin compiled indexes to the revision, which it does not change.
+  // Datasets are identified by their live published pointer (revision and
+  // digest) when the store offers one, so a fingerprint never reads, hashes and
+  // validates whole datasets; content for one pointer is immutable.
+  const datasetIdentity = async dataset => {
+    if (typeof publicPeople.revisionOf === 'function') { const pointer = await publicPeople.revisionOf(dataset); return pointer ? [pointer.revision, pointer.digest ?? null] : null }
+    return (await publicPeople.read(dataset))?.revision ?? null
+  }
   const fingerprint = async () => {
-    const legacy = await readLegacy()
-    if (!legacy) return null
+    // `readLegacyRevision` names the legacy publication without reading it.
+    const legacy = typeof readLegacyRevision === 'function' ? null : await readLegacy()
+    const legacyIdentity = legacy ? legacy.revision : typeof readLegacyRevision === 'function' ? await readLegacyRevision() : null
+    if (!legacyIdentity) return null
     const items = await discover()
     if (!Array.isArray(items) || items.length > 1000) return null
-    const parts = [legacy.revision]
-    for (const dataset of [...enrichmentDatasets, ...linkedinEnrichmentDatasets]) parts.push((await publicPeople.read(dataset))?.revision ?? null)
+    const parts = [legacyIdentity]
+    for (const dataset of [...enrichmentDatasets, ...linkedinEnrichmentDatasets]) parts.push(await datasetIdentity(dataset))
     const signups = typeof readSignupProfiles === 'function' ? await readSignupProfiles() : []
     if (!Array.isArray(signups)) return null
     parts.push(signups.map(row => [row.profile?.id, row.receiptId, row.owner?.ownerId, row.owner?.userId]))

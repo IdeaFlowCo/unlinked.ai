@@ -117,3 +117,20 @@ test('sources that do not identify content by revision never use the worker', as
   assert.equal((await createPublicPeopleReader({ readPublishedSnapshot: source }).list({})).profiles.length, 3)
   assert.equal(host.stats().installs, 0)
 })
+
+test('under heap pressure the old index is released before a new install; calls then use the new one', async t => {
+  let revision = 'pressure-v1'
+  const source = async () => ({ ...published(revision), profiles: Array.from({ length: 120 }, (_, i) => person(`p${i}`, `Person ${String(i).padStart(3, '0')}`)), connections: [], members: [], aliases: {} })
+  source.revisionIdentifiesContent = true
+  const host = await withHost(t, { keepOldBelow: 0 })
+  const pinned = createPublicPeopleReader({ readPublishedSnapshot: source, reuse: true })
+  const first = await pinned.list({})
+  revision = 'pressure-v2'
+  const fresh = createPublicPeopleReader({ readPublishedSnapshot: source })
+  assert.equal((await fresh.list({})).profiles.length, 50)
+  assert.equal(host.stats().releasedBeforeInstall, 1, 'the old index was released, not held alongside the new one')
+  // The pinned reader's revision is gone: it re-reads and lands on the new one,
+  // so a cursor from the old revision fails closed, as after any revision change.
+  await assert.rejects(pinned.list({ cursor: first.nextCursor }), { status: 503 })
+  assert.equal((await pinned.list({})).profiles.length, 50)
+})

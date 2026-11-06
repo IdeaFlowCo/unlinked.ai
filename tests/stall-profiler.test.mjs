@@ -1,0 +1,53 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtemp, readdir, readFile, rm, chmod, stat } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { startStallProfiler, summarizeStalls } from '../mcp-server/stall-profiler.mjs'
+
+function busyMainThreadFor(ms) { const end = performance.now() + ms; let x = 0; while (performance.now() < end) x += Math.sqrt(x + 1); return x }
+
+test('a stall is written as code locations and milliseconds, attributed to the blocking function', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'stall-')); await chmod(directory, 0o700)
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const profiler = await startStallProfiler({ directory, stallMs: 300, windowMs: 3600000 })
+  await new Promise(resolve => setTimeout(resolve, 60))
+  busyMainThreadFor(700)
+  await new Promise(resolve => setTimeout(resolve, 60))
+  await profiler.rotate()
+  await profiler.stop()
+  const files = await readdir(directory)
+  assert.equal(files.length, 1)
+  assert.match(files[0], /^stall-\d{8}T\d{6}Z\.json$/)
+  assert.equal((await stat(join(directory, files[0]))).mode & 0o777, 0o600)
+  const row = JSON.parse(await readFile(join(directory, files[0]), 'utf8'))
+  assert.equal(row.event, 'stall_profile')
+  assert.equal(row.stalls, 1)
+  assert.ok(row.stall_ms[0] >= 600)
+  assert.ok(row.sampled_ms >= 300, `sampled ${row.sampled_ms} ms`)
+  assert.ok(row.inclusive.some(([frame, ms]) => frame.startsWith('busyMainThreadFor ') && ms >= 300), JSON.stringify(row.inclusive.slice(0, 5)))
+  assert.ok(row.stacks[0].stack.some(frame => frame.startsWith('busyMainThreadFor ')))
+  // Only code locations and numbers.
+  for (const [frame, ms] of [...row.self, ...row.inclusive]) { assert.equal(typeof frame, 'string'); assert.ok(Number.isSafeInteger(ms)) }
+})
+
+test('no stall writes nothing; a non-private directory is refused', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'stall-')); await chmod(directory, 0o700)
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const profiler = await startStallProfiler({ directory, stallMs: 2000, windowMs: 3600000 })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  await profiler.rotate(); await profiler.stop()
+  assert.deepEqual(await readdir(directory), [])
+  await chmod(directory, 0o755)
+  await assert.rejects(startStallProfiler({ directory }), /stall_profiler_directory_not_private/)
+  await assert.rejects(startStallProfiler({ directory: 'relative' }), /stall_profiler_configuration_invalid/)
+})
+
+test('summaries count only samples inside the stall windows', () => {
+  const node = (id, functionName, children = [], url = 'file:///srv/x/runtime/unlinked/mcp-server/a.mjs') => ({ id, callFrame: { functionName, url, lineNumber: id }, children })
+  const profile = { startTime: 0, nodes: [node(1, '(root)', [2, 3], ''), node(2, 'inStall'), node(3, 'outside')], samples: [2, 2, 3, 3], timeDeltas: [1000, 1000, 1000, 1000] }
+  // perfAtStart 100 ms: samples at 101, 102, 103, 104 ms; window covers the first two.
+  const summary = summarizeStalls(profile, [[100.5, 102.5]], 100)
+  assert.equal(summary.sampled_ms, 2)
+  assert.deepEqual(summary.self, [['inStall mcp-server/a.mjs:3', 2]])
+})

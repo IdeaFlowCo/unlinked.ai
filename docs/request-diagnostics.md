@@ -194,3 +194,17 @@ PID 1 ignores SIGABRT, so glibc falls back to a trapping instruction, and the
 process exits **139**. The kernel logs `general protection fault ... in
 libc.so.6`. Read that combination as an abort, usually heap exhaustion, rather
 than a native memory bug. With `init: true` the same abort exits 134.
+
+## Stall profiles (opt-in)
+
+Set `UNLINKED_STALL_PROFILE_DIR` to an existing directory with mode 700, owned by the runtime user, and the runtime records what blocked its main thread.
+
+- **How it samples.** The runtime runs V8's sampling profiler in-process (`node:inspector` `Session.connect()`), with no port and no external attach, in 60 s windows at 1 ms sampling. A 20 ms ticker notes every main-thread gap of at least 500 ms.
+- **What it writes.** At the end of a window that had stalls, only the samples taken during those gaps are summarized. One mode-600 file `stall-YYYYMMDDTHHMMSSZ.json` is written, holding:
+  - stall count and lengths;
+  - top self and inclusive frames, as `function file:line` with milliseconds;
+  - the heaviest stacks.
+- **Privacy.** Only code locations and numbers are written, never request, owner, argument or value data.
+- **Retention.** The newest 240 files are kept.
+- **Cost.** Overhead is the profiler's sampling, typically a few percent of one core while enabled.
+- **Stopping.** Unset the variable to stop on the next restart.
