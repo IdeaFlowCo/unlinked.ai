@@ -46,7 +46,7 @@ export const installPublicIndexHost = host => { active = host ?? null; return ac
 // A process-level --max-old-space-size (CLI or NODE_OPTIONS) sets every
 // isolate's old-space limit, the worker's included: resourceLimits'
 // maxOldGenerationSizeMb is then ignored, higher or lower (measured on Node 22).
-export const processHeapFlag = (argv = process.execArgv, nodeOptions = process.env.NODE_OPTIONS ?? '') => /--max-old-space-size(?:=|\s+)\d+/.test(`${argv.join(' ')} ${nodeOptions}`)
+export const processHeapFlag = (argv = process.execArgv, nodeOptions = process.env.NODE_OPTIONS ?? '') => /--max[-_]old[-_]space[-_]size(?:=|\s+)[1-9]\d*/.test(`${argv.join(' ')} ${nodeOptions}`)
 
 export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs', import.meta.url), resourceLimits, keepOldBelow, onCapIgnored = () => process.stderr.write('unlinked_public_index_worker_heap_cap_ignored\n'), chunkSize = CHUNK, callTimeoutMs = CALL_TIMEOUT_MS, installTimeoutMs = INSTALL_TIMEOUT_MS, backoffMs = RESPAWN_BACKOFF_MS, onDisabled = () => process.stderr.write('unlinked_public_index_worker_disabled\n'), createWorker = (url, options) => new Worker(url, options), now = Date.now } = {}) {
   if (!Number.isSafeInteger(chunkSize) || chunkSize < 1 || !Number.isSafeInteger(callTimeoutMs) || callTimeoutMs < 1 || !Number.isSafeInteger(installTimeoutMs) || installTimeoutMs < 1 || !Number.isSafeInteger(backoffMs) || backoffMs < 0) throw new TypeError('public_index_host_configuration_invalid')

@@ -69,7 +69,15 @@ export async function startStallProfiler({ directory, stallMs = 500, windowMs = 
     await session.post('Profiler.setSamplingInterval', { interval: samplingUs })
     await begin()
   } catch (error) { try { session.disconnect() } catch {} throw error }
-  const ticker = setInterval(() => { const at = performance.now(); if (at - last - 20 >= stallMs) { if (last <= rotation[1] && at >= rotation[0]) selfStalls++; else windows.push([last, at]) } last = at }, 20)
+  const ticker = setInterval(() => {
+    const at = performance.now(), excess = at - last - 20
+    if (excess >= stallMs) {
+      // Only the part of the gap the rotation itself explains is the profiler's own.
+      const overlap = Math.max(0, Math.min(at, rotation[1]) - Math.max(last, rotation[0]))
+      if (excess - overlap < stallMs) selfStalls++; else windows.push([last, at])
+    }
+    last = at
+  }, 20)
   ticker.unref()
   const prune = async () => {
     const names = (await readdir(directory)).filter(name => FILE.test(name)).sort()
@@ -81,17 +89,26 @@ export async function startStallProfiler({ directory, stallMs = 500, windowMs = 
   const rotate = async ({ force = false } = {}) => {
     if (stopped) return
     // A failed restart is retried on the next window instead of stopping profiling for good.
-    if (!running) { await begin(); return }
+    if (!running) {
+      await begin()
+      // Gaps noted while nothing was sampling have no samples to explain them.
+      windows = []; rotation = [-Infinity, -Infinity]
+      return
+    }
     if (!force && !windows.length && performance.now() - perfAtStart < maxProfileMs) return
     const seen = windows; windows = []
     const startedAt = perfAtStart
     running = false
     const began = performance.now()
     rotation = [began, Infinity]
-    const { profile } = await session.post('Profiler.stop')
-    try { await begin() } catch { if (!warned) { warned = true; process.stderr.write('unlinked_stall_profiler_restart_failed\n') } }
-    rotationMs = Math.round(performance.now() - began)
-    rotation = [began, performance.now() + 25]
+    let profile
+    try {
+      profile = (await session.post('Profiler.stop')).profile
+      try { await begin() } catch { if (!warned) { warned = true; process.stderr.write('unlinked_stall_profiler_restart_failed\n') } }
+    } finally {
+      rotationMs = Math.round(performance.now() - began)
+      rotation = [began, performance.now()]
+    }
     if (!seen.length) return
     const summary = summarizeStalls(profile, seen, startedAt)
     const at = now()
@@ -99,13 +116,14 @@ export async function startStallProfiler({ directory, stallMs = 500, windowMs = 
     const name = `stall-${at.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}.json`
     const file = await open(join(directory, name), constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
     try { await file.writeFile(JSON.stringify(row)) } finally { await file.close() }
+    selfStalls = 0
     await prune()
   }
   let chain = Promise.resolve()
   const timer = setInterval(() => { chain = chain.then(rotate).catch(() => {}) }, windowMs)
   timer.unref()
   return {
-    rotate: () => (chain = chain.then(() => rotate({ force: true }))),
+    rotate: () => { const run = chain.then(() => rotate({ force: true })); chain = run.catch(() => {}); return run },
     async stop() { stopped = true; clearInterval(timer); clearInterval(ticker); await chain.catch(() => {}); if (running) await session.post('Profiler.stop').catch(() => {}); running = false; session.disconnect() },
   }
 }
