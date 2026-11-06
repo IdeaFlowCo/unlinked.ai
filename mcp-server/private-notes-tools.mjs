@@ -119,7 +119,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       const contact = found?.contact
       if (!contact) continue
       const owned = found.visibility === 'owner_private'
-      const refs = [...(owned && HASH.test(contact.linkedinRefHash ?? '') ? [`linkedin:in:${contact.linkedinRefHash}`] : []),
+      const refs = [...(HASH.test(contact.linkedinRefHash ?? '') ? [`linkedin:in:${contact.linkedinRefHash}`] : []),
         ...(contact.publishedProfileId ? [`unlinked:person:${contact.publishedProfileId}`] : [])]
       if (refs.length) return { refs, name: clean(contact.name, 120) || 'Unnamed', person: { name: contact.name ?? null, profileId: contact.publishedProfileId ?? null, connectionId: owned ? contact.connectionId ?? null : null, linkedinRefHash: owned ? contact.linkedinRefHash ?? null : null } }
     }
@@ -145,12 +145,13 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       return { id: found.id }
     }
     const named = await person(grant, value, signal)
-    if (!create) {
-      const found = []
-      for (const ref of named.refs) { const entity = await existingByRef(identity, ref); if (entity && !found.some(value => value.id === entity.id)) found.push(entity) }
-      return { ...named, entities: found }
-    }
+    const found = []
+    for (const ref of named.refs) { const entity = await existingByRef(identity, ref); if (entity && !found.some(value => value.id === entity.id)) found.push(entity) }
+    if (!create) return { ...named, entities: found }
+    if (found.length > 1 || found.some(entity => entity.kind !== 'person'))
+      throw fail('identity_conflict', 'Exact references name different private records. Ask the owner which one, then use its thing id.', { candidates: found.map(entity => ({ id: entity.id, name: entity.name })) })
     const made = await overlayCall(identity, 'POST', 'entities', { kind: 'person', name: named.name, refs: named.refs })
+    if (made.unattached?.length) throw fail('identity_conflict', 'Exact references changed or could not be attached. Inspect the private records before retrying.')
     return { ...named, id: made.entity.id }
   }
 

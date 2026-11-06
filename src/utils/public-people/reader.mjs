@@ -418,6 +418,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       matches.sort((a, b) => Number(b.presence === 'member') - Number(a.presence === 'member') || compare(a.id, b.id))
       return matches.length ? withPhoto(data.summaries.get(matches[0].id)) : null
     },
+    // Exact identity from a currently readable public address, never an id's
+    // spelling, a name, or an email. Private callers use it only in their own overlay.
+    async linkedinRef(request = {}) {
+      const { id, signal } = requestValue(request)
+      if (!idValid(id)) invalid()
+      const data = await snapshot(signal), resolved = data.aliases.get(id) ?? id
+      const parsed = parseLinkedinProfileUrl(data.details.get(resolved)?.linkedinUrl)
+      return parsed ? hash(parsed.slug) : null
+    },
     // The public summaries for known IDs, so a private row can link to the
     // matching public profile only when one is published.
     async lookup(request = {}) {

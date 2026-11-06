@@ -122,7 +122,7 @@ Header people/company autocomplete, its browser-only public projection boundary 
 
 Shared public People/API/AI and backward-compatible account grant behavior are documented in `docs/shared-people-beta.md`; no raw private import or identity data is projected publicly.
 
-Owner-only “Your private context” on `/people/:id` and `/network/contacts/:connectionId` reads the Ideaflow people overlay in Noos (never written, cached, published or given to models here); identity bridge, endpoints, export/delete decision and config are in `docs/private-context.md`.
+Owner-only “Your private context” on `/people/:id` and `/network/contacts/:connectionId` reads the Ideaflow people overlay in Noos (never written, cached, published or given to models here); identity bridge, endpoints, export/delete decision and config are in `docs/private-context.md`. Exact published LinkedIn URLs also resolve pre-existing private prospects; see the late-profile identity contract there.
 
 Company page facts (`/companies/<name>`) are the static list in `mcp-server/company-metadata.mjs` overlaid by the operator-published graph dataset `curated-companies-v1` (own labels, revoke-based rollback, static fallback on read errors); schema, publisher and rollback are in `docs/company-facts.md`.
 

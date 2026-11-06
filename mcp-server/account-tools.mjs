@@ -493,7 +493,10 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         const index = summaries.findIndex(summary => summary?.id === published.id)
         if (index >= 0) return { kind: 'unlinked_lookup_contact', contact: contactOf(ordered[index], summaries[index]), visibility: 'owner_private' }
         // Published, but not among the owner's contacts: public data only.
-        return { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: null, publishedProfileId: published.id }, visibility: 'public' }
+        let publicRef
+        try { publicRef = await reader.linkedinRef({ id: published.id, signal }) }
+        catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+        return { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: publicRef, publishedProfileId: published.id }, visibility: 'public' }
       }
       if (candidate) {
         const [summary] = await publishedFor([candidate])

@@ -161,11 +161,12 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   }
   return {
     configured,
-    // A published profile: its own ref, plus the owner's import of the same person.
+    // A published profile: its own ref and exact public/owner-import LinkedIn
+    // identity. A private prospect can predate this public profile entirely.
     async forProfile(owner, profileId) {
       if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return { state: 'empty' }
       const found = await contact(owner, { profileId })
-      const hash = found?.visibility === 'owner_private' && HASH.test(found.contact?.linkedinRefHash ?? '') ? found.contact.linkedinRefHash : null
+      const hash = HASH.test(found?.contact?.linkedinRefHash ?? '') ? found.contact.linkedinRefHash : null
       return read(owner, [refOf.person(profileId), ...(hash ? [refOf.linkedin(hash)] : [])])
     },
     // One of the owner's own imported contacts; null when it is not theirs.

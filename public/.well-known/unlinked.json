@@ -65,7 +65,8 @@
       },
       "connectionsCreated": false,
       "publicProfilesCreated": false
-    }
+    },
+    "privatePersonIdentity": "Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence."
   },
   "mcp": {
     "url": "https://www.unlinked.ai/mcp",

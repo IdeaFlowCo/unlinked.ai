@@ -137,3 +137,5 @@ unselected tabs**, privately on the server. Only the selected sheet is imported.
 512 KiB original-file limit. Selected-sheet formulas, macros and .xls are rejected;
 use values-only XLSX or CSV. Original XLSX recovery through the status tool returns
 base64 chunks with byte offsets: decode each chunk before concatenating.
+
+Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence.

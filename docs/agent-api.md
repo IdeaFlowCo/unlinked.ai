@@ -381,7 +381,7 @@ linkedinRefHash | null, publishedProfileId | null, provenance? }, visibility }`.
 `linkedinRefHash` is the SHA-256 hex of the canonical LinkedIn slug
 (`linkedinSlug()` in `src/utils/public-people/url-identity.mjs`: decoded,
 lowercased) — the value of the Ideaflow people-overlay ref `linkedin:in:<hash>`
-OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`).
+OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`). A public-only profile lookup also returns this hash when the readable public profile has an exact LinkedIn URL. Private tools use it to find the owner’s earlier private prospect without requiring an archive connection; reads never create or merge records.
 `publishedProfileId` is set when the same person has a published profile (the
 row's own published profile, or one with the same LinkedIn address).
 `visibility` is `owner_private` when the answer comes from the owner's own
