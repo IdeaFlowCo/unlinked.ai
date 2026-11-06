@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { createMemberPublicIndex, ENRICHMENT_DATASET } from '../src/utils/public-people/member-projection.mjs'
+import { createMemberPublicIndex, ENRICHMENT_DATASET, LINKEDIN_ENRICHMENT_DATASETS, linkedinEnrichmentId } from '../src/utils/public-people/member-projection.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { applyProfileDecisions } from '../src/utils/public-people/profile-decisions.mjs'
 import { ACCOUNT_TOOL_SCHEMAS } from '../mcp-server/account-tools.mjs'
@@ -23,11 +23,12 @@ test('published enrichment evidence is independent of membership and depth; revo
  const older=createPublicPeopleReader({readPublishedSnapshot:async()=>legacy})
  assert.equal((await older.profile({id:'a'})).profile.enrichmentStatus,'unknown')
 })
-test('merge carries evidence only when enriched content contributes; fill false keeps owner source',()=>{
+test('merge carries evidence independently of content and preserves owner fields',()=>{
  const snapshot={...legacy,profiles:[person('a',{enrichmentStatus:'enriched',about:'Enriched'}),person('b')]}
  for(const fill of [true,false]){
   const result=applyProfileDecisions(snapshot,[{id:'merge',kind:'merge',profileId:'a',survivorId:'b',fill}])
-  assert.equal(result.profiles[0].enrichmentStatus,fill?'enriched':undefined)
+  assert.equal(result.profiles[0].enrichmentStatus,'enriched')
+  assert.equal(result.profiles[0].about,fill?'Enriched':undefined)
  }
 })
 test('discovery advertises executable membership and enrichment filters',async()=>{
@@ -49,4 +50,20 @@ test('MCP service applies the filter and exposes matching status through profile
  const contact=(await call('unlinked_lookup_contact',{profileId:'a'})).contact
  for(const value of [profile,contact]){assert.equal(value.presence,'member');assert.equal(value.enrichmentStatus,'enriched')}
  await assert.rejects(call('unlinked_list_people',{enrichmentStatus:'made-up'}),error=>error.code==='invalid_input')
+})
+
+test('LinkedIn evidence survives member merges and budgets, then disappears on revocation', async () => {
+ const dataset=LINKEDIN_ENRICHMENT_DATASETS[0]
+ const url='https://www.linkedin.com/in/example-person'
+ const profiles=[person('member',{headline:'Member words'}),person('alias',{linkedinUrl:url,headline:'Already complete'}),person('complete',{linkedinUrl:'https://www.linkedin.com/in/complete',headline:'Complete'})]
+ let rows=[person(linkedinEnrichmentId('example-person'),{headline:'External words'}),person(linkedinEnrichmentId('complete'),{headline:'External words'})]
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>['member'],readDecisions:async()=>[{id:'merge',kind:'merge',profileId:'alias',survivorId:'member',fill:false}],linkedinEnrichmentDatasets:[dataset],linkedinEnrichmentTextBudget:0,publicPeople:{read:async name=>name===dataset && rows ? {state:'published',complete:true,revision:dataset+':1',profiles:rows,connections:[]} : null}})
+ const reader=createPublicPeopleReader({readPublishedSnapshot:read})
+ const member=(await reader.profile({id:'member'})).profile
+ assert.equal(member.headline,'Member words'); assert.equal(member.enrichmentStatus,'enriched'); assert.equal(member.presence,'member')
+ assert.equal((await reader.profile({id:'alias'})).profile.enrichmentStatus,'enriched')
+ assert.equal((await reader.profile({id:'complete'})).profile.enrichmentStatus,'enriched')
+ rows=null
+ assert.equal((await reader.profile({id:'member'})).profile.enrichmentStatus,'not_recorded')
+ assert.equal((await reader.profile({id:'complete'})).profile.enrichmentStatus,'not_recorded')
 })

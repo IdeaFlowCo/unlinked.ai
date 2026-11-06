@@ -96,7 +96,9 @@ test('curated enrichment refreshes legacy rows by id, never adds people, and a l
  const link={profileId:'legacy',sourceSha256:sourceSha,receiptId:'link-receipt',revision:'legacy-public-v1:'+sourceSha}
  const cached=projectPublicMemberImport({job,assertions})
  const linked=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[{id,owner:{ownerId:'bound-owner',userId:'bound-user'},revision:4}],getBackend:async()=>({readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job}),readLegacyProfile:async()=>link}),publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?enrichment:ENRICHMENT_DATASETS.includes(dataset)?null:cached}})
- const overlaid=await linked();assert.equal(overlaid.profiles.find(p=>p.id==='legacy').name,'Test Member')
+ const overlaid=await linked();assert.equal(overlaid.profiles.find(p=>p.id==='legacy').name,'Test Member');assert.equal(overlaid.profiles.find(p=>p.id==='legacy').enrichmentStatus,'enriched')
+ enrichment=null;assert.equal((await linked()).profiles.find(p=>p.id==='legacy').enrichmentStatus,'not_recorded')
+ enrichment={state:'published',complete:true,revision:ENRICHMENT_DATASET+':'+'f'.repeat(64),profiles:[fresh],connections:[]}
  for(const broken of [{...enrichment,connections:[{fromId:'legacy',toId:'legacy'}]},{...enrichment,revision:'other-dataset-v1:'+'f'.repeat(64)},{...enrichment,state:'staging'}]) {
   const bad=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[],getBackend:async()=>{throw Error('unused')},publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?broken:null}})
   await assert.rejects(bad(),/public_enrichment_invalid/)

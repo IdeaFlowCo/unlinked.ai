@@ -141,6 +141,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     // Members whose LinkedIn address comes from their own uploaded archive or a
     // confirmed recovered account, never from a URL typed at signup.
     const verified = new Set()
+    const evidence = new Set()
     const positions = new Map(profiles.map((value, index) => [value.id, index]))
     for (const dataset of enrichmentDatasets) {
       const enrichment = await publicPeople.read(dataset)
@@ -149,6 +150,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       for (const row of enrichment.profiles) {
         const index = positions.get(row.id)
         if (index !== undefined) {
+          evidence.add(row.id)
           const supplemental = {}
           for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profiles[index][key]) supplemental[key] = profiles[index][key]
           profiles[index] = { ...row, ...supplemental, enrichmentStatus: 'enriched' }
@@ -308,6 +310,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       for (const older of ordered.slice(1)) { members.delete(older.id); ownerMerges.push({ id: `owner:${older.id}`, kind: 'merge', profileId: older.id, survivorId: ordered[0].id }) }
     }
     for (const check of linkedChecks) await check()
+    for (const profile of profiles) if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id)
     // First index per id, exactly as findIndex returned.
     const positionOf = new Map()
     if (overlays.size) profiles.forEach((profile, index) => { if (!positionOf.has(profile.id)) positionOf.set(profile.id, index) })
@@ -325,7 +328,9 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     if (uniqueConnections.length > PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('shared_public_capacity_limit')
     const finalize = async snapshot => {
       for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
+      for (const profile of snapshot.profiles) if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id)
       const decided = await decide(snapshot, ownerMerges, members, verified)
+      const enriched = new Set([...evidence].map(id => decided.aliases?.[id] ?? id))
       // Enrichment fills the profiles shown, after every merge and removal, and
       // never members' or historical members' own words. Bounded, so a large
       // publication cannot push the reader past its text budget.
@@ -341,10 +346,10 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
           if (added > budget) return profile
           budget -= Math.max(0, added)
         }
-        return value === profile ? profile : { ...value, enrichmentStatus: 'enriched' }
+        return value
       }) } : decided
       if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
-      result = { ...result, profiles: result.profiles.map(profile => ({ ...profile, enrichmentStatus: profile.enrichmentStatus === 'enriched' ? 'enriched' : 'not_recorded' })) }
+      result = { ...result, profiles: result.profiles.map(profile => ({ ...profile, enrichmentStatus: enriched.has(profile.id) ? 'enriched' : 'not_recorded' })) }
       // Member photos for the photo route: resolved profile id -> owner + blob.
       // Kept on the server side only; never part of the public snapshot.
       if (typeof onMemberPhotos === 'function') {
