@@ -29,7 +29,7 @@ export function createConnectionActions({ memberConnections, accountForProfile, 
     if (!ids.length) return out
     const shared = readerFor(reader)
     const [mine, invited] = await Promise.all([mineFor(owner), memberInvitations ? memberInvitations.connections(owner) : []])
-    const linked = mine && typeof readPublishedSnapshot === 'function' ? new Set((await shared.neighbors({ id: mine })).map(value => value.id)) : new Set()
+    const linked = mine && typeof readPublishedSnapshot === 'function' ? new Set((await shared.neighbors({ id: mine, viewer: { signedIn: true, id: mine } })).map(value => value.id)) : new Set()
     await Promise.all(ids.map(async id => {
       const account = await accountForProfile(id)
       if (!account) return

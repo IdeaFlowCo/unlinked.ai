@@ -52,6 +52,7 @@ import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { iosAppView, renderScan, fillMeHeadline, TOP_BAR_SCRIPT, CARD_SHARE_SCRIPT, LINKEDIN_EMAIL_HELP_SCRIPT, LINKEDIN_EXPORT_PROGRESS_SCRIPT, SCAN_TABS_SCRIPT, renderConnectorConsent, renderConnectorError, renderMemberHome } from './private-onboarding-views.mjs'
 import { summarizeImports } from '../src/utils/private-import/import-summary.mjs'
 import { IMPORT_REMINDER } from './home-preferences.mjs'
+import { connectionPrivacyValue } from '../src/utils/public-people/connection-privacy.mjs'
 import { MEET_SCRIPT } from './public-discovery.mjs'
 import { PHOTO_ID } from './profile-photos.mjs'
 import { publicSearchDocument } from './public-web-search.mjs'
@@ -170,7 +171,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, ideaflowProfiles = null }) {
+export function createPrivateBrowserHandler({ connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, ideaflowProfiles = null }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -182,6 +183,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   if (memberEmail !== undefined && (typeof memberEmail.sending !== 'boolean' || ['rememberAddress', 'settings', 'savePreferences', 'sendInvite', 'inspectUnsubscribe', 'unsubscribe', 'exportOwner', 'removeOwner'].some(key => typeof memberEmail[key] !== 'function'))) throw new Error('member_email_configuration_required')
   if (contactCards !== undefined && ['read', 'save', 'rotate', 'syncIdentity', 'open', 'exportOwner', 'removeOwner'].some(key => typeof contactCards[key] !== 'function')) throw new Error('contact_card_configuration_required')
   if (homePreferences !== undefined && ['get', 'set', 'removeOwner'].some(key => typeof homePreferences?.[key] !== 'function')) throw new Error('home_preference_configuration_required')
+  if (connectionPrivacy !== undefined && ['get', 'set', 'list', 'removeOwner'].some(key => typeof connectionPrivacy?.[key] !== 'function')) throw new Error('connection_privacy_configuration_required')
   if (profileSocialLinks !== undefined && ['get', 'set', 'forProfile', 'removeOwner'].some(key => typeof profileSocialLinks?.[key] !== 'function')) throw new Error('profile_links_configuration_required')
   if (profileHandles !== undefined && ['resolve', 'handleFor', 'ensure', 'availability', 'rename', 'removeProfile'].some(key => typeof profileHandles?.[key] !== 'function')) throw new Error('profile_handles_configuration_required')
   // Every emitted /people/ link prefers the member's handle (docs/profile-handles.md).
@@ -323,7 +325,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const mine = await ownProfileId(viewer.owner)
     if (mine) {
       if (mine === profile.id) return null
-      const own = await readerFor(request).profile({ id: mine }).catch(() => null)
+      const own = await readerFor(request).profile({ id: mine, viewer: selfViewer(mine) }).catch(() => null)
       const ours = publicLinkedinUrl(own?.profile?.linkedinUrl), theirs = publicLinkedinUrl(profile.linkedinUrl)
       return ours && theirs && ours === theirs ? { href: '/import', kind: 'link-copy' } : null
     }
@@ -367,6 +369,14 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
   const memberReader = memberSnapshot ? createPublicPeopleReader({ readPublishedSnapshot: memberSnapshot, photoFor, suggestFreshMs: 10000, suggestStaleMs: 60000 }) : publicReader
   const iosApp = request => iosAppUserAgent(request?.headers?.['user-agent'])
   const readerFor = request => iosApp(request) ? memberReader : publicReader
+  // Who is looking, for members' connection privacy (docs/connection-privacy.md).
+  // Signed out (or the viewer's profile unreadable) reads as less, never more.
+  const readerViewer = async session => {
+    if (!session?.owner) return undefined
+    const id = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
+    return { signedIn: true, ...(id ? { id } : {}) }
+  }
+  const selfViewer = id => ({ signedIn: true, id })
   const snapshotFor = request => iosApp(request) && memberSnapshot ? memberSnapshot : readPublishedSnapshot
   // Owner-private contact addresses (docs/contact-slugs.md): every link to one
   // of the owner's own contacts prefers its slug and falls back to the row id.
@@ -477,7 +487,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
     const found = new Map()
     for (const summary of matches) if (summary) found.set(summary.id, summary)
     if (mine) {
-      for (const summary of await reader.neighbors({ id: mine })) found.set(summary.id, summary)
+      for (const summary of await reader.neighbors({ id: mine, viewer: selfViewer(mine) })) found.set(summary.id, summary)
       const self = (await reader.lookup({ ids: [mine] })).get(mine)
       found.delete(mine); if (self) found.delete(self.id)
     }
@@ -1191,7 +1201,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           let id
           try { id = handleTarget(decodeURIComponent(hoverCard[1])) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
           const viewer = sessionFor(request), known = viewer ? knownPeople(viewer.owner) : null
-          const result = await readerFor(request).card({ id, ...(known ? { known } : {}) })
+          const result = await readerFor(request).card({ id, ...(known ? { known } : {}), viewer: await readerViewer(viewer) })
           if (!result) { response.writeHead(404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'not_found' })); return }
           const card = { ...result.card }
           const cardHandle = profileHandles?.handleFor(card.id) ?? null
@@ -1543,7 +1553,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
             // waits and its count appears once the set is cached.
             const known = !publicProfile || !viewer ? null : requestedShow === 'known' ? await knownPeopleReady(viewer.owner) : knownPeople(viewer.owner)
             const connectionShow = requestedShow === 'known' && !known ? undefined : requestedShow
-            const result = await readerFor(request).profile({ id, cursor: url.searchParams.get('cursor') ?? undefined, query: connectionQuery, sort: connectionSort, show: connectionShow, ...(known ? { known } : {}) })
+            const result = await readerFor(request).profile({ id, cursor: url.searchParams.get('cursor') ?? undefined, query: connectionQuery, sort: connectionSort, show: connectionShow, ...(known ? { known } : {}), viewer: await readerViewer(viewer) })
             if (!result) {
               // In the app, a profile it does not list is a page, not a blank 404.
               if (publicProfile && iosApp(request) && request.method === 'GET') { journey(response, renderProfileUnavailable(chrome), null, '', 404); return }
@@ -2052,7 +2062,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
       if (request.method === 'GET' && (url.pathname === '/' || (signup && url.pathname === '/import'))) {
         if (signup) {
           const jobs = await jobResources(), props = jobProps(jobs), summary = await importSummary(jobs)
-          const archive = extra => journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic', ...extra }), props.importJob, uploadProgressScript())
+          // An unreadable choice leaves the control out: a form must never resubmit a guessed default.
+        const privacyChoice = connectionPrivacy ? await bounded(() => connectionPrivacy.get(session.owner), null) : null
+          const archive = extra => journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic', ...(privacyChoice ? { connectionPrivacy: privacyChoice } : {}), ...extra }), props.importJob, uploadProgressScript())
           if (url.pathname === '/import') { archive(summary.lastComplete ? { refresh: summary } : {}); return }
           // Home. A member with nothing imported keeps the default-on getting-started
           // reminder until they hide it; everyone else gets their real status and next steps.
@@ -2162,7 +2174,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           mine = await ownProfileId(session.owner).catch(() => null)
           const photo = mine ? profilePhotos?.urlFor(mine) : null
           if (photo) profile.photo = photo
-          const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
+          const published = mine ? await publicReader.profile({ id: mine, viewer: selfViewer(mine) }).catch(() => null) : null
           // The member's handle (docs/profile-handles.md): given on first view, editable here.
           if (profileHandles && published?.profile?.presence === 'member') {
             const current = profileHandles.handleFor(published.profile.id) ?? await bounded(() => ensureHandle(published.profile), null)
@@ -2213,7 +2225,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
           throw new Error('private_browser_csrf')
         }
         const mine = typeof ownProfileId === 'function' ? await ownProfileId(session.owner).catch(() => null) : null
-        const published = mine ? await publicReader.profile({ id: mine }).catch(() => null) : null
+        const published = mine ? await publicReader.profile({ id: mine, viewer: selfViewer(mine) }).catch(() => null) : null
         const own = published?.profile?.presence === 'member' && !coordination.deletingProfiles.has(session.owner.ownerId) ? published.profile.id : null
         if (checking) {
           const answer = own ? profileHandles.availability(input.get('handle'), own) : { code: 'unavailable' }
@@ -2547,11 +2559,19 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const [contact] = await contactRows([row], pageReader(request))
         const enrichment = contactEnrichment ? await contactEnrichment.inspect(session.owner, row).catch(() => ({ status: 'unavailable' })) : null
         if (contact.id && !enrichment?.publishedProfile) {
-          try { contact.publishedProfile = await pageReader(request).profile({ id: contact.id }) } catch {}
+          try { contact.publishedProfile = await pageReader(request).profile({ id: contact.id, viewer: await readerViewer(session) }) } catch {}
         }
         const props = jobProps(await jobResources())
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         journey(response, renderContactDetail({ ...props, contact: { ...contact, contactHref: canonical }, enrichment, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
+      }
+      if (signup && connectionPrivacy && request.method === 'POST' && url.pathname === '/settings/connection-privacy') {
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('connectionsAudience').length !== 1 || input.getAll('connectionsScope').length !== 1 || [...input.keys()].some(key => !['csrf', 'connectionsAudience', 'connectionsScope'].includes(key))) throw new Error('private_browser_csrf')
+        const choice = connectionPrivacyValue({ audience: input.get('connectionsAudience'), scope: input.get('connectionsScope') })
+        if (!choice) throw new Error('private_browser_csrf')
+        await connectionPrivacy.set(session.owner, choice)
+        redirect(response, '/settings?privacy=saved#connection-privacy'); return
       }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // Settings shows the owner's live key, but a page view never creates
@@ -2567,7 +2587,9 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const email = memberEmail?.sending ? await bounded(() => memberEmail.settings(session.owner), null) : null
         const recovered=typeof backend.readLegacyFiles==='function'?await backend.readLegacyFiles():null
         const blocks = memberBlocks ? await bounded(() => memberBlocks.list(session.owner), []) : null
-        const view=renderSettings({ ...props, blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+        // An unreadable choice leaves the control out: a form must never resubmit a guessed default.
+        const privacyChoice = connectionPrivacy ? await bounded(() => connectionPrivacy.get(session.owner), null) : null
+        const view=renderSettings({ ...props, ...(privacyChoice ? { connectionPrivacy: privacyChoice, connectionPrivacySaved: url.searchParams.get('privacy') === 'saved' } : {}), blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
           ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
@@ -2639,6 +2661,7 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
         if (homePreferences) await homePreferences.removeOwner(session.owner)
+        if (connectionPrivacy) await connectionPrivacy.removeOwner(session.owner)
         if (ideaflowProfiles?.choices) await ideaflowProfiles.choices.removeOwner(session.owner)
         if (personLookup) await personLookup.removeOwner(session.owner)
         if (contactEnrichment) await contactEnrichment.removeOwner(session.owner)
@@ -2746,7 +2769,16 @@ export function createPrivateBrowserHandler({ createMessagingSession, resolveCar
         const bytes = await body(request, LIMITS.archiveBytes + 65536)
         const form = await new Request(new URL('/upload', base), { method: 'POST', headers: { 'Content-Type': request.headers['content-type'] ?? '' }, body: bytes }).formData()
         const files = form.getAll('archive')
-        if (form.getAll('csrf').length !== 1 || form.get('csrf') !== session.csrf || !files.length || files.length > MAX_UPLOAD_FILES || [...form.keys()].some(key => !['csrf', 'archive', 'syntheticConsent'].includes(key))) throw new Error('private_browser_csrf')
+        if (form.getAll('csrf').length !== 1 || form.get('csrf') !== session.csrf || !files.length || files.length > MAX_UPLOAD_FILES || [...form.keys()].some(key => !['csrf', 'archive', 'syntheticConsent', 'connectionsAudience', 'connectionsScope'].includes(key))) throw new Error('private_browser_csrf')
+        // Who can see the connections (docs/connection-privacy.md): saved before
+        // any file is staged, so the new connections are never public first.
+        const privacyFields = ['connectionsAudience', 'connectionsScope'].map(key => form.getAll(key))
+        if (privacyFields.some(values => values.length > 1) || privacyFields[0].length !== privacyFields[1].length) throw new Error('private_browser_csrf')
+        if (privacyFields[0].length) {
+          const choice = connectionPrivacyValue({ audience: privacyFields[0][0], scope: privacyFields[1][0] })
+          if (!choice || !connectionPrivacy) throw new Error('private_browser_csrf')
+          await connectionPrivacy.set(session.owner, choice)
+        }
         if (dataMode === 'synthetic' && (form.getAll('syntheticConsent').length !== 1 || form.get('syntheticConsent') !== 'yes')) throw new Error('synthetic_archive_only')
         if (files.some(file => !file || typeof file.arrayBuffer !== 'function' || !file.name || file.name.length > 256 || /[\x00-\x1f\x7f/\\]/.test(file.name) || !/\.(csv|zip)$/i.test(file.name))) throw new Error('private_archive_filename_invalid')
         if (new Set(files.map(file => file.name)).size !== files.length) throw new Error('private_archive_filename_invalid')

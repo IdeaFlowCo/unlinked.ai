@@ -7,6 +7,7 @@ import { profileDetailLevel } from './detail-level.mjs'
 import { SEARCH_MODES, companyPageName, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-index.mjs'
 import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
+import { connectionPolicies, createConnectionVisibility } from './connection-privacy.mjs'
 
 export class PublicPeopleReaderError extends Error {
   constructor(status, code) { super(code); this.name = 'PublicPeopleReaderError'; this.status = status; this.code = code }
@@ -185,11 +186,17 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       // Presence is display evidence; only confirmed membership takes precedence
       // over recovered historical membership. Neither implies owner authorization.
+      // Members' connection privacy (docs/connection-privacy.md). Listing counts
+      // are what an anonymous visitor may see; signed-in views recount per viewer.
+      const policies = connectionPolicies(value.connectionPrivacy, id => summaries.has(id))
+      const listedBy = (a, b) => outgoing.get(a)?.has(b) ?? false
+      const anonymous = createConnectionVisibility({ policies, connected, listedBy, viewer: null })
+      const visibleCount = id => { if (!anonymous.restricted) return connected.get(id).size; let count = 0; for (const other of connected.get(id)) if (anonymous.visible(id, other)) count++; return count }
       if (value.members !== undefined) {
         const members = new Set(array(value.members, maxProfiles).map(id => { if (!summaries.has(id)) unavailable(); return id }))
         const legacy = new Set(array(value.legacyMembers ?? [], maxProfiles).map(id => { if (!summaries.has(id)) unavailable(); return id }))
         for (const [id, summary] of summaries) {
-          const marks = { presence: members.has(id) ? 'member' : legacy.has(id) ? 'legacy' : 'shadow', connectionCount: connected.get(id).size }
+          const marks = { presence: members.has(id) ? 'member' : legacy.has(id) ? 'legacy' : 'shadow', connectionCount: visibleCount(id) }
           Object.assign(summary, marks); Object.assign(details.get(id), marks)
         }
       }
@@ -219,7 +226,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // Addresses an operator removal took out; never published, only named.
       const removed = new Set()
       if (Array.isArray(value.removed)) for (const id of value.removed) if (idValid(id) && !summaries.has(id)) removed.add(id)
-      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
+      const data = { revision: value.revision, ordered, summaries, details, connected, policies, listedBy, tokens, aliases, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
@@ -240,6 +247,19 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     return value.size ? value : null
   }
   const groupScope = groups => groups ? `g=${[...groups].sort().join(',')}:` : ''
+  // `viewer`: who is looking, for members' connection privacy
+  // (docs/connection-privacy.md): { signedIn, id?: their published profile }.
+  // Missing means an anonymous visitor, so a caller that forgets it can only
+  // show less, never more.
+  const viewerValue = value => {
+    if (value === undefined || value === null) return null
+    if (!plain(value) || typeof value.signedIn !== 'boolean' || (value.id !== undefined && value.id !== null && !idValid(value.id)) || Object.keys(value).some(key => !['signedIn', 'id'].includes(key))) invalid()
+    return value
+  }
+  const visibilityFor = (data, viewer, known) => createConnectionVisibility({ policies: data.policies, connected: data.connected, listedBy: data.listedBy,
+    viewer: viewer ? { signedIn: viewer.signedIn, ...(viewer.id ? { id: data.aliases.get(viewer.id) ?? viewer.id } : {}), ...(known ? { known } : {}) } : null })
+  // Connection lists can differ per viewer, so a signed-in viewer's cursors are theirs.
+  const viewerScope = viewer => viewer ? `:v=${hash(JSON.stringify([viewer.signedIn === true, viewer.id ?? null]))}` : ''
   const queryValue = value => { if (value === undefined) return ''; if (typeof value !== 'string' || value.length > 200) invalid(); return normalized(value) }
   function cursorValue(cursor, scope) {
     if (cursor === undefined) return undefined
@@ -312,16 +332,17 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // `show` narrows to members ('members') or to `known`, the published ids
       // the signed-in viewer is connected to ('known'). `known` also yields the
       // "You both know" count; it is never read here.
-      const { id, cursor, signal, query = '', sort = 'name', show, known } = requestValue(request)
+      const { id, cursor, signal, query = '', sort = 'name', show, known } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id) || !['name', 'detail'].includes(sort) || ![undefined, 'members', 'known'].includes(show) || (known !== undefined && !(known instanceof Set)) || (show === 'known' && !known)) invalid()
       const search = queryValue(query)
       const narrowed = show ? `:${show}${show === 'known' ? `:${hash([...known].sort().join('\n'))}` : ''}` : ''
-      const scope = `connections:${id}${sort === 'name' && !search && !show ? '' : `:${sort}:${search}${narrowed}`}`, decodedCursor = cursorValue(cursor, scope)
+      const scope = `connections:${id}${sort === 'name' && !search && !show ? '' : `:${sort}:${search}${narrowed}`}${viewerScope(viewer)}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
       if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
       if (data.aliases.has(id)) return { moved: data.aliases.get(id) }
       if (!data.details.has(id)) return null
-      let rows = data.ordered.filter(person => person.id !== id && data.connected.get(id).has(person.id))
+      const visibility = visibilityFor(data, viewer, known)
+      let rows = data.ordered.filter(person => person.id !== id && data.connected.get(id).has(person.id) && visibility.visible(id, person.id))
       const connectionCount = rows.length
       // For a signed-in viewer, who they both know across the whole list (not
       // the current search): the count and a few faces, members first, for
@@ -341,14 +362,14 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // viewer (`known`: published ids they are connected to; never read here)
     // how many of this person's connections they know too.
     async card(request = {}) {
-      const { id, signal, known } = requestValue(request)
+      const { id, signal, known } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id) || (known !== undefined && !(known instanceof Set))) invalid()
       const data = await snapshot(signal)
-      const resolved = data.aliases.get(id) ?? id
+      const resolved = data.aliases.get(id) ?? id, visibility = visibilityFor(data, viewer, known)
       const summary = data.summaries.get(resolved)
       if (!summary) return null
       let mutual
-      if (known) { mutual = 0; for (const other of data.connected.get(resolved) ?? []) if (other !== resolved && known.has(other)) mutual++ }
+      if (known) { mutual = 0; for (const other of data.connected.get(resolved) ?? []) if (other !== resolved && known.has(other) && visibility.visible(resolved, other)) mutual++ }
       return { card: { ...withPhoto(summary), ...(mutual === undefined ? {} : { mutual }) } }
     },
     // The group a profile is unlisted in (null when unlisted for everyone),
@@ -417,12 +438,12 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // Everyone the public graph connects to one profile (either direction,
     // merged addresses resolved), as public summaries in name order.
     async neighbors(request = {}) {
-      const { id, signal } = requestValue(request)
+      const { id, signal } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id)) invalid()
       const data = await snapshot(signal)
       const from = data.aliases.get(id) ?? id
-      const connected = data.connected.get(from)
-      return connected ? data.ordered.filter(person => connected.has(person.id)).map(withPhoto) : []
+      const connected = data.connected.get(from), visibility = visibilityFor(data, viewer)
+      return connected ? data.ordered.filter(person => connected.has(person.id) && visibility.visible(from, person.id)).map(withPhoto) : []
     },
     // Everyone whose public profile ties them to a company, by the company name
     // as it appears on profiles: a position at it, or a headline naming it.

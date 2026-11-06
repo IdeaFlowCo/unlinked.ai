@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { CONNECTION_SORTS, orderNetwork } from '../network-order.mjs'
+import { connectionPolicies, createConnectionVisibility } from './connection-privacy.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
 const summary = profile => ({ id:profile.id,name:profile.name,...Object.fromEntries(['headline','company','location'].filter(key=>typeof profile[key]==='string').map(key=>[key,profile[key]])) })
 
@@ -25,10 +26,15 @@ export function createKnownConnectionsReader({ owner, getBackend, readPublishedS
       if (!outgoing.has(edge.fromId)) outgoing.set(edge.fromId,new Set())
       outgoing.get(edge.fromId).add(edge.toId)
     }
+    // Second-degree people come from other members' lists, so each one's
+    // connection privacy applies (docs/connection-privacy.md); the anchor's own list is theirs.
+    const connected=new Map()
+    for (const [from,set] of outgoing) for (const to of set) { if(!connected.has(from)) connected.set(from,new Set()); if(!connected.has(to)) connected.set(to,new Set()); connected.get(from).add(to); connected.get(to).add(from) }
+    const visibility=createConnectionVisibility({ policies: connectionPolicies(snapshot.connectionPrivacy, id=>people.has(id)), connected, listedBy:(a,b)=>outgoing.get(a)?.has(b) ?? false, viewer:{ signedIn:true, id:anchor.profileId } })
     const direct=outgoing.get(anchor.profileId) ?? new Set(), paths=new Map()
     if (degree===1) for (const id of direct) { if(id!==anchor.profileId) paths.set(id,{fromId:anchor.profileId,toId:id}) }
     else for (const via of [...direct].sort()) for (const id of outgoing.get(via) ?? []) {
-      if(id!==anchor.profileId && !direct.has(id) && !paths.has(id)) paths.set(id,{fromId:anchor.profileId,viaId:via,toId:id})
+      if(id!==anchor.profileId && !direct.has(id) && !paths.has(id) && visibility.visible(via,id)) paths.set(id,{fromId:anchor.profileId,viaId:via,toId:id})
     }
     const normalized=query.normalize('NFKC').trim().toLowerCase()
     const matches=[...paths.keys()].map(id=>people.get(id)).filter(p=>!normalized || [p.name,p.headline,p.company,...(p.positions??[]).map(position=>position.company)].some(value=>typeof value==='string'&&value.normalize('NFKC').toLowerCase().includes(normalized)))

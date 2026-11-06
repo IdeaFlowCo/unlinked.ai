@@ -6,6 +6,7 @@ import { publicLinkedinUrl } from './profile-links.mjs'
 import { applyProfileDecisions } from './profile-decisions.mjs'
 import { linkedinIdentityMerges, linkedinRefHash } from './url-identity.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
+import { CONNECTION_AUDIENCES, connectionPrivacyValue, isDefaultConnectionPrivacy } from './connection-privacy.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
 const permitted = job => job?.consent?.version === PUBLIC_UPLOAD_CONSENT.version && job.consent.publicProfessionalSearch === true && job.consent.privateRetention === true && job.consent.boundedOpenAIProcessing === true
 const profile = (id, name) => ({ id, name, positions: [], education: [], skills: [] })
@@ -101,7 +102,7 @@ const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.
 // `mergeSameLinkedin` folds published profiles that share one LinkedIn address
 // into one (linkedinIdentityMerges); `preferSurvivor(ids)` names the copy that
 // already holds the person's address so the survivor stays stable.
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
+export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, readConnectionPrivacy, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!validEnrichmentDatasets(enrichmentDatasets)) throw Error('public_enrichment_datasets_invalid')
   if (!Array.isArray(linkedinEnrichmentDatasets) || !linkedinEnrichmentDatasets.every((value, index) => LINKEDIN_ENRICHMENT_DATASETS.includes(value) && linkedinEnrichmentDatasets.indexOf(value) === index) || typeof mergeSameLinkedin !== 'boolean' || typeof preferSurvivor !== 'function') throw Error('public_enrichment_datasets_invalid')
   if (!Number.isSafeInteger(linkedinEnrichmentTextBudget) || linkedinEnrichmentTextBudget < 0 || linkedinEnrichmentTextBudget > LINKEDIN_ENRICHMENT_TEXT_BUDGET) throw Error('public_enrichment_text_budget_invalid')
@@ -162,6 +163,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       revisions.push('signup:' + source.receiptId)
     }
     const signupMerges = []
+    // Which published profile stands for each account, for connection privacy.
+    const profileFor = new Map(signupByOwner)
     for (const item of items) {
       const backend = await getBackend(item.owner), resource = await backend.readResource('import',item.id)
       if (!resource || resource.deleted || resource.sourceOwnerId !== item.owner.ownerId || resource.sourceRevision !== item.revision || resource.payload?.ownerId !== item.owner.ownerId || resource.payload.id !== item.id || !permitted(resource.payload)) throw Error('public_member_source_changed')
@@ -195,7 +198,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         connections.push(...snapshot.connections.map(edge => ({ fromId: edge.fromId === ownId ? linked.profileId : edge.fromId, toId: edge.toId })))
         const winner = overlays.get(linked.profileId), key = [resource.payload.createdAt ?? 0, item.id]
         if (own.name !== 'Unlinked member' && (!winner || key[0] > winner.key[0] || (key[0] === winner.key[0] && key[1] > winner.key[1]))) overlays.set(linked.profileId, { key, profile: { ...own, id: linked.profileId } })
-        members.add(linked.profileId)
+        members.add(linked.profileId); profileFor.set(`${item.owner.ownerId}\u0000${item.owner.userId}`, linked.profileId)
         revisions.push('legacy-link:' + linked.receiptId)
         linkedChecks.push(async () => { const current = await backend.readLegacyProfile(); if (!current || current.receiptId !== linked.receiptId || current.revision !== linked.revision) throw Error('public_member_source_changed') })
       } else {
@@ -210,6 +213,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
           signupMerges.push({ id: `signup:${ownId}`, kind: 'merge', profileId: ownId, survivorId: signupId })
         } else {
           profiles.push(...snapshot.profiles); connections.push(...snapshot.connections); members.add(ownId)
+          // Any of an owner's imports resolves to the one profile they fold into.
+          profileFor.set(`${item.owner.ownerId}\u0000${item.owner.userId}`, ownId)
           if (snapshot.profiles.find(row => row.id === ownId)?.linkedinUrl) verified.add(ownId)
         }
         const owner = `${item.owner.ownerId}\u0000${item.owner.userId}`
@@ -219,6 +224,17 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       if (profiles.length > PUBLIC_INDEX_MAX_PROFILES || connections.length > PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('shared_public_capacity_limit')
     }
     if (identity(await discover()) !== identity(items)) throw Error('public_member_source_changed')
+    // Members' choices of who can see their connections (docs/connection-privacy.md).
+    // Read once per build and hashed into the revision, so a change rebuilds the index.
+    const privacy = typeof readConnectionPrivacy === 'function' ? await readConnectionPrivacy() : []
+    if (!Array.isArray(privacy) || privacy.length > 10000) throw Error('public_connection_privacy_invalid')
+    const privacyByProfile = new Map()
+    for (const entry of privacy) {
+      const choice = connectionPrivacyValue(entry), id = profileFor.get(`${entry?.owner?.ownerId}\u0000${entry?.owner?.userId}`)
+      if (!choice) throw Error('public_connection_privacy_invalid')
+      if (id && !isDefaultConnectionPrivacy(choice)) privacyByProfile.set(id, choice)
+    }
+    if (privacyByProfile.size) revisions.push('connection-privacy:' + hash(JSON.stringify([...privacyByProfile].sort())))
     const activeKeys = new Set(items.map(item => JSON.stringify([item.id, item.owner.ownerId, item.owner.userId, item.revision])))
     for (const key of detailCache.keys()) if (!activeKeys.has(key)) detailCache.delete(key)
     // Without a legacy or signup identity, the newest import stands for the
@@ -259,7 +275,16 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         return value
       }) } : decided
       if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
-      return result
+      if (!privacyByProfile.size) return result
+      // Keyed by the profile each account resolves to after merges. When two
+      // accounts fold into one profile, the more private choice wins.
+      const shown = new Set(result.profiles.map(profile => profile.id)), connectionPrivacy = {}
+      const rank = choice => CONNECTION_AUDIENCES.indexOf(choice.audience) * 2 + Number(choice.scope === 'shared')
+      for (const [id, choice] of privacyByProfile) {
+        const target = result.aliases?.[id] ?? id
+        if (shown.has(target) && (!connectionPrivacy[target] || rank(choice) > rank(connectionPrivacy[target]))) connectionPrivacy[target] = { ...choice }
+      }
+      return { ...result, connectionPrivacy }
     }
     if (typeof readMembers !== 'function') return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections})
     // Historical membership is separate display evidence, never a current owner binding.
