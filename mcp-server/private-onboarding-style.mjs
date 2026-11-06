@@ -334,6 +334,8 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .file,.unlinked-onboarding .drop{display:block;padding:22px 24px;border:2px dashed var(--line2);border-radius:var(--r);background:#fff}
 .unlinked-onboarding .drop strong{display:block;font-size:18px;margin-bottom:4px}
 .unlinked-onboarding .drop p{margin:0 0 14px}
+.unlinked-onboarding .drop.over{border-color:var(--brand);background:var(--tint)}
+.unlinked-onboarding .drop ul{margin:8px 0 0;padding-left:18px}
 .unlinked-onboarding input[type=file]{display:block;width:100%;max-width:100%;margin:14px 0;font:inherit}
 .unlinked-onboarding input[type=text],.unlinked-onboarding textarea{display:block;width:100%;min-width:0;padding:12px 14px;margin-top:7px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;color:var(--fg);font:inherit;font-size:16px}
 .unlinked-onboarding input::placeholder{color:var(--muted);opacity:1}

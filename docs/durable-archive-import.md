@@ -49,3 +49,10 @@ Successful/denied callbacks now emit a private bounded audit containing timestam
 origin and owner hash or a fixed denial category. No email, subject, cookie, token,
 authorization URL, query or archive content is logged. Audit availability does not
 grant authority or block a valid callback.
+
+## Several files and stacked imports
+
+`/upload` accepts up to `MAX_UPLOAD_FILES` (10) `archive` files in one native multipart submission, within the same total request limit. The picker allows multiple selection; dropping files on the upload box adds them to the same file input (a later drop adds to the list, duplicates by name and non-ZIP/CSV files are ignored), so the form still submits natively without script. Each file is staged as its own import job with its own receipt. Imports stack: the owner network reads every published import together and shows one entry per person, so a Connections file split in two, a full export and a later export add up and nothing is replaced.
+
+Parser `linkedin-archive-v7` added numbered Connections parts and headerless continuation parts. Receipts staged by v6 still run after an upgrade; they keep `parserVersion` and record `parsedWith`.
+

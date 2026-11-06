@@ -514,3 +514,66 @@ test('owner profile reads only bounded profile chunks and preserves full fields'
   assert.ok(calls.includes(`import/${completed.assertionChunks[0]}`))
   assert.equal(calls.includes(`import/${completed.assertionChunks[1]}`), false)
 })
+
+test('several files in one upload and a later full export stack into one network; private fields stay private', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listImportIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && ['indexed', 'partial'].includes(row.payload?.status) && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listAccountGrantIds: async () => [] }
+  }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const csrfFor = async () => (await (await fetch(endpoint + '/import', { headers: { Cookie: cookie } })).text()).match(/name="csrf" value="([^"]+)"/)[1]
+  const post = async files => {
+    const form = new FormData(); form.set('csrf', await csrfFor())
+    for (const [bytes, name] of files) form.append('archive', new Blob([bytes]), name)
+    return fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })
+  }
+  const runAll = async () => {
+    const backend = await getBackend(owner)
+    for (const [, row] of Object.entries(await f.snapshot())) if (row.sourceOwnerId === owner.ownerId && row.payload?.status === 'uploaded' && row.payload?.backgroundVersion && !row.payload.receiptOf)
+      await runArchiveJob({ ownerId: owner.ownerId, id: row.sourceId, adapter: backend.adapter, readAsset: backend.readAsset })
+  }
+  // LinkedIn's Connections split in two: the second part has no header row.
+  const part1 = 'Notes:\n"When exporting your connection data..."\n\nFirst Name,Last Name,URL,Email Address,Company,Position,Connected On\nAda,Lovelace,https://www.linkedin.com/in/ada-l,ada@private.example,Engines,Analyst,01 Jan 2020\n'
+  const part2 = 'Grace,Hopper,https://www.linkedin.com/in/grace-h,grace@private.example,Navy,Admiral,02 Feb 2021\n'
+  const first = await post([[Buffer.from(part1), 'Connections.csv'], [Buffer.from(part2), 'Connections_2.csv']])
+  assert.equal(first.status, 303); assert.equal(first.headers.get('location'), '/profile')
+  await runAll()
+  let jobs = Object.values(await f.snapshot()).filter(row => row.sourceOwnerId === owner.ownerId && row.payload?.backgroundVersion && !row.payload.receiptOf)
+  assert.deepEqual(jobs.map(row => [row.payload.filename, row.payload.status, row.payload.counts.indexed]).sort(), [['Connections.csv', 'indexed', 1], ['Connections_2.csv', 'indexed', 1]])
+  // A later full export stacks on top: Grace again (once), a new person, and private-only files.
+  const zip = new JSZip()
+  zip.file('Connections.csv', 'First Name,Last Name,URL,Email Address,Company,Position,Connected On\nGrace,Hopper,https://www.linkedin.com/in/grace-h,grace@private.example,Navy,Admiral,02 Feb 2021\nAlan,Turing,https://www.linkedin.com/in/alan-t,,NPL,Researcher,03 Mar 2022\n')
+  zip.file('Profile.csv', 'First Name,Last Name,Headline\nStacked,Owner,Builder\n')
+  zip.file('messages.csv', 'CONVERSATION ID,FROM,TO,CONTENT\nc1,Stacked Owner,Grace Hopper,"secret plans"\n')
+  zip.file('PhoneNumbers.csv', 'Extension,Number,Type\n,+1 555 0199,Mobile\n')
+  const full = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  assert.equal((await post([[full, 'Complete_LinkedInDataExport_11-05-2026.zip']])).status, 303)
+  await runAll()
+  jobs = Object.values(await f.snapshot()).filter(row => row.sourceOwnerId === owner.ownerId && row.payload?.backgroundVersion && !row.payload.receiptOf)
+  assert.equal(jobs.length, 3)
+  assert.ok(jobs.every(row => ['indexed', 'partial'].includes(row.payload.status)))
+  const network = await (await fetch(endpoint + '/network', { headers: { Cookie: cookie } })).text()
+  for (const name of ['Ada Lovelace', 'Grace Hopper', 'Alan Turing']) assert.match(network, new RegExp(name))
+  // Grace is in two imports but is one entry: her name appears as often as Alan's, who is in one.
+  assert.equal(network.split('Grace Hopper').length, network.split('Alan Turing').length)
+  for (const secret of ['ada@private.example', 'grace@private.example', 'secret plans', '555 0199']) assert.doesNotMatch(network, new RegExp(secret))
+  // The full original is retained privately, byte for byte.
+  const backend = await getBackend(owner), fullJob = jobs.find(row => row.payload.filename.endsWith('.zip'))
+  assert.deepEqual(await backend.readAsset(fullJob.payload.archiveSha256), full)
+})
