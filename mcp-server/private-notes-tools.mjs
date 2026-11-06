@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { createInvestorTools } from './investor-tools.mjs'
 import { OverlayUnavailable } from './private-context.mjs'
 
 // Private people notes & relations for the direct Unlinked key and OAuth
@@ -11,7 +12,7 @@ import { OverlayUnavailable } from './private-context.mjs'
 // writing. The tools mirror the shared connector's `openchat__oc_*private*`
 // shapes (docs/agent-api.md has the mapping).
 
-export const PRIVATE_KINDS = Object.freeze(['person', 'company', 'idea', 'project'])
+export const PRIVATE_KINDS = Object.freeze(['person', 'company', 'idea', 'project', 'list'])
 export const RELATION_TYPES = Object.freeze(['knows', 'family', 'works_at', 'worked_with', 'works_on', 'attended', 'interested_in', 'other'])
 
 const PRIVATE = 'Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.'
@@ -26,8 +27,8 @@ const assertion = z.enum(['stated', 'inferred']).optional()
 
 export const PRIVATE_NOTES_SCHEMAS = Object.freeze({
   unlinked_get_person_private: { profileId: z.string().min(1).max(512) },
-  unlinked_get_private_thing: { thingId: id },
-  unlinked_list_private_things: { query: z.string().max(120).optional(), kind: z.enum(PRIVATE_KINDS).optional() },
+  unlinked_get_private_thing: { thingId: id, after: z.string().max(512).optional(), limit: z.number().int().min(1).max(100).optional() },
+  unlinked_list_private_things: { query: z.string().max(120).optional(), kind: z.enum(PRIVATE_KINDS).optional(), after: z.string().max(512).optional(), limit: z.number().int().min(1).max(100).optional() },
   unlinked_search_private: { query: z.string().max(120).optional(), relationType: z.enum(RELATION_TYPES).optional(), kind: z.enum(PRIVATE_KINDS).optional(), limit: z.number().int().min(1).max(50).optional() },
   unlinked_get_neighbourhood: { subjectKind, subjectId, depth: z.union([z.literal(1), z.literal(2)]).optional() },
   unlinked_save_private_thing: { kind: z.enum(PRIVATE_KINDS), name: z.string().min(1).max(120), createNew: z.boolean().optional(), clientRequestId: z.string().min(1).max(200).optional() },
@@ -45,14 +46,14 @@ export const PRIVATE_NOTES_SCHEMAS = Object.freeze({
 
 export const PRIVATE_NOTES_DESCRIPTIONS = Object.freeze({
   unlinked_get_person_private: `Read the owner’s private card about an Unlinked person: profileId may be a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. Returns the notes and relations recorded about that person (with note and link ids for corrections), plus profileId, connectionId and linkedinRefHash when they apply. entities is empty when nothing is recorded yet. ${PROVENANCE} ${PRIVATE}`,
-  unlinked_get_private_thing: `Read one of the owner’s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations. ${PROVENANCE} ${PRIVATE}`,
-  unlinked_list_private_things: `List the owner’s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind. Use an id with unlinked_get_private_thing. ${PRIVATE}`,
+  unlinked_get_private_thing: `Read one of the owner’s private entities (a saved person, company, idea, project or list, or any entity id from another private tool) with its notes and relations. Pass limit (1–100) and follow nextCursor as after to read every relation; without these arguments the legacy read is bounded at 500 links. ${PROVENANCE} ${PRIVATE}`,
+  unlinked_list_private_things: `List the owner’s private entities (saved people, companies, ideas, projects and lists, and Unlinked or OpenChat people they wrote about), optionally by name and kind. Pass limit (1–100) and follow nextCursor as after for complete enumeration; query is not supported with pagination. Without pagination the legacy name listing is bounded at 50. Use kind list to discover lists, then read contains relations using unlinked_get_private_thing with limit. ${PRIVATE}`,
   unlinked_search_private: `Search the owner’s private people knowledge in one call: entities matched by name or private note text, and relations matched by relation text, either end’s name, or relationType (${RELATION_TYPES.join(', ')}). Give at least one of query, relationType or kind. At most 50 of each; truncated says more matched. ${PROVENANCE} ${PRIVATE}`,
   unlinked_get_neighbourhood: `Read one person or thing and what surrounds it in the owner’s private graph: everything one (default) or two private relations away, and those relations (fromId/toId). ${SUBJECT} Never creates anything; empty when nothing is recorded. Bounded; truncated says it was cut. ${PROVENANCE} ${PRIVATE}`,
-  unlinked_save_private_thing: `Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”). Returns its id for notes and links. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one. Set createNew true with a clientRequestId only to save a different one with an existing name; retries return the same entity. ${PRIVATE}`,
+  unlinked_save_private_thing: `Find or save a private person, company, idea, project or list by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”). Returns its id for notes and links. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one. Set createNew true with a clientRequestId only to save a different one with an existing name; retries return the same entity. ${PRIVATE}`,
   unlinked_add_private_note: `Add a private note about a person or thing. ${SUBJECT} Adding the same text again returns the existing note. ${WRITTEN} Set assertion “inferred” when you concluded it yourself. ${PRIVATE}`,
   unlinked_delete_private_note: `Delete (undo) one of the owner’s private notes by note id. ${PRIVATE}`,
-  unlinked_add_private_link: `Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another. Subject: ${SUBJECT} Target: toKind “unlinked” + toId (published profile id, connection id or linkedin.com/in/ address), toKind “user” + toId (OpenChat user id already in the owner’s private notes), or toKind person/company/idea/project with toId (saved thing id) or toName. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one, then pass its id. Set createNew true with a clientRequestId only to save a different one with an existing name. The same subject, relation and target is one link, so retries never duplicate. ${WRITTEN} relationType is derived from the words. ${PRIVATE}`,
+  unlinked_add_private_link: `Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another. Subject: ${SUBJECT} Target: toKind “unlinked” + toId (published profile id, connection id or linkedin.com/in/ address), toKind “user” + toId (OpenChat user id already in the owner’s private notes), or toKind person/company/idea/project/list with toId (saved thing id) or toName. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one, then pass its id. Set createNew true with a clientRequestId only to save a different one with an existing name. The same subject, relation and target is one link, so retries never duplicate. ${WRITTEN} relationType is derived from the words. ${PRIVATE}`,
   unlinked_update_private_link: `Correct one of the owner’s private relations in place by link id, for example “sister of” to “cousin of”. The relation text, its relationType and the link’s identity change together; if the owner already has that exact relation between the same two ends, the two become one and the existing link is returned with merged true. ${WRITTEN} ${PRIVATE}`,
   unlinked_delete_private_link: `Delete (undo) one of the owner’s private relations by link id. ${PRIVATE}`,
   unlinked_delete_private_thing: `Delete (undo) one of the owner’s private entities by id: removes it with its private notes and every private relation to or from it. Cannot be reversed. Deleting an entity about an Unlinked person forgets only the owner’s private notes; the profile and contact are untouched. ${PRIVATE}`,
@@ -72,7 +73,7 @@ const clean = (value, max) => String(value ?? '').replace(/[\x00-\x1f\x7f]/g, ''
 // `lookupContact(grant, input, signal)` is the owner-scoped
 // unlinked_lookup_contact (throws typed not_found / invalid_input);
 // `identityFor(owner)` is the Ideaflow identity bridge of unlinked-9kk.4.
-export function createPrivateNotesTools({ overlay, identityFor, lookupContact, createError }) {
+export function createPrivateNotesTools({ overlay, identityFor, lookupContact, createError, getBackend }) {
   const fail = (code, message, details) => createError(code, message, details)
   const configured = Boolean(overlay && typeof overlay.request === 'function' && typeof identityFor === 'function')
   const who = async grant => {
@@ -95,7 +96,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       { candidates: (Array.isArray(answer.body.candidates) ? answer.body.candidates : []).slice(0, 20).map(value => ({ id: value.id, kind: value.kind, name: value.name })) })
     throw fail('invalid_input', `The private overlay refused the input (${code}).`, { overlayCode: code })
   }
-  const provenance = (grant, value) => ({ author: `agent:${clean(grant.agent, 80) || 'API key'}`, source: 'direct-key', assertion: value ?? 'stated' })
+  const provenance = (grant, value) => ({ author: `agent:${clean(grant.agent, 80) || 'API key'}`, source: grant.grantId?.startsWith('ideaflow:') ? 'connector' : 'direct-key', assertion: value ?? 'stated' })
 
   // An Unlinked person, named only from data the owner can already read: a
   // published profile, or the owner's own import (validated against it).
@@ -189,6 +190,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
   const out = (kind, body) => ({ kind, ...body, visibility: 'owner_private' })
 
   return {
+    ...createInvestorTools({ getBackend, who, overlayCall, existingByRef, person, provenance, fail }),
     async unlinked_get_person_private(grant, { profileId }, signal) {
       const identity = await who(grant)
       const found = await subject(grant, identity, 'unlinked', profileId, { create: false }, signal)
@@ -196,15 +198,22 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       for (const entity of found.entities) entities.push((await overlayCall(identity, 'GET', `entities/${encodeURIComponent(entity.id)}`)).entity)
       return out('unlinked_person_private', { person: found.person, entities: await annotate(grant, entities, signal) })
     },
-    async unlinked_get_private_thing(grant, { thingId }, signal) {
+    async unlinked_get_private_thing(grant, { thingId, after, limit }, signal) {
       const identity = await who(grant)
       if (!ENTITY_ID.test(thingId)) throw fail('not_found', 'Nothing of the owner’s has that id.')
-      return out('unlinked_private_thing', { entity: await annotate(grant, (await overlayCall(identity, 'GET', `entities/${encodeURIComponent(thingId)}`)).entity, signal) })
+      const entity = (await overlayCall(identity, 'GET', `entities/${encodeURIComponent(thingId)}`)).entity
+      if (after !== undefined || limit !== undefined) {
+        const page = await overlayCall(identity, 'GET', query(`entities/${encodeURIComponent(thingId)}/link-pages`, { after, limit }))
+        return out('unlinked_private_thing', { entity: await annotate(grant, { ...entity, links: page.links }, signal), nextCursor: page.nextCursor })
+      }
+      return out('unlinked_private_thing', { entity: await annotate(grant, entity, signal) })
     },
-    async unlinked_list_private_things(grant, { query: q, kind }, signal) {
+    async unlinked_list_private_things(grant, { query: q, kind, after, limit }, signal) {
       const identity = await who(grant)
-      const listed = await overlayCall(identity, 'GET', query('entities', { q, kind }))
-      return out('unlinked_private_things', { entities: await annotate(grant, listed.entities ?? [], signal) })
+      if ((after !== undefined || limit !== undefined) && q !== undefined) throw fail('invalid_input', 'Paged enumeration does not accept query; use private search separately.')
+      const paged = after !== undefined || limit !== undefined
+      const listed = await overlayCall(identity, 'GET', paged ? query('entity-pages', { kind, after, limit }) : query('entities', { q, kind }))
+      return out('unlinked_private_things', { entities: await annotate(grant, listed.entities ?? [], signal), ...(paged ? { nextCursor: listed.nextCursor } : {}) })
     },
     async unlinked_search_private(grant, { query: q, relationType, kind, limit }, signal) {
       if (!q?.trim() && !relationType && !kind) throw fail('invalid_input', 'Give at least one of query, relationType or kind.')

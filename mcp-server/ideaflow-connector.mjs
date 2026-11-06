@@ -1,6 +1,6 @@
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE } from './account-grants.mjs'
+import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION, composeAccountScope } from './account-grants.mjs'
 import { createAccountHostedHandler } from './account-hosted.mjs'
 
 export function createAssertionVerifier(secret) {
@@ -18,7 +18,7 @@ export function createAssertionVerifier(secret) {
         p.identity_issuer !== 'https://id.ideaflow.app/api/auth' || typeof p.sub !== 'string' || !p.sub || p.sub.length > 200 ||
         typeof p.jti !== 'string' || !p.jti || p.jti.length > 200 || !Number.isSafeInteger(p.iat) || !Number.isSafeInteger(p.exp) ||
         p.iat > now+5 || p.exp <= now || p.exp <= p.iat || p.exp-p.iat > 60 || typeof p.scope !== 'string' || !p.scope ||
-        !p.scope.split(' ').every(scope => ['unlinked:read','unlinked:write'].includes(scope)) || !p.scope.split(' ').includes('unlinked:read') ||
+        !p.scope.split(' ').every(scope => ['unlinked:read','unlinked:write','unlinked:private_notes'].includes(scope)) || !p.scope.split(' ').includes('unlinked:read') ||
         p.body_sha256 !== createHash('sha256').update(body).digest('hex')) return null
       for (const [id, expiry] of seen) if (expiry <= now) seen.delete(id)
       if (seen.has(p.jti) || seen.size >= 10000) return null
@@ -62,8 +62,8 @@ export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBacken
     const publicEnabled = typeof readPublishedSnapshot === 'function'
     const write = identity.scope.split(' ').includes('unlinked:write')
     if (write && !publicEnabled) return fail(403, 'Connection actions unavailable')
-    const scope = write ? ACCOUNT_WRITE_SCOPE : publicEnabled ? 'owner_network_and_public' : 'owner_network'
-    const grant = { ...owner, grantId:`ideaflow:${identity.jti}`, version:CURRENT_ACCOUNT_GRANT_VERSION, scope, tools:[...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] }
+    const scope = composeAccountScope({ public: publicEnabled, write, privateNotes: identity.scope.split(' ').includes('unlinked:private_notes') })
+    const grant = { ...owner, agent: typeof identity.client === 'string' ? identity.client.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 80) : 'Ideaflow connector', grantId:`ideaflow:${identity.jti}`, version:CURRENT_ACCOUNT_GRANT_VERSION, scope, tools:[...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] }
     authenticated.set(request, { identity, grant })
     return await hosted(request, response, body, coordination ? { ownerCheckpoint } : undefined)
     } catch {

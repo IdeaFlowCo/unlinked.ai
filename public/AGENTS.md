@@ -110,3 +110,19 @@ Browser-only card joining is not an agent capability. The repository guide `docs
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures.
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract `docs/public-people-reader.md` (Historical membership); filter values are published in [OpenAPI](https://www.unlinked.ai/openapi.json).
+
+## Private investor/contact CSV lists
+
+With Private people notes & relations permission, call
+`unlinked_stage_investor_csv(csv,listName,mapping,listId?)`, then repeat
+`unlinked_resume_investor_import(importId,batchSize?)` until complete or partial.
+Read original fields and outcomes with `unlinked_get_investor_import`, paging with
+nextOffset. CSV parts are at most 512 KiB; split larger files at complete records
+with repeated headers and append parts to the same listId. Names/emails never
+merge people; exact LinkedIn addresses may match. No public profiles, social
+connections or notifications are created. List membership is a private contains
+edge. Find lists with `unlinked_list_private_things(kind:list,limit:100)` and their
+members with `unlinked_get_private_thing(thingId:listId,limit:100)`, following
+nextCursor as after. The shared connector prefixes tools with `unlinked__` and
+requires separately consented `unlinked:private_notes`; connection-write access
+alone is insufficient. Existing graph quotas apply; errors never mean completion.

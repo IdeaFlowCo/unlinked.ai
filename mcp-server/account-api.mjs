@@ -41,8 +41,11 @@ const ROUTES = Object.freeze({
   'POST /api/agent/v1/contacts/lookup': { tool: 'unlinked_lookup_contact', body: ['connectionId', 'linkedinUrl', 'profileId', 'refHashes'] },
   // Private people notes & relations (catalog v7, separate permission).
   'GET /api/agent/v1/private/person': { tool: 'unlinked_get_person_private', query: ['profileId'] },
-  'GET /api/agent/v1/private/thing': { tool: 'unlinked_get_private_thing', query: ['thingId'] },
-  'GET /api/agent/v1/private/things': { tool: 'unlinked_list_private_things', query: ['query', 'kind'] },
+  'POST /api/agent/v1/private/investor-imports': { tool: 'unlinked_stage_investor_csv', body: ['csv', 'mapping', 'listName', 'listId'], limit: 1024 * 1024 },
+  'POST /api/agent/v1/private/investor-imports/resume': { tool: 'unlinked_resume_investor_import', body: ['importId', 'batchSize'] },
+  'GET /api/agent/v1/private/investor-imports/status': { tool: 'unlinked_get_investor_import', query: ['importId', 'offset', 'limit'], numbers: ['offset', 'limit'] },
+  'GET /api/agent/v1/private/thing': { tool: 'unlinked_get_private_thing', query: ['thingId', 'after', 'limit'], numbers: ['limit'] },
+  'GET /api/agent/v1/private/things': { tool: 'unlinked_list_private_things', query: ['query', 'kind', 'after', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/private/search': { tool: 'unlinked_search_private', query: ['query', 'relationType', 'kind', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/private/neighbourhood': { tool: 'unlinked_get_neighbourhood', query: ['subjectKind', 'subjectId', 'depth'], numbers: ['depth'] },
   'POST /api/agent/v1/private/things': { tool: 'unlinked_save_private_thing', body: ['kind', 'name', 'createNew', 'clientRequestId'] },

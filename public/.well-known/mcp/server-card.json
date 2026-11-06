@@ -413,7 +413,7 @@
     },
     {
       "name": "unlinked_get_private_thing",
-      "description": "Read one of the owner’s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "description": "Read one of the owner’s private entities (a saved person, company, idea, project or list, or any entity id from another private tool) with its notes and relations. Pass limit (1–100) and follow nextCursor as after to read every relation; without these arguments the legacy read is bounded at 500 links. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -421,6 +421,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          },
+          "after": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
           }
         },
         "required": [
@@ -436,7 +445,7 @@
     },
     {
       "name": "unlinked_list_private_things",
-      "description": "List the owner’s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind. Use an id with unlinked_get_private_thing. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "description": "List the owner’s private entities (saved people, companies, ideas, projects and lists, and Unlinked or OpenChat people they wrote about), optionally by name and kind. Pass limit (1–100) and follow nextCursor as after for complete enumeration; query is not supported with pagination. Without pagination the legacy name listing is bounded at 50. Use kind list to discover lists, then read contains relations using unlinked_get_private_thing with limit. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -450,8 +459,18 @@
               "person",
               "company",
               "idea",
-              "project"
+              "project",
+              "list"
             ]
+          },
+          "after": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
           }
         },
         "additionalProperties": false
@@ -491,7 +510,8 @@
               "person",
               "company",
               "idea",
-              "project"
+              "project",
+              "list"
             ]
           },
           "limit": {
@@ -528,19 +548,10 @@
             "maxLength": 512
           },
           "depth": {
-            "anyOf": [
-              {
-                "type": "number",
-                "enum": [
-                  1
-                ]
-              },
-              {
-                "type": "number",
-                "enum": [
-                  2
-                ]
-              }
+            "type": "number",
+            "enum": [
+              1,
+              2
             ]
           }
         },
@@ -558,7 +569,7 @@
     },
     {
       "name": "unlinked_save_private_thing",
-      "description": "Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”). Returns its id for notes and links. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one. Set createNew true with a clientRequestId only to save a different one with an existing name; retries return the same entity. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "description": "Find or save a private person, company, idea, project or list by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”). Returns its id for notes and links. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one. Set createNew true with a clientRequestId only to save a different one with an existing name; retries return the same entity. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -568,7 +579,8 @@
               "person",
               "company",
               "idea",
-              "project"
+              "project",
+              "list"
             ]
           },
           "name": {
@@ -670,7 +682,7 @@
     },
     {
       "name": "unlinked_add_private_link",
-      "description": "Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another. Subject: subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Target: toKind “unlinked” + toId (published profile id, connection id or linkedin.com/in/ address), toKind “user” + toId (OpenChat user id already in the owner’s private notes), or toKind person/company/idea/project with toId (saved thing id) or toName. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one, then pass its id. Set createNew true with a clientRequestId only to save a different one with an existing name. The same subject, relation and target is one link, so retries never duplicate. Recorded as written by this agent (author agent:<key or app name>, source direct-key). relationType is derived from the words. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+      "description": "Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another. Subject: subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Target: toKind “unlinked” + toId (published profile id, connection id or linkedin.com/in/ address), toKind “user” + toId (OpenChat user id already in the owner’s private notes), or toKind person/company/idea/project/list with toId (saved thing id) or toName. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one, then pass its id. Set createNew true with a clientRequestId only to save a different one with an existing name. The same subject, relation and target is one link, so retries never duplicate. Recorded as written by this agent (author agent:<key or app name>, source direct-key). relationType is derived from the words. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -700,7 +712,8 @@
               "person",
               "company",
               "idea",
-              "project"
+              "project",
+              "list"
             ]
           },
           "toId": {
@@ -828,6 +841,155 @@
         "openWorldHint": false
       },
       "permission": "private_notes"
+    },
+    {
+      "name": "unlinked_stage_investor_csv",
+      "description": "Stage an uploaded investor/contact CSV in the owner’s private database. Supply exact header names in mapping; map private comments with notes (an array of column names). Retains the original file and fields. Returns importId and validation preview; then call unlinked_resume_investor_import to commit. Same bytes, mapping and list target replay the same import. Name/email never auto-match; exact LinkedIn addresses can match existing private/public personas. Each unmatched source row becomes a separate private person. At most 512 KiB per part: split larger files by complete CSV rows, repeating the header, and use the first resulting listId for subsequent parts. listId appends to an existing private list; otherwise creates a distinct list. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "csv": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 524288
+          },
+          "listName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "listId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          },
+          "mapping": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32768
+              },
+              "firstName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32768
+              },
+              "lastName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32768
+              },
+              "linkedinUrl": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32768
+              },
+              "email": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32768
+              },
+              "company": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32768
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32768
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32768
+                },
+                "maxItems": 256
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "csv",
+          "listName",
+          "mapping"
+        ],
+        "additionalProperties": false
+      },
+      "permission": "private_notes",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "unlinked_resume_investor_import",
+      "description": "Commit/resume one bounded batch (default 10, maximum 25 rows) from a staged CSV. Repeat with the same importId until status complete or partial; never report completion before then. Durable row receipts and idempotent graph writes survive process restarts. import_busy means retry later. On other errors, progress is retained: inspect status and retry after fixing the cause. Existing graph quotas apply (5,000 entities and links per owner). Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "importId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "batchSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          }
+        },
+        "required": [
+          "importId"
+        ],
+        "additionalProperties": false
+      },
+      "permission": "private_notes",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "unlinked_get_investor_import",
+      "description": "Read an investor import’s status and private original row fields with outcome receipts. Page with nextOffset until null, at most 20 rows per call. A partial import has rejected rows; inspect reasons. This reads the original outcome, not a guarantee that the owner has not subsequently edited/deleted graph records. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "importId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "importId"
+        ],
+        "additionalProperties": false
+      },
+      "permission": "private_notes",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
     }
   ],
   "connectionBrowsing": {

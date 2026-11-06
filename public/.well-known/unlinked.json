@@ -95,7 +95,10 @@
         "unlinked_add_private_link",
         "unlinked_update_private_link",
         "unlinked_delete_private_link",
-        "unlinked_delete_private_thing"
+        "unlinked_delete_private_thing",
+        "unlinked_stage_investor_csv",
+        "unlinked_resume_investor_import",
+        "unlinked_get_investor_import"
       ],
       "visibility": "owner-only; shown in Unlinked and OpenChat; never notifies anyone; not a connection request; not messaging",
       "messaging": "OpenChat via the shared Ideaflow connector https://id.ideaflow.app/mcp (OpenChat permission); never an Unlinked key permission"

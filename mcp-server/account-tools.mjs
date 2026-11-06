@@ -1,3 +1,4 @@
+import { INVESTOR_TOOLS, INVESTOR_MUTATING, INVESTOR_SCHEMAS, INVESTOR_DESCRIPTIONS } from './investor-tools.mjs'
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
@@ -93,6 +94,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
     profileId: z.string().min(1).max(160).optional(), refHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(100).optional(),
   },
   ...PRIVATE_NOTES_SCHEMAS,
+  ...INVESTOR_SCHEMAS,
 })
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
@@ -110,13 +112,14 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_lookup_contact: 'Read-only, owner-scoped: resolve one of the owner’s own contacts without paging. Give exactly one of connectionId (an id from unlinked_list_connections), linkedinUrl (a linkedin.com/in/ address), profileId (a published profile id) or refHashes (up to 100 linkedinRefHash values). Returns name, headline, company, the owner connectionId when the owner imported the person, linkedinRefHash (SHA-256 of the canonical LinkedIn slug, the private-graph key `linkedin:in:<hash>`) and publishedProfileId when the same person has a published Unlinked profile. Never returns another owner’s imports; typed not_found when nothing matches.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and give short conversational reasons stating unknown sector focus. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
   ...PRIVATE_NOTES_DESCRIPTIONS,
+  ...INVESTOR_DESCRIPTIONS,
 })
 
-const DETERMINISTIC_TOOLS = new Set(['unlinked_list_person_targets', ...PRIVATE_NOTES_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+const DETERMINISTIC_TOOLS = new Set(['unlinked_list_person_targets', ...PRIVATE_NOTES_TOOLS, ...INVESTOR_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
 export const WRITE_TOOLS = new Set(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
 // Every tool that changes something: connection writes plus private-notes writes.
-export const MUTATING_TOOLS = new Set([...WRITE_TOOLS, ...PRIVATE_NOTES_MUTATING])
-const PRIVATE_NOTES_TOOL_SET = new Set(PRIVATE_NOTES_TOOLS)
+export const MUTATING_TOOLS = new Set([...WRITE_TOOLS, ...PRIVATE_NOTES_MUTATING, ...INVESTOR_MUTATING])
+const PRIVATE_NOTES_TOOL_SET = new Set([...PRIVATE_NOTES_TOOLS, ...INVESTOR_TOOLS])
 // Request-model refusals, mapped onto the typed agent vocabulary.
 const CONNECTION_FAILURES = Object.freeze({
   connection_not_member: ['not_a_member', 'That profile is not an Unlinked member yet (an imported profile), so it cannot be asked to connect.'],
@@ -561,7 +564,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     },
   }
 
-  Object.assign(tools, createPrivateNotesTools({ overlay, identityFor, createError: (code, message, details) => new AccountToolError(code, message, details),
+  Object.assign(tools, createPrivateNotesTools({ overlay, identityFor, getBackend, createError: (code, message, details) => new AccountToolError(code, message, details),
     lookupContact: (grant, input, signal) => tools.unlinked_lookup_contact(grant, input, signal) }))
 
   const askFailure = (error, signal) => {

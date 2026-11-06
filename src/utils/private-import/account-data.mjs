@@ -1,3 +1,4 @@
+import { investorJobsForAccount, investorReceiptId } from './investor-job.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { withoutSuspendedRows } from '../public-people/suspension-filter.mjs'
@@ -45,7 +46,18 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
   const confirmed = signupLookup ? await (typeof signupLookup.readForExport === 'function' ? signupLookup.readForExport(owner) : signupLookup.read(owner)) : null
   const signupProfile = confirmed ? { profile: confirmed.profile, receiptId: confirmed.receiptId, ...(confirmed.retired ? { retired: true, retiredByProfileId: confirmed.retiredByProfileId } : {}),
     provenance: { source: 'profile-lookup', selfAsserted: true, confirmation: 'self-asserted-public-profile-v1' } } : null
-  return { format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
+  const investorImports = []
+  for (const resource of (await investorJobsForAccount(owner.ownerId, backend)).jobs) {
+    signal?.throwIfAborted()
+    const job = resource.payload, receipts = []
+    for (let ordinal = 0; ordinal < job.total; ordinal++) {
+      signal?.throwIfAborted()
+      const receipt = await backend.readResource('import', investorReceiptId(owner.ownerId, job.id, ordinal))
+      if (receipt && !receipt.deleted && receipt.sourceOwnerId === owner.ownerId) receipts.push(receipt.payload)
+    }
+    investorImports.push({ job, csv: (await backend.readAsset(job.sourceDigest)).toString('utf8'), receipts })
+  }
+  return { investorImports, format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
     account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy, signupProfile }
 }
 
@@ -124,6 +136,16 @@ async function eraseAccountData({ owner, backend, jobs, grantIds = [], signupLoo
     await erase(others)
     await erase([tombstone('import', resource.sourceId, resource.sourceRevision)])
   }
+  const investor = await investorJobsForAccount(ownerId, backend)
+  for (const resource of investor.jobs) {
+    const job = resource.payload
+    for (let ordinal = 0; ordinal < job.total; ordinal++) {
+      signal?.throwIfAborted()
+      await eraseOne({ type: 'import', sourceId: investorReceiptId(ownerId, job.id, ordinal) })
+    }
+    await eraseOne({ type: 'import', sourceId: resource.sourceId })
+  }
+  if (investor.catalog) await eraseOne({ type: 'import', sourceId: investor.catalog.sourceId })
   for (const grantId of grantIds) {
     signal?.throwIfAborted()
     if (typeof grantId !== 'string' || !SHA.test(grantId)) continue
