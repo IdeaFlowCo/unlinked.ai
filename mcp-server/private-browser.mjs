@@ -37,7 +37,7 @@ import { InvitationError, INVITATION_TOKEN } from './member-invitations.mjs'
 import { ConnectionError } from './member-connections.mjs'
 import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
 import { CONNECTION_FEEDBACK_SCRIPT, CONNECTION_FEEDBACK_SRC, CONNECTION_FEEDBACK_VERSION } from './connection-feedback.mjs'
-import { FEEDBACK_TOKEN_PATH, FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, FEEDBACK_UPLOAD_ORIGIN, exchangeFeedbackToken, feedbackWidgetTag } from './feedback-widget.mjs'
+import { FEEDBACK_TOKEN_PATH, FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, FEEDBACK_UPLOAD_ORIGIN, exchangeFeedbackToken, feedbackWidgetTag, iosAppVersion } from './feedback-widget.mjs'
 import { ANALYTICS_ORIGIN, analyticsTag, queueAnalyticsEvent, takeAnalyticsEvents } from './ideaflow-analytics.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
 import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
@@ -636,8 +636,10 @@ export function createPrivateBrowserHandler({ privateListImports, connectionPriv
   const responseAlerts = new WeakMap()
   // Signed-in page responses that include the Messages dock.
   const responseDock = new WeakSet()
-  // Responses to the Unlinked iOS app: pages get iosAppView and no floating feedback bubble.
-  const iosResponses = new WeakSet()
+  // Responses to the Unlinked iOS app → its app version (or '' if unparsed):
+  // pages get iosAppView, the menu-launched feedback widget labelled with that
+  // version, and no analytics.
+  const iosResponses = new WeakMap()
   // Per-response route stage durations for Server-Timing on rendered pages:
   // fixed stage names and whole milliseconds only, never identifiers or paths.
   const responseTimings = new WeakMap()
@@ -705,7 +707,7 @@ export function createPrivateBrowserHandler({ privateListImports, connectionPriv
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? '' : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
+    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? feedbackWidgetTag(nonce, { iosApp: iosResponses.get(response) || 'unknown' }) : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   // `silentBack` (automatic sign-in) returns to the original page without
@@ -1135,7 +1137,7 @@ export function createPrivateBrowserHandler({ privateListImports, connectionPriv
     // APIs, auth, export, assets and every POST stay no-store.
     // Not back/forward-cache eligible: photo bytes (content-versioned header of
     // their own) and capability-URL contact cards, which stay no-store.
-    if (iosApp(request)) iosResponses.add(response)
+    if (iosApp(request)) iosResponses.set(response, iosAppVersion(request.headers['user-agent']) ?? '')
     const navigationPath = new URL(request.url, base).pathname
     const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/') && !navigationPath.startsWith('/messages/person/')
     response.setHeader('Cache-Control', navigation ? 'private, no-cache' : 'no-store')

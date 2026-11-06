@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { agentSetupCopyScript, renderAgents, renderDataLiberation, renderImportGuide, renderMeet, renderSupport, fillMeHeadline, fillNavAlerts, iosAppView, TOP_BAR_SCRIPT, PRIVACY_URL, TERMS_URL } from './private-onboarding-views.mjs'
 import { iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
-import { FEEDBACK_UPLOAD_ORIGIN, FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag } from './feedback-widget.mjs'
+import { FEEDBACK_UPLOAD_ORIGIN, FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag, iosAppVersion } from './feedback-widget.mjs'
 import { ANALYTICS_ORIGIN, analyticsTag } from './ideaflow-analytics.mjs'
 
 const root = new URL('../', import.meta.url)
@@ -56,8 +56,8 @@ export const MEET_SCRIPT = `import { BrowserCardScanner, decodeImageFile } from 
 const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 // Every page carries the header's Me-menu script under its own nonce.
 // Header counts (`alerts`) are display-only, like the rest of `chrome`.
-// In the iOS app (`UnlinkediOS/`), pages get iosAppView and no floating feedback bubble.
-const document = (view, { headline, nonce, alerts, ios = false }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? '' : feedbackWidgetTag(nonce) + analyticsTag(nonce)}<!--/email_off--></html>`
+// In the iOS app (`UnlinkediOS/`), pages get iosAppView, the menu-launched feedback widget labelled with the app version, and no analytics.
+const document = (view, { headline, nonce, alerts, ios = false }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? feedbackWidgetTag(nonce, { iosApp: ios }) : feedbackWidgetTag(nonce) + analyticsTag(nonce)}<!--/email_off--></html>`
 const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
 
 // Exact, source-controlled anonymous discovery only. Never resolves an owner,
@@ -83,7 +83,7 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
   } else if (pathname === '/public-assets/jsqr-module.mjs') { type = 'text/javascript'; content = 'export default globalThis.jsQR;' }
   else {
     type = 'text/html; charset=utf-8'
-    const nonce = randomBytes(24).toString('base64url'), page = { headline: chrome.headline, nonce, alerts: chrome.alerts, ios: iosAppUserAgent(request.headers['user-agent']) }
+    const nonce = randomBytes(24).toString('base64url'), page = { headline: chrome.headline, nonce, alerts: chrome.alerts, ios: iosAppUserAgent(request.headers['user-agent']) ? iosAppVersion(request.headers['user-agent']) || 'unknown' : false }
     const formAction = `form-action 'self'${typeof signInOrigin === 'string' && /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/.test(signInOrigin) ? ` ${signInOrigin}` : ''}`
     response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     // The copy button works under this page's nonce; the text stays selectable without it.
