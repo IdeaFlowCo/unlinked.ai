@@ -1,3 +1,4 @@
+import { readRequestBody } from './request-body.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { connectOpenChatSocket, OPENCHAT_SOCKET_URL } from './openchat-socket.mjs'
@@ -27,6 +28,13 @@ const AUDIO_TYPES = new Set(['audio/m4a', 'audio/mp4', 'audio/x-m4a', 'audio/aac
 const DOCUMENT_TYPES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/csv', 'text/plain', 'application/rtf', 'application/zip', 'application/x-zip-compressed'])
 const FILE_TYPES = new Set([...IMAGE_TYPES, ...AUDIO_TYPES, ...DOCUMENT_TYPES])
 const UPLOAD_TYPES = new Set([...IMAGE_TYPES, ...DOCUMENT_TYPES])
+export const messagingBodyLimit = (path, type) => path === '/messages/api/attachments' ? (DOCUMENT_TYPES.has(String(type ?? '').split(';')[0].trim().toLowerCase()) ? 20 * 1024 * 1024 : 10 * 1024 * 1024) : 64 * 1024
+export const validMessagingAttachmentHeaders = headers => {
+  const mimeType = String(headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+  const declared = Number(headers['content-length'])
+  const maxBytes = DOCUMENT_TYPES.has(mimeType) ? DOCUMENT_MAX_BYTES : UPLOAD_MAX_BYTES
+  return UPLOAD_TYPES.has(mimeType) && Number.isSafeInteger(declared) && declared > 0 && declared <= maxBytes
+}
 // Images stay at this proxy's existing 10 MB cap (stricter than OpenChat's own 20 MB).
 // Documents share the download/serve ceiling below (well under OpenChat's 50 MB cap),
 // so one FILE_MAX_BYTES also bounds what serveFile will ever stream back.
@@ -136,7 +144,7 @@ const invalid = () => new MessagingError(400, 'invalid_input')
 // `blockedUsers(session)` (optional) returns the OpenChat user ids this member
 // blocked (member-blocks.mjs): their direct conversations are hidden, their
 // messages are not delivered, and no message is sent to them from here.
-export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, blockedUsers = null, resolveOwnerRecipient = null } = {}) {
+export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, profilePathFor = null, blockedUsers = null, participantBlocked = null, resolveOwnerRecipient = null } = {}) {
   const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map(), blockCache = new Map(), peers = new Map()
   // The member's blocked OpenChat users, read at most every 30 seconds (and again after a change).
   async function blockedFor(session) {
@@ -227,21 +235,37 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   const remember = (key, id, clientId) => { let map = issued.get(key); if (!map) { map = new Map(); issued.set(key, map); trim(issued, 5000) } map.set(id, clientId); trim(map, 300) }
   const withClientId = (key, message) => { const clientId = issued.get(key)?.get(message.id); return clientId ? { ...message, clientId } : message }
 
-  async function listConversations(session) {
+  async function listConversations(session, { freshBlocks = false } = {}) {
     const { value, credential } = await upstream(session, 'GET', '/api/chat/conversations')
     const all = array(value).map(projectConversation).filter(Boolean).slice(0, 500)
     rememberPeers(session, all, credential.userId)
     // Conversations with someone this member blocked are hidden from the inbox.
-    const blocked = await blockedFor(session)
+    let blocked
+    if (freshBlocks) {
+      if (typeof blockedUsers !== 'function' || !ownerKey(session)) throw unavailable()
+      try { blocked = new Set([...(await blockedUsers(session))].filter(validId)) } catch { throw unavailable() }
+    } else blocked = await blockedFor(session)
     const conversations = blocked.size ? all.filter(conversation => !(conversation.type === 'direct' && conversation.participants.some(person => person.id !== credential.userId && blocked.has(person.id)))) : all
-    // "View on Unlinked": public profile ids of partners who claimed a published
-    // Unlinked profile. Bounded; a slow or failed lookup only omits the links.
+    // Profile links: public profile ids of partners who claimed a published
+    // Unlinked profile (the header name, dock window title and group sender
+    // names link there), plus the page path when handles are known
+    // (`profilePathFor`). Bounded; a slow or failed lookup only omits the links.
     if (typeof profilesForParticipants === 'function') {
       const others = [...new Set(conversations.flatMap(conversation => conversation.participants.map(person => person.id)).filter(id => id !== credential.userId))]
       const profiles = others.length ? await Promise.race([profilesForParticipants(session, others).catch(() => null), new Promise(resolve => { const timer = setTimeout(resolve, 2500, null); timer.unref?.() })]) : null
-      if (profiles instanceof Map) for (const conversation of conversations) for (const person of conversation.participants) { const profileId = profiles.get(person.id); if (typeof profileId === 'string' && profileId) person.profileId = profileId }
+      if (profiles instanceof Map) for (const conversation of conversations) for (const person of conversation.participants) {
+        const profileId = profiles.get(person.id)
+        if (typeof profileId !== 'string' || !profileId) continue
+        person.profileId = profileId
+        let path = null
+        try { path = typeof profilePathFor === 'function' ? profilePathFor(profileId) : null } catch { path = null }
+        if (typeof path === 'string' && path.startsWith('/people/') && path.length <= 600) person.profilePath = path
+      }
     }
-    return { me: { id: credential.userId }, conversations }
+    for (const conversation of conversations) for (const person of conversation.participants) {
+      if (person.id !== credential.userId && !person.profileId) person.chatProfilePath = `/messages/person/${encodeURIComponent(conversation.id)}/${encodeURIComponent(person.id)}`
+    }
+    return { me: { id: credential.userId }, conversations, ...(freshBlocks ? { blocked } : {}) }
   }
 
   async function markUnread(session, conversationId) {
@@ -337,11 +361,10 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const declared = Number(request.headers['content-length'])
     // Documents get the larger (but still bounded) cap; images keep the existing stricter one.
     const maxBytes = DOCUMENT_TYPES.has(mimeType) ? DOCUMENT_MAX_BYTES : UPLOAD_MAX_BYTES
-    if (!UPLOAD_TYPES.has(mimeType) || !Number.isSafeInteger(declared) || declared <= 0 || declared > maxBytes) throw invalid()
+    if (!validMessagingAttachmentHeaders(request.headers)) throw invalid()
     const filename = (String(request.headers['x-filename'] ?? 'image').normalize('NFKC').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100) || 'image')
-    const parts = []; let length = 0
-    for await (const part of request) { length += part.length; if (length > maxBytes) throw new MessagingError(413, 'body_too_large'); parts.push(part) }
-    const bytes = Buffer.concat(parts)
+    let bytes
+    try { bytes = await readRequestBody(request, maxBytes) } catch { throw new MessagingError(413, 'body_too_large') }
     if (bytes.length !== declared) throw invalid()
     const { value } = await upstream(session, 'POST', '/api/chat/attachments/presign', { filename, mimeType, sizeBytes: bytes.length })
     let put
@@ -568,24 +591,24 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     if (link.streams.size >= 3) { const oldest = [...link.streams][0]; oldest.write('superseded', {}); oldest.end() }
     const since = iso(request.headers['last-event-id']) ?? iso(url.searchParams.get('since'))
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store, private', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' })
-    let ended = false
+    let ended = false, heartbeat, lifetime
     const stream = {
       seen: new Set(),
-      write(event, data, id) { if (!ended) response.write(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) },
+      write(event, data, id) { if (!isSessionLive(session)) { this.end(); return } if (!ended) response.write(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) },
       end() { if (ended) return; ended = true; clearInterval(heartbeat); clearTimeout(lifetime); link.streams.delete(stream); response.end(); if (!link.streams.size && !link.closed) { link.lingerTimer = setTimeout(() => closeLink(link), lingerMs); link.lingerTimer.unref?.() } },
     }
     response.write('retry: 3000\n\n')
     link.streams.add(stream)
     stream.write('ready', { state: link.mode === 'socket' ? 'live' : link.mode })
     if (since) void replay(link, since, [stream]).catch(() => {})
-    const heartbeat = setInterval(() => {
+    heartbeat = setInterval(() => {
       if ((session.expiresAt && session.expiresAt <= now()) || !isSessionLive(session)) { stream.write('expired', {}); stream.end(); return }
       link.socket?.emit('heartbeat')
       stream.write('heartbeat', {})
     }, heartbeatMs)
     heartbeat.unref?.()
     // Streams are recycled; EventSource reconnects with Last-Event-ID and replays the gap.
-    const lifetime = setTimeout(() => stream.end(), streamLifetimeMs); lifetime.unref?.()
+    lifetime = setTimeout(() => stream.end(), streamLifetimeMs); lifetime.unref?.()
     request.on('close', () => stream.end())
     response.on('error', () => stream.end())
   }
@@ -593,10 +616,10 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   // ── Routes ──────────────────────────────────────────────────────────────
   async function readJson(request) {
     if (!/^application\/json(?:;\s*charset=utf-8)?$/i.test(request.headers['content-type'] ?? '')) throw invalid()
-    const parts = []; let length = 0
-    for await (const part of request) { length += part.length; if (length > BODY_MAX_BYTES) throw new MessagingError(413, 'body_too_large'); parts.push(part) }
+    let bytes
+    try { bytes = await readRequestBody(request, BODY_MAX_BYTES) } catch { throw new MessagingError(413, 'body_too_large') }
     let value
-    try { value = JSON.parse(Buffer.concat(parts).toString('utf8') || '{}') } catch { throw invalid() }
+    try { value = JSON.parse(bytes.toString('utf8') || '{}') } catch { throw invalid() }
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid()
     return value
   }
@@ -680,6 +703,23 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     const others = conversation.participants.filter(person => person.id !== credential.userId)
     return { conversation, me: credential.userId, peer: conversation.type === 'direct' && others.length === 1 ? others[0] : null }
   }
+  // Read only the caller's current, nonblocked conversations. No identity inference
+  // or public profile creation: OpenChat-only participants stay conversation scoped.
+  async function participantProfile(session, conversationId, userId) {
+    spend(session, 'read')
+    if (!validId(conversationId) || !validId(userId)) throw invalid()
+    const { me, conversations, blocked } = await listConversations(session, { freshBlocks: true })
+    const conversation = conversations.find(item => item.id === conversationId)
+    const person = conversation?.participants.find(item => item.id === userId && item.id !== me.id)
+    if (!person || blocked.has(userId)) throw new MessagingError(404, 'not_found')
+    if (participantBlocked) {
+      let hidden
+      try { hidden = await participantBlocked(session, userId) } catch { throw unavailable() }
+      if (hidden !== false && hidden !== true) throw unavailable()
+      if (hidden) throw new MessagingError(404, 'not_found')
+    }
+    return { person: { id: person.id, name: person.name, profileId: person.profileId, profilePath: person.profilePath }, conversationId }
+  }
   // A public profile's OpenChat user (the same confidential path Message uses), or null.
   async function recipientFor(session, profile) {
     const { value } = await upstream(session, 'POST', '/api/unlinked/recipient', { profile })
@@ -718,5 +758,5 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
 
   function close() { for (const link of [...links.values()]) closeLink(link) }
-  return { handle, openProfile, openOwner, unreadTotal, close, conversationPeer, recipientFor, blockUser, evidence, forwardReport, invalidateBlocks, _links: links }
+  return { participantProfile, handle, openProfile, openOwner, unreadTotal, close, conversationPeer, recipientFor, blockUser, evidence, forwardReport, invalidateBlocks, _links: links }
 }

@@ -2,6 +2,8 @@
 // ordinary type sizes, the accepted prototype's profile and directory layout.
 export const ONBOARDING_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap'
 export const ONBOARDING_STYLE = `
+.unlinked-onboarding .enrichment-row{padding:16px 20px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.unlinked-onboarding .enrichment-row:last-child{border-bottom:0}.unlinked-onboarding .enrichment-row h3{margin:0 0 4px}.unlinked-onboarding .profile.contact-detail{display:block;max-width:800px;margin-inline:auto}.unlinked-onboarding .contact-detail a{overflow-wrap:anywhere}
+
 html{-webkit-text-size-adjust:100%}
 .unlinked-onboarding #api-keys{scroll-margin-top:24px}
 .unlinked-onboarding .key-permissions{padding:12px 16px;margin:16px 0;border:1px solid var(--line);border-radius:var(--r);background:var(--page)}
@@ -59,6 +61,10 @@ body:has(.msg) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
 .unlinked-onboarding .msg-thread-who h2{font-size:16px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .unlinked-onboarding .msg-thread-who .small{font-size:13px}
 .unlinked-onboarding .msg-head-link{white-space:nowrap}
+.unlinked-onboarding .msg-thread-person{display:flex;align-items:center;gap:12px;min-width:0;flex:1;color:inherit;text-decoration:none}
+.unlinked-onboarding a.msg-thread-person:hover h2{text-decoration:underline}
+.unlinked-onboarding a.msg-thread-person:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:8px}
+.unlinked-onboarding .msg-sender a{color:inherit}
 .unlinked-onboarding .msg-back{display:none;min-height:44px;min-width:44px;padding:0;background:#fff;color:var(--fg);border-color:var(--line2);font-size:18px}
 .unlinked-onboarding .msg-log{flex:1;min-height:0;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:2px;overscroll-behavior:contain}
 .unlinked-onboarding .msg-loading{margin:auto;color:var(--muted);font-size:14px}
@@ -95,6 +101,8 @@ body:has(.msg) nav>a[href="/messages"]{font-weight:700;color:var(--brand)}
 .unlinked-onboarding .msg-item-preview.typing{color:var(--brand-d);font-style:italic}
 .unlinked-onboarding .msg-line{position:relative;display:flex;align-items:center;max-width:100%}
 .unlinked-onboarding .msg-row.own .msg-line{flex-direction:row-reverse}
+/* Reserve the toolbar's height below group sender links so it cannot cover them. */
+.unlinked-onboarding .msg-sender + .msg-line{margin-top:30px}
 /* A floating toolbar over the bubble's top corner: hidden actions never take width from the message. */
 .unlinked-onboarding .msg-actions{position:absolute;bottom:calc(100% - 6px);left:8px;z-index:3;display:flex;gap:0;padding:2px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #2529531f;opacity:0;pointer-events:none;transition:opacity .12s}
 .unlinked-onboarding .msg-row.own .msg-actions{left:auto;right:8px}
@@ -327,6 +335,12 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .file,.unlinked-onboarding .drop{display:block;padding:22px 24px;border:2px dashed var(--line2);border-radius:var(--r);background:#fff}
 .unlinked-onboarding .drop strong{display:block;font-size:18px;margin-bottom:4px}
 .unlinked-onboarding .drop p{margin:0 0 14px}
+.unlinked-onboarding .drop.over{border-color:var(--brand);background:var(--tint)}
+.unlinked-onboarding .drop ul{margin:8px 0 0;padding-left:18px}
+.unlinked-onboarding details.advanced{margin:16px 0;padding:12px 16px;border:1px solid var(--line);border-radius:var(--r);background:#fff}
+.unlinked-onboarding details.advanced summary{cursor:pointer;font-weight:600;min-height:28px}
+.unlinked-onboarding details.advanced label{display:block;margin:12px 0 0;font-weight:600}
+.unlinked-onboarding details.advanced select{display:block;width:100%;max-width:420px;min-height:44px;margin-top:6px;padding:8px 12px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;color:var(--fg);font:inherit;font-size:16px}
 .unlinked-onboarding input[type=file]{display:block;width:100%;max-width:100%;margin:14px 0;font:inherit}
 .unlinked-onboarding input[type=text],.unlinked-onboarding textarea{display:block;width:100%;min-width:0;padding:12px 14px;margin-top:7px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;color:var(--fg);font:inherit;font-size:16px}
 .unlinked-onboarding input::placeholder{color:var(--muted);opacity:1}
@@ -357,7 +371,9 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .tag,.unlinked-onboarding .skills span{display:inline-block;background:var(--tint);color:var(--brand-d);border-radius:99px;padding:5px 12px;font-size:14px}
 .unlinked-onboarding .profile{display:grid;grid-template-columns:1fr 350px;gap:20px;padding-top:22px;align-items:start}
 .unlinked-onboarding .profile .card{margin:0 0 16px}
-.unlinked-onboarding .phead{padding:0 0 22px;overflow:hidden}
+.unlinked-onboarding .phead{padding:0 0 22px;overflow:hidden;position:relative}
+.unlinked-onboarding .phead .li-top{position:absolute;top:120px;right:24px;gap:6px;color:var(--fg);text-decoration:none}
+.unlinked-onboarding .phead .li-top svg{color:#0a66c2;flex:none}
 .unlinked-onboarding .banner{height:108px;background:linear-gradient(115deg,var(--h,var(--brand)),color-mix(in srgb,var(--h,var(--brand)) 30%,#fff))}
 .unlinked-onboarding .pav{width:96px;height:96px;border-radius:50%;border:4px solid #fff;margin:-48px 0 0 24px;display:grid;place-items:center;background:var(--h,var(--brand));color:#fff;font-weight:600;font-size:30px}
 .unlinked-onboarding .phead h1{font:600 28px/1.15 "Public Sans",system-ui,sans-serif;letter-spacing:-.01em;margin:12px 24px 2px}
@@ -370,6 +386,12 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .qr{margin:18px 24px 0;max-width:260px;background:#fff}
 .unlinked-onboarding .qr svg{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:var(--r)}
 .unlinked-onboarding .qr-url{margin:10px 24px 0;overflow-wrap:anywhere}
+.unlinked-onboarding .share-link{margin:12px 0 0}
+.unlinked-onboarding .share-link label{font-size:13px;color:var(--muted)}
+.unlinked-onboarding .share-row{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin-top:6px}
+.unlinked-onboarding .share-row .share-url{flex:1 1 220px;margin:0;min-height:38px;padding:8px 12px;font-size:14px;color:var(--muted);background:var(--tint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.unlinked-onboarding .share-row button{flex:0 0 auto}
+.unlinked-onboarding .share-link [role=status]{margin:6px 0 0}
 .unlinked-onboarding .sec h3{margin:0 0 12px;font-size:17px}
 .unlinked-onboarding .sec>p{margin:0}
 .unlinked-onboarding .sec>p+p,.unlinked-onboarding .sec>pre+p{margin-top:10px}
@@ -444,15 +466,11 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .foot-brand{display:flex;flex-direction:column;gap:2px}
 .unlinked-onboarding .foot-brand b{color:var(--fg);font-size:15px;font-weight:700;letter-spacing:-.01em}
 .unlinked-onboarding .foot-links{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px}
-/* The WIT feedback widget's inline trigger lives in a shadow root; its host
-   takes the footer's colors and type through the widget's own variables. */
-.unlinked-onboarding #wit-feedback-slot,.unlinked-onboarding #wit-feedback-widget{display:inline-flex;align-items:center;font-family:inherit;color:inherit;--wit-muted:var(--muted);--wit-text:var(--fg)}
-.unlinked-onboarding #wit-feedback-slot:empty{display:none}
 .unlinked-onboarding .foot-meta{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 24px;margin-top:24px;font-size:13px}
 .unlinked-onboarding .foot-legal{display:flex;flex-wrap:wrap;align-items:center;gap:6px 20px}
 @media(max-width:600px){.unlinked-onboarding footer{padding:24px 0 28px}.unlinked-onboarding .foot-main{flex-direction:column;gap:6px}.unlinked-onboarding .foot-links{gap:0 20px}.unlinked-onboarding .foot-meta{flex-direction:column;align-items:flex-start;gap:4px;margin-top:16px}.unlinked-onboarding .foot-legal{gap:0 20px}}
 /* Touch screens: every footer link is a 44px tap target. */
-@media(pointer:coarse),(max-width:600px){.unlinked-onboarding footer :is(.foot-links,.foot-legal)>a,.unlinked-onboarding footer .link-button,.unlinked-onboarding footer #wit-feedback-slot{display:inline-flex;align-items:center;min-height:44px}}
+@media(pointer:coarse),(max-width:600px){.unlinked-onboarding footer :is(.foot-links,.foot-legal)>a,.unlinked-onboarding footer .link-button{display:inline-flex;align-items:center;min-height:44px}}
 .unlinked-onboarding .account{margin:0}
 .unlinked-onboarding :is(a,button,input,textarea,summary):focus-visible{outline:3px solid var(--brand);outline-offset:3px}
 .unlinked-onboarding [hidden]{display:none!important}
@@ -646,6 +664,15 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .pconn-status:empty{display:none}
 .unlinked-onboarding .pconn[aria-busy=true] .crow,.unlinked-onboarding .pconn[aria-busy=true] .pconn-status{opacity:.55}
 .unlinked-onboarding .pconn-all{margin:10px 0 0}
+.unlinked-onboarding .phead .pcount{display:inline-block;padding:8px 0;margin:-8px 0;color:inherit;text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:3px}
+.unlinked-onboarding .phead .pcount:hover{text-decoration-color:currentColor}
+.unlinked-onboarding .phead .pcount:focus-visible{outline:3px solid var(--brand);outline-offset:2px;border-radius:4px}
+.unlinked-onboarding .mutuals{display:flex;align-items:center;gap:4px;margin:12px 24px 0;min-height:36px;color:var(--fg);font-size:14px;line-height:1.3;text-decoration:none}
+.unlinked-onboarding .mutuals .mfaces{display:flex;flex:none;padding-right:10px}
+.unlinked-onboarding .mutuals .avatar{width:28px;height:28px;font-size:11px;border:2px solid #fff;margin-right:-8px}
+.unlinked-onboarding .mutuals:hover .mutuals-text{text-decoration:underline}
+.unlinked-onboarding .mutuals:focus-visible{outline:3px solid var(--brand);outline-offset:3px;border-radius:6px}
+.unlinked-onboarding #connections{scroll-margin-top:12px}
 @media(max-width:900px),(pointer:coarse){.unlinked-onboarding .pconn-filter input[type=search]{font-size:16px}}
 @media(max-width:600px){.unlinked-onboarding .network-toolbar{padding:4px 14px 14px}.unlinked-onboarding .network-query{min-width:100%}.unlinked-onboarding .network-sort{flex:1}.unlinked-onboarding .network-segments{width:100%;font-size:13px}.unlinked-onboarding .network-segments a{flex:1;text-align:center;padding:9px 5px}.unlinked-onboarding .network-reset{margin-left:0}}
 /* Phones: the list, not the filters, fills the first screen. Field labels stay
@@ -664,7 +691,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .private-context li{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--page);overflow-wrap:anywhere}
 .unlinked-onboarding .private-context li p{margin:0;white-space:pre-wrap}
 .unlinked-onboarding .private-context li .small{display:block;margin:4px 0 0;font-size:12px}
-.unlinked-onboarding .private-context .pc-facts{margin:10px 0 0;font-size:14px;font-weight:600}
+.unlinked-onboarding .private-context .pc-facts{margin:10px 0 0;font-size:14px;font-weight:600}.unlinked-onboarding .private-context .pc-desc{margin:10px 0 0;color:var(--muted)}
 .unlinked-onboarding .private-context .pc-facts.due{color:#a3461b}
 .unlinked-onboarding .private-context .pc-explore{margin-top:10px;min-height:36px}
 .unlinked-onboarding .private-context .pc-hint{margin:14px 0 0;font-size:13px}
@@ -722,4 +749,6 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
    bottom so the floating feedback button never sits on the last actions. */
 @media(max-width:600px){.unlinked-onboarding header{gap:10px 8px}.unlinked-onboarding .logo strong{font-size:21px}.unlinked-onboarding nav{gap:2px;flex-wrap:nowrap;margin-left:auto}.unlinked-onboarding header:has(.me) nav{width:100%;justify-content:space-between;margin-left:0}.unlinked-onboarding nav .nav-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.unlinked-onboarding nav>a:not(.button):not(.nav-ico){padding:0 6px}.unlinked-onboarding nav .nav-ico{width:38px;height:38px}.unlinked-onboarding nav .nav-ico.nav-ico-lbl{width:38px;padding:0;gap:0}.unlinked-onboarding{padding-bottom:96px}}
 @media(max-width:370px){.unlinked-onboarding nav{font-size:13px}.unlinked-onboarding nav .nav-ico{width:34px}}
+
+.network-facets{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0}.network-facets label{font-size:13px;font-weight:600}.network-facets input,.network-facets select{display:block;width:100%;font:inherit;padding:9px;border:1px solid var(--line,#dde1e9);border-radius:6px;background:var(--bg,#f7f8fa);color:inherit;box-sizing:border-box}.network-advanced{margin-top:12px}.network-advanced summary{cursor:pointer;font-weight:600;font-size:14px}.result-select{font-size:12px;display:inline-flex;align-items:center;gap:6px;min-height:36px}.result-select input{width:16px;height:16px}.save-results form{display:flex;align-items:end;gap:12px;flex-wrap:wrap}.save-results label{display:grid;gap:4px}.save-results input{max-width:100%}@media(max-width:600px){.network-facets input,.network-facets select{font-size:16px}}
 `

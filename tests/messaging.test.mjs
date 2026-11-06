@@ -54,6 +54,16 @@ test('partner identity lookup sends only the member identity and valid ids, and 
   await assert.rejects(createMessagingIdentities({ identityForOwner: async () => identity })({ owner }, ['oc-a']))
 })
 
+test('strict partner identity lookup rejects malformed, unrequested and duplicate answers', async () => {
+  const valid = { userId: 'oc-a', issuer: IDEAFLOW_ISSUER, subject: 'a' }
+  for (const answers of [null, [valid, { ...valid, userId: 'other' }], [valid, { ...valid, subject: '' }], [valid, valid]]) {
+    const lookup = createMessagingIdentities({ secret: 's'.repeat(40), identityForOwner: async () => identity, fetchImpl: async () => Response.json({ identities: answers }) })
+    await assert.rejects(lookup({ owner }, ['oc-a'], { strict: true }))
+  }
+  const lookup = createMessagingIdentities({ secret: 's'.repeat(40), identityForOwner: async () => identity, fetchImpl: async () => Response.json({ identities: [valid] }) })
+  assert.deepEqual(await lookup({ owner }, ['oc-a'], { strict: true }), [valid])
+})
+
 test('card recipient exchange returns only an inbox id and name, never the recipient credential', async () => {
   let calls = 0
   const resolve = createMessagingRecipient({ secret: 's'.repeat(40), identityForOwner: async value => { assert.deepEqual(value, owner); return identity }, fetchImpl: async (_url, options) => {

@@ -3,8 +3,10 @@
 People profile pages, People list rows, connection rows, company pages, the
 member's own profile and the member card (`/card`, `/scan` My card) show an
 operator-published profile photo when one exists, and the initials otherwise.
-Photos are an operator-published set from an offline operator source — never
-member uploads and never fetched by the runtime.
+Photos come from two sources: an operator-published set from an offline
+operator source, and (since unlinked-ff0p) **a member's own profile photo from
+their own LinkedIn export**, which wins for that member's profile. Members
+cannot upload arbitrary images, and the runtime fetches nothing else.
 
 ## Serving
 
@@ -139,3 +141,16 @@ built from this packet's files with `nginx.canonical.conf` copied over
 `nginx.conf`, as for every canonical release. Without the new ingress config the
 feature still works, but nginx adds `no-store` to photos so browsers refetch
 them on every page.
+
+## Members' own photos from their export (unlinked-ff0p)
+
+A LinkedIn export holds no image file. `Rich_Media.csv` has one row per upload. Rows that start "You uploaded a profile photo on …" carry a signed `media.licdn.com` link that expires about 60 days after the export (`e=` query parameter).
+
+- **Parse** (`src/utils/private-import/archive.mjs`, category `profile_photo`): only profile-photo rows with an HTTPS `media.licdn.com/dms/image/` link, with no credentials or port, are read. Feed photos and captions are never read. The file has its own row budget, so a long one never starves `Connections.csv`. Any outcome other than an accepted photo row (no rows, invalid UTF-8, malformed or multiline caption rows) is *skipped* with `photoSkipped` and no rejections, so it never makes an import failed or partial.
+- **Fetch** (`src/utils/private-import/profile-photo.mjs`, import worker only): the newest link that works, at most five tried. The fetch follows no redirects, is capped at 2 MiB with a 15 s timeout, and the type must be JPEG, PNG or WebP by magic bytes. Expired links are not requested. Kill switch: `UNLINKED_IMPORT_PHOTOS=off` in runtime.env.
+- **Store:** the bytes become an owner-private asset (`putAsset(sha256)`), so account export and deletion already cover them. The observation keeps only `photo sha256`, `photo type`, `photo bytes` and `uploaded at`, never the signed link. The original archive still holds the link, as it holds everything else.
+- **Publish:** the detail projection carries `ownPhoto` (hash, type, size). The public index resolves it to the profile the account stands for (linked legacy, signup or import, after merges; the newest import wins) and passes `profile id -> { owner, sha256, type, bytes }` to the server through `onMemberPhotos`. It is never part of the public snapshot.
+- **Serve:** `createMemberAwarePhotoStore` in `mcp-server/profile-photos.mjs` layers member photos over the operator set. Every read goes through the owner's backend and re-checks size, hash and magic bytes. The route, suspension check, caching and CSP are unchanged. `PHOTO_ID`/`PHOTO_URL` now also accept `member-(signup|import)-<sha256>` ids.
+- **Trust and removal:** nothing proves a row's link is the uploader's own photo; any LinkedIn-hosted image could be named. It shows only on the importer's own profile, the upload disclosure names the photo, and the existing profile Report and removal flow applies. A missing asset (import or account deleted) serves 404, and a failed index rebuild clears the member-photo map (fail closed).
+- **Limit (verified 2026-11-06 on a real December 2024 export):** the expired link returned 403, and a long-lived link to a 2018 upload returned 404 (image removed). Photos import from reasonably fresh exports, which is the normal flow because LinkedIn's download link expires in 72 hours. An old export imports without a photo.
+

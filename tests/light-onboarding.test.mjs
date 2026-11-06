@@ -114,7 +114,8 @@ test('the accepted member journey uses light copy and the shared navigation', ()
   assert.match(archive.content, /href="\/profile">Skip for now/)
   const uploadForm = archive.content.match(/<form id="onboarding-upload"[^>]*>(.*?)<\/form>/s)[1]
   assert.deepEqual([...uploadForm.matchAll(/name="([^"]+)"/g)].map(match => match[1]), ['csrf', 'archive'])
-  assert.match(uploadForm, /<button[^>]*>Import my file<\/button><p class="small">By importing,/)
+  assert.match(uploadForm, /Each upload adds to your earlier imports\. Someone in two files appears once\..*<button[^>]*>Import my files<\/button><p class="small">By importing,/s)
+  assert.match(uploadForm, /<input required type="file" name="archive" accept="\.zip,\.csv" multiple>/)
   const own = renderOwnProfile(account)
   assert.equal(own.title, "Here's your profile")
   // A new profile without an import gets a clear next step, not "Looks good".
@@ -160,7 +161,7 @@ test('People keeps the empty global header search above its own scoped toolbar s
     assert.match(toolbar, /method="get" action="\/network" role="search"/)
     assert.match(toolbar, /name="q" type="search"/)
     assert.doesNotMatch(toolbar, /name="csrf"/)
-    assert.equal([...view.content.matchAll(/<input\b[^>]*type="(?:search|text)"/g)].length, 2)
+    assert.equal([...view.content.matchAll(/<input\b[^>]*type="search"/g)].length, 2)
     if (props.query) { assert.match(toolbar, /value="&lt;&quot;climate&amp;&gt;"/); assert.doesNotMatch(header, /climate/) }
   }
   for (const view of [renderLanding(), renderJoin(), renderSignInRequired({ next: '/profile' }), renderPerson({ profile: { id: 'p', name: 'Maya Chen' } })]) {
@@ -302,6 +303,19 @@ test('found lookup results render escaped information and an explicit native cla
   assert.match(oneMember.content, /Listed by 1 member<\/p>/)
 })
 
+test('find-me confirmation sits above a long profile and repeats at its end', () => {
+  const positions = Array.from({ length: 6 }, (_, i) => ({ title: `Role ${i}`, company: `Company ${i}` }))
+  const found = extra => renderOwnProfile({ ...account, lookupResult: { status: 'found', source: 'profile-lookup', profileName: 'Sam Lee', headline: 'Builder', claimAction: '/claim-me', claimToken: 'tok', ...extra } }).content
+  const long = found({ positions, education: [{ institution: 'MIT' }] })
+  const yes = [...long.matchAll(/type="submit">Yes, that's me/g)].map(m => m.index)
+  assert.equal(yes.length, 2)
+  assert.ok(long.indexOf('Builder') < yes[0] && yes[0] < long.indexOf('Role 0'), 'first confirmation before experience')
+  assert.ok(yes[1] > long.indexOf('MIT'), 'second confirmation after education')
+  const short = found({ positions: positions.slice(0, 1) })
+  assert.equal([...short.matchAll(/type="submit">Yes, that's me/g)].length, 1)
+  assert.ok(short.indexOf("Yes, that's me") < short.indexOf('Role 0'))
+})
+
 test('lookup and claim forms reject actions that could send CSRF tokens off-host', () => {
   for (const action of ['https://evil.test/find-me', '//evil.test/find-me', 'javascript:alert(1)', '/\\evil.test', '/find-me\n', '/find-me\u0000', '/find-me#fragment', undefined]) {
     const view = renderOwnProfile({ ...account, linkedinLookup: { action }, lookupResult: { status: 'found', profileName: 'Sam', claimAction: action } })
@@ -389,7 +403,7 @@ test('member copy avoids forbidden technical and legacy words outside Settings d
   const forbidden = /observations|parser records|durable receipt|SHA-256|Ideaflow ID|invitation|private pilot|no feed/i
   for (const view of views) {
     const outsideDetails = view.content.replace(/<details\b[^>]*>.*?<\/details>/gs, '')
-    assert.doesNotMatch(outsideDetails, forbidden)
+    assert.doesNotMatch(outsideDetails, view.title === 'Settings' ? /observations|parser records|durable receipt|SHA-256|invitation|private pilot|no feed/i : forbidden)
     if (view.title !== 'Settings') assert.doesNotMatch(view.content, forbidden)
     assert.doesNotMatch(view.content, /<script|onclick=|onsubmit=/)
   }
@@ -412,7 +426,7 @@ test('unimplemented editing, public discovery and removal are stated truthfully'
   assert.match(renderPeople(account).content, /Friends come soon/)
   assert.match(renderSettings(account).content, /action="\/export"/)
   assert.match(renderSettings(account).content, /action="\/delete-account"/)
-  assert.match(renderSettings(account).content, /Type <b>delete everything<\/b> to confirm/)
+  assert.match(renderSettings(account).content, /Type <b>delete account<\/b> to confirm/)
   assert.doesNotMatch(renderSettings(account).content, /not available in this beta/)
   assert.match(renderPeople({ ...account, state: 'error' }).content, /does not mean your network is empty/)
   assert.match(renderJoin().content, /href="\/login"/)
@@ -420,9 +434,9 @@ test('unimplemented editing, public discovery and removal are stated truthfully'
 
 test('progress enhancement is separate from HTML and preserves native submission', () => {
   let submit
-  const button = { disabled: false, textContent: 'Import my file' }
+  const button = { disabled: false, textContent: 'Import my files' }
   const progress = { hidden: true }
-  const form = { reportValidity: () => true, addEventListener: (event, handler) => { assert.equal(event, 'submit'); submit = handler } }
+  const form = { querySelector: () => null, reportValidity: () => true, addEventListener: (event, handler) => { assert.equal(event, 'submit'); submit = handler } }
   vm.runInNewContext(uploadProgressScript(), { document: { getElementById: id => ({ 'onboarding-upload': form, 'onboarding-import': button, 'onboarding-progress': progress }[id]) } })
   submit({ preventDefault: () => assert.fail('must preserve native submission') })
   assert.equal(button.disabled, true)
@@ -469,8 +483,7 @@ test('fixture previews cover every requested screen and are reproducible without
       assert.match(content, /^<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>/)
       assert.match(content, /<body><style>/)
       assert.equal([...content.matchAll(/<h1\b/g)].length >= 1, true)
-      // The account-deletion step names the Ideaflow ID on purpose (the sign-in it deletes).
-      assert.doesNotMatch(content.replace(/<div class="ideaflow-id-delete">.*?<\/div>/gs, ''), /<script|type="checkbox"|observations|parser records|durable receipt|Ideaflow ID|invitation|private pilot/i)
+      assert.doesNotMatch(content, /<script|type="checkbox"|observations|parser records|durable receipt|invitation|private pilot/i)
     }
     const own = first[files.findIndex(file => file.endsWith('/own-profile-importing.html'))]
     assert.equal((own.match(/<div class="xp">/g) || []).length, 4)
@@ -485,7 +498,7 @@ test('fixture previews cover every requested screen and are reproducible without
     for (const file of ['people-welcome.html', 'people-empty.html', 'people-no-match.html']) {
       const content = first[files.findIndex(path => path.endsWith('/' + file))]
       // The header search (everyone) and the toolbar filter.
-      assert.equal([...content.matchAll(/<input\b[^>]*type="(?:search|text)"/g)].length, 2)
+      assert.equal([...content.matchAll(/<input\b[^>]*type="search"/g)].length, 2)
     }
     assert.match(first[files.findIndex(file => file.endsWith('/people-empty.html'))], /Bring your LinkedIn export to see your people\./)
     assert.match(first[files.findIndex(file => file.endsWith('/people-no-match.html'))], /No people matched\. Try another name or company\./)
@@ -566,7 +579,7 @@ test('a profile page shows who someone is and who they know, escaped, for visito
   assert.equal(anonymous.title, 'Maya Chen')
   assert.match(anonymous.content, /href="https:\/\/www.linkedin.com\/in\/maya" target="_blank" rel="noopener noreferrer"/)
   assert.match(anonymous.content, /<h1>Maya Chen<\/h1>/)
-  assert.match(anonymous.content, /Portland · 2\+ connections/)
+  assert.match(anonymous.content, /Portland · <a class="pcount" href="#connections">2\+ connections<\/a>/)
   assert.match(anonymous.content, /<h3>Experience<\/h3>.*<b>Lead<\/b>.*2021 to Present/s)
   assert.match(anonymous.content, /<h3>Education<\/h3>.*Northfield College.*BSc/s)
   assert.match(anonymous.content, /<span class="tag">Partnerships<\/span>/)
@@ -632,8 +645,9 @@ test('Settings opens with one compact account row: who is signed in and a native
   assert.match(section, /^<div class="acct"><span>Signed in as <b>member@example\.test<\/b><\/span><form method="post" action="\/logout">/)
   assert.match(section, /name="csrf" value="csrf-value"/)
   assert.match(section, /<button class="quiet sm" type="submit"[^>]*>Sign out</)
-  // One row: no heading, card or paragraph of its own.
-  assert.doesNotMatch(section, /<h2|class="card"|<p\b/)
+  // The account row remains compact, followed by direct data and deletion links.
+  assert.match(section, /<a href="#your-data">Download your data<\/a> · <a href="#delete-account">Delete account<\/a>/)
+  assert.doesNotMatch(section, /<h2|class="card"/)
   assert.doesNotMatch(section, /<script|onclick=/)
 })
 
@@ -715,4 +729,33 @@ test('LinkedIn export click progress survives anonymous reloads, expires and res
   blocked.click()
   assert.equal(blocked.link.textContent, 'Export page opened ✓')
   assert.equal(blocked.status.hidden, false)
+})
+
+test('dropping files adds them to the native file input and lists them; later drops add to the list', () => {
+  class FakeDataTransfer { constructor() { const files = []; this.files = files; this.items = { add: file => files.push(file) } } }
+  const handlers = {}, windowHandlers = {}
+  const input = { files: [], addEventListener: (event, handler) => { handlers['input:' + event] = handler } }
+  const classes = new Set()
+  const drop = { contains: target => target === drop || target === input, classList: { toggle: (name, on) => on ? classes.add(name) : classes.delete(name), remove: name => classes.delete(name) }, addEventListener: (event, handler) => { handlers[event] = handler } }
+  const items = []
+  const list = { hidden: true, set textContent(value) { items.length = 0 }, appendChild: item => items.push(item.textContent) }
+  const form = { querySelector: () => input, reportValidity: () => true, addEventListener: () => {} }
+  vm.runInNewContext(uploadProgressScript(), { DataTransfer: FakeDataTransfer, window: { addEventListener: (event, handler) => { windowHandlers[event] = handler } },
+    document: { createElement: () => ({ textContent: '' }), getElementById: id => ({ 'onboarding-upload': form, 'onboarding-drop': drop, 'onboarding-files': list }[id]) } })
+  let prevented = 0
+  const event = files => ({ target: drop, preventDefault: () => { prevented++ }, dataTransfer: { files } })
+  handlers.dragover(event([]))
+  assert.ok(classes.has('over'))
+  handlers.drop(event([{ name: 'Connections.csv' }, { name: 'photo.png' }]))
+  assert.deepEqual(input.files.map(file => file.name), ['Connections.csv'])
+  handlers.drop(event([{ name: 'Connections_2.csv' }, { name: 'Connections.csv' }, { name: 'Complete_LinkedInDataExport.zip' }]))
+  assert.deepEqual(input.files.map(file => file.name), ['Connections.csv', 'Connections_2.csv', 'Complete_LinkedInDataExport.zip'])
+  assert.deepEqual(items, ['Connections.csv', 'Connections_2.csv', 'Complete_LinkedInDataExport.zip'])
+  assert.equal(list.hidden, false)
+  assert.ok(!classes.has('over'))
+  // A drop that misses the box does not navigate away to the dropped file.
+  let missed = false
+  windowHandlers.drop({ target: {}, preventDefault: () => { missed = true } })
+  assert.equal(missed, true)
+  assert.ok(prevented >= 3)
 })

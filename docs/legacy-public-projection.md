@@ -26,8 +26,8 @@ Change the transformation version whenever publication semantics change.
 Identical plans replay identically without writes or generated IDs.
 A different compressed container for identical uncompressed bytes does not change the public revision.
 
-Default maxima match the reader: 20,000 profiles, 100,000 directed edges, 16 MiB public text, 20,000 characters per text field, 100 positions, 100 education rows and 500 skills per profile.
-Callers may lower the top-level profile, edge and text limits but cannot raise them beyond reader bounds.
+This legacy mapper retains its own narrower default maxima: 20,000 profiles, 100,000 directed edges, 16 MiB public text, 20,000 characters per text field, 100 positions, 100 education rows and 500 skills per profile.
+Callers may lower the top-level profile, edge and text limits but cannot raise them beyond these mapper bounds. The composed index has separate [reader bounds](public-people-reader.md).
 Malformed or sparse arrays, missing counts, duplicate entity IDs/provenance/direct endpoint pairs, dangling profile/organization references, incomplete source counts, source issues and invalid source hashes abort with fixed data-free `legacy_public_*` errors.
 No rows are silently truncated.
 Each approved source table must have exactly its declared number of distinct one-based provenance ordinals.

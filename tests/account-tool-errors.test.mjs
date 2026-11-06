@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { createAccountGrantService } from '../mcp-server/account-grants.mjs'
+import { createAccountToolService } from '../mcp-server/account-tools.mjs'
 import { createAccountHostedHandler, typedToolFailure } from '../mcp-server/account-hosted.mjs'
 import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 const require = createRequire(new URL('../mcp-server/package.json', import.meta.url))
@@ -105,4 +106,36 @@ test('typedToolFailure never leaks free-form exception text', () => {
   assert.equal(known.error.code, 'result_too_large')
   const identifier = JSON.parse(typedToolFailure(new Error('legacy_storage_binding_changed')).content[0].text)
   assert.equal(identifier.error.cause, 'legacy_storage_binding_changed')
+})
+
+
+test('hosted launch tools share REST search budgets across keys and release in-flight slots after errors', async t => {
+  const owner = { ownerId: 'metered-owner', userId: 'metered-user' }, f = fixture(owner)
+  const grants = createAccountGrantService({ issuer: 'https://metered.invalid', signingKey: randomBytes(32), getBackend: f.getBackend, publicSearchEnabled: true })
+  const readPublishedSnapshot = async () => ({ state: 'published', complete: true, revision: 'metered-v1', profiles: [], connections: [] })
+  const complete = async () => ({ matches: [] })
+  const service = createAccountToolService({ getBackend: f.getBackend, readPublishedSnapshot, complete, limits: { aiPerMinute: 1, aiInFlight: 1 } })
+  let handler
+  const server = createServer((req, res) => void handler(req, res))
+  await new Promise(r => server.listen(0, '127.0.0.1', r)); t.after(() => new Promise(r => server.close(r)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, origin = endpoint.replace('http:', 'https:')
+  handler = createAccountHostedHandler({ origin, authenticateGrant: grants.authenticateGrant, getBackend: f.getBackend, complete, readPublishedSnapshot, service })
+  const issued = await grants.issueGrant(owner)
+  const client = new Client({ name: 'metering-test', version: '1.0' })
+  await client.connect(new StreamableHTTPClientTransport(new URL(endpoint + '/mcp'), { requestInit: { headers: { Authorization: `Bearer ${issued.accessToken}` } } }))
+  t.after(() => client.close())
+  const first = await client.callTool({ name: 'unlinked_search_network', arguments: { query: 'Ada' } })
+  assert.ok(!first.isError)
+  assert.equal(JSON.parse(first.content[0].text).mode, 'text_match')
+  const grant = await grants.authenticateGrant({ headers: { authorization: `Bearer ${issued.accessToken}` } })
+  for (const name of ['unlinked_search_network', 'unlinked_search_everyone']) {
+    const result = await client.callTool({ name, arguments: { query: 'Ada' } })
+    assert.equal(result.isError, true)
+    assert.equal(JSON.parse(result.content[0].text).error.code, 'rate_limited')
+  }
+  await assert.rejects(service.call({ grant: { ...grant, grantId: 'another-key-same-owner' }, name: 'unlinked_search_everyone', input: { query: 'Ada' } }), e => e.code === 'rate_limited')
+  // A failed legacy callback must relinquish the same global in-flight slot.
+  const recovery = createAccountToolService({ getBackend: f.getBackend, limits: { aiInFlightTotal: 1 } })
+  await assert.rejects(recovery.withSearchBudget(grant, 'unlinked_search_network', async () => { throw Error('synthetic') }))
+  assert.equal(await recovery.withSearchBudget({ ...grant, ownerId: 'other-owner' }, 'unlinked_search_network', async () => 'ok'), 'ok')
 })

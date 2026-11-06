@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMemorySessionStore } from '../mcp-server/session-store.mjs'
 
-// Silent SSO: a normal sign-in sends no prompt. Only an explicit sign-out,
+// Silent SSO: a plain sign-in sends no prompt. Only ?switch=1, an explicit sign-out,
 // Switch account or account deletion asks Ideaflow ID for its account chooser.
 const ISSUER_ORIGIN = 'https://id.example.invalid'
 
@@ -44,7 +44,7 @@ async function site(t) {
   return { begins, go, signIn, csrfOf, post, cookieFrom }
 }
 
-test('a normal sign-in sends no prompt; after sign-out the next one asks for the account chooser, once', async t => {
+test('a plain sign-in sends no prompt; after sign-out the next one asks for the account chooser, once', async t => {
   const s = await site(t)
   const first = await s.signIn()
   assert.equal(first.provider.searchParams.has('prompt'), false)
@@ -66,6 +66,16 @@ test('a normal sign-in sends no prompt; after sign-out the next one asks for the
 
   // Only the exact marker value counts.
   assert.equal((await s.signIn('__Host-ul-signed-out=login')).provider.searchParams.has('prompt'), false)
+})
+
+test('/login?switch=1 is the explicit "use a different account" path: it always asks for the chooser', async t => {
+  const s = await site(t)
+  const start = await s.go('/login?switch=1')
+  assert.equal(start.status, 303)
+  assert.equal(new URL(start.headers.get('location')).searchParams.get('prompt'), 'select_account')
+  // Other values are not a switch.
+  assert.equal(new URL((await s.go('/login?switch=0')).headers.get('location')).searchParams.has('prompt'), false)
+  assert.deepEqual(s.begins, [{ prompt: 'select_account' }, {}])
 })
 
 test('Switch account signs out, then starts sign-in with the account chooser and a validated return page', async t => {

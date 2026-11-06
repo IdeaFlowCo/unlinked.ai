@@ -59,7 +59,7 @@ export function connectionNote(value) {
 }
 
 // `blocked(a, b)`: whether either account blocked the other (member-blocks.mjs); a block refuses new requests and accepts.
-export function createConnectionRequests({ store, notifications = null, onAccepted = null, blocked = null, now = Date.now, perDay = CONNECTION_REQUESTS_PER_DAY, cooldownMs = RESEND_COOLDOWN_MS } = {}) {
+export function createConnectionRequests({ store, notifications = null, onAccepted = null, blocked = null, coordination, validateParticipant, now = Date.now, perDay = CONNECTION_REQUESTS_PER_DAY, cooldownMs = RESEND_COOLDOWN_MS } = {}) {
   if (!store || ['insert', 'get', 'listPair', 'listByRecipient', 'listBySender', 'listAccepted', 'transition', 'countSentSince', 'countReceivedPending', 'deleteOwner'].some(name => typeof store[name] !== 'function')) throw new Error('connection_store_required')
   if (!Number.isSafeInteger(perDay) || perDay < 1 || !Number.isSafeInteger(cooldownMs) || cooldownMs < 0) throw new Error('connection_limits_invalid')
   // Notifications never decide whether a request works.
@@ -218,6 +218,39 @@ export function createConnectionRequests({ store, notifications = null, onAccept
       if (notifications) for (const id of removed) await quietly(() => notifications.retract(requestKey(id)))
       return removed.length
     },
+  }
+  if (coordination) {
+    service.checkpoint = () => coordination.checkpoint()
+    const pairWork = async (members, checkpoint, work) => coordination.run(members.map(member => 'owner:' + owner(member).ownerId), async () => {
+      if (members.some(member => coordination.version(member.ownerId) > checkpoint)) throw new ConnectionError('connection_not_available')
+      if (validateParticipant) for (const member of members) await validateParticipant(member)
+      return work()
+    })
+    const send = service.send
+    service.send = async input => {
+      const checkpoint = input.checkpoint ?? coordination.checkpoint()
+      return pairWork([input.sender, input.recipient], checkpoint, async () => {
+        if (typeof input.beforeWrite === 'function') await input.beforeWrite()
+        return send(input)
+      })
+    }
+    for (const method of ['respond', 'withdraw', 'remove', 'completeRemoval']) {
+      const original = service[method]
+      service[method] = async (member, id, ...args) => {
+        const checkpoint = coordination.checkpoint()
+        const record = typeof id === 'string' && REQUEST_ID.test(id) ? await store.get(id) : null
+        if (!record || (!same(senderOf(record), member) && !same(recipientOf(record), member))) {
+          if (method === 'completeRemoval') return
+          throw new ConnectionError('connection_not_found')
+        }
+        return pairWork([senderOf(record), recipientOf(record)], checkpoint, () => original(member, id, ...args))
+      }
+    }
+    const settle = service.settleRemovedPair
+    service.settleRemovedPair = async (member, other, ids) => {
+      const checkpoint = coordination.checkpoint()
+      return pairWork([member, other], checkpoint, () => settle(member, other, ids))
+    }
   }
   return service
 }

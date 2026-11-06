@@ -1,5 +1,17 @@
 # Unlinked agent guide
 
+## Choose public browsing or an account connection
+
+A few public profile comparisons need no account: use `/search-public?q=...`, `/people/<handle>` and its `/connections` page. Published professional details can be richer than a Connections.csv row. Available depth varies by person. Never interpret a 429 or fetch failure as evidence that a password is required. Honor `Retry-After`, retry with backoff, and report temporary unavailability if it persists.
+
+For repeated whole-index queries, use a consented MCP/API connection and indexed search rather than downloading every profile page. Everyone means all currently published professional profiles; it does not include other users' private networks. No archive import is required to search Everyone. An owner's private network requires their authorized grant.
+
+A connector-store listing is not required when the host supports custom connectors. Prefer https://id.ideaflow.app/agents for compatible OAuth hosts. For Muse, ask: “Create an Unlinked custom API connector using https://www.unlinked.ai/openapi.json. Ask me for a named Unlinked API key through your Secure Credentials Store, then verify whoami and search People.” Obtain that key in Unlinked Settings → API keys. Meta documents custom connectors, API-information retrieval and its Secure Credentials Store; Unlinked's Muse OAuth flow has not been verified. Do not invent a connector-store entry or assume an arbitrary hosted OAuth callback is supported. A host with no custom connector or HTTP capability can still read public pages, but cannot perform account tools until it gains a supported integration.
+
+Never request the user's password or session cookies. An agent may guide sign-in/signup when the user requests it, using the user's own verified identity and the existing consent flow. It must not silently create an account, claim someone else's imported profile, accept new terms, publish a profile, import an archive, or expand app permissions merely because it can. A silent Ideaflow SSO app binding is private app state, not public-profile publication or agent consent. There is no anonymous agent signup/key-issuance API. The shared connector requires an existing Unlinked account binding; if `account_link_required` occurs, open Unlinked once with the same Ideaflow identity, then retry the connection.
+
+Successful setup means an authenticated `whoami` for the intended account followed by a small search. If the identity is wrong, stop and reconnect. Store keys in the host's credential facility, never in ordinary chat or logs. Signup and multiple keys do not buy unlimited capacity: account keys/connections share owner budgets. Do not manufacture accounts or keys to evade limits.
+
 ## Set up your agent
 
 For compatible hosts wanting several apps or messages, start with the [shared Ideaflow connector](https://id.ideaflow.app/agents) and `https://id.ideaflow.app/mcp`. Consent to each app's permissions separately. Existing direct Unlinked Claude/ChatGPT OAuth connections remain supported; no migration is required. Messages need separate **OpenChat** permissions, not Unlinked connection-request permission.
@@ -40,7 +52,7 @@ An explicit account grant authorizes current/future owner imports, same-owner sa
 Never derive owner authority from typed email, archive fields, profile IDs or a URL.
 The backend binds signed Ideaflow issuer/subject to the owner; recovered-profile confirmation uses only server-held signed email evidence plus CSRF and can be revoked.
 It enforces owner/publication/grant state on each call.
-Raw archives, recovered original files, contact emails and phone numbers are excluded. OpenAI receives bounded relevant professional details.
+Raw LinkedIn archives, recovered original files, and archive contact emails and phone numbers are excluded from network search. OpenAI receives bounded relevant professional details. Private investor list access is described below.
 Everyone browsing is public at GET /api/people?q=&mode=&cursor= and GET /api/people/:id. The default mode `best` matches every word in any form and order ("investors" finds "investor"), and returns people who match some of the words when nobody has them all; the response's `match` is `all`, `some` or `none`. `mode=exact` matches the typed phrase as written. A person with an operator-published profile photo carries `photo`, a same-origin versioned URL of GET /people/:id/photo (JPEG, PNG or WebP; 404 when there is none).
 Everyone AI retrieval considers all public profiles, then ranks at most200 matching professional candidates. No archive is required.
 Old single-tool grants retain their original narrower scope.
@@ -54,7 +66,7 @@ Anonymous discovery, professional People browsing and Meet are public. Owner dat
 For /meet scanning and supported links, see the [Meet guide](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/README.md#meet-someone). Signed-in members show their QR business card at /card; its contact version opens a revocable contact link, while the public-only version opens their published profile. The web app is installable (manifest at /manifest.webmanifest); the service worker precaches only fixed public shell assets and never caches member content.
 Legacy Supabase APIs and legacy stdio tools remain historical code, not current onboarding instructions.
 
-Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve raw files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
+Recovered original LinkedIn files are browser-only under Settings after explicit recovered-account confirmation. GET /api/legacy-files lists your files; GET /legacy-files/:objectId downloads your original. Agents cannot retrieve these recovered LinkedIn files. Sanitized recovered Connections observations participate in the same owner network search; unknown legacy owners remain inaccessible.
 
 Grant catalog v5 supports optional `owner_network_and_public_and_write`: `unlinked_send_connection_request(profileId, note?)`, `unlinked_accept_connection_request(id)`, `unlinked_ignore_connection_request(id)`, `unlinked_withdraw_connection_request(id)`. These require explicit opt-in in Settings or OAuth consent; existing read-only grants and default issuance stay read-only. Owner-only grants can enable actions without gaining public reads. Direct Unlinked grants cannot send messages or post; use separate OpenChat permissions through the shared connector, or a direct OpenChat key, for messaging and Context. The route, limits and grant-update contract is owned by `docs/agent-api.md` in the repository.
 
@@ -98,3 +110,32 @@ Browser-only card joining is not an agent capability. The repository guide `docs
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures.
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract `docs/public-people-reader.md` (Historical membership); filter values are published in [OpenAPI](https://www.unlinked.ai/openapi.json).
+
+## Private investor/contact CSV and XLSX lists
+
+With Private people notes & relations permission, an agent can read investor
+CSV/XLSX files you provide, including contact fields and private notes. Call
+`unlinked_stage_investor_csv(csv,listName,mapping,listId?)`, then repeat
+`unlinked_resume_investor_import(importId,batchSize?)` until complete or partial.
+Read original fields and outcomes with `unlinked_get_investor_import`, paging with
+nextOffset. CSV parts are at most 512 KiB; split larger files at complete records
+with repeated headers and append parts to the same listId. Names/emails never
+merge people; exact LinkedIn addresses may match. No public profiles, social
+connections or notifications are created. List membership is a private contains
+edge. Find lists with `unlinked_list_private_things(kind:list,limit:100)` and their
+members with `unlinked_get_private_thing(thingId:listId,limit:100)`, following
+nextCursor as after. The shared connector prefixes tools with `unlinked__` and
+requires separately consented `unlinked:private_notes`; connection-write access
+alone is insufficient. Existing graph quotas apply; errors never mean completion.
+
+For XLSX use the same `unlinked_stage_investor_csv` tool with `fileBase64`,
+`filename` and `inspectOnly:true` to discover sheets without retaining anything.
+Select an exact `sheet` and optional physical `headerRow` (default 1), then provide
+`mapping`, `listName` and `retainOriginalConfirmed:true` only after owner
+authorization to retain the **whole original workbook, including hidden and
+unselected tabs**, privately on the server. Only the selected sheet is imported.
+512 KiB original-file limit. Selected-sheet formulas, macros and .xls are rejected;
+use values-only XLSX or CSV. Original XLSX recovery through the status tool returns
+base64 chunks with byte offsets: decode each chunk before concatenating.
+
+Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence.

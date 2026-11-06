@@ -8,6 +8,10 @@ Internal profile ids do not change: connections, requests, notifications,
 blocks, suspensions and account resolution keep using ids. A handle is only
 the address of an id.
 
+Handles cover public `/people/` pages only. A member's own private contact
+pages (`/network/contacts/…`) have separate owner-scoped addresses that reuse
+the person's handle when they have one; see docs/contact-slugs.md.
+
 ## Who gets one
 
 Members (presence `member`: an active account stands behind the profile) and

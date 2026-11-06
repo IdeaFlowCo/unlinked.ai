@@ -111,7 +111,7 @@ test('the profile sidebar filters with a native form and links, offers "You both
 test('removing a connection sits behind the “…” menu, never beside Connected', async () => {
   const { renderPerson } = await import('../mcp-server/private-onboarding-views.mjs')
   const view = renderPerson({ csrf: 'c'.repeat(43), accountLabel: 'Me', profile: { id: 'p1', name: 'Ada Lovelace', positions: [], education: [], skills: [], connections: [] }, connect: { state: 'connected', requestId: 'r1' } })
-  assert.match(view.content, /✓ Connected<\/span>(?:(?!more-actions).)*>Search everyone<\/a><details class="more-actions profile-more"><summary aria-label="More actions for Ada Lovelace" title="More"><svg/s)
+  assert.match(view.content, /✓ Connected<\/span>(?:(?!more-actions).)*<details class="more-actions profile-more"><summary aria-label="More actions for Ada Lovelace" title="More"><svg/s)
   // The same menu carries Report (and Block / Request removal where they apply; docs/report-and-block.md).
   assert.match(view.content, /<div class="more-panel">.*action="\/connections\/remove".*>Remove connection<\/button><\/form><p class="more-links"><a href="\/people\/p1\/report">Report Ada Lovelace<\/a><\/p><\/div><\/details>/s)
   assert.doesNotMatch(view.content, /Remove connection…|Confirm removal/)

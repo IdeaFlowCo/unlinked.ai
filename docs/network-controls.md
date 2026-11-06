@@ -22,3 +22,37 @@ Date order never substitutes a batch import date for a connection date. Dates co
 Dates are owner-only listing metadata and are not projected onto public profiles. The browser requests full result counts explicitly; reader ordering, cursor isolation and API compatibility are owned by the [public People reader contract](public-people-reader.md).
 
 Regression coverage: `tests/network-one-card.test.mjs` covers one card per person, section partition, counts and same-name separation; `tests/network-controls.test.mjs` covers server-wide filtering and ordering across pages, cursor isolation, native form state, date semantics, authenticated date ordering, and public date isolation. `tests/network-filter-script.test.mjs` covers pending query/sort/membership state, pagination after edits, Back/Forward, focus during fetches and native fallback after failures.
+
+## Structured filters and saved results
+
+The browser's **All filters** section adds `degree=1|2|3`, `location`, `company`
+(current), `pastCompany`, `title`, `school` and `industry`. Text facets are
+case/accent-insensitive substring matches, combined with AND before keyword
+ranking and pagination. Empty fields do not match a nonempty facet. Current
+company/title uses undated or current positions and the profile's current
+company/headline; past company requires an ended position. Connection degrees
+use the shortest recorded visible path from the viewer's known direct contacts,
+up to three hops; unknown reachability is never labeled third-degree. Additional
+hops honor connection-list audience rules. The UI uses one compiled snapshot
+per page and batched profile lookup, with no provider calls per filter change.
+
+All facets survive native GET submission, pagination and connection-action return
+links. Live filtering updates the address bar and Back/Forward restores the
+controls. **Copy search link** copies the rendered query URL; it reruns in the
+recipient's own account and does not grant access to the sender's network.
+
+Signed-in members can check results and **Save selected results**. Each list holds
+up to 200 selected people on that page, a name and the original search URL. It
+is a fixed membership set, not an automatically changing saved query. `/lists`
+and `/lists/<id>` are browser-only, account-scoped pages backed by the
+`UnlinkedSavedSearchList` Neo4j store. Records survive runtime restarts, are part
+of graph recovery, are included in account export, and are removed with account
+deletion. Current publication/owner contact access is checked again on read.
+
+**Create share link** explicitly shares the list name and currently listed public
+profile IDs under a random revocable `/lists/shared/<token>` address. Private
+contacts, query text, notes and connection paths are excluded. Every shared read
+rechecks current public listing: removed, suspended and unlisted profiles drop
+out. Turning off sharing invalidates the link; creating another rotates it.
+Shared pages are no-store, noindex and no-referrer. No list is shared by saving it.
+These browser routes do not add agent tools or expand existing agent grants.

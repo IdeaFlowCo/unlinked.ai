@@ -1,3 +1,4 @@
+import { INVESTOR_TOOLS } from '../mcp-server/investor-tools.mjs'
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -45,7 +46,7 @@ test('public/.well-known/mcp/server-card.json describes canonical account MCP', 
   assert.ok(!card.transports?.stdio, 'canonical card must not advertise legacy stdio bootstrap');
 
   const toolNames = card.tools.map((t) => t.name);
-  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request', ...PRIVATE_NOTES_TOOLS]);
+  assert.deepEqual(toolNames, ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request', ...PRIVATE_NOTES_TOOLS,...INVESTOR_TOOLS]);
   const searchTool = card.tools[0];
   assert.deepEqual(searchTool.inputSchema.required, ['query']);
   assert.equal(searchTool.inputSchema.additionalProperties, false);
@@ -99,7 +100,7 @@ test('public/openapi.json describes canonical beta routes accurately', () => {
 
   const paths = Object.keys(spec.paths);
   const expectedPaths = ['/messages/api/conversations', '/api/messaging/v1/recipient', '/search-public', '/c/{token}/add', '/login', '/mcp', '/api/people', '/api/people/{id}', '/people/{id}/photo', '/api/my-connections', '/api/legacy-files', '/legacy-files/{objectId}', '/api/agent/v1/whoami', '/api/agent/v1/people', '/api/agent/v1/people/{id}', '/api/agent/v1/connections', '/api/agent/v1/connection-requests', '/api/agent/v1/connection-requests/accept', '/api/agent/v1/connection-requests/ignore', '/api/agent/v1/connection-requests/send', '/api/agent/v1/connection-requests/withdraw', '/api/agent/v1/notifications', '/api/agent/v1/ai-search', '/api/agent/v1/search-network', '/api/agent/v1/search-everyone', '/api/agent/v1/provision-grant',
-    '/api/agent/v1/contacts/lookup', '/api/agent/v1/private/person', '/api/agent/v1/private/thing', '/api/agent/v1/private/things', '/api/agent/v1/private/search', '/api/agent/v1/private/neighbourhood',
+    '/api/agent/v1/contacts/lookup', '/api/agent/v1/private/investor-imports', '/api/agent/v1/private/investor-imports/resume', '/api/agent/v1/private/investor-imports/status', '/api/agent/v1/private/person', '/api/agent/v1/private/thing', '/api/agent/v1/private/things', '/api/agent/v1/private/search', '/api/agent/v1/private/neighbourhood',
     '/api/agent/v1/private/things/delete', '/api/agent/v1/private/notes', '/api/agent/v1/private/notes/delete', '/api/agent/v1/private/links', '/api/agent/v1/private/links/update', '/api/agent/v1/private/links/delete',
     '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server', '/oauth/authorize', '/oauth/token', '/oauth/register', '/oauth/revoke'];
 
@@ -206,7 +207,7 @@ test('discovery cards advertise private notes & relations as a separate permissi
   const card = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/mcp/server-card.json'), 'utf8'));
   const descriptor = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'public/.well-known/unlinked.json'), 'utf8'));
   const privateTools = card.tools.filter(tool => tool.permission === 'private_notes');
-  assert.equal(privateTools.length, 12);
+  assert.equal(privateTools.length, 15);
   for (const tool of privateTools) assert.match(tool.description, /NOT a connection request and NOT messaging/);
   assert.deepEqual(descriptor.mcp.privateNotesScope.tools, privateTools.map(tool => tool.name));
   assert.equal(descriptor.mcp.privateNotesScope.defaultForApiKeys, true);

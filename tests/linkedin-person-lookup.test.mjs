@@ -26,6 +26,57 @@ test('LinkedIn QR and pasted URLs share strict normalization without following f
   }
 })
 
+test('pasted LinkedIn profile URLs survive whatever junk ends up around them', () => {
+  const junk = [
+    'https://www.linkedin.com/in/synthetic-person/details/experience/',
+    'https://www.linkedin.com/in/synthetic-person/overlay/contact-info/',
+    'https://www.linkedin.com/in/synthetic-person/recent-activity/all/?trk=x',
+    'https://www.linkedin.com/in/synthetic-person/en',
+    'https://www.linkedin.com/in/synthetic-person?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app',
+    'https://www.linkedin.com/in/synthetic-person?trk=public_profile_browsemap&originalSubdomain=uk#experience',
+    'https://www.linkedin.com/in/synthetic-person/?',
+    'https://www.linkedin.com/in/synthetic-person//',
+    'https://www.linkedin.com//in/synthetic-person',
+    'https://www.linkedin.com/in/synthetic-person;jsessionid=abc',
+    'https://www.linkedin.com/in/synthetic-person%20',
+    'https://www.linkedin.com/in/synthetic-person%E2%80%8B',
+    'http://www.linkedin.com/in/synthetic-person',
+    'HTTPS://WWW.LINKEDIN.COM/IN/SYNTHETIC-PERSON',
+    'https://uk.linkedin.com/in/synthetic-person',
+    'https://m.linkedin.com/in/synthetic-person',
+    'https://mobile.linkedin.com/in/synthetic-person/',
+    'www.linkedin.com/in/synthetic-person.',
+    'linkedin.com/in/synthetic-person),',
+    '  "https://www.linkedin.com/in/synthetic-person"  ',
+    '<https://www.linkedin.com/in/synthetic-person>',
+    '“https://www.linkedin.com/in/synthetic-person”',
+    '​https://www.linkedin.com/in/synthetic-person​\n',
+    'My LinkedIn: https://www.linkedin.com/in/synthetic-person thanks!',
+    '[https://www.linkedin.com/in/synthetic-person](https://www.linkedin.com/in/synthetic-person/)',
+    'https://www.linkedin.com/in/synthetic-person https://www.linkedin.com/in/synthetic-person',
+  ]
+  for (const input of junk) {
+    assert.deepEqual(parseLinkedinProfileUrl(input), { slug: 'synthetic-person', url: address }, JSON.stringify(input))
+    assert.equal(classifyMeetCode(input)?.kind, 'linkedin', JSON.stringify(input))
+  }
+  for (const input of [
+    'https://evil.test/https://www.linkedin.com/in/synthetic-person',
+    'see https://evil.test/?u=https://www.linkedin.com/in/synthetic-person',
+    'https://www.linkedin.com/in/someone-else https://www.linkedin.com/in/synthetic-person',
+    'https://linkedin.com.evil.test/in/synthetic-person junk',
+    'https://www.linkedin.com/company/synthetic-person',
+    'https://www.linkedin.com/in/',
+    'my linkedin is synthetic-person',
+  ]) assert.equal(parseLinkedinProfileUrl(input), null, input)
+})
+
+test('serialized parser keeps working inside inline browser scripts', () => {
+  const source = parseLinkedinProfileUrl.toString()
+  assert.match(source, /^[\x00-\x7F]*$/, 'ASCII-only source')
+  const revived = new Function(`return (${source})`)()
+  assert.equal(revived('My LinkedIn: https://uk.linkedin.com/in/Synthetic-Person/details/ thanks').slug, 'synthetic-person')
+})
+
 test('published URL lookup prefers the member, keeps namesakes separate and fails closed', async () => {
   let snapshot = { state: 'published', complete: true, revision: 'lookup-test', profiles: [
     { id: 'shadow', name: 'Same Name', linkedinUrl: address }, { id: 'member', name: 'Same Name', linkedinUrl: address },

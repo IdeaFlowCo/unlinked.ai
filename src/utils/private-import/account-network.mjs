@@ -1,6 +1,7 @@
 import { validTimestamp, connectionDate } from '../network-order.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
+import { sharedImportRowCache } from './import-row-cache.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from './consent.mjs'
 import { createPrivateSearch } from './ai-search.mjs'
 import { matchNetworkText } from './network-text-search.mjs'
@@ -19,9 +20,29 @@ const NETWORK_RANKING_RESERVE_MS = 4000
 // its ranking calls run wider than the shared default.
 const NETWORK_RANK_CONCURRENCY = 8
 
+// The deadline is a strongly held timer (an AbortSignal.timeout inside
+// AbortSignal.any can be collected before it fires), and the call is raced
+// against it, so awaits that ignore the signal cannot outlive it either.
+// stopSignal fires reserveMs early so ranking can return partial results.
+export async function withSearchDeadline({ signal, budgetMs, label = 'search', reserveMs = NETWORK_RANKING_RESERVE_MS }, work) {
+  if (!Number.isSafeInteger(budgetMs) || budgetMs < 1) throw new Error('search_deadline_invalid')
+  const timer = new AbortController(), soft = new AbortController()
+  const handle = setTimeout(() => timer.abort(new DOMException(`${label} deadline elapsed`, 'TimeoutError')), budgetMs)
+  const softHandle = setTimeout(() => soft.abort(new DOMException(`${label} ranking time elapsed`, 'TimeoutError')), Math.max(0, budgetMs - Math.min(reserveMs, budgetMs / 5)))
+  const deadline = signal ? AbortSignal.any([signal, timer.signal]) : timer.signal
+  const expired = new Promise((_, reject) => {
+    if (deadline.aborted) reject(deadline.reason)
+    else deadline.addEventListener('abort', () => reject(deadline.reason), { once: true })
+  })
+  const run = Promise.resolve().then(() => work({ deadline, stopSignal: soft.signal }))
+  run.catch(() => {}); expired.catch(() => {})
+  try { return await Promise.race([run, expired]) }
+  finally { clearTimeout(handle); clearTimeout(softHandle) }
+}
+
 // One authenticated account, all its currently published imports. Source
 // assertions keep their original IDs and provenance; no email/URL ownership.
-export function createAccountNetwork({ owner, getBackend, complete, observationLimit = 100000 }) {
+export function createAccountNetwork({ owner, getBackend, complete, observationLimit = 100000, rowCache = sharedImportRowCache }) {
   if (!owner?.ownerId || !owner.userId || typeof getBackend !== 'function') throw new Error('verified_owner_required')
   if (!Number.isSafeInteger(observationLimit) || observationLimit < 0 || observationLimit > 100000) throw new Error('account_observation_limit')
   const networkId = privateId(owner.ownerId, 'account-network-v1')
@@ -35,7 +56,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
     let indexed = 0
     for (const id of ids) {
       signal?.throwIfAborted()
-      const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit' })
+      const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit', rowCache })
       const publication = await readImport(id, { signal })
       requireCombinedUploadConsent(publication.consent)
       for (const row of publication.assertions) assertions.push({ ...row, ...(publication.importedAt ? { importedAt: publication.importedAt } : {}), ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })
@@ -104,20 +125,17 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
     const readFirst = async (id, options) => { if (first) { const value = first; first = null; return value } return readNetwork(id, options) }
     return search({ query, signal: deadline, stopSignal, readFirst, concurrency: NETWORK_RANK_CONCURRENCY })
   }
-  // The deadline is a strongly held timer (an AbortSignal.timeout inside
-  // AbortSignal.any can be collected before it fires), and the call is raced
-  // against it, so awaits that ignore the signal cannot outlive it either.
   const searchNetwork = async ({ query, signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
     if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
-    const timer = new AbortController(), soft = new AbortController()
-    const handle = setTimeout(() => timer.abort(new DOMException('search_network deadline elapsed', 'TimeoutError')), aiBudgetMs)
-    const softHandle = setTimeout(() => soft.abort(new DOMException('search_network ranking time elapsed', 'TimeoutError')), Math.max(0, aiBudgetMs - Math.min(NETWORK_RANKING_RESERVE_MS, aiBudgetMs / 5)))
-    const deadline = signal ? AbortSignal.any([signal, timer.signal]) : timer.signal
-    const expired = new Promise((_, reject) => deadline.addEventListener('abort', () => reject(deadline.reason), { once: true }))
-    const work = searchWithin({ query, deadline, stopSignal: soft.signal })
-    work.catch(() => {}); expired.catch(() => {})
-    try { return await Promise.race([work, expired]) }
-    finally { clearTimeout(handle); clearTimeout(softHandle) }
+    return withSearchDeadline({ signal, budgetMs: aiBudgetMs, label: 'search_network' }, ({ deadline, stopSignal }) => searchWithin({ query, deadline, stopSignal }))
   }
-  return { readNetwork, search, searchNetwork }
+  // unlinked_ai_search scope "mine": always AI-ranked (no text-first), under
+  // the same hard deadline and soft partial-result stop as searchNetwork. It
+  // previously used AbortSignal.any([signal, AbortSignal.timeout(ms)]) with no
+  // race, so a requested 20 s budget could run until the client gave up.
+  const askNetwork = search ? async ({ query, signal, budgetMs = NETWORK_AI_BUDGET_MS }) => {
+    if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
+    return withSearchDeadline({ signal, budgetMs, label: 'ai_search' }, ({ deadline, stopSignal }) => search({ query, signal: deadline, stopSignal, concurrency: NETWORK_RANK_CONCURRENCY }))
+  } : null
+  return { readNetwork, search, searchNetwork, askNetwork }
 }

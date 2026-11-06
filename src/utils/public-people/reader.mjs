@@ -1,12 +1,14 @@
+import { peopleFilters, matchesPeopleFilters, connectionDegrees } from './search-filters.mjs'
 import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { createHash } from 'node:crypto'
-import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES, PUBLIC_INDEX_MAX_TEXT_BYTES } from './limits.mjs'
 import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
-import { SEARCH_MODES, createQueryMatcher, rankMatches, words } from './text-match.mjs'
+import { SEARCH_MODES, companyPageName, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-index.mjs'
 import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
+import { connectionPolicies, createConnectionVisibility } from './connection-privacy.mjs'
 
 export class PublicPeopleReaderError extends Error {
   constructor(status, code) { super(code); this.name = 'PublicPeopleReaderError'; this.status = status; this.code = code }
@@ -22,7 +24,9 @@ const plain = value => value !== null && typeof value === 'object' && (Object.ge
 const hash = value => createHash('sha256').update(value).digest('hex')
 // Same grammar as PHOTO_URL in mcp-server/profile-photos.mjs: only a same-origin photo path.
 const SUGGESTED_PEOPLE = 5
-const PHOTO_URL = /^\/people\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/photo\?v=[a-f0-9]{16}$/
+// Faces on a profile header's mutual connections line.
+const MUTUAL_PREVIEW = 3
+const PHOTO_URL = /^\/people\/(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|member-(?:signup|import)-[a-f0-9]{64})\/photo\?v=[a-f0-9]{16}$/
 
 const dense = value => {
   if (!Array.isArray(value)) return false
@@ -77,19 +81,26 @@ const deepFreeze = value => {
 // source) let `suggest` reuse the last verified index: as-is while younger than
 // the fresh window, and while younger than the stale bound with one background
 // refresh. A failed refresh drops it, so a revoked publication fails closed.
-export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = 16 * 1024 * 1024, timeoutMs = 8000, reuse = false, photoFor, suggestFreshMs = 0, suggestStaleMs = 0, now = Date.now } = {}) {
-  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, 16 * 1024 * 1024) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean' || !Number.isSafeInteger(suggestFreshMs) || suggestFreshMs < 0 || !Number.isSafeInteger(suggestStaleMs) || suggestStaleMs < suggestFreshMs || suggestStaleMs > 300000 || typeof now !== 'function') throw new TypeError('public_people_configuration_invalid')
+export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null, pageSize = 50, maxProfiles = PUBLIC_INDEX_MAX_PROFILES, maxConnections = PUBLIC_INDEX_MAX_CONNECTIONS, maxTextBytes = PUBLIC_INDEX_MAX_TEXT_BYTES, timeoutMs = 8000, reuse = false, photoFor, suggestFreshMs = 0, suggestStaleMs = 0, now = Date.now } = {}) {
+  if ((readPublishedSnapshot !== undefined && typeof readPublishedSnapshot !== 'function') || (photoFor !== undefined && typeof photoFor !== 'function') || !bounded(pageSize, 100) || !bounded(maxProfiles, PUBLIC_INDEX_MAX_PROFILES) || !bounded(maxConnections, PUBLIC_INDEX_MAX_CONNECTIONS) || !bounded(maxTextBytes, PUBLIC_INDEX_MAX_TEXT_BYTES) || !bounded(timeoutMs, 30000) || (viewer !== null && (!plain(viewer) || !immutableIdentity(viewer))) || typeof reuse !== 'boolean' || !Number.isSafeInteger(suggestFreshMs) || suggestFreshMs < 0 || !Number.isSafeInteger(suggestStaleMs) || suggestStaleMs < suggestFreshMs || suggestStaleMs > 300000 || typeof now !== 'function') throw new TypeError('public_people_configuration_invalid')
 
   // Reads that overlap share one build: a page may read the snapshot twice at
   // once, and building it is slow. With the default `reuse: false`, each new
   // read checks the source before reusing any compiled public index. A
-  // caller's own signal reads alone unless a reusable snapshot is already kept.
+  // caller's own signal reads alone unless request-scoped reuse is enabled.
   let inflight = null, kept = null, latest = null
   async function snapshot(signal) {
+    if (signal?.aborted) unavailable()
     if (kept) return kept
-    if (signal) return build(signal).then(value => { hold(value); return value })
-    if (!inflight) inflight = build().then(value => { if (reuse) kept = value; hold(value); return value }, error => { latest = null; throw error }).finally(() => { inflight = null })
-    return inflight
+    if (signal && !reuse) return build(signal).then(value => { hold(value); return value })
+    if (!inflight) inflight = build(signal).then(value => { if (reuse) kept = value; hold(value); return value }, error => { latest = null; throw error }).finally(() => { inflight = null })
+    if (!signal) return inflight
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(new PublicPeopleReaderError(503, 'public_people_unavailable'))
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) abort()
+      inflight.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+    })
   }
   // A suggesting reader prepares the autocomplete index for each new snapshot
   // off the request path, so no keystroke waits for it.
@@ -166,9 +177,12 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         summaries.set(input.id, summary); details.set(input.id, detail)
         // Everything searchable is already public on the profile page.
         tokens.set(input.id, { name: words(summary.name), text: words([summary.name, summary.headline, company, detail.about, ...detail.positions.flatMap(position => [position.title, position.company, position.description]), ...detail.education.flatMap(school => [school.institution, school.degree]), ...detail.skills].filter(Boolean).join(' ')),
-          // Position companies and the headline, tokenized once per compile, so
-          // a company page never re-tokenizes every profile per request.
-          companies: [...detail.positions.map(position => words(position.company)), words(summary.headline ?? '')].filter(list => list.length) })
+          // Position companies, the profile's own company and the headline,
+          // tokenized once per compile, so a company page never re-tokenizes
+          // every profile per request. The profile company is linked from the
+          // profile header, so it must find its page too: an import can name
+          // "Lopus AI (YC W25)" while the experience says "Lopus (YC W25)".
+          companies: [...detail.positions.map(position => words(position.company)), words(company ?? ''), words(summary.headline ?? '')].filter(list => list.length) })
       }
       const outgoing = new Map([...summaries.keys()].map(id => [id, new Set()]))
       // A connection is mutual, but an edge is stored only from the person whose export listed it.
@@ -180,20 +194,26 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       // Presence is display evidence; only confirmed membership takes precedence
       // over recovered historical membership. Neither implies owner authorization.
+      // Members' connection privacy (docs/connection-privacy.md). Listing counts
+      // are what an anonymous visitor may see; signed-in views recount per viewer.
+      const policies = connectionPolicies(value.connectionPrivacy, id => summaries.has(id))
+      const listedBy = (a, b) => outgoing.get(a)?.has(b) ?? false
+      const anonymous = createConnectionVisibility({ policies, connected, listedBy, viewer: null })
+      const visibleCount = id => { if (!anonymous.restricted) return connected.get(id).size; let count = 0; for (const other of connected.get(id)) if (anonymous.visible(id, other)) count++; return count }
       if (value.members !== undefined) {
         const members = new Set(array(value.members, maxProfiles).map(id => { if (!summaries.has(id)) unavailable(); return id }))
         const legacy = new Set(array(value.legacyMembers ?? [], maxProfiles).map(id => { if (!summaries.has(id)) unavailable(); return id }))
         for (const [id, summary] of summaries) {
-          const marks = { presence: members.has(id) ? 'member' : legacy.has(id) ? 'legacy' : 'shadow', connectionCount: connected.get(id).size }
+          const marks = { presence: members.has(id) ? 'member' : legacy.has(id) ? 'legacy' : 'shadow', connectionCount: visibleCount(id) }
           Object.assign(summary, marks); Object.assign(details.get(id), marks)
         }
       }
       const ordered = [...summaries.values()].sort((a, b) => compare(normalized(a.name), normalized(b.name)) || compare(a.id, b.id))
       // A merged profile's address points at its survivor.
-      const aliases = new Map()
+      const aliases = new Map(), aliasesById = new Map()
       if (value.aliases !== undefined) {
         if (!plain(value.aliases) || Object.keys(value.aliases).length > maxProfiles) unavailable()
-        for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to) }
+        for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to); if (!aliasesById.has(to)) aliasesById.set(to, []); aliasesById.get(to).push(from) }
       }
       // Autocomplete companies come only from visible positions, never raw imports.
       const companies = new Map()
@@ -214,7 +234,17 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // Addresses an operator removal took out; never published, only named.
       const removed = new Set()
       if (Array.isArray(value.removed)) for (const id of value.removed) if (idValid(id) && !summaries.has(id)) removed.add(id)
-      const data = { revision: value.revision, ordered, summaries, details, connected, tokens, aliases, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
+      const linkedinProfiles = new Map(), linkedinIds = new Map()
+      for (const detail of details.values()) {
+        const slug = parseLinkedinProfileUrl(detail.linkedinUrl)?.slug
+        if (!slug) continue
+        if (!linkedinIds.has(slug)) linkedinIds.set(slug, [])
+        linkedinIds.get(slug).push(detail.id)
+        const previous = linkedinProfiles.get(slug)
+        if (!previous || Number(detail.presence === 'member') > Number(previous.presence === 'member') ||
+          (Number(detail.presence === 'member') === Number(previous.presence === 'member') && compare(detail.id, previous.id) < 0)) linkedinProfiles.set(slug, detail)
+      }
+      const data = { revision: value.revision, ordered, summaries, details, linkedinProfiles, linkedinIds, connected, policies, listedBy, tokens, aliases, aliasesById, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
@@ -235,6 +265,21 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     return value.size ? value : null
   }
   const groupScope = groups => groups ? `g=${[...groups].sort().join(',')}:` : ''
+  // `viewer`: who is looking, for members' connection privacy
+  // (docs/connection-privacy.md): { signedIn, id?: their published profile }.
+  // Missing means an anonymous visitor, so a caller that forgets it can only
+  // show less, never more.
+  const viewerValue = value => {
+    if (value === undefined || value === null) return null
+    if (!plain(value) || typeof value.signedIn !== 'boolean' || (value.id !== undefined && value.id !== null && !idValid(value.id)) || Object.keys(value).some(key => !['signedIn', 'id'].includes(key))) invalid()
+    return value
+  }
+  // The viewer's private `known` set never widens what they see: relationships
+  // come only from the published owner-side lists (docs/connection-privacy.md).
+  const visibilityFor = (data, viewer) => createConnectionVisibility({ policies: data.policies, connected: data.connected, listedBy: data.listedBy,
+    viewer: viewer ? { signedIn: viewer.signedIn, ...(viewer.id ? { id: data.aliases.get(viewer.id) ?? viewer.id } : {}) } : null })
+  // Connection lists can differ per viewer, so a signed-in viewer's cursors are theirs.
+  const viewerScope = viewer => viewer ? `:v=${hash(JSON.stringify([viewer.signedIn === true, viewer.id ?? null]))}` : ''
   const queryValue = value => { if (value === undefined) return ''; if (typeof value !== 'string' || value.length > 200) invalid(); return normalized(value) }
   function cursorValue(cursor, scope) {
     if (cursor === undefined) return undefined
@@ -278,15 +323,18 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known, listed: listedFor(data.unlisted, groups) }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
     },
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [], unlistedGroups } = requestValue(request)
-      const groups = groupsValue(unlistedGroups)
+      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [], unlistedGroups, filters: inputFilters = {}, networkSeeds, networkSelf } = requestValue(request)
+      const groups = groupsValue(unlistedGroups), filters = peopleFilters(inputFilters), viewer = networkSeeds ? viewerValue(request.viewer) : null
+      if (networkSeeds !== undefined && (!Array.isArray(networkSeeds) || networkSeeds.length > maxProfiles || !networkSeeds.every(idValid))) invalid()
+      if (networkSelf !== undefined && !idValid(networkSelf)) invalid()
+      if (filters.degree && !networkSeeds) invalid()
       if (!PUBLIC_LIST_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
       // `exclude`: published ids the caller already shows elsewhere on the page
       // (a signed-in owner's own people), left out before paging and totals.
       if (!Array.isArray(exclude) || exclude.length > maxProfiles || !exclude.every(idValid)) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
       // The presence filter and exclusions are part of the cursor scope, so a page never mixes filters.
-      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}${groupScope(groups)}`
+      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}${groupScope(groups)}${Object.keys(filters).length ? `filters=${hash(JSON.stringify(filters))}:` : ''}${networkSeeds ? `network=${hash(JSON.stringify([networkSelf, [...networkSeeds].sort(), viewerScope(viewer)]))}:` : ''}`
       const data0 = exclude.length ? await snapshot(signal) : null
       const excluded = data0 ? new Set(exclude.map(id => data0.aliases.get(id) ?? id)) : null
       const without = excluded?.size ? `x=${hash([...excluded].sort().join('\n'))}:` : ''
@@ -294,7 +342,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const decodedCursor = cursorValue(cursor, scope), data = data0 ?? await snapshot(signal)
       // A snapshot that does not name its members has no presence, so it matches no filter.
       const listed = listedFor(data.unlisted, groups)
-      const people = data.ordered.filter(person => (!presence || person.presence === presence) && listed(person.id))
+      const degrees = networkSeeds ? connectionDegrees({ seeds: networkSeeds.map(id => data.aliases.get(id) ?? id), self: data.aliases.get(networkSelf) ?? networkSelf, connected: data.connected, visible: visibilityFor(data, viewer).visible }) : null
+      const people = data.ordered.filter(person => (!presence || person.presence === presence) && listed(person.id) && matchesPeopleFilters(data.details.get(person.id), filters) && (!filters.degree || degrees.get(person.id) === Number(filters.degree)))
+        .map(person => degrees?.get(person.id) ? { ...person, connectionDegree: degrees.get(person.id) } : person)
       // Exclusions apply after ranking, so leaving out the full matches the
       // page already shows never promotes people who match only some words.
       const kept = rows => excluded?.size ? rows.filter(person => !excluded.has(person.id)) : rows
@@ -307,17 +357,23 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // `show` narrows to members ('members') or to `known`, the published ids
       // the signed-in viewer is connected to ('known'). `known` also yields the
       // "You both know" count; it is never read here.
-      const { id, cursor, signal, query = '', sort = 'name', show, known } = requestValue(request)
+      const { id, cursor, signal, query = '', sort = 'name', show, known } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id) || !['name', 'detail'].includes(sort) || ![undefined, 'members', 'known'].includes(show) || (known !== undefined && !(known instanceof Set)) || (show === 'known' && !known)) invalid()
       const search = queryValue(query)
       const narrowed = show ? `:${show}${show === 'known' ? `:${hash([...known].sort().join('\n'))}` : ''}` : ''
-      const scope = `connections:${id}${sort === 'name' && !search && !show ? '' : `:${sort}:${search}${narrowed}`}`, decodedCursor = cursorValue(cursor, scope)
+      const scope = `connections:${id}${sort === 'name' && !search && !show ? '' : `:${sort}:${search}${narrowed}`}${viewerScope(viewer)}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
       if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
       if (data.aliases.has(id)) return { moved: data.aliases.get(id) }
       if (!data.details.has(id)) return null
-      let rows = data.ordered.filter(person => person.id !== id && data.connected.get(id).has(person.id))
+      const visibility = visibilityFor(data, viewer)
+      let rows = data.ordered.filter(person => person.id !== id && data.connected.get(id).has(person.id) && visibility.visible(id, person.id))
       const connectionCount = rows.length
+      // For a signed-in viewer, who they both know across the whole list (not
+      // the current search): the count and a few faces, members first, for
+      // the profile header's mutual line. Only this person's published
+      // connections are read; the viewer's own set is never listed.
+      const mutual = known ? (shared => ({ total: shared.length, preview: shared.sort((a, b) => Number(b.presence === 'member') - Number(a.presence === 'member')).slice(0, MUTUAL_PREVIEW).map(withPhoto) }))(rows.filter(person => known.has(person.id))) : undefined
       if (search) { const matcher = createQueryMatcher(search, 'best'); rows = matcher ? rows.filter(person => matcher.test(data.tokens.get(person.id)).all) : [] }
       // Counts for each narrowing, within the current search.
       const connectionFacets = { all: rows.length, members: rows.filter(person => person.presence === 'member').length, ...(known ? { known: rows.filter(person => known.has(person.id)).length } : {}) }
@@ -325,20 +381,20 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       else if (show === 'known') rows = rows.filter(person => known.has(person.id))
       if (sort === 'detail') rows.sort((a, b) => Number(b.detailLevel === 'detailed') - Number(a.detailLevel === 'detailed'))
       const connections = page(rows, decodedCursor, scope, data.revision)
-      return { profile: { ...withPhoto(data.details.get(id)), connectionCount, connectionsTotal: rows.length, connectionFacets, connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
+      return { profile: { ...withPhoto(data.details.get(id)), connectionCount, connectionsTotal: rows.length, connectionFacets, ...(mutual ? { mutual } : {}), connections: connections.profiles, ...(connections.nextCursor ? { nextConnectionsCursor: connections.nextCursor } : {}) } }
     },
     // A small public card for hover previews: the summary, plus for a signed-in
     // viewer (`known`: published ids they are connected to; never read here)
     // how many of this person's connections they know too.
     async card(request = {}) {
-      const { id, signal, known } = requestValue(request)
+      const { id, signal, known } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id) || (known !== undefined && !(known instanceof Set))) invalid()
       const data = await snapshot(signal)
-      const resolved = data.aliases.get(id) ?? id
+      const resolved = data.aliases.get(id) ?? id, visibility = visibilityFor(data, viewer)
       const summary = data.summaries.get(resolved)
       if (!summary) return null
       let mutual
-      if (known) { mutual = 0; for (const other of data.connected.get(resolved) ?? []) if (other !== resolved && known.has(other)) mutual++ }
+      if (known) { mutual = 0; for (const other of data.connected.get(resolved) ?? []) if (other !== resolved && known.has(other) && visibility.visible(resolved, other)) mutual++ }
       return { card: { ...withPhoto(summary), ...(mutual === undefined ? {} : { mutual }) } }
     },
     // The group a profile is unlisted in (null when unlisted for everyone),
@@ -380,48 +436,65 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { address, signal } = requestValue(request), parsed = parseLinkedinProfileUrl(address)
       if (!parsed) invalid()
       const data = await snapshot(signal)
-      const matches = [...data.details.values()].filter(profile => parseLinkedinProfileUrl(profile.linkedinUrl)?.slug === parsed.slug)
-      // Prefer a live member when two published sources describe one person.
-      matches.sort((a, b) => Number(b.presence === 'member') - Number(a.presence === 'member') || compare(a.id, b.id))
-      return matches.length ? withPhoto(data.summaries.get(matches[0].id)) : null
+      const match = data.linkedinProfiles.get(parsed.slug)
+      return match ? withPhoto(data.summaries.get(match.id)) : null
+    },
+    async linkedinProfileIds(request = {}) {
+      const { id, signal } = requestValue(request)
+      if (!idValid(id)) invalid()
+      const data = await snapshot(signal), resolved = data.aliases.get(id) ?? id
+      const detail = data.details.get(resolved)
+      if (!detail) return []
+      const parsed = parseLinkedinProfileUrl(detail.linkedinUrl)
+      const ids = parsed ? data.linkedinIds.get(parsed.slug) ?? [] : [resolved]
+      return ids.flatMap(value => [value, ...(data.aliasesById.get(value) ?? [])])
+    },
+    // Exact identity from a currently readable public address, never an id's
+    // spelling, a name, or an email. Private callers use it only in their own overlay.
+    async linkedinRef(request = {}) {
+      const { id, signal } = requestValue(request)
+      if (!idValid(id)) invalid()
+      const data = await snapshot(signal), resolved = data.aliases.get(id) ?? id
+      const parsed = parseLinkedinProfileUrl(data.details.get(resolved)?.linkedinUrl)
+      return parsed ? hash(parsed.slug) : null
     },
     // The public summaries for known IDs, so a private row can link to the
     // matching public profile only when one is published.
     async lookup(request = {}) {
-      const { ids, signal } = requestValue(request)
+      const { ids, signal, filters = {}, details = false, listedOnly = false } = requestValue(request)
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(idValid)) invalid()
       const data = await snapshot(signal)
       const resolved = id => data.aliases.get(id) ?? id
-      return new Map(ids.filter(id => data.summaries.has(resolved(id))).map(id => [id, withPhoto(data.summaries.get(resolved(id)))]))
+      const parsed = peopleFilters(filters), listed = listedFor(data.unlisted, new Set())
+      return new Map(ids.filter(id => data.summaries.has(resolved(id)) && (!listedOnly || listed(resolved(id))) && matchesPeopleFilters(data.details.get(resolved(id)), parsed)).map(id => [id, withPhoto((details ? data.details : data.summaries).get(resolved(id)))]))
     },
     // Whether the public graph already connects two profiles (either direction,
     // merged addresses resolved). Used to avoid offering "Connect" to people
     // who are already connected through an import.
     async linked(request = {}) {
-      const { fromId, toId, signal } = requestValue(request)
+      const { fromId, toId, signal } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(fromId) || !idValid(toId)) invalid()
       const data = await snapshot(signal)
       const from = data.aliases.get(fromId) ?? fromId, to = data.aliases.get(toId) ?? toId
-      return from !== to && Boolean(data.connected.get(from)?.has(to))
+      return from !== to && Boolean(data.connected.get(from)?.has(to)) && visibilityFor(data, viewer).visible(from, to)
     },
     // Everyone the public graph connects to one profile (either direction,
     // merged addresses resolved), as public summaries in name order.
     async neighbors(request = {}) {
-      const { id, signal } = requestValue(request)
+      const { id, signal } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id)) invalid()
       const data = await snapshot(signal)
       const from = data.aliases.get(id) ?? id
-      const connected = data.connected.get(from)
-      return connected ? data.ordered.filter(person => connected.has(person.id)).map(withPhoto) : []
+      const connected = data.connected.get(from), visibility = visibilityFor(data, viewer)
+      return connected ? data.ordered.filter(person => connected.has(person.id) && visibility.visible(from, person.id)).map(withPhoto) : []
     },
     // Everyone whose public profile ties them to a company, by the company name
     // as it appears on profiles: a position at it, or a headline naming it.
     async company(request = {}) {
       const { name, cursor, signal, unlistedGroups } = requestValue(request)
-      if (typeof name !== 'string' || !name.trim() || name.length > 200) invalid()
+      if (!companyPageName(name)) invalid()
       const groups = groupsValue(unlistedGroups)
       const phrase = words(name)
-      if (!phrase.length || phrase.length > 12) invalid()
       const contains = tokens => {
         outer: for (let start = 0; start + phrase.length <= tokens.length; start++) {
           for (let offset = 0; offset < phrase.length; offset++) if (tokens[start + offset] !== phrase[offset]) continue outer

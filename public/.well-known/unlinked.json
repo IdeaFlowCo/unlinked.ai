@@ -47,7 +47,26 @@
       2
     ],
     "connectionAnchor": "explicitly confirmed recovered profile",
-    "recoveredOriginals": "browser-only after explicit recovered-account confirmation"
+    "recoveredOriginals": "browser-only after explicit recovered-account confirmation",
+    "privateListFiles": {
+      "formats": [
+        "csv",
+        "xlsx"
+      ],
+      "tool": "unlinked_stage_investor_csv",
+      "permission": "private_notes",
+      "maxOriginalBytes": 524288,
+      "xlsx": {
+        "explicitSheetSelection": true,
+        "inspectionWrites": false,
+        "originalRetention": "Entire workbook, including unselected and hidden tabs; owner-private; requires retainOriginalConfirmed:true after disclosure and owner authorization",
+        "imports": "Selected sheet only",
+        "sourceRecovery": "Decode each base64 chunk separately; offsets count bytes"
+      },
+      "connectionsCreated": false,
+      "publicProfilesCreated": false
+    },
+    "privatePersonIdentity": "Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence."
   },
   "mcp": {
     "url": "https://www.unlinked.ai/mcp",
@@ -95,7 +114,10 @@
         "unlinked_add_private_link",
         "unlinked_update_private_link",
         "unlinked_delete_private_link",
-        "unlinked_delete_private_thing"
+        "unlinked_delete_private_thing",
+        "unlinked_stage_investor_csv",
+        "unlinked_resume_investor_import",
+        "unlinked_get_investor_import"
       ],
       "visibility": "owner-only; shown in Unlinked and OpenChat; never notifies anyone; not a connection request; not messaging",
       "messaging": "OpenChat via the shared Ideaflow connector https://id.ideaflow.app/mcp (OpenChat permission); never an Unlinked key permission"
@@ -205,5 +227,11 @@
       "shadow"
     ],
     "description": "Presence semantics and the historical-account reclaim boundary are owned by docs/public-people-reader.md#historical-membership in the repository."
+  },
+  "agentAccess": {
+    "guide": "https://www.unlinked.ai/AGENTS.md",
+    "publicComparisons": "No account required; honor Retry-After.",
+    "unlistedClients": "Custom API connector with OpenAPI and a named account key when supported; Muse OAuth unverified.",
+    "accountConsent": "Use verified user identity and explicit delegated consent; no silent agent-created accounts or quota evasion."
   }
 }

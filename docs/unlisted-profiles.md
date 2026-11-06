@@ -1,7 +1,7 @@
 # Unlisted profiles
 
-An unlisted profile stays published: its page, hover card, links to it,
-connection lists that include it, lookups by id or LinkedIn address,
+An unlisted profile stays published and anyone with its link can view it. Its
+page, hover card, links to it, connection lists that include it, lookups by id or LinkedIn address,
 messaging and connection requests all keep working. It is left out of
 **listings**: the People directory (`/people`, `/network` Everyone,
 `/api/people`, `/search-public`), header suggestions, company pages and AI
@@ -13,7 +13,8 @@ reader (`list`, `suggest`, `company`) and in `shared-search.mjs`. Tests:
 
 `profile-decisions-operator.mjs unlist <profileId> <group|-> <decidedBy> "<reason>"`
 stores an `UnlinkedProfileDecision` of kind `unlist`; `revoke` restores the
-listing. With a group (lowercase letters, digits and hyphens, e.g.
+listing. Unlisting is managed by operators through support, not self-service.
+With a group (lowercase letters, digits and hyphens, e.g.
 `appreview`), the profile is still listed for signed-in members whose own
 profile is unlisted in the same group; with `-` it is unlisted for everyone.
 A member's group is read from their own public profile and kept for 5 minutes.

@@ -85,3 +85,14 @@ Browser-only card joining is not an agent capability. The repository guide `docs
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures.
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract `docs/public-people-reader.md` (Historical membership); filter values are published in [OpenAPI](https://www.unlinked.ai/openapi.json).
+
+## Public browsing and unlisted agents
+
+Public profile comparisons need no sign-in; 429 means temporary capacity, not a password requirement. Honor Retry-After. Repeated network searches should use indexed MCP/API queries under a consented account connection. No archive is required for Everyone search.
+Custom connectors need no store listing when the host supports them. Muse: use /openapi.json plus a named key from Settings in the host credential store; Muse OAuth is unverified. Never ask for passwords, silently create accounts, or evade limits with multiple accounts. See /AGENTS.md for the full setup and account-consent instructions.
+
+Private investor CSVs: unlinked_stage_investor_csv(csv,listName,mapping,listId?) stages owner-private source; repeat unlinked_resume_investor_import(importId,batchSize?) until complete/partial, then page unlinked_get_investor_import receipts with nextOffset. 512 KiB CSV parts; append larger files by listId. Exact LinkedIn refs may match; names/emails do not. No public publication or social connections. Private lists: unlinked_list_private_things(kind:list,limit:100), then unlinked_get_private_thing(thingId:listId,limit:100); follow nextCursor as after. Requires private_notes (shared Ideaflow: unlinked:private_notes), independently of social connection writes.
+
+XLSX multi-tab imports use the same stage tool: fileBase64 + filename + inspectOnly:true lists tabs without storage. Explicit sheet (exact name), headerRow (default1), mapping and listName select the table. retainOriginalConfirmed:true requires owner authorization for private retention of the entire workbook, including unselected/hidden tabs. Only the selected sheet becomes list members. Original limit512KiB; no formulas/macros/.xls. Status source recovery uses separately decoded base64 chunks and byte offsets for XLSX; UTF-16 text offsets remain for CSV.
+
+Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence.

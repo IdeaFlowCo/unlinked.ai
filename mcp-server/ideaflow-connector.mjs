@@ -1,6 +1,6 @@
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE } from './account-grants.mjs'
+import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION, composeAccountScope } from './account-grants.mjs'
 import { createAccountHostedHandler } from './account-hosted.mjs'
 
 export function createAssertionVerifier(secret) {
@@ -18,7 +18,7 @@ export function createAssertionVerifier(secret) {
         p.identity_issuer !== 'https://id.ideaflow.app/api/auth' || typeof p.sub !== 'string' || !p.sub || p.sub.length > 200 ||
         typeof p.jti !== 'string' || !p.jti || p.jti.length > 200 || !Number.isSafeInteger(p.iat) || !Number.isSafeInteger(p.exp) ||
         p.iat > now+5 || p.exp <= now || p.exp <= p.iat || p.exp-p.iat > 60 || typeof p.scope !== 'string' || !p.scope ||
-        !p.scope.split(' ').every(scope => ['unlinked:read','unlinked:write'].includes(scope)) || !p.scope.split(' ').includes('unlinked:read') ||
+        !p.scope.split(' ').every(scope => ['unlinked:read','unlinked:write','unlinked:private_notes'].includes(scope)) || !p.scope.split(' ').includes('unlinked:read') ||
         p.body_sha256 !== createHash('sha256').update(body).digest('hex')) return null
       for (const [id, expiry] of seen) if (expiry <= now) seen.delete(id)
       if (seen.has(p.jti) || seen.size >= 10000) return null
@@ -30,18 +30,20 @@ export function createAssertionVerifier(secret) {
 
 /** The gateway owns consent/revocation; each call carries a new 60s assertion.
  * No stored personal keys, account creation, or email matching occurs here. */
-export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin, service }) {
+export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin, service, coordination }) {
   const verify = createAssertionVerifier(secret), authenticated = new WeakMap()
   const authenticateGrant = async request => {
     const state = authenticated.get(request)
-    if (!state) return null
+    if (!state || state.identity.exp <= Math.floor(Date.now() / 1000)) return null
     const owner = await resolveOwner({ issuer: state.identity.identity_issuer, subject: state.identity.sub })
     if (!owner || owner.ownerId !== state.grant.ownerId || owner.userId !== state.grant.userId) return null
     await getBackend(owner) // live owner authorization; never trust assertion fields as local ids
+    if (state.identity.exp <= Math.floor(Date.now() / 1000)) return null
     return state.grant
   }
   const hosted = createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service })
   return async (request, response) => {
+    const ownerCheckpoint = coordination?.checkpoint()
     response.setHeader('Cache-Control', 'no-store')
     const fail = (status, message) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ jsonrpc:'2.0', id:null, error:{ code:-32001, message } })) }
     if (typeof secret !== 'string' || Buffer.byteLength(secret) < 32) return fail(503, 'Unified connector is not configured')
@@ -49,22 +51,25 @@ export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBacken
     if (!(request.headers['content-type'] ?? '').startsWith('application/json')) return fail(400, 'JSON required')
     try {
     const chunks = []; let length = 0
-    for await (const chunk of request) { length += chunk.length; if (length > 1024*1024) return fail(413, 'Request too large'); chunks.push(chunk) }
+    for await (const chunk of request) { length += chunk.length; if (length > 4*1024*1024) return fail(413, 'Request too large'); chunks.push(chunk) }
     const bytes = Buffer.concat(chunks)
     const identity = verify(request.headers.authorization?.replace(/^Bearer /, '') ?? '', bytes)
     if (!identity) { requestDiagnostic().denied('not_linked'); return fail(401, 'Invalid connector assertion') }
     requestDiagnostic().gateway(identity)
     let body
     try { body = JSON.parse(bytes.toString('utf8')) } catch { return fail(400, 'Invalid JSON') }
+    // CSV source bytes can expand sixfold in JSON. Keep the larger envelope
+    // exclusive to the separately consented import tool; its source cap remains.
+    if (length > 1024*1024 && !(body?.method === 'tools/call' && body.params?.name === 'unlinked_stage_investor_csv' && identity.scope.split(' ').includes('unlinked:private_notes'))) return fail(413, 'Request too large')
     const owner = await resolveOwner({ issuer: identity.identity_issuer, subject: identity.sub })
     if (!owner) { requestDiagnostic().denied('account_link_required'); return fail(409, 'account_link_required') }
     const publicEnabled = typeof readPublishedSnapshot === 'function'
     const write = identity.scope.split(' ').includes('unlinked:write')
     if (write && !publicEnabled) return fail(403, 'Connection actions unavailable')
-    const scope = write ? ACCOUNT_WRITE_SCOPE : publicEnabled ? 'owner_network_and_public' : 'owner_network'
-    const grant = { ...owner, grantId:`ideaflow:${identity.jti}`, version:CURRENT_ACCOUNT_GRANT_VERSION, scope, tools:[...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] }
+    const scope = composeAccountScope({ public: publicEnabled, write, privateNotes: identity.scope.split(' ').includes('unlinked:private_notes') })
+    const grant = { ...owner, agent: typeof identity.client === 'string' ? identity.client.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 80) : 'Ideaflow connector', grantId:`ideaflow:${identity.jti}`, version:CURRENT_ACCOUNT_GRANT_VERSION, scope, tools:[...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, scope)] }
     authenticated.set(request, { identity, grant })
-    return await hosted(request, response, body)
+    return await hosted(request, response, body, coordination ? { ownerCheckpoint } : undefined)
     } catch {
       if (!response.headersSent) return fail(503, 'Unlinked connector is temporarily unavailable')
       response.end()

@@ -16,8 +16,11 @@ None of these answer 401, read an owner or start the automatic sign-in hop.
 The support page covers: contact (`support@ideaflow.app`, the brand-wide
 inbox that forwards to the operators), the public feedback board
 (`https://worldissuetracker.com/tracker/unlinked-ai`), how to delete an
-account (Settings → Your data → Delete everything…, anchored at
-`/settings#your-data`; afterwards, and on the deleted page, **Also delete your
+account (Settings → Delete account, anchored at
+`/settings#delete-account`; the form is visible without opening a disclosure. Type
+`delete account` and choose **Permanently delete my Unlinked account**. The
+previous `delete everything` confirmation remains accepted for open pages.
+On Settings and the confirmation page, **Also delete your
 Ideaflow ID** links to `https://id.ideaflow.app/account/delete?return_to=https://www.unlinked.ai`,
 which removes sign-in for every Ideaflow app; that page belongs to Ideaflow ID
 and is built separately), how to report people or messages, how a person can
@@ -32,3 +35,28 @@ continue"). Change the addresses in one place: `SUPPORT_EMAIL`,
 `FEEDBACK_URL`, `PRIVACY_URL` and `TERMS_URL` in
 `mcp-server/private-onboarding-views.mjs`. Tests:
 `tests/support-and-legal.test.mjs`.
+
+## In-app feedback (WIT widget)
+
+**Send feedback** sits in the Me menu (signed in, desktop and phone) and in
+every page footer (signed out too). It opens the World Issue Tracker panel
+in place; nothing floats over the page (`data-trigger="none"`). Reports go to
+the unlisted board `unlinked-feedback`
+(`https://worldissuetracker.com/tracker/unlinked-feedback`), tagged
+`App: Unlinked v<package version>`. Without script, and in the iOS app (which
+does not load the widget), the item is a link to `/support`. Wiring:
+`mcp-server/feedback-widget.mjs`.
+
+Signed-in reports carry a verified sender. At sign-in the runtime keeps the
+member's Ideaflow ID token **in process memory only** (a non-enumerable field
+on the identity, copied into the in-memory session; never in the Neo4j session
+store, a cookie, a log or the page). `POST /wit-feedback-token` (same-origin,
+signed-in) exchanges it at WIT's `/functions/v1/feedback-token` for a
+15-minute `wfb1.` token that can only create issues, caches that per session,
+and returns `204` otherwise, so the report files anonymously. ID tokens last
+10 hours and there is no refresh token, so reports become anonymous after
+that, or after a runtime restart, until the member next signs in. WIT accepts
+the exchange only once Unlinked's Ideaflow client ID
+(`tpSUdlNXMYdgabXvwTjkQWhqGtzOUXwM`) is on its `WIT_FEEDBACK_CLIENT_IDS`
+allowlist; until then reports are anonymous. Tests:
+`tests/private-browser.test.mjs` (WIT feedback token), `tests/topbar-me-menu.test.mjs`.

@@ -1,3 +1,5 @@
+import { createPrivateLists, PRIVATE_LIST_READ_TOOLS } from './private-lists.mjs'
+import { createPrivateListImports, LIST_TOOLS } from './private-list-imports.mjs'
 import { diagnosticTransport, requestDiagnostic } from './request-diagnostics.mjs'
 import { createIdeaflowConnectorHandler } from './ideaflow-connector.mjs'
 import { createMessagingHandler, MESSAGING_PATH } from './messaging.mjs'
@@ -5,9 +7,10 @@ import { createServer } from 'node:http'
 import { hkdfSync } from 'node:crypto'
 import { generateKeyPair } from 'jose'
 import { createPrivateBrowserHandler } from './private-browser.mjs'
+import { coordinatorFor } from './owner-coordination.mjs'
 import { createPrivateHostedHandler } from './private-hosted.mjs'
 import { createPrivateGrantService } from './private-grants.mjs'
-import { createAccountGrantService } from './account-grants.mjs'
+import { createAccountGrantService, composeAccountScope } from './account-grants.mjs'
 import { createAccountHostedHandler } from './account-hosted.mjs'
 import { createAccountAgentApiHandler } from './account-api.mjs'
 import { createAccountToolService } from './account-tools.mjs'
@@ -18,7 +21,7 @@ import { warmPublicPeopleIndex } from './public-people-warmup.mjs'
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
 // invocation; no operational credential or provider token is sent to clients.
-export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, messagingSecret, resolveMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, requestDiagnostics, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos, autoSignIn = false, overlay, overlayIdentity }) {
+export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIdentityForOwner, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, messagingSecret, resolveMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, savedSearchLists, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, requestDiagnostics, recordBrowserPerformance, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos, autoSignIn = false, overlay, overlayIdentity, ideaflowProfiles }) {
   const base = new URL(baseUrl)
   const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : ['isolated-container', 'shared-noos'].includes(networkMode) && host === '0.0.0.0' && ['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) && port === 9367
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !Number.isSafeInteger(port) || port < 7000 || port > 9999 || !privateHost || typeof complete !== 'function') throw new Error('explicit_isolated_pilot_configuration_required')
@@ -31,19 +34,27 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagi
   // client-registration MAC key is derived from, and separate from, the grant key.
   const oauth = accountGrants ? createOAuthServer({ origin: base.origin, resourcePath: '/mcp', publicSearchEnabled: typeof readPublishedSnapshot === 'function',
     clientKey: new Uint8Array(hkdfSync('sha256', accountGrantKey, 'unlinked-oauth', 'client-registration-v1', 32)),
-    issueGrant: accountGrants.issueGrant, revokeConnectionToken: accountGrants.revokeConnectionToken, audit }) : null
+    issueGrant: accountGrants.issueGrant, revokeConnectionToken: accountGrants.revokeConnectionToken, coordination: coordinatorFor(sessionStore), audit }) : null
   // One tool service instance backs both agent surfaces, so the MCP tools and
   // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
-  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined,
+  const toolService = accountGrants ? createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, coordination: coordinatorFor(sessionStore), lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined,
+    contactAddresses: contactEnrichment ? owner => contactEnrichment.addresses(owner) : undefined,
     // Private people notes & relations (catalog v7) call the same Noos overlay as the private-context panel.
     ...(overlay && typeof overlayIdentity === 'function' ? { overlay, identityFor: overlayIdentity } : {}) }) : null
   // Owner-only private context from the Ideaflow people overlay
   // (docs/private-context.md). The owner's contact lookup is the same
   // owner-scoped unlinked_lookup_contact the agent tools use, run for the
   // signed-in session owner only.
-  const privateContext = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateContext({ overlay, identityFor: overlayIdentity,
+  const privateContext = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateContext({ overlay, identityFor: overlayIdentity, ...(contactSlugs ? { contactPath: id => contactSlugs.pathFor(id) } : {}),
     lookupContact: async (owner, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: 'owner', tools: ['unlinked_lookup_contact'] }, name: 'unlinked_lookup_contact', input })).result }) : null
-  const browser = createPrivateBrowserHandler({ createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, getBackend, complete, readPublishedSnapshot,
+  // Browser list uploads (followers and other lists, docs/investor-csv.md):
+  // the same private list import as the agent tools, run as the signed-in
+  // owner through an in-process grant limited to those three tools.
+  const privateListImports = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateListImports({
+    call: async (owner, name, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: composeAccountScope({ privateNotes: true }), tools: [...LIST_TOOLS], agent: 'Unlinked import page', app: true }, name, input })).result }) : null
+  const privateLists = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateLists({
+    call: async (owner, name, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: composeAccountScope({ privateNotes: true }), tools: [...PRIVATE_LIST_READ_TOOLS], agent: 'Unlinked lists page', app: true }, name, input })).result }) : null
+  const browser = createPrivateBrowserHandler({ privateLists, privateListImports, ideaflowProfiles, recordPublicAdmission: requestDiagnostics?.publicAdmission, recordBrowserPerformance, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, savedSearchLists, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, getBackend, complete, readPublishedSnapshot,
     issueAccountGrant: accountGrants?.issueGrant, ensureAccountGrant: accountGrants?.ensureGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
     issueGrant: grants.issueGrant, mcpEndpoint: new URL('/mcp', base).href, dataMode, backgroundImports, audit,
     oauth: oauth ?? undefined, listAccountGrants: accountGrants?.listGrants, accountKeys: accountGrants, ...(lookupCompanyFacts ? { lookupCompanyFacts } : {}), profilePhotos, autoSignIn, privateContext })
@@ -57,9 +68,9 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, createMessagi
   if (provisionAgentClients.length && !accountGrants) throw new Error('account_agent_provisioning_configuration_required')
   // Server-to-server grant provisioning stays off unless the operator supplied
   // a non-empty allow list (see docs/agent-api.md, "Grant provisioning").
-  const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit } : undefined
+  const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit, coordination: coordinatorFor(sessionStore) } : undefined
   const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin, provisioning }) : null
-  const connector = accountGrants ? createIdeaflowConnectorHandler({ secret: ideaflowConnectorSecret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService }) : null
+  const connector = accountGrants ? createIdeaflowConnectorHandler({ secret: ideaflowConnectorSecret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService, coordination: coordinatorFor(sessionStore) }) : null
   const messaging = createMessagingHandler({ origin: base.origin, secret: messagingSecret, resolveRecipient: resolveMessagingRecipient })
   const server = createServer((request, response) => {
     let pathname

@@ -160,8 +160,8 @@ tools for each scope; historical entries are immutable.
   does not deliver tool-list-change or notification pushes (`listChanged: false`).
   The notification tool reads the in-app feed on demand.
 - Catalog v6 added the read-only, owner-scoped `unlinked_lookup_contact` to every
-  scope. Current issuance is **catalog v7**: every v6 scope keeps its exact list
-  and gains a twin with the suffix `_and_private_notes` (scope grammar
+  scope. Catalog v7 kept each v6 scope's exact list
+  and added a twin with the suffix `_and_private_notes` (scope grammar
   `owner_network[_and_public][_and_write][_and_private_notes]`) that appends the
   twelve [private people notes & relations](#private-people-notes--relations-catalog-v7)
   tools. That is a **separate, default-on permission** (Jacob's decision on
@@ -170,7 +170,8 @@ tools for each scope; historical entries are immutable.
   A pre-v7 **OAuth connection** keeps exactly its consented scope and needs
   reconnection to consent to `private_notes`. Manual-key permissions
   (connection requests, private notes) are switched in Settings; OAuth apps
-  require actual consent/reconsent for additional permissions.
+  require actual consent/reconsent for additional permissions. Current issuance is
+  catalog v9; its investor tools are described in the [investor list workflow](investor-csv.md).
 
 OpenChat's production integration — stateless JSON-RPC `tools/call` POSTs to
 `/mcp` invoking `unlinked_search_network` / `unlinked_search_everyone` — is
@@ -209,6 +210,8 @@ an extra sanitized `cause` identifier).
 | `cooldown_active` | 429 | The withdrawal cooldown has not elapsed. |
 | `ambiguous_name` | 409 | (private notes) Several of the owner's saved things share that name. The body adds `candidates` (`id`, `kind`, `name`, the owner's own); ask the user, then pass an id, or `createNew` with `clientRequestId`. |
 | `identity_unavailable` | 409 | (private notes) The account has no Ideaflow sign-in identity, so it has no people overlay. Sign in to Unlinked with Ideaflow once. |
+| `import_busy` | 409 | An investor import is being changed or has an active batch; retry after the lease expires. |
+| `identity_conflict` | 409 | Exact references identify conflicting private records or could not be attached; inspect them and have the owner select the intended record before retrying. |
 
 Private-notes input refusals from the overlay are `invalid_input` with an extra
 `overlayCode` (for example `invalid_relation`).
@@ -232,9 +235,9 @@ This vocabulary may be extended, never renamed.
 - AI tools (`ai_search`, `search_network` free-text mode, `search_everyone`):
   20/min, 2000/day and 2 in flight **per grant owner**, plus a shared ceiling
   of 8 concurrent AI calls per runtime. These budgets are enforced on the
-  HTTP API and on the new MCP tools; the two launch tools keep their
-  historical unmetered behavior **on the MCP surface only** (preserved for
-  existing integrations). **Known conflict with a 10 s consumer
+  HTTP API, shared gateway and all hosted MCP search tools, including the
+  two launch tools. Launch searches retain their historical result shapes
+  and page sizes; text-first searches also consume this AI allowance. **Known conflict with a 10 s consumer
   timeout:** these call a provider with batched ranking rounds; worst case is
   bounded at 40 s and p95 is not guaranteed under 10 s. Mitigations the
   contract commits to: `unlinked_ai_search` accepts `timeoutMs` (1000–40000) and
@@ -247,8 +250,10 @@ This vocabulary may be extended, never renamed.
 Hard fences, identical on both surfaces and strictly narrower than the
 human-facing profile card (card-only opt-ins such as phone never appear here):
 
-- **Never returned:** contact email/phone, raw archives/original files,
-  credential or signed URLs, other owners' private imports.
+- **Never returned by network and profile reads:** archive contact email/phone,
+  raw LinkedIn archives or recovered original files, credential or signed URLs,
+  and other owners' private imports. The separate private-notes permission permits
+  access to the owner's investor CSV/XLSX source and fields; see [the investor list workflow](investor-csv.md).
 - Every entry/result is labeled `visibility: "public"` (published People
   index / recorded public paths) or `"owner_private"` (the grant owner's own
   imported observations, visible only to that grant).
@@ -369,14 +374,20 @@ own contacts without paging; give exactly one input:
 - `profileId`: a published profile id; answers with the owner's connection to
   that person when there is one, otherwise the public profile only.
 - `refHashes`: up to 100 `linkedinRefHash` values; answers the owner's contacts
-  among them (`{ kind, contacts: [...] }`, unmatched hashes are omitted).
+  among them (`{ kind, contacts: [...] }`, unmatched hashes are omitted). When
+  multiple owner contacts share a source hash, the contact includes sorted
+  `connectionIds` alongside the existing `connectionId`.
 
 Response: `{ kind, contact: { connectionId | null, name, headline?, company?,
-linkedinRefHash | null, publishedProfileId | null, provenance? }, visibility }`.
+linkedinRefHash | null, sourceLinkedinRefHash?, sourceLinkedinRefHashes?,
+publishedProfileId | null, publishedProfileIds?, provenance? },
+publicReconciliationComplete?, visibility }`. Additional source hashes and
+published IDs identify related exact references; `publicReconciliationComplete`
+indicates whether the public index was available for reconciliation.
 `linkedinRefHash` is the SHA-256 hex of the canonical LinkedIn slug
 (`linkedinSlug()` in `src/utils/public-people/url-identity.mjs`: decoded,
 lowercased) — the value of the Ideaflow people-overlay ref `linkedin:in:<hash>`
-OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`).
+OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`). A public-only profile lookup also returns this hash when the readable public profile has an exact LinkedIn URL. See [private context](private-context.md#private-prospects-before-a-public-profile) for the identity and read boundaries.
 `publishedProfileId` is set when the same person has a published profile (the
 row's own published profile, or one with the same LinkedIn address).
 `visibility` is `owner_private` when the answer comes from the owner's own
@@ -647,19 +658,25 @@ independent of "Send and manage connection requests".
 - **Naming people.** `subjectKind`/`toKind` `unlinked` takes a published profile
   id, a connection id from `unlinked_list_connections` (an imported LinkedIn
   contact) or a `linkedin.com/in/` address, resolved with the owner-scoped
-  `unlinked_lookup_contact` (only the caller's own imports). Refs are
+  `unlinked_lookup_contact` (published profiles and only the caller's own imports). Refs are
   `unlinked:person:<id>` for published profiles and `linkedin:in:<sha256 of the
-  canonical slug>` for the owner's imports — never a plaintext address; both are
-  joined on one entity with `ensureRefs`. `thing` takes an overlay entity id.
+  canonical slug>` for exact public or owner-import addresses — never a plaintext
+  address. Writes attach compatible refs with `ensureRefs`; conflicting private
+  entities are refused rather than merged. Both named endpoints of a link are
+  checked before writes, but a later independent race or outage can still leave
+  a partial write. See [private context](private-context.md#private-prospects-before-a-public-profile)
+  for reconciliation and its limits. `thing` takes an overlay entity id.
   `user` (OpenChat user id) works only for OpenChat people the owner already has
   private notes about; record new OpenChat people through the shared connector.
   Reads never create entities.
 - **Provenance.** Every write records `author: "agent:<key name>"` (API keys; the
-  default key is "Default key") or `"agent:<connected app>"` (OAuth), `source:
-  "direct-key"` and `assertion` `stated` (default) or `inferred`. Unlinked and
+  default key is "Default key") or `"agent:<connected app>"` (OAuth), `source`
+  `direct-key` for direct grants or `connector` for the shared connector, and
+  `assertion` `stated` (default) or `inferred`. Unlinked and
   OpenChat label each agent-written note and relation with it.
 - **Results** never include raw overlay refs: entity ends carry `profileId`,
-  `linkedinRefHash` (+ `connectionId` when the owner imported them) or
+  `linkedinRefHash` (+ `connectionId` when the owner imported them, and sorted
+  `connectionIds` when multiple owner contacts match its exact hashes) or
   `openchatUserId`. Every result is `visibility: "owner_private"`.
 - **Budgets.** Shared with the deterministic budget (120 calls per owner per
   minute). Writes revalidate the key before running and report a landed write
@@ -668,8 +685,8 @@ independent of "Send and manage connection requests".
 | MCP tool (`unlinked_*`) | HTTP route (`/api/agent/v1/…`) | Fields | Shared connector equivalent (`openchat__…`) |
 |---|---|---|---|
 | `unlinked_get_person_private` | `GET private/person` | `profileId` (profile id, connection id or LinkedIn address) | `oc_get_unlinked_person_private` |
-| `unlinked_get_private_thing` | `GET private/thing` | `thingId` | `oc_get_private_thing` |
-| `unlinked_list_private_things` | `GET private/things` | `query?`, `kind?` | `oc_list_private_things` |
+| `unlinked_get_private_thing` | `GET private/thing` | `thingId`, `after?`, `limit?` | `oc_get_private_thing` |
+| `unlinked_list_private_things` | `GET private/things` | `query?`, `kind?`, `after?`, `limit?` | `oc_list_private_things` |
 | `unlinked_search_private` | `GET private/search` | `query?`, `relationType?`, `kind?`, `limit?` (one of the first three) | `oc_search_private` (also covers `oc_list_private_links` with a query) |
 | `unlinked_get_neighbourhood` | `GET private/neighbourhood` | `subjectKind`, `subjectId`, `depth?` (1–2) | `oc_get_neighbourhood` |
 | `unlinked_save_private_thing` | `POST private/things` | `kind`, `name`, `createNew?`, `clientRequestId?` | `oc_save_private_thing` |
@@ -684,6 +701,7 @@ Not on the direct key: `oc_get_person_private` / `oc_set_person_private` /
 `oc_list_catch_up` (OpenChat people and their catch-up cadence) — use the shared
 connector. Agents can switch between the two surfaces by dropping the
 `openchat__oc_` prefix for `unlinked_` and using `subjectKind: "unlinked"`.
+Paged private-thing enumeration does not accept `query`; use private search instead.
 
 **Three separate things.** Messaging = OpenChat, through the shared Ideaflow
 connector (`https://id.ideaflow.app/mcp`) with the OpenChat permission; it is not
@@ -697,7 +715,7 @@ for this.
 
 ## Shared connector delegation
 
-The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` on that host). The gateway forwards authorized calls to `POST /api/connector/mcp` with a dedicated `IDEAFLOW_CONNECTOR_SECRET` HS256 assertion, never a personal API key. Assertions bind the exact UTF-8 JSON body hash, `https://www.unlinked.ai/mcp` audience, Ideaflow issuer/subject, consented `unlinked:read` and optional `unlinked:write`, unique jti, and at most 60 seconds. Invalid/replayed assertions fail before account lookup. No account or linking is created by a call. The existing account tool service and live owner authorization are reused; write permission exposes only existing connection actions, never messaging or raw archives. Gateway disconnect revokes future assertions; in-flight authorized operations can finish. Deploy the per-service secret in the runtime env with the release; absence keeps the internal endpoint disabled.
+The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` on that host). The gateway forwards authorized calls to `POST /api/connector/mcp` with a dedicated `IDEAFLOW_CONNECTOR_SECRET` HS256 assertion, never a personal API key. Assertions bind the exact UTF-8 JSON body hash, `https://www.unlinked.ai/mcp` audience, Ideaflow issuer/subject, consented `unlinked:read` and optional `unlinked:write` and `unlinked:private_notes`, unique jti, and at most 60 seconds. Invalid/replayed assertions fail before account lookup. No account or linking is created by a call. The existing account tool service and live owner authorization are reused; write permission exposes only existing connection actions, never messaging or raw archives. Gateway disconnect revokes future assertions; in-flight operations may continue only while their assertion remains valid and owner authorization succeeds. Direct keys are live-revalidated. Deploy the per-service secret in the runtime env with the release; absence keeps the internal endpoint disabled.
 
 
 ### Named manual keys
@@ -708,3 +726,12 @@ formats, independent key lifecycle, compatibility and generation-aware rollback.
 ## Request diagnostics
 
 When operator-enabled, direct REST/MCP responses include a server-generated X-Request-ID. For a failed query, report that response ID, time/timezone, endpoint or tool, status/error, elapsed time and query length; never send credentials, private query text or results. Diagnostics is off by default and does not prove host setup or fix earlier failures. See [the private diagnostics contract](request-diagnostics.md) for field semantics, retention, trusted gateway correlation limits and operator lookup. The JSON response schemas, permissions and status mappings are unchanged.
+
+## Unlisted clients and consistent search admission
+
+See [agent access](agent-access.md) for public comparisons, Muse custom API setup, explicit signup/consent, and capacity policy. Search budgets and launch-tool compatibility are defined in [Rate limits and latency](#rate-limits-and-latency).
+
+### Private investor CSV/XLSX files and lists (catalog v9)
+
+See the [investor list workflow](investor-csv.md) for private CSV/XLSX staging,
+sheet selection and retention consent, resumable imports, recovery and list queries.

@@ -49,7 +49,7 @@ function fakeOpenChat() {
   return { calls, blocks, fetchImpl }
 }
 
-async function site(t, { reports = true, blocks = true } = {}) {
+async function site(t, { reports = true, blocks = true, onProfileLookup, identityLookup } = {}) {
   const openChat = fakeOpenChat()
   const blockService = blocks ? createMemberBlocks({ store: createMemoryBlockStore() }) : undefined
   const notifications = createNotifications({ store: createMemoryNotificationStore() })
@@ -65,10 +65,10 @@ async function site(t, { reports = true, blocks = true } = {}) {
     login: { begin: async () => ({ location: 'https://identity.invalid/', transaction: { state: 'test' } }), finish: async () => ({ issuer: 'https://identity.invalid', subject: nextSubject, verifiedEmail: `${nextSubject}@example.invalid`, displayName: nextSubject === 'alex' ? 'Alex Rivera' : 'Blake Moreau' }) },
     resolveOwner: async identity => owners[identity.subject] ?? null, signup: async identity => owners[identity.subject], issueAccountGrant: async () => ({}), revokeAccountGrant: async () => {},
     getBackend: async () => ({ adapter: {}, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => [], readResource: async () => null }),
-    readPublishedSnapshot: async () => snapshot, accountForProfile: async id => profiles.get(id) ?? null, ownProfileId: async owner => owner.ownerId === A.ownerId ? ALEX : BLAKE,
+    readPublishedSnapshot: async () => snapshot, accountForProfile: async id => { const result = profiles.get(id) ?? null; await onProfileLookup?.(id); return result }, ownProfileId: async owner => owner.ownerId === A.ownerId ? ALEX : BLAKE,
     memberConnections, notifications,
     createMessagingSession: async session => ({ token: `token-${session.owner.ownerId}`, user: { userId: session.owner.ownerId === A.ownerId ? 'oc_alex' : 'oc_blake' } }),
-    messagingIdentities: async (_session, ids) => ids.filter(id => id === 'oc_blake').map(userId => ({ userId, issuer: 'https://identity.invalid', subject: 'blake' })),
+    messagingIdentities: identityLookup ?? (async (_session, ids) => ids.filter(id => id === 'oc_blake').map(userId => ({ userId, issuer: 'https://identity.invalid', subject: 'blake' }))),
     messagingOptions: { fetchImpl: openChat.fetchImpl, connectSocket: async () => { throw new Error('no socket in tests') } },
     ...(reports ? { safetyReports: createSafetyReports({ store: reportStore, transport, from: 'Unlinked <noreply@id.ideaflow.app>', origin: 'https://www.unlinked.ai' }) } : {}),
     ...(blockService ? { memberBlocks: blockService } : {}) })
@@ -85,6 +85,79 @@ async function site(t, { reports = true, blocks = true } = {}) {
   const api = (path, cookie, csrf, body) => go(`/messages/api${path}`, body === undefined ? { headers: { Cookie: cookie } } : { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/json', 'X-Unlinked-CSRF': csrf }, body: JSON.stringify(body) })
   return { go, page, post, api, signIn, csrfOf, openChat, reportStore, transport, blockService, memberConnections, notifications }
 }
+
+test('chat profile enforces account blocks without an OpenChat ID', async t => {
+  let fail = false
+  let strictCalls = 0
+  const app = await site(t, { identityLookup: async (_session, ids, options) => {
+    if (options?.strict) strictCalls++
+    if (fail) throw new Error('identity unavailable')
+    return ids.filter(id => id === 'oc_blake').map(userId => ({ userId, issuer: 'https://identity.invalid', subject: 'blake' }))
+  } })
+  const alex = await app.signIn('alex')
+  const path = '/messages/person/c_group/oc_blake'
+  assert.equal((await app.page(path)).status, 401)
+  const redirect = await app.go(path, { headers: { Cookie: alex } })
+  assert.equal(redirect.status, 303)
+  assert.match(redirect.headers.get('cache-control'), /no-store/)
+  assert.match(redirect.headers.get('x-robots-tag'), /noindex/)
+  await app.blockService.block(A, { blocked: B, profileId: BLAKE })
+  assert.equal((await app.page(path, alex)).status, 404)
+  assert.equal(strictCalls, 1)
+  fail = true
+  const unavailable = await app.go(path, { headers: { Cookie: alex } })
+  assert.equal(unavailable.status, 503)
+  assert.equal(unavailable.headers.get('retry-after'), '10')
+  assert.match(unavailable.headers.get('cache-control'), /no-store/)
+  assert.match(unavailable.headers.get('x-robots-tag'), /noindex/)
+  const body = await unavailable.text()
+  assert.match(body, /try again/i)
+  assert.doesNotMatch(body, /Blake|oc_blake/)
+})
+
+test('unresolved chat identities fail closed only when account blocks require comparison', async t => {
+  let identityResult = []
+  const app = await site(t, { identityLookup: async () => identityResult })
+  const alex = await app.signIn('alex')
+  const path = '/messages/person/c_group/oc_casey'
+  assert.equal((await app.page(path, alex)).status, 200)
+  await app.blockService.block(A, { blocked: B, profileId: BLAKE })
+  const empty = await app.page(path, alex)
+  assert.equal(empty.status, 503)
+  assert.doesNotMatch(empty.body, /Casey Ito/)
+  identityResult = [{ userId: 'oc_casey', issuer: 'https://identity.invalid', subject: 'unknown' }]
+  const unknown = await app.page(path, alex)
+  assert.equal(unknown.status, 503)
+  assert.doesNotMatch(unknown.body, /Casey Ito/)
+})
+
+test('chat profile rate limiting returns a temporary response', async t => {
+  const app = await site(t)
+  const alex = await app.signIn('alex')
+  for (let i = 0; i < 300; i++) await app.page('/messages/person/c_group/invalid%20id', alex)
+  const limited = await app.go('/messages/person/c_group/oc_blake', { headers: { Cookie: alex } })
+  assert.equal(limited.status, 429)
+  assert.equal(limited.headers.get('retry-after'), '60')
+  const body = await limited.text()
+  assert.match(body, /try again/i)
+  assert.doesNotMatch(body, /Blake|oc_blake/)
+})
+
+test('a delayed profile block cannot recreate a block after target deletion', async t => {
+  let armed = false, entered, resume
+  const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve })
+  const app = await site(t, { onProfileLookup: async id => { if (armed && id === BLAKE) { armed = false; entered(); await proceed } } })
+  const alex = await app.signIn('alex'), blake = await app.signIn('blake')
+  const form = await app.page(`/people/${BLAKE}/block`, alex), settings = await app.page('/settings', blake)
+  armed = true
+  const pending = app.post(`/people/${BLAKE}/block`, { csrf: app.csrfOf(form.body) }, alex)
+  await waiting
+  const deleted = await app.post('/delete-account', { csrf: app.csrfOf(settings.body), confirm: 'delete account' }, blake)
+  assert.equal(deleted.status, 200)
+  resume()
+  assert.notEqual((await pending).status, 200)
+  assert.deepEqual(await app.blockService.list(A), [])
+})
 
 test('anyone can report a profile from its ••• menu; the report is stored, emailed, and offers Block to a signed-in member', async t => {
   const app = await site(t)

@@ -35,7 +35,12 @@ that is an email address never becomes an automatic card. Creation is
 create-if-absent (`MERGE … ON CREATE`), so two tabs end with one card and one link.
 
 `/card` shows the card with its QR code first (on phones the QR panel sits
-above the details), then the link, then the explanation and the form.
+above the details), then the link, then the explanation and the form. The link
+block (`shareLink` in the views, `CARD_SHARE_SCRIPT` on every page) shows the
+same URL the QR code encodes with **Copy link** and, where the browser has a
+share sheet, **Share…**, so the card can be texted or emailed across any
+platform. The public version and the Scan sheet's My card tab carry the same
+block; the public one is the member's `/people/<handle>` permalink.
 Scanning your own card says **This is your card**.
 
 ## Hiding
@@ -56,7 +61,7 @@ Scanning your own card says **This is your card**.
 | `email` | `showEmail` | A plain address, up to 254 characters. |
 | `link` | `showLink` | `https` only, no credentials, up to 200 characters. |
 
-The card also keeps the member's `name`, `headline`, `location`, public `linkedinUrl` and public `profilePath`, refreshed whenever they open `/card`, so the link can be rendered without their session. The LinkedIn address is part of the already-public identity (it appears on the public profile), not a switched contact detail; both card versions and the vCard show it.
+The card also keeps the member's `name`, `headline`, `location`, public `linkedinUrl` and public `profilePath`, refreshed whenever they open `/card`, so the link can be rendered without their session. The LinkedIn address is part of the already-public identity (it appears on the public profile), not a switched contact detail; both card versions and the vCard show it. If the member's profile rows, legacy profile and signup source have no LinkedIn address, the card falls back to the validated address from the published profile its QR code opens. This does not replace an existing address; it also covers recovered profiles whose LinkedIn slug is joined only into the published profile.
 
 Storage: one `UnlinkedContactCard` node per account in the pilot graph (`ownerKey` and `token` unique). `projectContactCard` is the single consent projection; the page, the owner's preview and the vCard all render from it.
 
@@ -114,3 +119,11 @@ credential is used to open/reuse the direct conversation. No identity, email or
 recipient id is accepted from browser fields. Blocks apply. The card capability
 never leaves Unlinked or enters the conversation URL. Opening does not send a
 message; unavailable messaging leaves a retry action on the card.
+
+## Asking for their number
+
+An owner can switch on **Ask people who join from my card for their phone
+number** (`askPhone` on the card record). After Join & connect, the connected
+viewer is asked once to share their number with that owner only; the number
+becomes an owner-private `UnlinkedContactShare` record, never a profile or card
+detail unless they also choose that. Design and flow: [card-phone-request.md](card-phone-request.md).

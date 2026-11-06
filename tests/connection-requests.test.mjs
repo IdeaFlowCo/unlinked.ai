@@ -9,6 +9,8 @@ import { createAccountNetwork } from '../src/utils/private-import/account-networ
 import { privateId } from '../src/utils/private-import/job.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { renderInvitations, renderNotifications, renderPerson, fillNavAlerts, NAV_ALERTS_SLOT } from '../mcp-server/private-onboarding-views.mjs'
+import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
+import { createConnectionActions } from '../mcp-server/connection-actions.mjs'
 
 const jacob = { ownerId: 'jacob-owner', userId: 'jacob-user' }, ada = { ownerId: 'ada-owner', userId: 'ada-user' }, grace = { ownerId: 'grace-owner', userId: 'grace-user' }
 const code = expected => error => error instanceof ConnectionError && error.code === expected
@@ -20,6 +22,106 @@ const setup = (options = {}) => {
 }
 const send = (requests, from, to, extra = {}) => requests.send({ sender: from, senderName: from === jacob ? 'Jacob Cole' : from === ada ? 'Ada Lovelace' : 'Grace Hopper', senderProfileId: `${from.ownerId}-profile`,
   recipient: to, recipientName: to === jacob ? 'Jacob Cole' : to === ada ? 'Ada Lovelace' : 'Grace Hopper', recipientProfileId: `${to.ownerId}-profile`, ...extra })
+
+test('connection resolved before recipient deletion cannot recreate a request or notification', async () => {
+  const coordination = coordinatorFor({}), { requests, notifications } = setup({ coordination, validateParticipant: async () => {} })
+  let started, resume, first = true
+  const waiting = new Promise(resolve => { started = resolve }), proceed = new Promise(resolve => { resume = resolve })
+  const accountForProfile = async () => { if (first) { first = false; started(); await proceed } return ada }
+  const actions = createConnectionActions({ memberConnections: requests, accountForProfile })
+  const reader = { profile: async () => ({ profile: { presence: 'member', name: 'Ada' } }) }
+  const pending = actions.send(jacob, { profileId: 'ada-profile', fallbackName: 'Jacob', reader })
+  await waiting
+  const release = await coordination.acquire('owner:' + ada.ownerId, true)
+  await requests.removeOwner(ada)
+  coordination.deleted(ada.ownerId)
+  release()
+  resume()
+  const result = await pending
+  assert.equal(result.code, 'connection_not_available')
+  assert.deepEqual(await requests.received(ada), [])
+  assert.deepEqual(await notifications.list(ada), [])
+})
+
+test('invitation acceptance waits for inviter deletion and rejects a stale invite', async () => {
+  const coordination = coordinatorFor({}), store = createMemoryInvitationStore()
+  let entered, resume, paused = false, notifications = 0
+  const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve })
+  const get = store.get.bind(store)
+  store.get = async key => { const record = await get(key); if (!paused) { paused = true; entered(); await proceed } return record }
+  const invitations = createMemberInvitations({ store, coordination, validateParticipant: async () => {}, onAccepted: async () => { notifications++ } })
+  const created = await invitations.create({ inviter: jacob, inviterName: 'Jacob', inviteeName: 'Ada' })
+  const response = invitations.respond(created.token, ada, 'accept', 'Ada')
+  await waiting
+  const release = await coordination.acquire('owner:' + jacob.ownerId, true)
+  await invitations.removeOwner(jacob)
+  coordination.deleted(jacob.ownerId)
+  release()
+  resume()
+  await assert.rejects(response, { code: 'invitation_unavailable' })
+  assert.equal(notifications, 0)
+  assert.deepEqual(await invitations.connections(ada), [])
+})
+
+test('nested sender coordination permits pair writes and reciprocal acceptance', async () => {
+  const coordination = coordinatorFor({}), { requests } = setup({ coordination, validateParticipant: async () => {} })
+  await coordination.run(['owner:' + jacob.ownerId], async () => {
+    const first = await send(requests, jacob, ada)
+    assert.equal(first.status, 'pending')
+    const accepted = await send(requests, ada, jacob)
+    assert.equal(accepted.status, 'accepted')
+  })
+  assert.equal((await requests.between(jacob, ada)).state, 'connected')
+})
+
+test('detached nested work keeps its own owner lock until it settles', async () => {
+  const coordination = coordinatorFor({})
+  let entered, resume, deleted = false
+  const waiting = new Promise(resolve => { entered = resolve }), proceed = new Promise(resolve => { resume = resolve })
+  let child
+  await coordination.run(['owner:' + jacob.ownerId], async () => {
+    child = coordination.run(['owner:' + jacob.ownerId], async () => { entered(); await proceed })
+    await waiting
+  })
+  const deletion = (async () => { const release = await coordination.acquire('owner:' + jacob.ownerId, true); deleted = true; release() })()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(deleted, false)
+  resume()
+  await Promise.all([child, deletion])
+  assert.equal(deleted, true)
+})
+
+test('nested pair acquisition does not deadlock with waiting deletions', async () => {
+  const coordination = coordinatorFor({}), { requests } = setup({ coordination, validateParticipant: async () => {} })
+  const releaseAda = await coordination.acquire('owner:' + ada.ownerId, true)
+  let nestedStarted, senderHeld
+  const start = new Promise(resolve => { nestedStarted = resolve }), held = new Promise(resolve => { senderHeld = resolve })
+  const operation = coordination.run(['owner:' + jacob.ownerId], async () => { senderHeld(); await start; return send(requests, jacob, ada) })
+  await held
+  const deletion = coordination.acquire('owner:' + jacob.ownerId, true)
+  nestedStarted()
+  releaseAda()
+  assert.equal((await operation).status, 'pending')
+  const releaseJacob = await deletion
+  releaseJacob()
+})
+
+test('agent mutations revalidate while holding the owner boundary', async () => {
+  const { createAccountToolService } = await import('../mcp-server/account-tools.mjs')
+  const { ACCOUNT_WRITE_SCOPE, accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION } = await import('../mcp-server/account-grants.mjs')
+  const coordination = coordinatorFor({}), { requests } = setup({ coordination, validateParticipant: async () => {} })
+  const first = await send(requests, jacob, ada)
+  const service = createAccountToolService({ getBackend: async () => ({}), memberConnections: requests, coordination,
+    readPublishedSnapshot: async () => ({ people: [] }), accountForProfile: async () => ada })
+  const grant = { ...ada, grantId: 'test-grant', scope: ACCOUNT_WRITE_SCOPE, tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, ACCOUNT_WRITE_SCOPE)] }
+  const release = await coordination.acquire('owner:' + ada.ownerId, true)
+  let valid = true
+  const operation = service.call({ grant, name: 'unlinked_accept_connection_request', input: { id: first.request.id }, revalidate: async () => { if (!valid) throw new Error('revoked'); return grant } })
+  valid = false
+  release()
+  await assert.rejects(operation, /revoked/)
+  assert.equal((await requests.between(jacob, ada)).state, 'outgoing')
+})
 
 test('a request is pending once per pair, accepted by the recipient only, and then connects both accounts', async () => {
   const { requests, notifications } = setup()

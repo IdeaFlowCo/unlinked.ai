@@ -44,11 +44,11 @@ const legacyOf = profiles => ({ state: 'published', complete: true, revision: 'l
 const liData = rows => ({ state: 'published', complete: true, revision: LI1 + ':' + sha(JSON.stringify(rows)), profiles: rows, connections: [] })
 const liRow = (slug, extra) => ({ id: linkedinEnrichmentId(slug), name: 'Row Name', positions: [], education: [], skills: [], ...extra })
 
-function index({ profiles, members = [], legacyMembers = [], decisions = [], rows = [], mergeSameLinkedin = true, prefer }) {
+function index({ profiles, members = [], legacyMembers = [], decisions = [], rows = [], mergeSameLinkedin = true, prefer, linkedinEnrichmentTextBudget }) {
   const data = { [LI1]: rows.length ? liData(rows) : null }
   return createMemberPublicIndex({ readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => { throw Error('unused') },
     readMembers: async () => members, readLegacyMembers: async () => legacyMembers, readDecisions: async () => decisions,
-    linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin, ...(prefer ? { preferSurvivor: prefer } : {}),
+    linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], linkedinEnrichmentTextBudget, mergeSameLinkedin, ...(prefer ? { preferSurvivor: prefer } : {}),
     publicPeople: { read: async dataset => data[dataset] ?? null } })
 }
 
@@ -162,9 +162,36 @@ test('a removed copy keeps the person removed: the other copies fold into it', (
 test('the LinkedIn rows stop filling at their text budget', async () => {
   const profiles = Array.from({ length: 6 }, (_, n) => person(`public-${n}`, `P${n}`, { linkedinUrl: li(`p-${n}`) }))
   const big = 'x'.repeat(1024 * 1024)
-  const value = await index({ profiles, rows: profiles.map((_, n) => liRow(`p-${n}`, { about: big })) })()
+  const value = await index({ profiles, rows: profiles.map((_, n) => liRow(`p-${n}`, { about: big })), linkedinEnrichmentTextBudget: 4 * 1024 * 1024 })()
   const filled = value.profiles.filter(profile => profile.about).length
   assert.ok(filled >= 3 && filled <= 5, String(filled))
+})
+
+test('a row cannot overrun the remaining enrichment budget or prevent a smaller row filling', async () => {
+  const profiles = [person('public-a', 'Ada', { linkedinUrl: li('ada-fictional') }), person('public-b', 'Bo', { linkedinUrl: li('bo-fictional') })]
+  const value = await index({ profiles, rows: [liRow('ada-fictional', { about: 'x'.repeat(1000) }), liRow('bo-fictional', { about: 'Small' })], linkedinEnrichmentTextBudget: 30 })()
+  assert.equal(value.profiles[0].about, undefined)
+  assert.equal(value.profiles[1].about, 'Small')
+  assert.throws(() => index({ profiles, linkedinEnrichmentTextBudget: 65 * 1024 * 1024 }), /public_enrichment_text_budget_invalid/)
+  assert.throws(() => index({ profiles, linkedinEnrichmentTextBudget: -1 }), /public_enrichment_text_budget_invalid/)
+})
+
+test('a cohort across seven shards stays enriched and readable beyond the old index text cap', async () => {
+  const profiles = Array.from({ length: 1000 }, (_, n) => person(`public-${n}`, `Fictional Person ${n}`, { linkedinUrl: li(`fictional-${n}`) }))
+  const datasets = LINKEDIN_ENRICHMENT_DATASETS.slice(0, 7)
+  const rows = profiles.map((_, n) => liRow(`fictional-${n}`, { about: `Biography ${n} ` + 'x'.repeat(18000) }))
+  const data = Object.fromEntries(datasets.map((dataset, shard) => {
+    const prepared = prepareEnrichmentSnapshot(Buffer.from(JSON.stringify(rows.filter((_, n) => n % 7 === shard))), dataset)
+    return [dataset, prepared.snapshot]
+  }))
+  const read = createMemberPublicIndex({ readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => { throw Error('unused') },
+    linkedinEnrichmentDatasets: datasets, publicPeople: { read: async dataset => data[dataset] ?? null } })
+  const value = await read()
+  assert.equal(value.profiles.filter(profile => profile.about).length, profiles.length)
+  assert.equal(value.profiles.at(-1).about, rows.at(-1).about)
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => value })
+  assert.equal((await reader.profile({ id: 'public-999' })).profile.about, rows.at(-1).about)
+  await assert.rejects(createPublicPeopleReader({ readPublishedSnapshot: async () => value, maxTextBytes: 16 * 1024 * 1024 }).list(), error => error.code === 'public_people_unavailable')
 })
 
 test('the composed index folds same-address profiles only when asked, and names stay apart', async () => {

@@ -39,6 +39,10 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
       assert.equal(identity.issuer, issuer); assert.equal(identity.subject, 'immutable-synthetic-subject'); assert.equal(identity.verifiedEmail, 'authenticated@example.invalid')
       assert.equal(identity.clientId, 'private-client'); assert.ok(Number.isSafeInteger(identity.verifiedAt))
       assert.match(identity.provenanceReceiptId, /^[A-Za-z0-9_-]{43}$/)
+      // The ID token is kept for the WIT feedback exchange only, never serialized.
+      assert.match(identity.feedbackIdToken.value, /^ey/); assert.ok(identity.feedbackIdToken.expiresAt > Date.now())
+      assert.equal(Object.keys(identity).includes('feedbackIdToken'), false)
+      assert.equal(JSON.stringify(identity).includes(identity.feedbackIdToken.value), false)
     }
     else await assert.rejects(login.finish(callback, start.transaction))
   }
@@ -97,6 +101,43 @@ test('signup mode does not expose invitation confirmation or account switching r
   assert.equal(waiting.status, 303)
   assert.equal(waiting.headers.get('location'), '/')
   assert.equal(signups, 1)
+})
+
+test('WIT feedback token: signed-in sessions exchange the in-memory ID token; everyone else stays anonymous', { skip: !browser }, async t => {
+  const owner = { ownerId: 'feedback-owner', userId: 'feedback-user' }
+  const exchanged = []
+  let handler, expiresAt = Date.now() + 3600000, issued = 0
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)))
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+  handler = browser.createPrivateBrowserHandler({ baseUrl,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/authorize', transaction: { state: 'synthetic-state' } }),
+      finish: async () => Object.defineProperty({ issuer: 'https://synthetic.invalid', subject: 'feedback-sub' }, 'feedbackIdToken', { value: { value: 'synthetic.id.token', expiresAt }, enumerable: false }) },
+    resolveOwner: async () => owner,
+    getBackend: async () => ({ adapter: {}, readResource: async () => null, listImportIds: async () => [] }),
+    exchangeFeedback: async idToken => { exchanged.push(idToken); return { token: `wfb1.synthetic-${++issued}`, expires_at: Math.floor(Date.now() / 1000) + 900 } },
+  })
+  const post = cookie => fetch(`${endpoint}/wit-feedback-token`, { method: 'POST', headers: { Origin: baseUrl, 'content-type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: '{}' })
+  assert.equal((await post()).status, 204)
+  assert.equal((await fetch(`${endpoint}/wit-feedback-token`, { method: 'POST', headers: { Origin: 'https://evil.invalid' }, body: '{}' })).status, 403)
+  const signIn = async () => {
+    const start = await fetch(`${endpoint}/login`, { redirect: 'manual' })
+    const callback = await fetch(`${endpoint}/auth/callback/ideaflow?code=synthetic&state=synthetic-state`, { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+    return callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  }
+  const cookie = await signIn()
+  const first = await post(cookie)
+  assert.equal(first.status, 200); assert.equal(first.headers.get('cache-control'), 'no-store, private')
+  const body = await first.json()
+  assert.equal(body.token, 'wfb1.synthetic-1'); assert.equal(JSON.stringify(body).includes('synthetic.id.token'), false)
+  // Cached until shortly before expiry: one exchange per feedback token.
+  assert.equal((await (await post(cookie)).json()).token, 'wfb1.synthetic-1')
+  assert.deepEqual(exchanged, ['synthetic.id.token'])
+  assert.equal((await fetch(`${endpoint}/wit-feedback-token`, { headers: { Cookie: cookie } })).status, 405)
+  // An expired ID token is never exchanged.
+  expiresAt = Date.now() + 1000
+  assert.equal((await post(await signIn())).status, 204)
+  assert.equal(exchanged.length, 1)
 })
 
 test('private browser sign-in, action-disclosed upload, durable replay receipt, search and scoped setup execute over HTTP', { skip: !browser }, async t => {

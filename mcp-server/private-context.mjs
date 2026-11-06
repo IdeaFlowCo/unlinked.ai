@@ -11,6 +11,9 @@ import { profilePath } from '../src/utils/public-people/profile-handles.mjs'
 
 export const OVERLAY_APP = 'unlinked'
 export const OVERLAY_AUDIENCE = 'noos-people-overlay'
+// Noos permits eight refs per entity. Never fan out an ambiguous identity
+// into unbounded remote lookups; explicit entity IDs remain available.
+export const MAX_PRIVATE_PERSON_REFS = 8
 const HASH = /^[a-f0-9]{64}$/
 const ENTITY_ID = /^[A-Za-z0-9_-]{1,80}$/
 
@@ -100,7 +103,7 @@ const iso = value => typeof value === 'string' && !Number.isNaN(Date.parse(value
 // or null. `lookupContact(owner, input)` is the owner-scoped
 // unlinked_lookup_contact (connectionId | profileId | refHashes); it never
 // reads another owner's imports.
-export function createPrivateContext({ overlay, identityFor, lookupContact, now = () => Date.now() }) {
+export function createPrivateContext({ overlay, identityFor, lookupContact, now = () => Date.now(), contactPath = id => `/network/contacts/${encodeURIComponent(id)}` }) {
   if (typeof identityFor !== 'function' || typeof lookupContact !== 'function') throw new Error('private_context_configuration_required')
   const configured = Boolean(overlay)
   const identity = async owner => {
@@ -109,8 +112,13 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
     return value && typeof value.issuer === 'string' && typeof value.subject === 'string' ? value : null
   }
   const contact = async (owner, input) => { try { return await lookupContact(owner, input) } catch { return null } }
+  const identityContact = async (owner, input) => {
+    try { return await lookupContact(owner, input) }
+    catch (error) { if (error?.code === 'not_found') return null; throw new OverlayUnavailable() }
+  }
   // Where a relation's other end lives in Unlinked, for the owner: a published
-  // profile, else their own imported contact; other ends are plain text.
+  // profile, else their own imported contact (at its owner-private slug when
+  // it has one, docs/contact-slugs.md); other ends are plain text.
   const hrefsFor = async (owner, ends) => {
     const hrefs = new Map(), hashes = new Map()
     for (const end of ends) {
@@ -123,7 +131,7 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
     if (hashes.size) {
       const found = await contact(owner, { refHashes: [...hashes.keys()].slice(0, 100) })
       for (const value of Array.isArray(found?.contacts) ? found.contacts : []) {
-        const href = value.publishedProfileId ? profilePath(value.publishedProfileId) : value.connectionId ? `/network/contacts/${encodeURIComponent(value.connectionId)}` : null
+        const href = value.publishedProfileId ? profilePath(value.publishedProfileId) : value.connectionId ? contactPath(value.connectionId) : null
         for (const id of hashes.get(value.linkedinRefHash) ?? []) if (href) hrefs.set(id, href)
       }
     }
@@ -136,6 +144,8 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   }
   const shape = (entity, hrefs) => ({
     id: entity.id, kind: entity.kind, name: String(entity.name ?? ''),
+    // The owner's one-line summary of the person (overlay description), as OpenChat shows it.
+    description: typeof entity.description === 'string' && entity.description.trim() ? entity.description.slice(0, 280) : null,
     important: entity.card?.important === true, catchUp: catchUp(entity.card),
     notes: (Array.isArray(entity.notes) ? entity.notes : []).map(note => ({ text: String(note.text ?? ''), createdAt: iso(note.createdAt), label: provenanceLabel(note) })),
     relations: (Array.isArray(entity.links) ? entity.links : []).map(link => ({ relation: String(link.relation ?? ''), relationType: link.relationType ?? 'other', direction: link.direction === 'in' ? 'in' : 'out',
@@ -143,6 +153,8 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   })
   // Every ref that may name this person for this owner; each entity once.
   const read = async (owner, refs) => {
+    refs = [...new Set(refs)]
+    if (refs.length > MAX_PRIVATE_PERSON_REFS) throw new OverlayUnavailable('private_identity_limit')
     const who = await identity(owner)
     if (!who) return { state: 'no_identity' }
     const seen = new Map()
@@ -158,19 +170,21 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   }
   return {
     configured,
-    // A published profile: its own ref, plus the owner's import of the same person.
+    // A published profile: its own ref and exact public/owner-import LinkedIn
+    // identity. A private prospect can predate this public profile entirely.
     async forProfile(owner, profileId) {
       if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return { state: 'empty' }
-      const found = await contact(owner, { profileId })
-      const hash = found?.visibility === 'owner_private' && HASH.test(found.contact?.linkedinRefHash ?? '') ? found.contact.linkedinRefHash : null
-      return read(owner, [refOf.person(profileId), ...(hash ? [refOf.linkedin(hash)] : [])])
+      const found = await identityContact(owner, { profileId })
+      const hash = HASH.test(found?.contact?.linkedinRefHash ?? '') ? found.contact.linkedinRefHash : null
+      return read(owner, [refOf.person(profileId), ...((found?.contact?.publishedProfileIds ?? []).filter(Boolean).map(refOf.person)), ...(found?.contact?.publishedProfileId && found.contact.publishedProfileId !== profileId ? [refOf.person(found.contact.publishedProfileId)] : []), ...(hash ? [refOf.linkedin(hash)] : []), ...([...new Set([found?.contact?.sourceLinkedinRefHash, ...(found?.contact?.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin))])
     },
     // One of the owner's own imported contacts; null when it is not theirs.
     async forContact(owner, connectionId) {
-      const found = await contact(owner, { connectionId })
+      const found = await identityContact(owner, { connectionId })
       if (!found?.contact || found.visibility !== 'owner_private') return null
       const refs = [...(HASH.test(found.contact.linkedinRefHash ?? '') ? [refOf.linkedin(found.contact.linkedinRefHash)] : []),
-        ...(found.contact.publishedProfileId ? [refOf.person(found.contact.publishedProfileId)] : [])]
+        ...([...new Set([found.contact.sourceLinkedinRefHash, ...(found.contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin)),
+        ...([...new Set([found.contact.publishedProfileId, ...(found.contact.publishedProfileIds ?? [])])].filter(Boolean).map(refOf.person))]
       return refs.length ? read(owner, refs) : { state: 'empty' }
     },
     async neighbourhood(owner, entityId, depth) {
@@ -212,6 +226,7 @@ const render=(mount,data)=>{mount.replaceChildren();mount.hidden=false;const nam
  const r=remembered();box.open=r===null?true:r==='1';box.addEventListener('toggle',()=>{try{localStorage.setItem(KEY,box.open?'1':'0')}catch{}});
  for(const e of data.entities){const sec=el('div','pc-entity');if(data.entities.length>1)sec.append(el('h4',null,e.name));
   const facts=[];if(e.important)facts.push('★ Important to you');if(e.catchUp){if(e.catchUp.cadenceDays)facts.push('Catch up every '+e.catchUp.cadenceDays+' days');if(e.catchUp.lastContactAt)facts.push('last '+day(e.catchUp.lastContactAt));if(e.catchUp.due)facts.push('due now');else if(e.catchUp.nextDueAt)facts.push('next '+day(e.catchUp.nextDueAt))}
+  if(e.description)sec.append(el('p','pc-desc',e.description));
   if(facts.length)sec.append(el('p','pc-facts'+(e.catchUp&&e.catchUp.due?' due':''),facts.join(' · ')));
   if(e.notes.length){const ul=el('ul','pc-notes');for(const n of e.notes){const li=el('li');li.append(el('p',null,n.text));const meta=[n.label,n.createdAt?day(n.createdAt):''].filter(Boolean).join(' · ');if(meta)li.append(el('span','small',meta));ul.append(li)}sec.append(el('h5',null,'Notes'),ul)}
   if(e.relations.length){const ul=el('ul','pc-rels');for(const x of e.relations){const li=el('li'),line=el('span','pc-rel');if(x.direction==='in'){line.append(link(x.other),' '+x.relation+' ',el('span',null,e.name))}else{line.append(el('span',null,e.name),' '+x.relation+' ',link(x.other))}li.append(line);if(x.label)li.append(el('span','small',x.label));ul.append(li)}sec.append(el('h5',null,'Relations'),ul)}

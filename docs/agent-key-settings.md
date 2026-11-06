@@ -58,7 +58,7 @@ catalog v7 (unlinked-9kk.5) they have their own switch under the selected key:
 (Jacob's decision, unlinked-lf4). It sits beside the connection-request switch in
 the same **Save permissions** form and uses the same compare-and-set edit (token,
 jti, issue time and generation unchanged). **Create API key** offers it as a
-ticked checkbox. Off hides the twelve private-notes tools from that key's
+ticked checkbox. Off hides the private-notes tools from that key's
 `tools/list` and refuses them with `scope_not_granted`. The notes live in the
 owner's Ideaflow people overlay (shared with OpenChat); each agent-written note
 or relation is labelled with the key's name. Contract: [agent-api.md](agent-api.md#private-people-notes--relations-catalog-v7).

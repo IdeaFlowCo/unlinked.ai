@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+import { createContactCards, createMemoryContactCardStore } from '../mcp-server/contact-card.mjs'
 import { privateId } from '../src/utils/private-import/job.mjs'
 import { PUBLIC_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 import { writeFile } from 'node:fs/promises'
@@ -48,6 +49,7 @@ function harness(t, overrides = {}) {
       getBackend: async value => { assert.deepEqual(value, owner); return backend },
       complete: async () => ({ matches: [] }),
       ownProfileId: overrides.ownProfileId, signupLookup: overrides.signupLookup,
+      ...(overrides.cards ? { contactCards: createContactCards({ store: createMemoryContactCardStore() }) } : {}),
       lookupCompanyFacts: overrides.lookupCompanyFacts,
       issueAccountGrant: async () => ({ accessToken: 'synthetic' }), revokeAccountGrant: async () => {},
       readPublishedSnapshot: async () => { if (!snapshot.current) throw new Error('unavailable'); return snapshot.current },
@@ -95,7 +97,7 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   assert.equal(page.status, 200)
   html = await page.text()
   const cardUrl = `${signed.baseUrl}/people/${encodeURIComponent(publicId)}`
-  assert.ok(html.includes(`<code>${cardUrl.replace(/&/g, '&amp;')}</code>`), 'shows the exact encoded URL')
+  assert.ok(html.includes(`<input class="share-url" id="share-public" type="text" readonly value="${cardUrl.replace(/&/g, '&amp;')}"`), 'shows the exact encoded URL, copyable')
   assert.match(html, /<svg[^>]*aria-label="QR code opening /)
   assert.doesNotMatch(html, /src="data:|url\(data:/)
   // No contact channels on the card page (phone stays opt-in and unshipped).
@@ -104,11 +106,12 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   // CSP stays locked down; the QR is inline SVG, not an image fetch.
   assert.match(page.headers.get('content-security-policy'), /default-src 'none'/)
 
-  // The decoded QR content equals the public profile URL.
+  // The decoded QR content is the public profile URL marked as a card scan
+  // (admission priority); the copyable field above stays the clean URL.
   const { qrMatrix } = await import('../src/utils/qr-code.mjs')
   const svgPath = html.match(/<path d="([^"]+)" fill="#16181d"/)[1]
   assert.equal(svgPath, (() => { // same deterministic rendering as qrSvg
-    const matrix = qrMatrix(cardUrl)
+    const matrix = qrMatrix(`${cardUrl}?via=card`)
     let path = ''
     for (let y = 0; y < matrix.length; y++) for (let x = 0; x < matrix.length; x++) if (matrix[y][x]) path += `M${x + 4} ${y + 4}h1v1h-1z`
     return path
@@ -120,7 +123,7 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   fixture.resources.set(newerId, { type: 'import', sourceId: newerId, sourceOwnerId: fixture.owner.ownerId, sourceRevision: 1, deleted: false,
     payload: { id: newerId, ownerId: fixture.owner.ownerId, filename: 'Newer.csv', archiveSha256: 'e'.repeat(64), status: 'partial', createdAt: Date.now() + 60000, backgroundVersion: 'profile-first-v1', counts: { accepted: 2, indexed: 1 }, consent: { ...PUBLIC_UPLOAD_CONSENT } } })
   html = await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text()
-  assert.ok(html.includes(`<code>${cardUrl.replace(/&/g, '&amp;')}</code>`), 'older published profile still on the card')
+  assert.ok(html.includes(`<input class="share-url" id="share-public" type="text" readonly value="${cardUrl.replace(/&/g, '&amp;')}"`), 'older published profile still on the card')
   fixture.resources.delete(newerId)
 
   // A confirmed legacy profile takes priority as the stable card target.
@@ -129,10 +132,55 @@ test('the card page is owner-only, linked from the profile, and shows a decodabl
   html = await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text()
   assert.match(html, /\/people\/legacy-profile-uuid/)
 
+  // The raw legacy record carries no LinkedIn address (its slug is joined only
+  // into the published profile); the card shows the one the public page shows.
+  assert.doesNotMatch(html, /linkedin\.com\/in\/legacy-owner/)
+  fixture.snapshot.current = { ...fixture.snapshot.current, profiles: fixture.snapshot.current.profiles.map(value => value.id === 'legacy-profile-uuid' ? { ...value, linkedinUrl: 'https://www.linkedin.com/in/legacy-owner' } : value) }
+  html = await (await fetch(`${signed.endpoint}/card?share=public`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /href="https:\/\/www\.linkedin\.com\/in\/legacy-owner"/)
+  html = await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /href="https:\/\/www\.linkedin\.com\/in\/legacy-owner"/)
+  // An address the owner's own profile already has is never replaced.
+  fixture.backend.readLegacyProfile = async () => ({ profileId: 'legacy-profile-uuid', profile: { name: 'Card Owner', linkedinUrl: 'https://www.linkedin.com/in/own-address' } })
+  html = await (await fetch(`${signed.endpoint}/card?share=public`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /linkedin\.com\/in\/own-address/)
+  assert.doesNotMatch(html, /linkedin\.com\/in\/legacy-owner/)
+
+  fixture.backend.readLegacyProfile = async () => ({ profileId: 'legacy-profile-uuid', profile: { name: 'Card Owner' } })
+  fixture.snapshot.current = { ...fixture.snapshot.current, revision: 'card-test-moved', profiles: fixture.snapshot.current.profiles.filter(value => value.id !== 'legacy-profile-uuid').concat({ id: 'survivor', name: 'Card Owner', linkedinUrl: 'https://www.linkedin.com/in/survivor', positions: [], education: [], skills: [] }), aliases: { 'legacy-profile-uuid': 'survivor' } }
+  html = await (await fetch(`${signed.endpoint}/card?share=public`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /\/people\/survivor/)
+  assert.match(html, /href="https:\/\/www\.linkedin\.com\/in\/survivor"/)
+  html = await (await fetch(`${signed.endpoint}/card`, { headers: { Cookie: signed.cookie } })).text()
+  assert.match(html, /href="https:\/\/www\.linkedin\.com\/in\/survivor"/)
+
   // Sign-in can return to the card page.
   assert.equal((await fetch(`${signed.endpoint}/card?x=1`, { redirect: 'manual' })).status, 401)
   const signIn = await (await fetch(`${signed.endpoint}/card`)).text()
   assert.match(signIn, /href="\/login\?next=%2Fcard"/)
+})
+
+test('recovered published LinkedIn reaches both card versions and the shared contact and vCard', async t => {
+  const fixture = harness(t, { cards: true, backend: { readLegacyProfile: async () => ({ profileId: 'legacy-owner', profile: { name: 'Card Owner' } }) } })
+  fixture.snapshot.current = { state: 'published', complete: true, revision: 'legacy-card', connections: [], profiles: [{ id: 'legacy-owner', name: 'Card Owner', linkedinUrl: 'https://www.linkedin.com/in/legacy-owner', positions: [], education: [], skills: [] }] }
+  const signed = await fixture.start()
+  const get = (path, auth = true) => fetch(`${signed.endpoint}${path}`, { headers: auth ? { Cookie: signed.cookie } : {} })
+  const publicCard = await (await get('/card?share=public')).text()
+  const contactCard = await (await get('/card?share=contact')).text()
+  const link = contactCard.match(/id="cc-link-out" type="text" readonly value="([^"]+)"/)[1]
+  const path = new URL(link).pathname
+  const sharedResponse = await get(path, false)
+  assert.equal(sharedResponse.status, 200)
+  const shared = await sharedResponse.text()
+  const vcfResponse = await get(`${path}/contact.vcf`, false)
+  assert.equal(vcfResponse.status, 200)
+  const vcf = await vcfResponse.text()
+  for (const document of [publicCard, contactCard, shared]) assert.match(document, /href="https:\/\/www\.linkedin\.com\/in\/legacy-owner"/)
+  assert.match(vcf, /https:\/\/www\.linkedin\.com\/in\/legacy-owner/)
+  await profileEvidence('legacy-public-card.html', publicCard)
+  await profileEvidence('legacy-contact-card.html', contactCard)
+  await profileEvidence('legacy-shared-card.html', shared)
+  await profileEvidence('legacy-contact.vcf', vcf)
 })
 
 test('the search bar QR button opens a scan sheet: Scan for visitors, My card first for the signed-in member', async t => {

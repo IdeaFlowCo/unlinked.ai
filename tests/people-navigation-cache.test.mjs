@@ -63,7 +63,7 @@ test('signed-in profile to People navigation reuses public chunks with live auth
   assert.equal(profile.response.status, 200)
   assert.equal(profile.response.headers.get('cache-control'), 'private, no-cache')
   assert.match(profile.body, /Ada Lovelace/)
-  assert.match(profile.body, /href="\/network"/)
+  assert.match(profile.body, /href="\/network\?connected=1"/)
   const heldReads = chunkReads, heldPointers = pointerReads, heldOwner = ownerReads
   const people = await request('/network', session)
   assert.equal(people.response.status, 200)
@@ -145,9 +145,8 @@ test('signed-in pages reuse one account network read per owner; a finished POST 
   const api = await fetch(endpoint + '/api/people', { headers: { Cookie: session } })
   assert.equal(api.headers.get('cache-control'), 'no-store')
   // Any finished POST by the owner (even a rejected one) drops the kept read.
-  const post = await fetch(endpoint + '/anything', { method: 'POST', headers: { Cookie: session } })
+  const post = await fetch(endpoint + '/anything', { method: 'POST', headers: { Cookie: session, Origin: endpoint.replace('http:', 'https:') } })
   assert.notEqual(post.status, 200)
-  await new Promise(resolve => setTimeout(resolve, 20))
   await fetch(endpoint + '/network', { headers: { Cookie: session } })
   assert.equal(importLists, 2, 'a mutating POST invalidates the owner network read')
   // networkFreshMs 0 keeps next-request reads.

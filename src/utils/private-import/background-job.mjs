@@ -1,12 +1,23 @@
 import { randomUUID } from 'node:crypto'
-import { digest, LIMITS, parseArchive, PARSER_VERSION } from './archive.mjs'
+import { digest, LIMITS, parseArchive, PARSER_VERSION, RUNNABLE_PARSER_VERSIONS } from './archive.mjs'
 import { privateId } from './job.mjs'
 import { requireCombinedUploadConsent } from './consent.mjs'
+import { firstWorkingPhoto } from './profile-photo.mjs'
 
 const terminal = job => ['indexed', 'partial', 'failed'].includes(job.status)
 const ownCategories = new Set(['profile', 'positions', 'education', 'skills'])
 const counts = () => ({ accepted: 0, rejected: 0, skippedFiles: 0, failedFiles: 0, indexed: 0 })
 const LEASE_MS = 180000
+// Only fixed lower-case codes leave the worker; never messages with data in them.
+const codes = new Set(['private_worker_stopped', 'private_import_owner_invalid', 'private_archive_recovery_invalid', 'private_worker_discovery_limit',
+  'private_upload_consent_required', 'tombstone_conflict', 'verified_owner_required', 'private_import_deleted', 'private_import_not_found',
+  'private_noos_binding_not_found', 'private_noos_timeout', 'private_owner_mismatch', 'private_publication_incomplete',
+  'private_publication_support_limit', 'private_resource_key_invalid', 'private_asset_key_invalid', 'private_asset_invalid',
+  'private_observation_recovery_unavailable', ...Array.from({ length: 500 }, (_, i) => `private_noos_${i + 100}`)])
+const phases = new Set(['uploaded', 'parsing', 'failed', 'unsupported_private_publication', 'no_accepted_rows', 'staging_private_observations', 'private_observation_index_ready'])
+const safeCode = value => codes.has(value) ? value : 'unknown'
+const jobNumbers = job => ({ accepted: job.counts?.accepted ?? 0, rejected: job.counts?.rejected ?? 0, indexed: job.counts?.indexed ?? 0,
+  failedFiles: job.counts?.failedFiles ?? 0, sources: Array.isArray(job.sources) ? job.sources.length : 0 })
 
 // The original private asset and uploaded receipt must be durable before the
 // browser receives a redirect. A browser disconnect never owns the worker.
@@ -41,11 +52,11 @@ export async function stageArchive({ ownerId, filename, bytes, adapter, consent,
 
 // CAS on every lease/progress receipt fences delayed publishers. Immutable
 // chunks may survive a crash, but search/MCP require the final job publication.
-export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Date.now, leaseId = randomUUID(), stopped = () => false }) {
+export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Date.now, leaseId = randomUUID(), stopped = () => false, onProgress = () => {}, onParsedSources = () => {}, fetchProfilePhoto }) {
   return adapter.withImport(ownerId, id, async store => {
     let current = await store.getJob(id)
     if (!current || terminal(current) || current.backgroundVersion !== 'profile-first-v1') return current
-    if (current.ownerId !== ownerId || current.parserVersion !== PARSER_VERSION) throw new Error('private_import_owner_invalid')
+    if (current.ownerId !== ownerId || !RUNNABLE_PARSER_VERSIONS.includes(current.parserVersion)) throw new Error('private_import_owner_invalid')
     if (current.lease && current.lease.expiresAt > now() && current.lease.id !== leaseId) return current
     requireCombinedUploadConsent(current.consent)
     const save = async changes => {
@@ -54,8 +65,9 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
         lease: { id: leaseId, expiresAt: now() + LEASE_MS } }
       await store.saveJob(next)
       current = next
+      onProgress()
     }
-    await save({ status: 'parsing', phase: 'parsing' })
+    await save({ status: 'parsing', phase: 'parsing', ...(current.parserVersion !== PARSER_VERSION ? { parsedWith: PARSER_VERSION } : {}) })
     const bytes = await readAsset(current.archiveSha256)
     if (!Buffer.isBuffer(bytes) || bytes.length > LIMITS.archiveBytes || digest(bytes) !== current.archiveSha256) throw new Error('private_archive_recovery_invalid')
     let parsed
@@ -63,6 +75,19 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
     catch (error) {
       await save({ status: 'failed', phase: 'failed', error: 'archive_parse_failed', failureReason: /^[a-z0-9_]{1,64}$/.test(error?.message) ? error.message : 'unknown', progress: { processed: 0, total: null, profileReady: false } })
       return current
+    }
+    onParsedSources(parsed.sources.length)
+    // The owner's profile photo (docs/profile-photos.md): the newest link that
+    // downloads becomes one owner-private asset and one observation holding
+    // only its hash, type and size. Without a fetcher, or when none works,
+    // the source is skipped with a reason; the import itself is unaffected.
+    for (const source of parsed.sources) {
+      if (source.category !== 'profile_photo' || !source.accepted.length) continue
+      const found = typeof fetchProfilePhoto === 'function' ? await firstWorkingPhoto(source.accepted, { fetchPhoto: fetchProfilePhoto, now }) : { reason: 'photo_import_off' }
+      if (!found.photo) { Object.assign(source, { accepted: [], skipped: true, photoSkipped: found.reason }); continue }
+      await store.putAsset(found.photo.sha256, found.photo.bytes)
+      source.accepted = [{ rowId: found.row.rowId, category: 'profile_photo', subject: 'archive_owner_observation',
+        fields: { 'photo sha256': found.photo.sha256, 'photo type': found.photo.type, 'photo bytes': String(found.photo.bytes.length), 'uploaded at': new Date(found.row.uploadedAt).toISOString() } }]
     }
     const sources = [], assertions = [], totals = counts()
     // Stable source IDs preserve old receipts. Only staging order changes:
@@ -104,27 +129,82 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
 
 // One process-wide worker; Noos discovery + CAS leases make restart and a
 // second process safe. There is no separate people database or fixture fallback.
-export function createArchiveWorker({ listPendingImports, getBackend, intervalMs = 2000, onError = () => {}, now = Date.now }) {
+export function createArchiveWorker({ listPendingImports, getBackend, coordination, intervalMs = 2000, slowAfterMs = 10 * 60 * 1000, onError = () => {}, now = Date.now, fetchProfilePhoto }) {
   if (typeof listPendingImports !== 'function' || typeof getBackend !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 100 || intervalMs > 60000) throw new Error('private_worker_configuration_required')
-  let closed = false, running = null, timer
-  const notify = async event => { try { await onError(event) } catch { /* Logging never changes job authority or worker recovery. */ } }
-  const tick = () => {
-    if (closed || running) return running ?? Promise.resolve()
-    running = (async () => {
-      const pending = await listPendingImports()
-      if (!Array.isArray(pending) || pending.length > 200) throw new Error('private_worker_discovery_limit')
-      for (const item of pending) {
-        if (closed) break
+  let closed = false, discovery = null, timer, active = 0, discoveryFailures = 0
+  const scheduled = new Map(), ownerTails = new Map(), waiters = []
+  // Per-job failure history, so a job that keeps failing is visible (reason,
+  // attempt, first failure) instead of retrying silently every interval.
+  const failures = new Map(), finished = new Set(), notRunnable = new Set()
+  const notify = event => { void Promise.resolve().then(() => onError(event)).catch(() => {}) }
+  const slot = () => new Promise(resolve => {
+    const enter = () => { active++; resolve(() => { active--; waiters.shift()?.() }) }
+    if (active < 8) enter(); else waiters.push(enter)
+  })
+  const schedule = item => {
+    const key = JSON.stringify([item.owner.ownerId, item.id])
+    if (scheduled.has(key)) return scheduled.get(key)
+    const ownerId = item.owner.ownerId
+    const work = (ownerTails.get(ownerId) ?? Promise.resolve()).then(async () => {
+      if (closed) return
+      const releaseSlot = await slot()
+      try {
+        if (closed) return
+        const release = coordination ? coordination.tryAcquireShared('owner:' + ownerId) : () => {}
+        if (!release) return
+        const startedAt = now()
+        // A run still going after slowAfterMs is reported once (long delay, no error).
+        const slow = setTimeout(() => { void notify({ event: 'import_job_running_long', importId: item.id, elapsedMs: now() - startedAt }) }, slowAfterMs)
+        slow.unref?.()
         try {
           const backend = await getBackend(item.owner)
-          await runArchiveJob({ ownerId: item.owner.ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
-        } catch { await notify({ event: 'import_worker_retry', importId: item.id }) }
-      }
-    })().catch(() => notify({ event: 'import_worker_discovery_failed' })).finally(() => { running = null })
-    return running
+          let progressed = false, parsedSources
+          const result = await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed, onProgress: () => { progressed = true }, onParsedSources: count => { parsedSources = count }, fetchProfilePhoto })
+          const history = failures.get(key)
+          if (progressed || (result && terminal(result))) failures.delete(key)
+          if (result && terminal(result) && !finished.has(key)) {
+            finished.add(key)
+            notify({ event: 'import_job_finished', importId: item.id, status: result.status, phase: phases.has(result.phase) ? result.phase : 'unknown',
+              durationMs: now() - startedAt, ...jobNumbers(result), ...(parsedSources === undefined ? {} : { sources: parsedSources }), ...(history ? { attemptsBeforeSuccess: history.attempt } : {}) })
+          } else if (result && !terminal(result) && result.backgroundVersion !== 'profile-first-v1' && !notRunnable.has(key)) {
+            notRunnable.add(key)
+            notify({ event: 'import_job_not_runnable', importId: item.id, reason: 'background_version_unsupported' })
+          }
+        } finally { clearTimeout(slow); release() }
+      } finally { releaseSlot() }
+    }).catch(error => {
+      if (closed && error?.message === 'private_worker_stopped') return
+      const previous = failures.get(key)
+      const attempt = (previous?.attempt ?? 0) + 1, firstFailedAt = previous?.firstFailedAt ?? now()
+      failures.set(key, { attempt, firstFailedAt })
+      // Report attempts 1, 2, 4, 8, ... so a poison job cannot fill the
+      // bounded audit file; flag it as stuck once, at the fifth attempt.
+      if ((attempt & (attempt - 1)) === 0) return notify({ event: 'import_worker_retry', importId: item.id, reason: safeCode(error?.message), attempt, failingForMs: now() - firstFailedAt })
+      if (attempt === 5) return notify({ event: 'import_worker_stuck', importId: item.id, reason: safeCode(error?.message), attempt, failingForMs: now() - firstFailedAt })
+    })
+    const settled = work.finally(() => { scheduled.delete(key); if (ownerTails.get(ownerId) === settled) ownerTails.delete(ownerId) })
+    scheduled.set(key, settled)
+    ownerTails.set(ownerId, settled)
+    return settled
+  }
+  const tick = () => {
+    if (closed) return Promise.resolve()
+    if (discovery) return discovery.then(jobs => Promise.all(jobs))
+    discovery = (async () => {
+      const pending = await listPendingImports()
+      if (!Array.isArray(pending) || pending.length > 200) throw new Error('private_worker_discovery_limit')
+      return pending.map(schedule)
+    })().then(jobs => { discoveryFailures = 0; return jobs }, async error => {
+      discoveryFailures++
+      // Same 1, 2, 4, 8, ... throttle: a lasting outage stays visible without flooding.
+      if ((discoveryFailures & (discoveryFailures - 1)) === 0) notify({ event: 'import_worker_discovery_failed', reason: safeCode(error?.message), attempt: discoveryFailures })
+      return []
+    }).finally(() => { discovery = null })
+    return discovery.then(jobs => Promise.all(jobs))
   }
   return { tick, start() { if (!timer && !closed) { timer = setInterval(tick, intervalMs); timer.unref?.(); void tick() } },
-    async stop() { closed = true; clearInterval(timer); await running } }
+    async stop() { closed = true; clearInterval(timer); if (discovery) await discovery; await Promise.all(scheduled.values()) } }
+
 }
 
 export function importJobStatus(job) {

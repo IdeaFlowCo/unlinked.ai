@@ -18,9 +18,14 @@ public discovery pages):
   as Instagram keep their own escape links, `escapeHref`).
 - **No "Add to Home Screen" hint** on My card (it is for browsers), and the
   client script never shows it under that user agent either.
-- **No floating feedback button.** Feedback stays in the footer and on Help &
-  support. On phone browsers the page keeps 96 px of room at the bottom so the
-  button never covers the last actions.
+- **Feedback is menu-launched, never floating.** Me menu and footer **Send
+  feedback** open the WIT widget (`data-trigger="none"`, `unlinked-feedback`
+  board) with the same verified-sender token as the web
+  (`POST /wit-feedback-token`). The shell is a plain WKWebView with no script
+  bridge, so the widget has no more reach than in Safari. Reports are labelled
+  `App: Unlinked iOS v<app version> (web <web version>)` from the
+  `UnlinkediOS/<version>` user agent. The app gets no analytics tag
+  (world-issue-tracker-julr.11).
 
 Scanner fallbacks apply everywhere: when the camera is declined or missing,
 the paste box opens and the status names where to allow it (in the app:

@@ -4,6 +4,8 @@ import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMessagingSession } from '../mcp-server/messaging.mjs'
 import { renderMessages, renderPerson, renderPeople } from '../mcp-server/private-onboarding-views.mjs'
+import { createMemberBlocks, createMemoryBlockStore } from '../mcp-server/member-blocks.mjs'
+import { renderedProfileLink } from './messages-client-navigation-helper.mjs'
 
 test('membership is visible and unclaimed profiles invite instead of pretending to be recipients', () => {
   const base = { id: 'person', name: 'Avery', positions: [], education: [], skills: [] }
@@ -25,6 +27,20 @@ test('session exchange reads the live owner binding and fails closed without it'
   await assert.rejects(createMessagingSession({ secret: 's'.repeat(40), identityForOwner: async () => null, fetchImpl: async () => { throw Error('must not call') } })({ owner }))
 })
 
+test('chat profile headers survive a session store failure', async t => {
+  const handler = createPrivateBrowserHandler({ baseUrl: 'https://example.test', dataMode: 'synthetic',
+    login: { begin: async () => {}, finish: async () => {} }, resolveOwner: async () => null, getBackend: async () => ({ adapter: {} }),
+    sessionStore: { get: async () => { throw new Error('unavailable') } },
+  })
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/messages/person/c/u`, { headers: { Host: 'example.test', Cookie: '__Host-ul-session=fixture' } })
+  assert.equal(response.status, 503)
+  assert.match(response.headers.get('cache-control'), /no-store/)
+  assert.match(response.headers.get('x-robots-tag'), /noindex/)
+})
+
 test('the inbox requires browser login; the shell carries no OpenChat credential and no frame permissions', async t => {
   let handler, calls = 0
   const owner = { ownerId: 'owner', userId: 'user' }
@@ -34,10 +50,19 @@ test('the inbox requires browser login; the shell carries no OpenChat credential
   handler = createPrivateBrowserHandler({ baseUrl: origin, dataMode: 'synthetic',
     login: { begin: async () => ({ location: 'https://id.example.invalid/auth', transaction: { state: 'fixture-state' } }), finish: async () => ({ issuer: 'https://id.example.invalid', subject: 'verified', displayName: 'Avery' }) },
     resolveOwner: async () => owner, getBackend: async () => ({ adapter: {} }),
+    memberBlocks: createMemberBlocks({ store: createMemoryBlockStore() }),
     createMessagingSession: async session => { calls++; assert.deepEqual(session.owner, owner); return { token: 'fixture-private-token', user: { userId: 'inbox' } } },
-    messagingOptions: { fetchImpl: async () => new Response(JSON.stringify({ unreadTotal: 2 })) },
+    messagingOptions: { fetchImpl: async url => new Response(JSON.stringify(String(url).endsWith('/api/chat/conversations') ? [{ id: 'conv_1', type: 'direct', participants: [{ user: { id: 'inbox', name: 'Avery' } }, { user: { id: 'vlad', name: 'Vlad Sitalo' } }] }] : { unreadTotal: 2 })) },
   })
   const request = (path, options = {}) => fetch(endpoint + path, { redirect: 'manual', ...options })
+  const privateHeaders = response => {
+    assert.match(response.headers.get('cache-control'), /no-store/)
+    assert.match(response.headers.get('x-robots-tag'), /noindex/)
+  }
+  const signedOut = await request('/messages/person/conv_1/vlad')
+  assert.equal(signedOut.status, 401); privateHeaders(signedOut)
+  const signedOutHead = await request('/messages/person/conv_1/vlad', { method: 'HEAD' })
+  assert.equal(signedOutHead.status, 405); privateHeaders(signedOutHead)
   assert.equal((await request('/messages')).status, 401)
   assert.equal((await request('/messages/c/conv_1')).status, 401)
   const start = await request('/login?next=%2Fmessages%2Fc%2Fconv_1'), transaction = start.headers.getSetCookie().find(value => value.startsWith('__Host-ul-login=')).split(';')[0]
@@ -50,6 +75,30 @@ test('the inbox requires browser login; the shell carries no OpenChat credential
   assert.doesNotMatch(markup, /fixture-private-token|<iframe/)
   assert.match(markup, /data-nav-messages aria-current="page">Messages<span class="nav-count" aria-label="2 unread">2<\/span>/)
   assert.equal(calls, 1)
+  const person = await request('/messages/person/conv_1/vlad', { headers: { Cookie: cookie } })
+  assert.equal(person.status, 200)
+  const personHtml = await person.text()
+  assert.match(personHtml, /Vlad Sitalo/)
+  assert.match(personHtml, /Chat profile/)
+  assert.match(personHtml, /unlisted does not mean private/)
+  privateHeaders(person)
+  assert.doesNotMatch(personHtml, /fixture-private-token/)
+  const missingPerson = await request('/messages/person/other/vlad', { headers: { Cookie: cookie } })
+  assert.equal(missingPerson.status, 404); privateHeaders(missingPerson)
+  assert.equal((await request('/messages/person/conv_1/stranger', { headers: { Cookie: cookie } })).status, 404)
+
+  const direct = (await (await request('/messages/api/conversations', { headers: { Cookie: cookie } })).json()).conversations[0]
+  const group = { ...direct, type: 'group' }
+  const message = { id: 'm1', conversationId: 'conv_1', senderId: 'vlad', sender: { id: 'vlad', name: 'Vlad Sitalo' }, content: 'Hello', createdAt: '2026-01-01T00:00:00Z', reactions: [] }
+  for (const options of [{ conversation: direct }, { conversation: direct, dock: true }, { conversation: group, messages: [message] }]) {
+    const link = await renderedProfileLink(options)
+    assert.ok(link, 'the client renders a profile anchor')
+    assert.equal(link.getAttribute('href'), '/messages/person/conv_1/vlad')
+    const destination = await request(link.activate(), { headers: { Cookie: cookie } })
+    assert.equal(destination.status, 200)
+    assert.match(await destination.text(), /Vlad Sitalo/)
+  }
+
   // The old exchange that returned the OpenChat token to the browser no longer exists.
   const csrf = /name="csrf" value="([^"]+)"/.exec(markup)[1]
   const old = await request('/messages/session', { method: 'POST', headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${csrf}` })

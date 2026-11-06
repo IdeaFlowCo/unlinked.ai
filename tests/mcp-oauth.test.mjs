@@ -68,6 +68,22 @@ const authorizeQuery = (clientId, extra = {}) => new URLSearchParams({ client_id
 const csrfFrom = text => text.match(/name="csrf" value="([^"]+)"/)[1]
 const hiddenParams = text => new URLSearchParams([...text.matchAll(/<input type="hidden" name="([a-z_]+)" value="([^"]*)">/g)].filter(m => !['csrf', 'next'].includes(m[1])).map(m => [m[1], m[2].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')]))
 
+test('authorization code issued before account deletion cannot mint a grant', async t => {
+  const p = await pilot(t)
+  const client = await (await p.register({ client_name: 'Claude', redirect_uris: [CLAUDE] })).json()
+  const query = authorizeQuery(client.client_id, { resource: `${p.baseUrl}/mcp` })
+  const { cookie } = await p.signIn()
+  const consent = await (await p.go(`/oauth/authorize?${query}`, { headers: { Cookie: cookie } })).text()
+  const csrf = csrfFrom(consent)
+  const approved = await p.go('/oauth/authorize', { method: 'POST', headers: { Cookie: cookie, Origin: p.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams([['csrf', csrf], ['decision', 'allow'], ...hiddenParams(consent)]) })
+  const code = new URL(approved.headers.get('location')).searchParams.get('code')
+  const deleted = await p.go('/delete-account', { method: 'POST', headers: { Cookie: cookie, Origin: p.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, confirm: 'delete account' }) })
+  assert.equal(deleted.status, 200)
+  const token = await p.token({ grant_type: 'authorization_code', code, code_verifier: 'v'.repeat(64), client_id: client.client_id, redirect_uri: CLAUDE, resource: `${p.baseUrl}/mcp` })
+  assert.equal((await token.json()).error, 'invalid_grant')
+  assert.equal(p.graph.live().length, 0)
+})
+
 async function mcpTools(endpoint, accessToken) {
   const client = new Client({ name: 'oauth-test', version: '1.0.0' })
   await client.connect(new StreamableHTTPClientTransport(new URL(`${endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${accessToken}` } } }))
@@ -142,7 +158,7 @@ test('dynamic registration accepts only connector callbacks and loopback, always
   assert.equal(forged.headers.get('location'), null)
 })
 
-test('connector sign-in uses silent SSO, and consent offers Switch account back to the same request', async t => {
+test('connector sign-in is silent SSO, and consent offers Switch account back to the same request', async t => {
   const begins = []
   const p = await pilot(t, { login: { authorizationOrigin: 'https://synthetic-idp.invalid',
     begin: async (options = {}) => { begins.push(options); return { location: `https://synthetic-idp.invalid/authorize${options.prompt ? `?prompt=${options.prompt}` : ''}`, transaction: { state: 'synthetic-state' } } },
@@ -152,7 +168,7 @@ test('connector sign-in uses silent SSO, and consent offers Switch account back 
   const next = new URL((await p.go(`/oauth/authorize?${query}`)).headers.get('location'), p.endpoint).searchParams.get('next')
   const { cookie, location } = await p.signIn(next)
   assert.equal(location, `/oauth/authorize?${query}`)
-  // No forced password: the consent screen below is the confirmation for this grant.
+  // No prompt and no forced password: the consent screen below is the confirmation for this grant.
   assert.deepEqual(begins, [{}])
 
   const consent = await p.go(location, { headers: { Cookie: cookie } })

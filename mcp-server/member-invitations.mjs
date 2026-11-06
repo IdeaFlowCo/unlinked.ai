@@ -30,7 +30,7 @@ export function invitationName(value) {
 
 // `onAccepted` hears about each accepted invitation (the inviter's
 // notification); it never decides whether accepting works.
-export function createMemberInvitations({ store, now = Date.now, ttlMs = null, onHeavyUse = () => {}, onAccepted = () => {} } = {}) {
+export function createMemberInvitations({ store, coordination, validateParticipant, now = Date.now, ttlMs = null, onHeavyUse = () => {}, onAccepted = () => {} } = {}) {
   if (!store || ['insert', 'get', 'listByInviter', 'listAccepted', 'transition', 'countByInviter', 'deleteByInviter'].some(key => typeof store[key] !== 'function')) throw new Error('invitation_store_required')
   // An expired invitation reads as expired; the stored status stays pending.
   const expired = record => record.expiresAt != null && record.expiresAt <= now()
@@ -114,6 +114,20 @@ export function createMemberInvitations({ store, now = Date.now, ttlMs = null, o
     // Account deletion removes every invitation the owner created, and stops
     // invitations it accepted from connecting it to anyone.
     async removeOwner(member) { return store.deleteByInviter(owner(member)) },
+  }
+  if (coordination) {
+    const respond = service.respond
+    service.respond = async (token, invitee, action, responderName) => {
+      const checkpoint = coordination.checkpoint()
+      const record = await byToken(token)
+      if (!record) throw new InvitationError('invitation_not_found')
+      const inviter = { ownerId: record.inviterOwnerId, userId: record.inviterUserId }
+      return coordination.run(['owner:' + inviter.ownerId, 'owner:' + owner(invitee).ownerId], async () => {
+        if ([inviter, invitee].some(member => coordination.version(member.ownerId) > checkpoint)) throw new InvitationError('invitation_unavailable')
+        if (validateParticipant) { await validateParticipant(inviter); await validateParticipant(invitee) }
+        return respond(token, invitee, action, responderName)
+      })
+    }
   }
   return service
 }

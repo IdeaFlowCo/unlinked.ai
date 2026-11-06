@@ -30,6 +30,7 @@ function authenticateClient(request, clients) {
 const ROUTES = Object.freeze({
   'GET /api/agent/v1/whoami': { tool: 'unlinked_whoami', query: [] },
   'GET /api/agent/v1/people': { tool: 'unlinked_list_people', query: ['q', 'mode', 'presence', 'sort', 'cursor', 'limit'], numbers: ['limit'] },
+  'GET /api/agent/v1/person-targets': { tool: 'unlinked_list_person_targets', query: ['q', 'cursor', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/connections': { tool: 'unlinked_list_connections', query: ['degree', 'q', 'sort', 'grouping', 'cursor', 'limit'], numbers: ['degree', 'limit'] },
   'GET /api/agent/v1/connection-requests': { tool: 'unlinked_list_connection_requests', query: ['direction'] },
   'GET /api/agent/v1/notifications': { tool: 'unlinked_list_notifications', query: ['limit'], numbers: ['limit'] },
@@ -40,8 +41,11 @@ const ROUTES = Object.freeze({
   'POST /api/agent/v1/contacts/lookup': { tool: 'unlinked_lookup_contact', body: ['connectionId', 'linkedinUrl', 'profileId', 'refHashes'] },
   // Private people notes & relations (catalog v7, separate permission).
   'GET /api/agent/v1/private/person': { tool: 'unlinked_get_person_private', query: ['profileId'] },
-  'GET /api/agent/v1/private/thing': { tool: 'unlinked_get_private_thing', query: ['thingId'] },
-  'GET /api/agent/v1/private/things': { tool: 'unlinked_list_private_things', query: ['query', 'kind'] },
+  'POST /api/agent/v1/private/investor-imports': { tool: 'unlinked_stage_investor_csv', body: ['csv', 'fileBase64', 'filename', 'sheet', 'headerRow', 'inspectOnly', 'retainOriginalConfirmed', 'mapping', 'listName', 'listId'], limit: 4 * 1024 * 1024 },
+  'POST /api/agent/v1/private/investor-imports/resume': { tool: 'unlinked_resume_investor_import', body: ['importId', 'batchSize'] },
+  'GET /api/agent/v1/private/investor-imports/status': { tool: 'unlinked_get_investor_import', query: ['importId', 'offset', 'limit', 'sourceOffset'], numbers: ['offset', 'limit', 'sourceOffset'] },
+  'GET /api/agent/v1/private/thing': { tool: 'unlinked_get_private_thing', query: ['thingId', 'after', 'limit'], numbers: ['limit'] },
+  'GET /api/agent/v1/private/things': { tool: 'unlinked_list_private_things', query: ['query', 'kind', 'after', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/private/search': { tool: 'unlinked_search_private', query: ['query', 'relationType', 'kind', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/private/neighbourhood': { tool: 'unlinked_get_neighbourhood', query: ['subjectKind', 'subjectId', 'depth'], numbers: ['depth'] },
   'POST /api/agent/v1/private/things': { tool: 'unlinked_save_private_thing', body: ['kind', 'name', 'createNew', 'clientRequestId'] },
@@ -115,9 +119,15 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
         typeof subject !== 'string' || !subject || subject.length > 512 || /[\x00-\x1f\x7f]/.test(subject)) throw new AccountToolError('invalid_input', 'Send { issuer, subject }: the verified https OIDC issuer and the exact opaque subject.')
     // The caller must have verified this identity itself; this endpoint only
     // maps an exact issuer+subject binding to its owner — never email.
+    const checkpoint = provisioning.coordination?.checkpoint()
     let owner = null
     try { owner = await provisioning.resolveOwner({ issuer, subject }) } catch { throw new AccountToolError('upstream_unavailable', 'The identity binding could not be read right now; retry.') }
     if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new AccountToolError('not_linked', 'No Unlinked account is bound to that verified identity. The person must sign in at /login once; linkage is never established by email matching.')
+    const release = provisioning.coordination ? await provisioning.coordination.acquire('owner:' + owner.ownerId, false) : () => {}
+    try {
+    if (provisioning.coordination && provisioning.coordination.version(owner.ownerId) > checkpoint) throw new AccountToolError('not_linked', 'The account changed while provisioning; sign in again.')
+    const currentOwner = await provisioning.resolveOwner({ issuer, subject })
+    if (!currentOwner || currentOwner.ownerId !== owner.ownerId || currentOwner.userId !== owner.userId) throw new AccountToolError('not_linked', 'The account is no longer linked.')
     let ensured = null
     try { ensured = await provisioning.ensureGrant({ ownerId: owner.ownerId, userId: owner.userId }, { readOnly: true }) } catch { throw new AccountToolError('upstream_unavailable', 'Grant provisioning could not finish; retry.') }
     if (!ensured) throw new AccountToolError('grant_revoked', 'The owner revoked agent access; it stays off until they re-enable it in Settings.')
@@ -142,6 +152,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
     response.end(JSON.stringify({ kind: 'unlinked_provision_grant', ownerId: owner.ownerId, grantId: ensured.grantId, created: ensured.created === true,
       version: grant.version, scope: grant.scope, tools: grant.tools, accessToken: ensured.accessToken }))
+    } finally { release() }
   }
   const send = (response, status, value, headers = {}) => {
     if (response.headersSent) { response.end(); return }

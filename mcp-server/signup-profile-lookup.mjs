@@ -61,7 +61,7 @@ export async function loadProfileLookupAdapter(settings, { root = PROFILE_LOOKUP
   try { loaded = await importModule(path) } catch { throw Error('profile_lookup_adapter_import') }
   const adapter = typeof loaded?.default?.lookup === 'function' ? loaded.default : loaded
   if (typeof adapter?.lookup !== 'function') throw Error('profile_lookup_adapter_contract')
-  return { lookup: (slug, options) => adapter.lookup(slug, options) }
+  return { lookup: (slug, options) => adapter.lookup(slug, options), ...(typeof adapter.search === 'function' ? { search: (query, options) => adapter.search(query, options) } : {}) }
 }
 
 // Startup wiring: settings plus the loaded adapter, or the feature stays off

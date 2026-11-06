@@ -1,3 +1,6 @@
+import { createBrowserPerformanceRecorder } from './browser-performance.mjs'
+import { createNeo4jSavedSearchLists } from './saved-search-lists.mjs'
+import { createAuditQueue } from './audit-queue.mjs'
 import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
@@ -8,6 +11,10 @@ import { createMessagingResolver, createMessagingSession, createMessagingRecipie
 import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
+import { createContactEnrichment, createNeo4jContactEnrichmentStore } from './contact-enrichment.mjs'
+import { createContactSlugs, createNeo4jContactSlugStore } from './contact-slugs.mjs'
+import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
+import { publishedPeopleFor } from './connection-identity.mjs'
 import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
@@ -22,17 +29,20 @@ import { createNeo4jCompanyFactsStore } from './company-facts-store.mjs'
 import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
 import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
+import { createNeo4jConnectionPrivacyStore } from './connection-privacy-store.mjs'
+import { createIdeaflowProfileClient, createIdeaflowProfileProvider, createNeo4jIdeaflowProfileChoices } from './ideaflow-profile.mjs'
 import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
 import { createNeo4jProfileHandleStore, createProfileHandles } from './profile-handles.mjs'
 import { createNeo4jSafetyReportStore, createSafetyReports } from './safety-reports.mjs'
 import { createNeo4jBlockStore, createMemberBlocks } from './member-blocks.mjs'
-import { createProfilePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
+import { createProfilePhotoStore, createMemberAwarePhotoStore, PHOTO_DIRECTORY } from './profile-photos.mjs'
+import { fetchLinkedinPhoto } from '../src/utils/private-import/profile-photo.mjs'
 import { createMemberEmail, createNeo4jEmailStore, createResendTransport, emailConfig } from './member-email.mjs'
 import { createSelfClaims } from './self-claims.mjs'
 import { isTestProfileId, testProfile, CLAIMED_PROFILE_FOR_OWNER, OWNER_FOR_CLAIMED_PROFILE, CLAIMED_MEMBER_PROFILES } from './test-profiles.mjs'
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { lstat, mkdir, open, readFile, readdir, rm } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SignJWT } from 'jose'
@@ -42,6 +52,7 @@ import { CLIENT_ID_PATTERN } from './account-api.mjs'
 import { createNoosOwnerBackend } from '../src/utils/private-import/noos-adapter.mjs'
 import { createResponsesCompletion } from '../src/utils/private-import/ai-search.mjs'
 import { createArchiveWorker } from '../src/utils/private-import/background-job.mjs'
+import { coordinatorFor } from './owner-coordination.mjs'
 
 export function earliestConnectionDates(invitations, requests) {
   const key = value => JSON.stringify([value.other.ownerId, value.other.userId])
@@ -89,7 +100,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createConnectionPrivacyStore: createNeo4jConnectionPrivacyStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createIdeaflowProfileChoiceStore: createNeo4jIdeaflowProfileChoices, createSavedSearchLists: createNeo4jSavedSearchLists, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -131,12 +142,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, connectionSync, indexWarmKeeper, closed = false
+  let server, worker, memberEmail, diagnosticsStore, browserPerformanceStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
   const close = async () => {
     if (closed) return
     closed = true
     indexWarmKeeper?.stop()
+    await contactEnrichment?.stop()
     await diagnosticsStore?.close()
+    await browserPerformanceStore?.close()
     await connectionSync?.stop()
     await worker?.stop()
     await memberEmail?.stop()
@@ -201,17 +214,30 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // The signed-in home's display choices (docs/member-home.md); UI preferences only.
     const homePreferences = typeof dependencies.createHomePreferenceStore === 'function' ? dependencies.createHomePreferenceStore(driver, 'neo4j') : undefined
     await homePreferences?.initialize()
+    // Member photo index (profile id -> owner + blob), refreshed by each public index build.
+    let memberPhotos = new Map()
+    // Members' choice of who can see their connections (docs/connection-privacy.md).
+    const connectionPrivacy = typeof dependencies.createConnectionPrivacyStore === 'function' ? dependencies.createConnectionPrivacyStore(driver, 'neo4j') : undefined
+    await connectionPrivacy?.initialize()
+    // Members' choice to show or hide their Ideaflow interests and asks (docs/ideaflow-profile.md).
+    const ideaflowProfileChoices = process.env.UNLINKED_IDEAFLOW_PROFILES !== 'off' && typeof dependencies.createIdeaflowProfileChoiceStore === 'function' ? dependencies.createIdeaflowProfileChoiceStore(driver, 'neo4j') : undefined
+    await ideaflowProfileChoices?.initialize()
     // Member-published public profile links (docs/profile-social-links.md).
+    const savedSearchLists = dependencies.createSavedSearchLists?.(driver, 'neo4j')
+    await savedSearchLists?.initialize()
     const profileSocialLinks = typeof dependencies.createProfileLinkStore === 'function' ? dependencies.createProfileLinkStore(driver, 'neo4j') : undefined
     await profileSocialLinks?.initialize()
     // Member handles: readable /people/<handle> addresses (docs/profile-handles.md).
     const profileHandles = typeof dependencies.createProfileHandleStore === 'function' ? createProfileHandles({ store: dependencies.createProfileHandleStore(driver, 'neo4j') }) : undefined
     await profileHandles?.initialize()
+    // Owner-private readable contact addresses, /network/contacts/<slug> (docs/contact-slugs.md).
+    const contactSlugs = typeof dependencies.createContactSlugStore === 'function' ? createContactSlugs({ store: dependencies.createContactSlugStore(driver, 'neo4j') }) : undefined
+    await contactSlugs?.initialize()
     // Operator-published company facts (docs/company-facts.md), merged over the
     // static list with a 60 s cache; a failed read serves the static list.
     const companyFactsStore = typeof dependencies.createCompanyFactsStore === 'function' ? dependencies.createCompanyFactsStore(driver, 'neo4j') : null
     await companyFactsStore?.initialize()
-    const lookupCompanyFacts = companyFactsStore ? createCompanyFacts({ readDataset: () => companyFactsStore.read(COMPANY_DATASET), onError: () => process.stderr.write('unlinked_company_facts_read_failed: serving the static list\n') }) : undefined
+    const lookupCompanyFacts = companyFactsStore ? createCompanyFacts({ readDataset: options => companyFactsStore.read(COMPANY_DATASET, options), onError: () => process.stderr.write('unlinked_company_facts_read_failed: serving the static list\n') }) : undefined
     // Member email, when the runtime supplies its private store.
     // Without RESEND_API_KEY (or with UNLINKED_EMAIL_ENABLED=false) nothing is
     // sent and no address is recorded; unsubscribe links keep working. Without
@@ -254,8 +280,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const memberBlocks = blockStore ? createMemberBlocks({ store: blockStore }) : undefined
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
     await connectionStore?.initialize()
-    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
-    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
+    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
+    const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
       // The inviter hears that their invite was accepted (and so that the invitee joined).
       onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,
         ...await publicProfileIdFor(value.invitee).then(id => id ? { actorProfileId: id } : {}, () => ({})), subjectId: value.invitationId, dedupeKey: `invite-accepted:${value.invitationId}` }) : undefined }) : undefined
@@ -393,9 +419,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         rows = (await session.executeRead(tx => tx.run(`MATCH (d:UnlinkedProfileDecision) WHERE d.kind = 'suspend' AND coalesce(d.revoked, false) = false
           RETURN d.profileId AS id, d.linkedinRefHash AS ref LIMIT 5001`))).records
       } finally { await session.close() }
-      const ids = new Set(), refs = new Set()
+      // `decided`: profiles an operator suspended by id. Everything else in `ids`
+      // is hidden because it shares a LinkedIn address with one of them.
+      const ids = new Set(), refs = new Set(), decided = new Set()
       for (const record of rows) {
-        if (typeof record.get('id') === 'string') ids.add(record.get('id'))
+        if (typeof record.get('id') === 'string') { ids.add(record.get('id')); decided.add(record.get('id')) }
         if (typeof record.get('ref') === 'string' && /^[a-f0-9]{64}$/.test(record.get('ref'))) refs.add(record.get('ref'))
       }
       // Nothing suspended: authoritatively nobody is.
@@ -411,9 +439,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         for (const ref of index.refs) refs.add(ref)
         complete = true
       } catch { /* the stored decisions alone still apply */ }
-      return { ids, refs, complete }
+      return { ids, refs, complete, decided }
     }
-    let requestDiagnostics
+    let requestDiagnostics, recordBrowserPerformance
     if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {
       const auditDirectory = join(root, 'audit')
       await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
@@ -422,23 +450,54 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       diagnosticsStore = await createDiagnosticsStore({ directory: join(auditDirectory, 'requests') })
       requestDiagnostics = createRequestDiagnostics({ emit: diagnosticsStore.emit })
     }
-    const audit = async event => {
+    if (diagnosticsEnv.UNLINKED_BROWSER_PERFORMANCE !== 'off') {
+      const auditDirectory=join(root,'audit')
+      await mkdir(auditDirectory,{mode:0o700}).catch(error=>{if(error.code!=='EEXIST')throw error})
+      const auditStat=await lstat(auditDirectory)
+      if(!auditStat.isDirectory()||auditStat.isSymbolicLink()||(auditStat.mode&0o777)!==0o700||auditStat.uid!==process.getuid())throw Error('performance_audit_directory_not_private')
+      browserPerformanceStore = await createDiagnosticsStore({ directory: join(root, 'audit', 'browser-performance') })
+      recordBrowserPerformance = createBrowserPerformanceRecorder({ emit: browserPerformanceStore.emit, release: JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version })
+    }
+    // One runtime process owns this audit file; all its appends and rotations share this queue.
+    const writeAudit = async event => {
       const directory = join(root, 'audit')
       await mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
       const state = await lstat(directory)
       if (!state.isDirectory() || state.isSymbolicLink() || (state.mode & 0o077) || state.uid !== process.getuid?.()) throw new Error('private_audit_directory_required')
-      const descriptor = await open(join(directory, 'browser-events.jsonl'), constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
-      try {
-        const stat = await descriptor.stat()
-        if (!stat.isFile() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_audit_file_required')
-        const line = JSON.stringify(event) + '\n'
-        if (stat.size + Buffer.byteLength(line) > 8 * 1024 * 1024) throw new Error('private_audit_capacity')
-        await descriptor.write(line); await descriptor.sync()
-      } finally { await descriptor.close() }
+      const line = JSON.stringify(event) + '\n'
+      if (Buffer.byteLength(line) > 64 * 1024) throw new Error('private_audit_event_too_large')
+      const live = join(directory, 'browser-events.jsonl')
+      for (;;) {
+        let descriptor = await open(live, constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
+        try {
+          const stat = await descriptor.stat()
+          if (!stat.isFile() || (stat.mode & 0o077) || stat.uid !== process.getuid?.()) throw new Error('private_audit_file_required')
+          if (stat.size + Buffer.byteLength(line) <= 8 * 1024 * 1024) {
+            await descriptor.write(line); await descriptor.sync()
+            return
+          }
+          await descriptor.close(); descriptor = null
+          const current = await lstat(live).catch(error => { if (error.code !== 'ENOENT') throw error; return null })
+          if (current && current.dev === stat.dev && current.ino === stat.ino) {
+            await rename(live, join(directory, 'browser-events.1.jsonl'))
+            console.error(JSON.stringify({ event: 'private_audit_rotated', at: new Date().toISOString() }))
+          }
+        } finally { await descriptor?.close() }
+      }
+    }
+    const audit = createAuditQueue(writeAudit)
+    // Import worker events are numeric/fixed-code only (no names, emails or
+    // rows), so they also go to the container log for operators.
+    const importEvent = async event => {
+      const line = { ...event, at: new Date().toISOString() }
+      console.log(JSON.stringify({ unlinkedImportWorker: line }))
+      await audit(line)
     }
     if (typeof store.listPendingImportJobs !== 'function' || typeof store.listImportJobIds !== 'function') throw new Error('private_background_store_required')
-    worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend,
-      onError: event => audit({ ...event, at: new Date().toISOString() }) })
+    // Profile photos from members' own exports (docs/profile-photos.md); kill
+    // switch UNLINKED_IMPORT_PHOTOS=off in runtime.env.
+    worker = createArchiveWorker({ listPendingImports: () => store.listPendingImportJobs(Date.now()), getBackend, coordination: coordinatorFor(sessionStore),
+      onError: importEvent, ...(process.env.UNLINKED_IMPORT_PHOTOS === 'off' ? {} : { fetchProfilePhoto: fetchLinkedinPhoto }) })
     worker.start()
     // The notification mailer runs on its own timer; startup never waits for it.
     memberEmail?.start()
@@ -494,7 +553,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // sharing one LinkedIn address fold into one page; the copy already holding
     // the person's readable address survives (docs/profile-handles.md).
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true,
-      preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list,
+      preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list, readConnectionPrivacy: connectionPrivacy ? () => connectionPrivacy.list() : undefined, onMemberPhotos: map => { memberPhotos = map },
       includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')
@@ -575,6 +634,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // Pre-build the shared index and keep it young, so neither the first
     // request after a restart nor the first after an idle gap pays the
     // rebuild in-band. The interval stays well inside the stale window.
+    // A member's new connection-privacy choice applies on the next read, not
+    // after the index freshness window (docs/connection-privacy.md).
+    if (connectionPrivacy && typeof readPublishedSnapshot?.invalidate === 'function') {
+      const { set, removeOwner } = connectionPrivacy
+      connectionPrivacy.set = async (...args) => { try { return await set(...args) } finally { readPublishedSnapshot.invalidate() } }
+      connectionPrivacy.removeOwner = async (...args) => { try { return await removeOwner(...args) } finally { readPublishedSnapshot.invalidate() } }
+    }
     if (readPublishedSnapshot && publicIndexFreshMs > 0 && publicIndexStaleMs > 0) {
       indexWarmKeeper = createIndexWarmKeeper({ read: readPublishedSnapshot, intervalMs: Math.max(publicIndexFreshMs, Math.min(45000, Math.floor(publicIndexStaleMs / 2))) })
       indexWarmKeeper.start()
@@ -595,12 +661,37 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       connectionSync = createOpenChatConnectionSync({ store: createNeo4jOpenChatSyncStore(driver), identityForOwner, secret: process.env.UNLINKED_MESSAGING_SECRET })
       connectionSync.start()
     }
-    return { login, getBackend, close, audit, requestDiagnostics, backgroundImports: true,
+    if (personLookup && readPublishedSnapshot) {
+      const enrichmentStore = createNeo4jContactEnrichmentStore(driver)
+      await enrichmentStore.initialize()
+      const reader = createPublicPeopleReader({ readPublishedSnapshot })
+      contactEnrichment = createContactEnrichment({ store: enrichmentStore, coordination: coordinatorFor(sessionStore),
+        readNetwork: owner => createAccountNetwork({ owner, getBackend }).readNetwork(), lookup: personLookup,
+        published: async row => {
+          const [match] = await publishedPeopleFor([row], { lookupSlug: slug => selfClaims.lookupSlug(slug), lookup: ids => reader.lookup({ ids }) })
+          return match ? reader.profile({ id: match.id }) : null
+        },
+        localCandidates: async name => {
+          const result = await reader.list({ query: name, mode: 'exact' })
+          return Promise.all(result.profiles.slice(0, 5).map(profile => reader.profile({ id: profile.id })))
+        },
+      })
+      contactEnrichment.start()
+    }
+    return { login, getBackend, close, audit, requestDiagnostics, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),
       readPublishedSnapshot,
+      contactEnrichment,
       messagingSecret: process.env.UNLINKED_MESSAGING_SECRET || undefined,
+      connectionIdentityForOwner: identityForOwner,
+      // Ideaflow interests and asks on member profiles (ideaflow.profile.v1): public sections of the
+      // member's own ideas-network About, found by their one verified Ideaflow identity; collapsed for
+      // visitors, hideable by the member. Off with UNLINKED_IDEAFLOW_PROFILES=off.
+      ideaflowProfiles: ideaflowProfileChoices && accountForProfile ? createIdeaflowProfileProvider({
+        client: createIdeaflowProfileClient({ origin: process.env.IDEANETWORK_URL || 'https://social.ideaflow.app' }),
+        accountForProfile, identityForOwner, choices: ideaflowProfileChoices }) : undefined,
       resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }),
       createMessagingSession: createMessagingSession({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
       resolveCardMessagingRecipient: createMessagingRecipient({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
@@ -614,14 +705,22 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // Operator-published photos (publish-profile-photos.mjs), read-only here.
       // No member hide-photo choice exists yet; when it does, pass it as
       // `hidden` so it outranks the operator set (docs/profile-photos.md).
-      profilePhotos: createProfilePhotoStore({ directory: join(assetRoot, PHOTO_DIRECTORY) }),
+      // Members' own photos from their exports (owner-private assets) win for
+      // their own profile; the operator set covers everyone else.
+      profilePhotos: createMemberAwarePhotoStore({ operator: createProfilePhotoStore({ directory: join(assetRoot, PHOTO_DIRECTORY) }),
+        members: () => memberPhotos,
+        // An asset deleted since the last index build reads as no photo (404), not an error.
+        readOwnerAsset: async (owner, sha256) => (await getBackend(owner)).readAsset(sha256).catch(error => { if (error?.message === 'private_observation_recovery_unavailable') return null; throw error }) }),
       memberInvitations,
       memberConnections,
       notifications,
       contactCards,
       homePreferences,
+      connectionPrivacy,
+      savedSearchLists,
       profileSocialLinks,
       profileHandles,
+      contactSlugs,
       safetyReports,
       memberBlocks,
       lookupCompanyFacts,
@@ -631,7 +730,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       ownProfileId: publicProfileIdFor,
       // Someone just claimed `profileId`: tell members whose own exports listed
       // that profile. Best effort and bounded; never blocks the claim.
-      notifyProfileClaimed: notifications && publicPeople ? async (profileId, claimer) => {
+      notifyProfileClaimed: notifications && publicPeople ? async (profileId, claimer, checkpoint = coordinatorFor(sessionStore).checkpoint()) => {
         if (isTestProfileId(profileId)) return 0
         const snapshot = await readPublishedSnapshot?.()
         if (!snapshot || !Array.isArray(snapshot.connections)) return 0
@@ -643,7 +742,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           try {
             const recipient = await accountForProfile(fromId)
             if (!recipient || (recipient.ownerId === claimer?.ownerId && recipient.userId === claimer?.userId)) continue
-            if (await notifications.notify({ recipient, kind: 'profile_claimed', actor: claimer, actorName: name, actorProfileId: profileId, subjectId: profileId, dedupeKey: `profile-claimed:${profileId}:${recipient.ownerId}:${recipient.userId}` })) sent++
+            await coordinatorFor(sessionStore).run(['owner:' + claimer.ownerId, 'owner:' + recipient.ownerId], async () => {
+              if ([claimer, recipient].some(member => coordinatorFor(sessionStore).version(member.ownerId) > checkpoint)) return
+              await getBackend(claimer); await getBackend(recipient)
+              const current = await accountForProfile(fromId)
+              if (!current || current.ownerId !== recipient.ownerId || current.userId !== recipient.userId) return
+              if (await notifications.notify({ recipient, kind: 'profile_claimed', actor: claimer, actorName: name, actorProfileId: profileId, subjectId: profileId, dedupeKey: `profile-claimed:${profileId}:${recipient.ownerId}:${recipient.userId}` })) sent++
+            })
           } catch { /* best effort */ }
         }
         return sent

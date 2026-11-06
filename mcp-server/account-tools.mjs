@@ -1,7 +1,8 @@
+import { INVESTOR_TOOLS, INVESTOR_MUTATING, INVESTOR_SCHEMAS, INVESTOR_DESCRIPTIONS } from './investor-tools.mjs'
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
+import { createAccountNetwork, withSearchDeadline } from '../src/utils/private-import/account-network.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
@@ -14,7 +15,8 @@ import { PRIVATE_NOTES_DESCRIPTIONS, PRIVATE_NOTES_MUTATING, PRIVATE_NOTES_SCHEM
 import { linkedinRefHash, linkedinSlug } from '../src/utils/public-people/url-identity.mjs'
 import { linkedinUrl as canonicalLinkedinUrl } from '../src/utils/private-import/archive.mjs'
 import { CONNECTION_SORTS, PUBLIC_LIST_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
-import { groupConnectionRows, publishedPeopleFor, rowSlug, usableProfileId } from './connection-identity.mjs'
+import { groupConnectionRows, rowSlug, rowPublicTarget, usableProfileId } from './connection-identity.mjs'
+import { contactFingerprint } from './contact-enrichment.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const LINKEDIN_PROFILE = /^https:\/\/www\.linkedin\.com\/in\/[\w%-]+$/
@@ -29,6 +31,7 @@ export const ACCOUNT_TOOL_ERROR_STATUS = Object.freeze({
   not_a_member: 409, already_connected: 409, request_pending: 409, request_unavailable: 409, cooldown_active: 429,
   // Private people notes & relations (grant catalog version 7, separate permission).
   ambiguous_name: 409, identity_unavailable: 409,
+  import_busy: 409, identity_conflict: 409,
 })
 
 // unlinked_search_network's text-first path: name the AI fallback's own
@@ -60,6 +63,7 @@ export const CONNECTION_GROUPINGS = Object.freeze(['person', 'none'])
 
 export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   unlinked_whoami: {},
+  unlinked_list_person_targets: { q: z.string().max(100).optional(), cursor: z.string().max(4096).optional(), limit: z.number().int().min(1).max(50).optional() },
   unlinked_list_people: {
     q: z.string().max(200).optional(), mode: z.enum(SEARCH_MODES).optional(), presence: z.enum(PRESENCE).optional(),
     sort: z.enum(PUBLIC_LIST_SORTS).optional(),
@@ -91,9 +95,11 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
     profileId: z.string().min(1).max(160).optional(), refHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(100).optional(),
   },
   ...PRIVATE_NOTES_SCHEMAS,
+  ...INVESTOR_SCHEMAS,
 })
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
+  unlinked_list_person_targets: 'Read-only current owner-network members with proven active Ideaflow identity, for cross-app person targets. Exact published-profile ownership only; no names/email guesses, contact details, messages, relationship assertions, account creation or sends. Connected does not mean chatted. Cursor pages the current own network, including imported connections.',
   unlinked_whoami: 'Return the authenticated grant owner: the stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy-profile anchor if any. Linkage is the grant itself — never email matching. No contact email/phone is returned.',
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=legacy keeps recovered accounts awaiting claim, presence=shadow keeps imported profiles without a recovered account. sort: best (default: relevance with q, else stored name order), name (A–Z by first letter or number, ignoring leading emoji/punctuation, accents and case), name-desc, raw (Unicode code-point order of the name as written). Paginated with an opaque cursor bound to the query and sort, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Degree 1 groups one entry per person (grouping "person", default) when records share exact identity evidence — the same published profile (merges followed) or the same LinkedIn address, never a name — with sources[] listing every underlying record (provenance, visibility) and top-level fields from the owner import; total counts people. grouping "none" returns one row per source record. sort: name (default; A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case — names are shown exactly as written), raw (Unicode code-point order), name-desc, connected (most recently connected first), imported (most recently imported first), company. Paginated, at most 50 per page; the cursor is bound to q, sort and grouping.',
@@ -107,13 +113,14 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_lookup_contact: 'Read-only, owner-scoped: resolve one of the owner’s own contacts without paging. Give exactly one of connectionId (an id from unlinked_list_connections), linkedinUrl (a linkedin.com/in/ address), profileId (a published profile id) or refHashes (up to 100 linkedinRefHash values). Returns name, headline, company, the owner connectionId when the owner imported the person, linkedinRefHash (SHA-256 of the canonical LinkedIn slug, the private-graph key `linkedin:in:<hash>`) and publishedProfileId when the same person has a published Unlinked profile. Never returns another owner’s imports; typed not_found when nothing matches.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and give short conversational reasons stating unknown sector focus. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
   ...PRIVATE_NOTES_DESCRIPTIONS,
+  ...INVESTOR_DESCRIPTIONS,
 })
 
-const DETERMINISTIC_TOOLS = new Set([...PRIVATE_NOTES_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+const DETERMINISTIC_TOOLS = new Set(['unlinked_list_person_targets', ...PRIVATE_NOTES_TOOLS, ...INVESTOR_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
 export const WRITE_TOOLS = new Set(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
 // Every tool that changes something: connection writes plus private-notes writes.
-export const MUTATING_TOOLS = new Set([...WRITE_TOOLS, ...PRIVATE_NOTES_MUTATING])
-const PRIVATE_NOTES_TOOL_SET = new Set(PRIVATE_NOTES_TOOLS)
+export const MUTATING_TOOLS = new Set([...WRITE_TOOLS, ...PRIVATE_NOTES_MUTATING, ...INVESTOR_MUTATING])
+const PRIVATE_NOTES_TOOL_SET = new Set([...PRIVATE_NOTES_TOOLS, ...INVESTOR_TOOLS])
 // Request-model refusals, mapped onto the typed agent vocabulary.
 const CONNECTION_FAILURES = Object.freeze({
   connection_not_member: ['not_a_member', 'That profile is not an Unlinked member yet (an imported profile), so it cannot be asked to connect.'],
@@ -154,7 +161,7 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 // `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
 // people overlay client (private-context.mjs) and the owner identity bridge.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, overlay, identityFor, limits = {} }) {
+export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // Write tools use the same rules as the site's Connect button.
@@ -200,7 +207,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     const handle = handleOf(profile)
     return handle ? { ...profile, handle, ...(address ? { url: `${UNLINKED_PROFILE_ORIGIN}/people/${encodeURIComponent(handle)}` } : {}) } : profile
   }
-  const publicReader = pageSize => {
+  const publicReader = (pageSize, reuse = false) => {
     if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
     const captured = { revision: null, total: null }
     const observe = async options => {
@@ -213,7 +220,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     // seconds on the full public index, and this runs on every profile view
     // (private context) and agent call.
     observe.compiledSource = readPublishedSnapshot
-    const reader = createPublicPeopleReader({ pageSize, readPublishedSnapshot: observe })
+    const reader = createPublicPeopleReader({ pageSize, readPublishedSnapshot: observe, reuse })
     return { reader, captured }
   }
   // With q/mode already schema-validated, a reader 400 under a supplied cursor
@@ -337,15 +344,49 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     },
     async unlinked_get_profile(grant, { id, connectionsCursor }, signal) {
       const { reader, captured } = publicReader(50)
+      // The member's own agent sees connections as the member would (docs/connection-privacy.md).
+      const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner(grant)).catch(() => null) : null
+      const viewer = { signedIn: true, ...(mine ? { id: mine } : {}) }
       let result
       try {
-        result = await reader.profile({ id: profileHandles?.resolve(id)?.profileId ?? id, cursor: connectionsCursor, signal })
+        result = await reader.profile({ id: profileHandles?.resolve(id)?.profileId ?? id, cursor: connectionsCursor, signal, viewer })
         // A merged profile answers with the profile it was merged into.
-        if (result?.moved) result = { ...(await reader.profile({ id: result.moved, signal })), movedFrom: id }
+        if (result?.moved) result = { ...(await reader.profile({ id: result.moved, signal, viewer })), movedFrom: id }
       } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured) }
       // A handle names only a member's profile.
       if (!result?.profile || (profileHandles?.resolve(id) && !handleOf(result.profile))) throw new AccountToolError('not_found', 'No published public profile has that id.')
       return { kind: 'unlinked_get_profile', revision: captured.revision, profile: withHandle(result.profile, true), ...(result.movedFrom ? { movedFrom: result.movedFrom } : {}), visibility: 'public' }
+    },
+    async unlinked_list_person_targets(grant, { q = '', cursor, limit = 50 }, signal) {
+      if (typeof connectionIdentityForOwner !== 'function' || typeof accountForProfile !== 'function' || !memberBlocks)
+        throw new AccountToolError('upstream_unavailable', 'Person identity metadata is not configured.')
+      const listing = await tools.unlinked_list_connections(grant, { q, cursor, limit, degree: 1, sort: 'connected', grouping: 'person' }, signal)
+      const viewer = owner(grant), people = []
+      const hidden = await memberBlocks.hidden(viewer)
+      // Re-read live source evidence so a completed/ongoing connection removal
+      // cannot be revived by a cached public path or an acceptance receipt.
+      const network = await createAccountNetwork({ owner: viewer, getBackend }).readNetwork(undefined, { signal })
+      const sources = new Map(network.assertions.filter(row => row.category === 'connections').map(row => [row.id, row]))
+      const [accepted, invited] = await Promise.all([
+        memberConnections ? memberConnections.connections(viewer) : [],
+        memberInvitations ? memberInvitations.connections(viewer) : [],
+      ])
+      const same = (a, b) => a.ownerId === b.ownerId && a.userId === b.userId
+      for (const entry of listing.connections) {
+        signal?.throwIfAborted()
+        if (!entry.publishedProfileId || hidden.profiles.has(entry.publishedProfileId)) continue
+        const target = await accountForProfile(entry.publishedProfileId)
+        if (!target || same(viewer, target) || await memberBlocks.between(viewer, target)) continue
+        const rows = entry.sources.map(source => sources.get(source.id)).filter(Boolean)
+        const imported = rows.some(row => !['unlinked-connection', 'unlinked-invite'].includes(row.provenance?.source))
+        if (!imported && ![...accepted, ...invited].some(value => same(value.other, target))) continue
+        const identity = await connectionIdentityForOwner(target)
+        if (!identity || identity.issuer !== 'https://id.ideaflow.app/api/auth' || typeof identity.subject !== 'string'
+          || !identity.subject || identity.subject.length > 512 || /[\x00-\x1f\x7f]/.test(identity.subject)) continue
+        people.push({ profileId: entry.publishedProfileId, displayName: entry.name,
+          identity: { issuer: identity.issuer, subject: identity.subject }, connected: true })
+      }
+      return { kind: 'unlinked_person_targets', people, ...(listing.nextCursor ? { nextCursor: listing.nextCursor } : {}) }
     },
     async unlinked_list_connections(grant, { degree = 1, q = '', sort = 'name', grouping = 'person', cursor, limit = 50 }, signal) {
       const owner = { ownerId: grant.ownerId, userId: grant.userId }
@@ -399,7 +440,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         wantedSlug = suppliedSlug(input.linkedinUrl)
         if (!wantedSlug) throw new AccountToolError('invalid_input', 'linkedinUrl must be a LinkedIn profile address, like https://www.linkedin.com/in/their-name.')
       }
-      const reader = typeof readPublishedSnapshot === 'function' ? publicReader(50).reader : null
+      const reader = typeof readPublishedSnapshot === 'function' ? publicReader(50, true).reader : null
       // The published profile for a profileId lookup (merged ids resolve to the survivor).
       let published = null
       if (mode === 'profileId') {
@@ -411,67 +452,126 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       // The owner's own connection rows; never anyone else's.
       let rows
       try { rows = (await createAccountNetwork({ owner: owner(grant), getBackend }).readNetwork(undefined, { signal })).assertions.filter(row => row.category === 'connections') }
-      catch {
-        // A published profile still resolves without the owner's network; it just has no connection id.
-        if (mode !== 'profileId') throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.')
-        rows = []
-      }
-      const ordered = rows.map(row => ({ row, entry: connectionEntry(row), slug: rowSlug(row) }))
+      catch { throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
+      // A row without its own LinkedIn address uses the one the owner attached
+      // to that contact privately (contact enrichment), so the owner's private
+      // card can be keyed linkedin:in:<hash>. Only the hash leaves this tool.
+      let attached = new Map()
+      if (typeof contactAddresses === 'function') { try { attached = await contactAddresses(owner(grant)) } catch { throw new AccountToolError('upstream_unavailable', 'The owner contact addresses are unavailable right now.') } }
+      const privateSlug = row => { const value = attached.get(row.id); return value && value.fingerprint === contactFingerprint(row) ? rowSlug({ fields: { url: value.address } }) : null }
+      const ordered = rows.map(row => ({ row, entry: connectionEntry(row), slug: rowSlug(row) ?? privateSlug(row) }))
         .sort((a, b) => a.entry.name.localeCompare(b.entry.name) || a.entry.id.localeCompare(b.entry.id))
-      // Each candidate row's published profile: its own target, else a published profile with the same LinkedIn address.
+      // Each candidate row's published identity evidence.
       const publishedFor = async candidates => {
-        if (!reader || !candidates.length) return candidates.map(() => null)
-        try { return await publishedPeopleFor(candidates.map(({ row }) => row), { lookupSlug: typeof lookupSlug === 'function' ? lookupSlug : null, lookup: ids => reader.lookup({ ids, signal }) }) }
-        catch { return candidates.map(() => null) }
+        if (!reader || !candidates.length) return candidates.map(() => [])
+        try {
+          await reader.lookup({ ids: [], signal })
+          return await Promise.all(candidates.map(async candidate => {
+            const target = usableProfileId(rowPublicTarget(candidate.row))
+            const explicit = target ? (await reader.lookup({ ids: [target], signal })).get(target) : null
+            const byAddress = candidate.slug ? await reader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(candidate.slug)}`, signal }) : null
+            return [...new Map([explicit, byAddress].filter(Boolean).map(summary => [summary.id, summary])).values()]
+          }))
+        } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
       }
-      const contactOf = (candidate, summary) => ({
-        connectionId: candidate.entry.id, name: candidate.entry.name,
-        ...(candidate.entry.headline ? { headline: candidate.entry.headline } : {}), ...(candidate.entry.company ? { company: candidate.entry.company } : {}),
-        linkedinRefHash: linkedinRefHash(candidate.slug), publishedProfileId: summary?.id ?? null, provenance: candidate.entry.provenance,
-      })
+      const contactOf = async (candidate, summary) => {
+        const sourceRef = linkedinRefHash(candidate.slug)
+        let publicRef = null
+        if (summary) {
+          try { publicRef = await reader.linkedinRef({ id: summary.id, signal }) }
+          catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+        }
+        return { connectionId: candidate.entry.id, name: candidate.entry.name,
+          ...(candidate.entry.headline ? { headline: candidate.entry.headline } : {}), ...(candidate.entry.company ? { company: candidate.entry.company } : {}),
+          linkedinRefHash: publicRef ?? sourceRef, ...(sourceRef && publicRef && sourceRef !== publicRef ? { sourceLinkedinRefHash: sourceRef } : {}),
+          publishedProfileId: summary?.id ?? null, provenance: candidate.entry.provenance }
+      }
       if (mode === 'refHashes') {
-        const wanted = new Set(input.refHashes), seen = new Set(), picked = []
+        const wanted = new Set(input.refHashes), grouped = new Map()
         for (const candidate of ordered) {
           const value = linkedinRefHash(candidate.slug)
-          if (value && wanted.has(value) && !seen.has(value)) { seen.add(value); picked.push(candidate) }
+          if (value && wanted.has(value)) {
+            if (!grouped.has(value)) grouped.set(value, [])
+            grouped.get(value).push(candidate)
+          }
         }
+        const picked = [...grouped.values()].map(candidates => candidates[0])
         const summaries = await publishedFor(picked)
-        return { kind: 'unlinked_lookup_contact', contacts: picked.map((candidate, index) => contactOf(candidate, summaries[index])), visibility: 'owner_private' }
+        return { kind: 'unlinked_lookup_contact', contacts: await Promise.all(picked.map(async (candidate, index) => {
+          const hash = linkedinRefHash(candidate.slug), ids = [...new Set(grouped.get(hash).map(value => value.entry.id))].sort()
+          return { ...await contactOf(candidate, summaries[index][0] ?? null), linkedinRefHash: hash, ...(ids.length > 1 ? { connectionIds: ids } : {}) }
+        })), visibility: 'owner_private' }
       }
       let candidate = null
+      if (mode === 'linkedinUrl' && reader) {
+        try { published = await reader.lookupLinkedin({ address: input.linkedinUrl, signal }) }
+        catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+      }
       if (mode === 'connectionId') candidate = ordered.find(value => value.entry.id === input.connectionId) ?? null
-      else if (mode === 'linkedinUrl') candidate = ordered.find(value => value.slug === wantedSlug) ?? null
-      else {
-        const summaries = await publishedFor(ordered)
-        const index = summaries.findIndex(summary => summary?.id === published.id)
-        if (index >= 0) return { kind: 'unlinked_lookup_contact', contact: contactOf(ordered[index], summaries[index]), visibility: 'owner_private' }
-        // Published, but not among the owner's contacts: public data only.
-        return { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: null, publishedProfileId: published.id }, visibility: 'public' }
+      else if (mode === 'linkedinUrl' && !published) candidate = ordered.find(value => value.slug === wantedSlug) ?? null
+      if (!published && !candidate) {
+        if (mode === 'linkedinUrl' && !reader) throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
+        throw new AccountToolError('not_found', mode === 'connectionId' ? 'No connection of the owner has that id.' : 'Neither the owner’s contacts nor a published profile have that LinkedIn address.')
       }
-      if (candidate) {
-        const [summary] = await publishedFor([candidate])
-        return { kind: 'unlinked_lookup_contact', contact: contactOf(candidate, summary), visibility: 'owner_private' }
+      const summaries = await publishedFor(ordered)
+      let refs = new Map(), targetRef = null
+      try {
+        if (published) targetRef = await reader.linkedinRef({ id: published.id, signal })
+        const ids = [...new Set(summaries.flat().map(summary => summary.id))]
+        refs = new Map(await Promise.all(ids.map(async id => [id, await reader.linkedinRef({ id, signal })])))
+      } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+      const parents = ordered.map((_, index) => index), byKey = new Map()
+      const root = index => { while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index] } return index }
+      for (let index = 0; index < ordered.length; index++) {
+        const source = linkedinRefHash(ordered[index].slug)
+        const keys = [...(source ? [`h:${source}`] : []), ...summaries[index].flatMap(summary => [`p:${summary.id}`, ...(refs.get(summary.id) ? [`h:${refs.get(summary.id)}`] : [])])]
+        for (const key of keys) {
+          const other = byKey.get(key)
+          if (other === undefined) byKey.set(key, index)
+          else { const left = root(index), right = root(other); if (left !== right) parents[left] = right }
+        }
       }
-      if (mode === 'linkedinUrl' && reader && typeof lookupSlug === 'function') {
-        // Not imported by the owner, but a published profile has that address.
-        const id = usableProfileId(await Promise.resolve(lookupSlug(wantedSlug)).catch(() => null))
-        let summary = null
-        if (id) { try { summary = (await reader.lookup({ ids: [id], signal })).get(id) ?? null } catch { summary = null } }
-        if (summary) return { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: summary.name, ...(summary.headline ? { headline: summary.headline } : {}), linkedinRefHash: linkedinRefHash(wantedSlug), publishedProfileId: summary.id }, visibility: 'public' }
+      let start = candidate ? ordered.indexOf(candidate) : byKey.get(`p:${published.id}`)
+      if (start === undefined && targetRef) start = byKey.get(`h:${targetRef}`)
+      const indexes = start === undefined || start < 0 ? [] : ordered.flatMap((_, index) => root(index) === root(start) ? [index] : [])
+      const publicIds = new Set(published ? [published.id] : []), hashes = new Set(targetRef ? [targetRef] : [])
+      const related = new Map()
+      for (const index of indexes) {
+        const source = linkedinRefHash(ordered[index].slug)
+        if (source) hashes.add(source)
+        for (const summary of summaries[index]) {
+          const publicRef = refs.get(summary.id)
+          publicIds.add(summary.id)
+          if (publicRef) hashes.add(publicRef)
+          const key = publicRef ? `h:${publicRef}` : `p:${summary.id}`
+          if (!related.has(key)) related.set(key, summary.id)
+        }
       }
-      throw new AccountToolError('not_found', mode === 'connectionId' ? 'No connection of the owner has that id.' : 'Neither the owner’s contacts nor a published profile have that LinkedIn address.')
+      if (published) related.set(targetRef ? `h:${targetRef}` : `p:${published.id}`, published.id)
+      try {
+        for (const id of related.values()) for (const relatedId of await reader.linkedinProfileIds({ id, signal })) publicIds.add(relatedId)
+      } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+      const primary = candidate ?? (indexes.length ? ordered[indexes[0]] : null)
+      if (primary) {
+        const preferredIndex = ordered.indexOf(primary)
+        const summary = summaries[preferredIndex][0] ?? indexes.flatMap(index => summaries[index])[0] ?? published
+        const contact = await contactOf(primary, summary)
+        const sourceLinkedinRefHashes = [...hashes].filter(hash => hash !== contact.linkedinRefHash)
+        const publishedProfileIds = [...publicIds].filter(id => id !== contact.publishedProfileId)
+        return { kind: 'unlinked_lookup_contact', publicReconciliationComplete: Boolean(reader), contact: { ...contact, ...(sourceLinkedinRefHashes.length ? { sourceLinkedinRefHashes } : {}), ...(publishedProfileIds.length ? { publishedProfileIds } : {}) }, visibility: 'owner_private' }
+      }
+      return { kind: 'unlinked_lookup_contact', publicReconciliationComplete: true, contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: targetRef, publishedProfileId: published.id, ...([...publicIds].some(id => id !== published.id) ? { publishedProfileIds: [...publicIds].filter(id => id !== published.id) } : {}) }, visibility: 'public' }
     },
     async unlinked_ai_search(grant, { query, scope, timeoutMs = 40000 }, signal) {
       // Default to the widest scope the grant actually covers, so the natural
       // single-argument call works on every grant that includes the tool.
       scope ??= scopeCoversPublic(grant.scope) ? 'everyone' : 'mine'
       if (typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'AI ranking is not configured.')
-      const combined = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)])
       if (scope === 'mine') {
         let result
-        try { result = await createAccountNetwork({ owner: { ownerId: grant.ownerId, userId: grant.userId }, getBackend, complete }).search({ query, signal: combined }) }
-        catch (error) { throw askFailure(error, combined) }
-        return { kind: 'unlinked_ai_search', scope: 'mine', mode: result.mode, considered: result.considered, indexed: result.indexed,
+        try { result = await createAccountNetwork({ owner: { ownerId: grant.ownerId, userId: grant.userId }, getBackend, complete }).askNetwork({ query, signal, budgetMs: timeoutMs }) }
+        catch (error) { throw askFailure(error, signal) }
+        return { kind: 'unlinked_ai_search', scope: 'mine', mode: result.mode, considered: result.considered, indexed: result.indexed, ...(result.partial ? { partial: true } : {}),
           matches: result.matches.map(match => ({ assertionId: match.assertionId, sourceId: match.sourceId, rowId: match.rowId,
             name: [match.fields?.['first name'], match.fields?.['last name']].filter(Boolean).join(' ').slice(0, 256),
             ...(match.fields?.position ? { headline: match.fields.position } : {}), ...(match.fields?.company ? { company: match.fields.company } : {}),
@@ -480,8 +580,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       if (!scopeCoversPublic(grant.scope)) throw new AccountToolError('scope_not_granted', 'This grant covers only the owner network; asking about everyone requires a public-scope grant.')
       if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
       let result
-      try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: combined }) }
-      catch (error) { throw askFailure(error, combined) }
+      try { result = await withSearchDeadline({ signal, budgetMs: timeoutMs, label: 'ai_search' }, ({ deadline }) => createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: deadline })) }
+      catch (error) { throw askFailure(error, signal) }
       return { kind: 'unlinked_ai_search', scope: 'everyone', mode: result.mode, revision: result.revision, considered: result.considered,
         lexicalMatches: result.lexicalMatches, modelCandidates: result.modelCandidates, matches: result.matches, visibility: 'public' }
     },
@@ -519,7 +619,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     },
   }
 
-  Object.assign(tools, createPrivateNotesTools({ overlay, identityFor, createError: (code, message, details) => new AccountToolError(code, message, details),
+  Object.assign(tools, createPrivateNotesTools({ overlay, identityFor, getBackend, createError: (code, message, details) => new AccountToolError(code, message, details),
     lookupContact: (grant, input, signal) => tools.unlinked_lookup_contact(grant, input, signal) }))
 
   const askFailure = (error, signal) => {
@@ -535,7 +635,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   // on revoked/replaced identity or removal of the requested permission. Unrelated
   // permission edits are allowed. Reads recheck after work; writes recheck before
   // execution (send also after target lookup), never misreport a committed write.
-  async function call({ grant, name, input = {}, signal, revalidate }) {
+  async function call({ grant, name, input = {}, signal, revalidate, requestContext }) {
     if (!grant || typeof grant.ownerId !== 'string' || typeof grant.userId !== 'string' || !Array.isArray(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant is no longer valid.')
     if (!Object.hasOwn(tools, name)) throw new AccountToolError('not_found', 'Unknown tool.')
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
@@ -545,6 +645,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
     const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
     try {
+      const execute = async () => {
+      if (coordination && MUTATING_TOOLS.has(name) && requestContext?.ownerCheckpoint !== undefined && coordination.version(grant.ownerId) > requestContext.ownerCheckpoint) throw new AccountToolError('grant_revoked', 'The account changed during this request; reconnect and retry.')
       if (typeof revalidate === 'function') grant = await revalidate() ?? grant
       const result = await tools[name](grant, parsed.data, signal, revalidate)
       // A write has already happened by now; only reads are withheld when the
@@ -556,8 +658,17 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       const text = JSON.stringify(result)
       if (Buffer.byteLength(text) > 1024 * 1024) throw new AccountToolError('result_too_large', 'The result exceeded 1 MiB; narrow the query or lower the page size.')
       return { result, text }
+      }
+      return coordination && MUTATING_TOOLS.has(name) ? await coordination.run(['owner:' + grant.ownerId], execute) : await execute()
     } finally { release?.() }
   }
 
-  return { call }
+  // Hosted launch tools preserve their historical result/page shape while
+  // sharing the same per-owner and process-wide AI admission as REST/tools.
+  async function withSearchBudget(grant, name, work) {
+    if (!['unlinked_search_network', 'unlinked_search_everyone'].includes(name) || !grant?.tools?.includes(name)) throw new AccountToolError('scope_not_granted', 'This grant does not include the requested search.')
+    const release = admitAi(grant.ownerId)
+    try { return await work() } finally { release() }
+  }
+  return { call, withSearchBudget }
 }

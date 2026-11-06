@@ -1,3 +1,4 @@
+import { INVESTOR_TOOLS } from './investor-tools.mjs'
 import { requestDiagnostic, instrumentMcpTransport } from './request-diagnostics.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
@@ -41,13 +42,13 @@ const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list
   // Registered only for grants whose opt-in scope includes them.
   'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request',
   // Registered only for grants with the private-notes permission (catalog v7).
-  ...PRIVATE_NOTES_TOOLS]
+  ...PRIVATE_NOTES_TOOLS, 'unlinked_list_person_targets', ...INVESTOR_TOOLS]
 
 export function createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service, challenge }) {
   const base = new URL(origin)
   if (base.protocol !== 'https:' || base.origin !== origin || ![authenticateGrant, getBackend, complete].every(x => typeof x === 'function')) throw new Error('account_host_configuration_required')
   const toolService = service ?? createAccountToolService({ getBackend, complete, readPublishedSnapshot })
-  return async (request, response, parsedBody) => {
+  return async (request, response, parsedBody, requestContext) => {
     response.setHeader('Cache-Control', 'no-store')
     if (request.headers.host !== base.host || request.headers.origin && request.headers.origin !== base.origin) { response.writeHead(403).end(); return }
     // Unauthenticated requests get the OAuth challenge (RFC 9728) whatever the
@@ -80,14 +81,16 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
       try {
         await revalidate('unlinked_search_network')
-        const connectionQuery = knownConnectionQuery(query, degree)
-        if (cursor !== undefined && !connectionQuery.degree) throw new Error('account_cursor_requires_connection_mode')
-        const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).searchNetwork({ query, signal })
-        await revalidate('unlinked_search_network')
-        requestDiagnostic().result(result)
-        const text = JSON.stringify(result)
-        if (Buffer.byteLength(text) > 1024 * 1024) throw new Error('account_tool_result_limit')
-        return { content: [{ type: 'text', text }] }
+        return await toolService.withSearchBudget(grant, 'unlinked_search_network', async () => {
+          const connectionQuery = knownConnectionQuery(query, degree)
+          if (cursor !== undefined && !connectionQuery.degree) throw new Error('account_cursor_requires_connection_mode')
+          const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).searchNetwork({ query, signal })
+          await revalidate('unlinked_search_network')
+          requestDiagnostic().result(result)
+          const text = JSON.stringify(result)
+          if (Buffer.byteLength(text) > 1024 * 1024) throw new Error('account_tool_result_limit')
+          return { content: [{ type: 'text', text }] }
+        })
       } catch (error) { requestDiagnostic().failure(error, signal); return typedToolFailure(networkSearchFailure(error, signal)) }
     })
     if (grant.tools.includes('unlinked_search_everyone') && typeof readPublishedSnapshot === 'function') server.registerTool('unlinked_search_everyone', {
@@ -100,22 +103,24 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       try {
         const valid = () => revalidate('unlinked_search_everyone')
         await valid()
-        const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal })
-        await valid()
-        requestDiagnostic().result(result)
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+        return await toolService.withSearchBudget(grant, 'unlinked_search_everyone', async () => {
+          const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal })
+          await valid()
+          requestDiagnostic().result(result)
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+        })
       } catch (error) { requestDiagnostic().failure(error, signal); return typedToolFailure(error) }
     })
     for (const name of SERVICE_TOOLS) {
       if (!grant.tools.includes(name)) continue
       // Clients that ask before acting see which tools change something.
-      const annotations = MUTATING_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: PRIVATE_NOTES_DESTRUCTIVE.has(name), idempotentHint: PRIVATE_NOTES_TOOLS.includes(name), openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
+      const annotations = MUTATING_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: PRIVATE_NOTES_DESTRUCTIVE.has(name), idempotentHint: PRIVATE_NOTES_TOOLS.includes(name) || name === 'unlinked_stage_investor_csv', openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
       server.registerTool(name, { description: ACCOUNT_TOOL_DESCRIPTIONS[name], inputSchema: ACCOUNT_TOOL_SCHEMAS[name], annotations }, async input => {
         const controller = new AbortController()
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
         response.once('close', () => { if (!response.writableFinished) controller.abort() })
         try {
-          const { text, result } = await toolService.call({ grant, name, input, signal, revalidate: () => revalidate(name) })
+          const { text, result } = await toolService.call({ grant, name, input, signal, requestContext, revalidate: () => revalidate(name) })
           requestDiagnostic().result(result)
           return { content: [{ type: 'text', text }] }
         } catch (error) {

@@ -49,6 +49,27 @@ export function createPersonLookup({ store, settings, adapter, now = Date.now })
         return result.profile ? { status: 'found', profile: result.profile, address: parsed.url, observedAt: now(), cached: false } : { status: 'unavailable', code: result.code }
       } catch { return { status: 'unavailable', code: 'unavailable' } }
     },
+    // Name searches share the exact same durable global/owner quota and lease
+    // as URL lookups. Results are proposals, retained only on the viewer contact.
+    async search({ owner, query }) {
+      if (typeof query !== 'string' || !query.trim() || query.length > 200) return { status: 'unavailable', code: 'invalid_query' }
+      if (!settings || typeof adapter?.search !== 'function') return { status: 'unavailable', code: 'disabled' }
+      const time = now(), args = { key: keyFor(owner), owner, slug: 'contact-search-' + hash(query), attempt: randomUUID(), now: time, day: Math.floor(time / DAY), dailyCap: settings.dailyCap, pacingMs: settings.pacingMs, timeoutMs: settings.timeoutMs }
+      try {
+        const reserved = await store.reserve(args)
+        if (!reserved.allowed) return { status: 'unavailable', code: reserved.code ?? 'unavailable' }
+        const controller = new AbortController()
+        let deadline, candidates, code
+        try {
+          const expired = new Promise((_, reject) => { deadline = setTimeout(() => { controller.abort(); reject(Error('timeout')) }, settings.timeoutMs) })
+          candidates = await Promise.race([Promise.resolve().then(() => adapter.search(query, { signal: controller.signal })), expired])
+          if (!Array.isArray(candidates)) throw Error('unavailable')
+        } catch { code = controller.signal.aborted ? 'timeout' : 'unavailable' }
+        finally { clearTimeout(deadline) }
+        if (!await store.finish({ ...args, code: code ?? 'search_complete', now: now() })) return { status: 'unavailable', code: 'unavailable' }
+        return code ? { status: 'unavailable', code } : { status: 'found', candidates: candidates.slice(0, 50) }
+      } catch { return { status: 'unavailable', code: 'unavailable' } }
+    },
     removeOwner: owner => store.removeOwner(owner),
   }
 }

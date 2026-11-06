@@ -45,8 +45,8 @@ test('the support page answers without a session and covers contact, deletion, r
   assert.ok(body.includes(`href="${FEEDBACK_URL}"`))
   assert.equal(FEEDBACK_URL, 'https://worldissuetracker.com/tracker/unlinked-ai')
   // How to delete an account, in the words Settings uses.
-  assert.ok(body.includes('href="/settings#your-data"'))
-  assert.match(body, /Delete everything…/); assert.match(body, /delete everything/); assert.match(body, /Permanently delete my data/)
+  assert.ok(body.includes('href="/settings#delete-account"'))
+  assert.match(body, /Delete account/); assert.match(body, /delete account/); assert.match(body, /Permanently delete my Unlinked account/)
   assert.match(body, /id="report"/); assert.match(body, /id="removal"/)
   assert.match(body, /no tolerance for objectionable content or abusive users/)
   assert.ok(body.includes(`href="${PRIVACY_URL}"`)); assert.ok(body.includes(`href="${TERMS_URL}"`))
@@ -121,7 +121,7 @@ test('the footer is two rows under one hairline: brand and links, then a meta ro
     assert.deepEqual(links, ['/support', '/data-liberation', '/agents', 'https://www.unlinked.ai/meet'], path)
     const meta = footer.slice(footer.indexOf('<div class="foot-meta">'))
     assert.match(meta, /Not affiliated with LinkedIn\. · <span class="app-version">v/)
-    assert.match(meta, /<span class="foot-legal"><span id="wit-feedback-slot"><\/span><a href="https:\/\/www\.ideaflow\.io\/privacy-policy"/)
+    assert.match(meta, /<span class="foot-legal"><a href="\/support" data-wit-feedback>Send feedback<\/a><a href="https:\/\/www\.ideaflow\.io\/privacy-policy"/)
     assert.doesNotMatch(footer, /<nav/) // header nav styles must not reach the footer links
   }
   // Phones: footer links are 44px tap targets and the footer has bottom room.

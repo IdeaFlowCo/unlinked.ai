@@ -27,7 +27,7 @@ const ada = row('Ada', 'Synthetic', 'https://www.linkedin.com/in/synthetic-ada')
 const bo = row('Bo', 'Private', 'https://www.linkedin.com/in/synthetic-bo')
 const adaHash = sha('synthetic-ada'), boHash = sha('synthetic-bo')
 const profile = (id, name) => ({ id, name, headline: 'Public headline', positions: [], education: [], skills: [] })
-const snapshot = async () => ({ state: 'published', complete: true, revision: 'context-fixture-v1', connections: [], profiles: [profile('pub-ada', 'Ada Synthetic'), profile('pub-cy', 'Cy Published')] })
+const snapshot = async () => ({ state: 'published', complete: true, revision: 'context-fixture-v1', connections: [], profiles: [{ ...profile('pub-ada', 'Ada Synthetic'), linkedinUrl: 'https://www.linkedin.com/in/synthetic-ada' }, profile('pub-cy', 'Cy Published')] })
 const slugs = new Map([['synthetic-ada', 'pub-ada']])
 const backendFor = who => {
   const mine = who.ownerId === owner.ownerId
@@ -44,7 +44,7 @@ function fakeOverlay() {
       links: [{ id: 'l1', relation: 'knows', relationType: 'knows', direction: 'out', other: { id: 'ent-bo', kind: 'person', name: 'Bo Private', refs: [`linkedin:in:${boHash}`] }, author: 'owner', source: 'app', assertion: 'stated' },
         { id: 'l2', relation: 'sister of', relationType: 'family', direction: 'in', other: { id: 'ent-cy', kind: 'person', name: 'Cy Published', refs: ['unlinked:person:pub-cy'] }, author: 'agent:ChatGPT', source: 'direct-key', assertion: 'inferred' },
         { id: 'l3', relation: 'works on', relationType: 'works_on', direction: 'out', other: { id: 'ent-p', kind: 'project', name: 'Common Ground', refs: [] }, author: 'owner', source: 'app', assertion: 'stated' }] },
-    { id: 'ent-bo', kind: 'person', name: 'Bo Private', refs: [`linkedin:in:${boHash}`], card: { important: false }, notes: [{ id: 'n3', text: 'Bo note', createdAt: '2026-10-09T10:00:00.000Z', author: 'owner', source: 'app', assertion: 'stated' }], links: [] },
+    { id: 'ent-bo', kind: 'person', name: 'Bo Private', description: 'Founder of a synthetic lab', refs: [`linkedin:in:${boHash}`], card: { important: false }, notes: [{ id: 'n3', text: 'Bo note', createdAt: '2026-10-09T10:00:00.000Z', author: 'owner', source: 'app', assertion: 'stated' }], links: [] },
   ]]])
   const calls = []
   return {
@@ -142,6 +142,10 @@ test('a profile reads its own ref and the owner import of the same person; relat
   const hood = await context.neighbourhood(owner, 'ent-ada', 2)
   assert.deepEqual(hood.links.map(link => [link.from.name, link.relation, link.to.name, link.to.href]), [['Ada Synthetic', 'knows', 'Bo Private', `/network/contacts/${bo.id}`]])
   assert.equal(await context.neighbourhood(stranger, 'ent-ada', 2), null)
+  // With owner-private contact addresses, the same end links to its slug (docs/contact-slugs.md).
+  const slugged = createPrivateContext({ overlay, identityFor: async who => identities.get(who.ownerId) ?? null, lookupContact, now: () => Date.parse('2026-10-09T12:00:00Z'), contactPath: id => id === bo.id ? '/network/contacts/bo-private' : `/network/contacts/${id}` })
+  const viaSlug = await slugged.forProfile(owner, 'pub-ada')
+  assert.equal(viaSlug.entities[0].relations.find(relation => relation.other.name === 'Bo Private').other.href, '/network/contacts/bo-private')
 })
 
 test('no identity and a failing overlay are distinct from empty', async () => {
@@ -258,4 +262,14 @@ test('GET /people/add is the Add a person page, not a profile id (unlinked-u8z)'
   assert.match(await page.text(), /Add a person/)
   assert.notEqual((await request('/people/add')).status, 404)
   assert.equal((await request('/people/pub-ada', { method: 'HEAD' })).status, 200)
+})
+
+test('the owner\u2019s one-line description of a person is part of the private panel answer and is rendered as text', async () => {
+  const overlay = fakeOverlay()
+  const context = createPrivateContext({ overlay, identityFor: async who => identities.get(who.ownerId) ?? null, lookupContact })
+  const value = await context.forProfile(owner, 'pub-ada')
+  assert.equal(value.entities[0].description, null)
+  const contact = await context.forContact(owner, bo.id)
+  assert.equal(contact.entities[0].description, 'Founder of a synthetic lab')
+  assert.match(PRIVATE_CONTEXT_SCRIPT, /if\(e\.description\)sec\.append\(el\('p','pc-desc',e\.description\)\)/)
 })

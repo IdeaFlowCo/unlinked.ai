@@ -2,6 +2,7 @@ import { parseLinkedinProfileUrl } from '../src/utils/linkedin-profile-url.mjs'
 // Progressive enhancement only: native GET forms/links remain complete without JS.
 export const NETWORK_FILTER_SCRIPT = `(()=>{
   const linkedin=${parseLinkedinProfileUrl.toString()};
+  const filterKeys=['degree','location','company','pastCompany','title','school','industry'];
   let root=document.querySelector('[data-network]');if(!root)return;
   const initialForm=root.querySelector('#network-filters');
   let renderedURL=new URL(initialForm.action);renderedURL.search=new URLSearchParams(new FormData(initialForm)).toString();
@@ -9,62 +10,65 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
   let timer,controller,version=0,composing=false,typingEntry=false,enhanced=true;
   const ready=()=>{root.setAttribute('data-network-enhanced','');const help=root.querySelector('#network-search-help');if(help)help.textContent='Results update as you type.'};ready();
   const cancel=()=>{clearTimeout(timer);controller?.abort();version++};
-  const value=(u,key)=>u.searchParams.get(key)||(key==='sort'&&u.searchParams.get('connected')==='1'?'connected':['sort','mode'].includes(key)?'best':'');
-  const formURL=()=>{const form=root.querySelector('#network-filters'),fields=new URLSearchParams(new FormData(form)),url=new URL(form.action);url.search=pendingURL.search;for(const key of ['q','sort']){const live=fields.get(key)||value(new URL(form.action),key);if(live)url.searchParams.set(key,live);else url.searchParams.delete(key)}url.searchParams.delete('page');url.searchParams.delete('cursor');return url};
-  const syncControls=()=>{const sort=root.querySelector('#network-sort'),wantedSort=value(pendingURL,'sort');for(const [key,label] of [['connected','Recently connected'],['imported','Recently imported']]){const option=[...sort.options].find(option=>option.value===key);if(pendingURL.searchParams.get('connected')==='1'){if(!option){const added=document.createElement('option');added.value=key;added.textContent=label;sort.append(added)}}else option?.remove()}sort.value=wantedSort;const query=root.querySelector('#network-query'),wantedQuery=value(pendingURL,'q');if(query.value!==wantedQuery)query.value=wantedQuery};
+  const textInput=element=>element?.id==='network-query'||filterKeys.filter(key=>key!=='degree').some(key=>element?.id==='network-'+key);
+  const value=(u,key)=>u.searchParams.get(key)||(key==='sort'&&(u.searchParams.get('connected')==='1'||u.searchParams.get('degree')==='1')?'connected':['sort','mode'].includes(key)?'best':'');
+  const formURL=()=>{const form=root.querySelector('#network-filters'),fields=new URLSearchParams(new FormData(form)),url=new URL(form.action);url.search=pendingURL.search;for(const key of ['q','sort',...filterKeys]){if(filterKeys.includes(key)&&!fields.has(key))continue;const live=fields.get(key)||value(new URL(form.action),key);if(live)url.searchParams.set(key,live);else url.searchParams.delete(key)}if(fields.get('degree')){url.searchParams.delete('connected');if(['connected','imported'].includes(url.searchParams.get('sort'))&&fields.get('degree')!=='1')url.searchParams.delete('sort')}url.searchParams.delete('page');url.searchParams.delete('cursor');return url};
+  const syncControls=()=>{for(const key of filterKeys){const field=root.querySelector('#network-'+key);if(field)field.value=pendingURL.searchParams.get(key)||''}const sort=root.querySelector('#network-sort'),wantedSort=value(pendingURL,'sort');for(const [key,label] of [['connected','Recently connected'],['imported','Recently imported']]){const option=[...sort.options].find(option=>option.value===key);if((pendingURL.searchParams.get('connected')==='1'||pendingURL.searchParams.get('degree')==='1')){if(!option){const added=document.createElement('option');added.value=key;added.textContent=label;sort.append(added)}}else option?.remove()}sort.value=wantedSort;const query=root.querySelector('#network-query'),wantedQuery=value(pendingURL,'q');if(query.value!==wantedQuery)query.value=wantedQuery};
   const focusables='a,button,input:not([type="hidden"]),select,textarea,summary,[tabindex],[contenteditable="true"]';
   const focusKey=element=>{if(element.id)return JSON.stringify(['id',element.id]);const section=element.closest('section[aria-label]');const form=element.closest('form'),row=element.closest('article'),person=row?.querySelector('a[href^="/people/"]');return JSON.stringify([section?.getAttribute('class')||section?.getAttribute('aria-label'),row?.getAttribute('data-network-row'),element.tagName,form?.getAttribute('action'),form?.querySelector('input[name="profileId"],input[name="id"]')?.value,person?.getAttribute('href'),element.name,element.type,element.tagName==='BUTTON'?element.value:null,['A','BUTTON','SUMMARY'].includes(element.tagName)?element.textContent.trim():null])};
   const busy=value=>root.querySelector('[data-network-results]')?.setAttribute('aria-busy',String(value));
   async function load(url,{historyMode='push',typing=false}={}){
-    cancel();pendingURL=new URL(url);syncControls();const current=version;controller=new AbortController();busy(true);
+    cancel();pendingURL=new URL(url);syncControls();const current=version;controller=new AbortController();busy(true);const timing=globalThis.unlinkedPerformance?.start('filter',url.pathname);let outcome='cancelled';
     try{
       const response=await fetch(url,{credentials:'same-origin',signal:controller.signal,headers:{'Accept':'text/html'}});
       if(!response.ok||response.redirected)throw Error('network_filter_failed');
       const text=await response.text();if(current!==version)return;
-      const doc=new DOMParser().parseFromString(text,'text/html'),next=doc.querySelector('[data-network]');if(!next)throw Error('network_filter_failed');
+      const doc=new DOMParser().parseFromString(text,'text/html'),next=doc.querySelector('[data-network]');if(!next||next.hasAttribute('data-page-load-error'))throw Error('network_filter_failed');
       const active=document.activeElement;const focused=root.contains(active)?focusKey(active):null;
       const openDisclosures=[...root.querySelectorAll('details[open]')].map(details=>details.querySelector('summary')).filter(Boolean).map(focusKey);
-      const oldInput=root.querySelector('#network-query');const start=oldInput.selectionStart,end=oldInput.selectionEnd;
-      if(active===oldInput){oldInput.value=next.querySelector('#network-query').value;next.querySelector('#network-query').replaceWith(oldInput);}
+      const oldInput=textInput(active)?active:root.querySelector('#network-query');const start=oldInput.selectionStart,end=oldInput.selectionEnd;
+      if(active===oldInput){const fresh=next.querySelector('#'+oldInput.id);oldInput.value=fresh.value;fresh.replaceWith(oldInput);}
       root.replaceWith(next);root=next;renderedURL=new URL(url);ready();
       if(historyMode==='push'){history.pushState(null,'',url);if(typing)typingEntry=true}else if(historyMode==='replace')history.replaceState(null,'',url);
       document.title=doc.title;
       for(const details of root.querySelectorAll('details')){const summary=details.querySelector('summary');if(summary&&openDisclosures.includes(focusKey(summary)))details.open=true}
       if(focused){const target=[...root.querySelectorAll(focusables)].find(element=>focusKey(element)===focused);target?.focus({preventScroll:true});if(target===oldInput)try{target.setSelectionRange(start,end)}catch{}}
-    }catch(error){if(current!==version||error.name==='AbortError')return;const status=root.querySelector('.network-count');if(status)status.textContent='Could not update results. Press Enter or Apply to try again.';const form=root.querySelector('#network-filters');syncControls();
+      outcome='ok';
+    }catch(error){if(current!==version||error.name==='AbortError')return;outcome='error';const status=root.querySelector('.network-count');if(status)status.textContent='Could not update results. Press Enter or Apply to try again.';const form=root.querySelector('#network-filters');syncControls();
       for(const key of ['presence','connected','mode','scope','page','cursor']){
         let field=form.querySelector('input[name="'+key+'"]');const wanted=pendingURL.searchParams.get(key);
         if(wanted===null){field?.remove();continue}if(!field){field=document.createElement('input');field.type='hidden';field.name=key;form.append(field)}field.value=wanted;
       }
       enhanced=false;root.removeAttribute('data-network-enhanced');}
-    finally{if(current===version)busy(false)}
+    finally{timing?.finish(outcome);if(current===version)busy(false)}
   }
   document.addEventListener('input',event=>{
-    if(!enhanced||event.target.id!=='network-query'||!root.contains(event.target))return;
+    if(!enhanced||!['network-query',...filterKeys.map(key=>'network-'+key)].includes(event.target.id)||!root.contains(event.target))return;
     cancel();busy(true);if(composing)return;
-    if(linkedin(event.target.value)){busy(false);const status=root.querySelector('.network-count');if(status)status.textContent='Press Enter to find this LinkedIn person.';return;}
+    if(event.target.id==='network-query'&&linkedin(event.target.value)){busy(false);const status=root.querySelector('.network-count');if(status)status.textContent='Press Enter to find this LinkedIn person.';return;}
     timer=setTimeout(()=>{const mode=typingEntry?'replace':'push';load(formURL(),{historyMode:mode,typing:true})},300);
   });
-  document.addEventListener('compositionstart',event=>{if(event.target.id==='network-query'){composing=true;cancel()}});
-  document.addEventListener('compositionend',event=>{if(event.target.id==='network-query'){composing=false;event.target.dispatchEvent(new Event('input',{bubbles:true}))}});
-  document.addEventListener('change',event=>{if(enhanced&&event.target.id==='network-sort'&&root.contains(event.target)){typingEntry=false;load(formURL(),{})}});
+  document.addEventListener('compositionstart',event=>{if(textInput(event.target)){composing=true;cancel()}});
+  document.addEventListener('compositionend',event=>{if(textInput(event.target)){composing=false;event.target.dispatchEvent(new Event('input',{bubbles:true}))}});
+  document.addEventListener('change',event=>{if(enhanced&&['network-sort','network-degree'].includes(event.target.id)&&root.contains(event.target)){typingEntry=false;load(formURL(),{})}});
   document.addEventListener('submit',event=>{if(event.target.id!=='network-filters')return;const person=linkedin(root.querySelector('#network-query').value);if(person){event.preventDefault();cancel();location.href='/people/lookup?url='+encodeURIComponent(person.url);return;}if(!enhanced)return;event.preventDefault();typingEntry=false;load(formURL(),{})});
-  document.addEventListener('click',event=>{
+  document.addEventListener('click',async event=>{
+    const copy=event.target.closest('[data-copy-search]');if(copy&&root.contains(copy)){const status=root.querySelector('[data-copy-status]');try{await navigator.clipboard.writeText(root.querySelector('[data-query-link]').href);status.textContent=' Link copied.'}catch{status.textContent=' Use the search link or copy the address bar.'}return}
     const link=event.target.closest('a');if(!enhanced||!link||!root.contains(link)||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.altKey||event.shiftKey||link.target)return;
     const destination=new URL(link.href);if(destination.origin!==location.origin||destination.pathname!=='/network')return;
     const clear=link.classList.contains('network-reset')||link.textContent==='Clear search';
     let url=formURL();
     if(clear){
-      for(const key of link.classList.contains('network-reset')?['q','mode','presence','sort']:['q','mode'])url.searchParams.delete(key);
+      for(const key of link.classList.contains('network-reset')?['q','mode','presence','sort',...filterKeys]:['q','mode'])url.searchParams.delete(key);
     }else{
-      const keys=['q','sort','mode','presence','connected','scope'];
+      const keys=['q','sort','mode','presence','connected','scope',...filterKeys];
       const changed=keys.some(key=>value(url,key)!==value(renderedURL,key));
-      const intentKeys=link.closest('.network-segments')?['presence']:link.closest('.network-scopes')?['connected']:link.closest('.modes')?['mode']:['mode','presence','connected','scope'].filter(key=>value(destination,key)!==value(renderedURL,key));
+      const intentKeys=link.closest('.network-segments')?['presence']:link.closest('.network-scopes')?['connected','degree']:link.closest('.modes')?['mode']:['mode','presence','connected','scope'].filter(key=>value(destination,key)!==value(renderedURL,key));
       for(const key of intentKeys){
         if(destination.searchParams.has(key))url.searchParams.set(key,destination.searchParams.get(key));else url.searchParams.delete(key);
       }
       if(link.closest('.network-scopes')&&url.searchParams.get('connected')==='1'&&url.searchParams.get('sort')==='best')url.searchParams.delete('sort');
-      if(!url.searchParams.has('connected')&&['connected','imported'].includes(url.searchParams.get('sort')))url.searchParams.delete('sort');
+      if(!url.searchParams.has('connected')&&url.searchParams.get('degree')!=='1'&&['connected','imported'].includes(url.searchParams.get('sort')))url.searchParams.delete('sort');
       if(!changed)for(const key of ['page','cursor'])if(destination.searchParams.has(key))url.searchParams.set(key,destination.searchParams.get(key));
     }
     event.preventDefault();typingEntry=false;load(url);
@@ -74,16 +78,18 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
 })();`;
 
 // A profile's connections sidebar: the filter field and All / You both know /
-// On Unlinked update the list in place. Without JS they are a native GET form
-// and links to the same page.
+// On Unlinked update the list in place, as does a header link into the card
+// (`data-connections-link`, the mutual connections line), which then scrolls
+// the card into view. Without JS they are a native GET form and links to the
+// same page.
 export const PROFILE_CONNECTIONS_SCRIPT = `(()=>{
   let root=document.querySelector('[data-profile-connections]');if(!root||!root.querySelector('#pconn-q'))return;
   let timer,controller,version=0,composing=false;
   const cancel=()=>{clearTimeout(timer);controller?.abort();version++};
   const target=(href)=>{const url=new URL(href,location.href);url.hash='';return url};
   const fromForm=()=>{const form=root.querySelector('.pconn-filter'),url=target(form.action);const fields=new URLSearchParams(new FormData(form));for(const [key,value] of [...fields])if(!value)fields.delete(key);url.search=fields.toString();return url};
-  async function load(url,{focusHref=null}={}){
-    cancel();const current=version;controller=new AbortController();root.setAttribute('aria-busy','true');
+  async function load(url,{focusHref=null,reveal=false}={}){
+    cancel();const current=version;controller=new AbortController();root.setAttribute('aria-busy','true');const timing=globalThis.unlinkedPerformance?.start('connections_filter',url.pathname);let outcome='cancelled';
     try{
       const response=await fetch(url,{credentials:'same-origin',signal:controller.signal,headers:{'Accept':'text/html'}});
       if(!response.ok||response.redirected)throw Error('profile_connections_failed');
@@ -93,18 +99,21 @@ export const PROFILE_CONNECTIONS_SCRIPT = `(()=>{
       if(typing){const fresh=next.querySelector('#pconn-q');input.value=fresh.value;fresh.replaceWith(input)}
       root.replaceWith(next);root=next;
       history.replaceState(history.state,'',url.pathname+url.search+'#connections');
+      if(reveal)root.scrollIntoView({block:'start'});
       if(typing){input.focus({preventScroll:true});try{input.setSelectionRange(start,end)}catch{}}
       else if(focusHref){const link=[...root.querySelectorAll('.pconn-shows a')].find(a=>target(a.href).search===focusHref);link?.focus({preventScroll:true})}
-    }catch(error){if(current!==version||error.name==='AbortError')return;location.assign(url.pathname+url.search+'#connections')}
-    finally{if(current===version)root.removeAttribute('aria-busy')}
+      outcome='ok';
+    }catch(error){if(current!==version||error.name==='AbortError')return;outcome='error';location.assign(url.pathname+url.search+'#connections')}
+    finally{timing?.finish(outcome);if(current===version)root.removeAttribute('aria-busy')}
   }
   document.addEventListener('input',event=>{if(event.target.id!=='pconn-q'||!root.contains(event.target))return;cancel();if(composing)return;timer=setTimeout(()=>load(fromForm()),300)});
   document.addEventListener('compositionstart',event=>{if(event.target.id==='pconn-q'){composing=true;cancel()}});
   document.addEventListener('compositionend',event=>{if(event.target.id==='pconn-q'){composing=false;event.target.dispatchEvent(new Event('input',{bubbles:true}))}});
   document.addEventListener('submit',event=>{if(!event.target.classList.contains('pconn-filter')||!root.contains(event.target))return;event.preventDefault();load(fromForm())});
   document.addEventListener('click',event=>{
-    const link=event.target.closest('.pconn-shows a,.pconn-status a');if(!link||!root.contains(link)||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.altKey||event.shiftKey)return;
+    const link=event.target.closest('.pconn-shows a,.pconn-status a,a[data-connections-link]'),reveal=Boolean(link?.hasAttribute('data-connections-link'));
+    if(!link||(!reveal&&!root.contains(link))||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.altKey||event.shiftKey)return;
     const url=target(link.href);if(url.origin!==location.origin||url.pathname!==location.pathname)return;
-    event.preventDefault();load(url,{focusHref:link.closest('.pconn-shows')?url.search:null});
+    event.preventDefault();load(url,{focusHref:link.closest('.pconn-shows')?url.search:null,reveal});
   });
 })();`

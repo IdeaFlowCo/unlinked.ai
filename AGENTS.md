@@ -4,13 +4,19 @@ The canonical beta at **https://www.unlinked.ai** runs the standalone Noos-backe
 
 This file is the repo-internal guide for autonomous agents and contributors working *in* this codebase. For agents arriving at unlinked.ai over HTTP, see the public brief at `public/AGENTS.md` (served at `/AGENTS.md`).
 
+## Human, agent and crawler access
+
+Public comparisons need no account. Connected agents should search the indexed published network, not crawl N+1 profiles. Setup, unlisted-host/Muse fallback, account consent and abuse policy: [docs/agent-access.md](docs/agent-access.md). Public instructions: `public/AGENTS.md`; canonical setup renderer: `renderAgents` in `mcp-server/private-onboarding-views.mjs`. Keep both aligned. Do not add anonymous account/key minting, bypass verified identity/consent, change existing permission defaults, or claim Muse OAuth works without client evidence.
+
+Public admission policy: [docs/agent-access.md](docs/agent-access.md#capacity-and-abuse-policy). Aggregate diagnostics and redaction: [docs/request-diagnostics.md](docs/request-diagnostics.md#public-directory-admission-aggregates).
+
 ## Canonical agent setup and grant invariants
 
 Settings presents API keys before client instructions: named independent keys, repeatable Show/Copy API key, retained Copy agent setup, and compact per-key permission switches (connection actions; private people notes & relations). Reveal/copy never issue or rotate credentials. Shared Ideaflow OAuth is recommended for compatible multi-app hosts; direct Unlinked OAuth and manual keys remain supported. Muse manual setup is documented; Muse OAuth is unverified. The authoritative UI/lifecycle contract is [docs/agent-key-settings.md](docs/agent-key-settings.md); authentication, tool normalization and provisioning are in [docs/agent-api.md](docs/agent-api.md).
 
 - Historical `ACCOUNT_GRANT_TOOL_VERSIONS` lists are immutable validation records. Valid old grants resolve **current tools within their original enabled scope**; new tools do not require token rotation. Auth, discovery, whoami, Settings and execution must agree on effective capabilities.
 - Manual permission edits preserve jti, issuedAt and generation (identical token bytes). Owner-only grants may enable connection actions without gaining public reads. OAuth additions require consent; connection actions do not grant messaging or private relationship assertions.
-- Catalog v7 (unlinked-9kk.5) adds the separate **Private people notes & relations** permission (scope suffix `_and_private_notes`, OAuth scope `private_notes`): owner-only notes/relations in the Noos people overlay via `mcp-server/private-notes-tools.mjs`, which calls `/api/overlay` and never re-implements its rules. It is default-on for API keys (pre-v7 keys resolve to it with the same token; Jacob, unlinked-lf4) and never implies connection writes; pre-v7 OAuth connections need reconsent. Writes carry `author: agent:<key/app name>`, `source: direct-key`. Messaging stays off Unlinked keys (OpenChat via the shared connector). Contract: `docs/agent-api.md` ("Private people notes & relations").
+- Catalog v7 (unlinked-9kk.5) adds the separate **Private people notes & relations** permission (scope suffix `_and_private_notes`, OAuth scope `private_notes`): owner-only notes/relations in the Noos people overlay via `mcp-server/private-notes-tools.mjs`, which calls `/api/overlay` and never re-implements its rules. It is default-on for API keys (pre-v7 keys resolve to it with the same token; Jacob, unlinked-lf4) and never implies connection writes; pre-v7 OAuth connections need reconsent. Messaging stays off Unlinked keys (OpenChat via the shared connector). Contract and provenance: `docs/agent-api.md` ("Private people notes & relations").
 - Owner/session/CSRF checks and compare-and-set protect lifecycle edits. Replacement changes only the selected key's generation; revocation tombstones and generation checks prevent resurrection or reuse of replaced secrets. Revalidate the live identity/generation and requested tool, not entire tool-array equality. Retain generation/v5 validation on rollback.
 - Read-only provisioning never returns a write-enabled Default key. If no eligible read-only grant exists and the deterministic Default is write-enabled, use the bounded independent read-only fallback while preserving the original read boundary and tombstones. Reauthentication at the end must check effective read-only scope as well as owner; a concurrent permission change must not return a write token.
 
@@ -124,7 +130,7 @@ Member-to-member connection requests (Connect, `/invitations`) and the per-accou
 
 The versioned agent tool contract — hosted MCP tools plus the grant-authenticated HTTP JSON API under `/api/agent/v1/` (`mcp-server/account-tools.mjs`, `account-api.mjs`), typed error codes, grant-scope version catalog and old-grant compatibility — is `docs/agent-api.md`. Grant tool lists are versioned in `ACCOUNT_GRANT_TOOL_VERSIONS` (`mcp-server/account-grants.mjs`): add a new version to add tools; never mutate an existing version's list.
 
-Sign-in is one "Sign in with Ideaflow" control with silent SSO; only an explicit sign-out, Switch account or an invitation binding asks Ideaflow ID for `prompt=select_account` (`docs/ideaflow-sign-in.md`). Do not add other sign-in options or `prompt=login`. Signed-out page views make one silent `prompt=none` hop per browser session (automatic sign-in; kill switch `UNLINKED_AUTO_SIGNIN=off`); a silent attempt creates only the private app record, never a public profile or confirmation step (same doc).
+Sign-in is one "Sign in with Ideaflow" control; a plain sign-in sends no `prompt` (silent SSO); only `/login?switch=1`, the first sign-in after an explicit sign-out/Switch account, and invitation binding ask Ideaflow ID for `prompt=select_account` (`docs/ideaflow-sign-in.md`). Do not add other sign-in options or `prompt=login`. Signed-out page views make one silent `prompt=none` hop per browser session (automatic sign-in; kill switch `UNLINKED_AUTO_SIGNIN=off`); a silent attempt creates only the private app record, never a public profile or confirmation step (same doc).
 
 MCP clients connect with OAuth ("paste the URL and sign in"): `mcp-server/oauth-server.mjs` is the authorization server for `/mcp` (RFC 9728/8414 metadata, CIMD for three exact published client ids (Claude, Claude Code, ChatGPT) plus stateless HMAC-signed DCR client ids, redirect URIs limited to the Claude/ChatGPT callbacks and loopback, PKCE S256, consent at `/oauth/authorize` in `private-browser.mjs`). Its access token is an ordinary account grant carrying `payload.connection`; isolation from manual keys is owned by the contract: `docs/agent-api.md` ("OAuth connector").
 
@@ -187,3 +193,13 @@ Default-off standalone REST/MCP diagnostics, trust/redaction boundaries, private
 Public People presence and the historical-account reclaim boundary are owned by the repository contract [Historical membership](docs/public-people-reader.md#historical-membership).
 
 Browser-only LinkedIn URL/QR lookup is documented in [docs/linkedin-discovery-and-queue.md](docs/linkedin-discovery-and-queue.md). General person lookup shares signup’s global adapter budget, never its claim/lifetime account policy; private save uses the existing added-person importer. Agentbook and LinkedIn queue execution remain planning-only.
+
+Private recent-contact enrichment and the viewer-only LinkedIn candidate review
+flow are documented in [docs/contact-enrichment.md](docs/contact-enrichment.md).
+An accepted Unlinked connection/invite is not an imported contact. Keep its
+source label distinct, and never treat a name search as identity evidence.
+
+Private CSV/XLSX investor/list imports reuse the three catalog-v9 tools. Explicit
+sheet selection, whole-workbook private-retention acknowledgement, bounded
+ZIP/XML parsing, original-byte recovery and provenance: `docs/investor-csv.md`.
+Browser list upload remains CSV-only; XLSX is available through MCP/REST.

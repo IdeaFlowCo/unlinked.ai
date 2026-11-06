@@ -1,9 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { createServer, request as httpRequest } from 'node:http'
+import { createHash, randomBytes } from 'node:crypto'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createAccountGrantService } from '../mcp-server/account-grants.mjs'
+import { createMemorySessionStore } from '../mcp-server/session-store.mjs'
 import { privateId } from '../src/utils/private-import/job.mjs'
 
 const header = 'First Name,Last Name,URL,Company,Position\n'
@@ -67,8 +68,9 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
   const grants = createAccountGrantService({ issuer: 'https://synthetic-private.invalid', signingKey: randomBytes(32), getBackend: f.getBackend })
   let legacyRevoked = 0, assetsRemoved = []
   const complete = async () => ({ matches: [] })
-  let handler
-  const server = createServer((req, res) => void handler(req, res))
+  let handler, uploadStarted
+  const uploading = new Promise(resolve => { uploadStarted = resolve })
+  const server = createServer((req, res) => { if (req.headers['x-stalled-upload']) uploadStarted(); void handler(req, res) })
   await new Promise(r => server.listen(0, '127.0.0.1', r)); t.after(() => new Promise(r => server.close(r)))
   const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
   handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'synthetic',
@@ -118,6 +120,10 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
   const settings = await (await fetch(`${endpoint}/settings`, { headers: { Cookie: signed.cookie } })).text()
   assert.match(settings, /action="\/export"/)
   assert.match(settings, /action="\/delete-account"/)
+  assert.match(settings, /<h2 id="delete-account">Delete account<\/h2>/)
+  assert.doesNotMatch(settings.split('<h2 id="delete-account">')[1].split('<h2')[0], /<details\b/)
+  assert.match(settings, /href="https:\/\/id\.ideaflow\.app\/account\/delete\?return_to=https:\/\/www\.unlinked\.ai"/)
+  assert.match(settings, /Permanently delete my Unlinked account/)
   const refused = await fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(signed.csrf)}&confirm=${encodeURIComponent('delete')}` })
   assert.equal(refused.status, 400)
   assert.match(await refused.text(), /Nothing was deleted/)
@@ -125,9 +131,18 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
 
   // The confirmed deletion tombstones every resource, including receipts,
   // sources, assertions and the agent grant, and ends every session.
-  const deleted = await fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(signed.csrf)}&confirm=${encodeURIComponent('Delete Everything ')}` })
+  const boundary = 'synthetic-boundary'
+  const uploadBody = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="csrf"\r\n\r\n${signed.csrf}\r\n--${boundary}\r\nContent-Disposition: form-data; name="syntheticConsent"\r\n\r\nyes\r\n--${boundary}\r\nContent-Disposition: form-data; name="archive"; filename="Connections.csv"\r\nContent-Type: text/csv\r\n\r\n${header}New,Contact,https://www.linkedin.com/in/new-contact,Example,Engineer\n\r\n--${boundary}--\r\n`)
+  const pausedUpload = httpRequest(`${endpoint}/upload`, { method: 'POST', headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': uploadBody.length, 'X-Stalled-Upload': '1' } })
+  const uploadResult = new Promise((resolve, reject) => { pausedUpload.on('response', response => { response.resume(); response.on('end', () => resolve(response.statusCode)) }); pausedUpload.on('error', reject) })
+  const half = Math.floor(uploadBody.length / 2)
+  pausedUpload.write(uploadBody.subarray(0, half))
+  await uploading
+  const deleted = await fetch(`${endpoint}/delete-account`, { method: 'POST', signal: AbortSignal.timeout(2000), headers: { Cookie: signed.cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `csrf=${encodeURIComponent(signed.csrf)}&confirm=${encodeURIComponent('Delete Account ')}` })
   assert.equal(deleted.status, 200)
-  assert.match(await deleted.text(), /Your data is deleted/)
+  assert.match(await deleted.text(), /Your Unlinked account is deleted/)
+  pausedUpload.end(uploadBody.subarray(half))
+  assert.equal(await uploadResult, 401)
   const remaining = [...f.resources.values()].filter(x => x.sourceOwnerId === owner.ownerId && !x.deleted)
   assert.deepEqual(remaining, [])
   for (const value of f.resources.values()) if (value.sourceOwnerId === owner.ownerId) assert.equal(value.payload, null)
@@ -140,3 +155,95 @@ test('export downloads the whole account and type-to-confirm deletion erases eve
   const exportAfter = await fetch(`${endpoint}/export`, { headers: { Cookie: signed.cookie } })
   assert.equal(exportAfter.status, 401)
 })
+
+for (const failedStep of ['legacy', 'assets', 'sessions', 'handle-lookup', 'handle-removal', 'home-preference', 'visibility-choice']) {
+  test(`account deletion retries after ${failedStep} cleanup fails`, async t => {
+    const f = fixture(), owner = { ownerId: 'retry-owner', userId: 'retry-user' }, bindings = new Map()
+    const grants = createAccountGrantService({ issuer: 'https://synthetic-private.invalid', signingKey: randomBytes(32), getBackend: f.getBackend })
+    const store = createMemorySessionStore(), deleteOwner = store.deleteOwner.bind(store)
+    let fail = true, identityPresent = true, handlePresent = true, pauseRead = false, releaseRead, readStarted
+    const readPending = new Promise(resolve => { readStarted = resolve })
+    const readRelease = new Promise(resolve => { releaseRead = resolve })
+    const get = store.get.bind(store)
+    store.get = async (...args) => {
+      const record = await get(...args)
+      if (pauseRead) { pauseRead = false; readStarted(); await readRelease }
+      return record
+    }
+    store.deleteOwner = async id => { if (failedStep === 'sessions' && fail) throw new Error('storage unavailable'); await deleteOwner(id) }
+    let handlers, stalledArrived
+    const stalled = new Promise(resolve => { stalledArrived = resolve })
+    const server = createServer((req, res) => { if (req.headers['x-stall']) stalledArrived(); void handlers[req.headers['x-worker'] === 'second' ? 1 : 0](req, res) })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    t.after(() => new Promise(resolve => server.close(resolve)))
+    const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = `https://127.0.0.1:${server.address().port}`
+    const options = { baseUrl, dataMode: 'synthetic', sessionStore: store,
+      login: { begin: async () => ({ location: 'https://synthetic-idp.invalid/authorize', transaction: { state: 'retry-state' } }),
+        finish: async () => ({ issuer: 'https://synthetic-idp.invalid', subject: 'retry-subject', clientId: 'synthetic-client', verifiedAt: Math.floor(Date.now() / 1000), provenanceReceiptId: 'retry-proof' }) },
+      resolveOwner: async identity => bindings.get(`${identity.issuer}:${identity.subject}`),
+      signup: async identity => { bindings.set(`${identity.issuer}:${identity.subject}`, owner); f.register(owner); return owner },
+      getBackend: f.getBackend, complete: async () => ({ matches: [] }), issueAccountGrant: grants.issueGrant, revokeAccountGrant: grants.revoke,
+      handleBackfillMs: 0,
+      profileHandles: { resolve: () => null, handleFor: () => null, ensure: async () => {}, availability: () => ({}), rename: async () => {},
+        removeProfile: async id => { assert.equal(id, 'profile-id'); if (failedStep === 'handle-removal' && fail) throw new Error('handle unavailable'); handlePresent = false } },
+      ownProfileId: async () => { if (failedStep === 'handle-lookup' && fail) throw new Error('profile unavailable'); return identityPresent ? 'profile-id' : null },
+      signupLookup: { read: async () => null, removeOwner: async () => { identityPresent = false } },
+      homePreferences: { get: async () => null, set: async () => {}, removeOwner: async () => { if (failedStep === 'home-preference' && fail) throw new Error('unavailable') } },
+      ideaflowProfiles: { choices: { removeOwner: async () => { if (failedStep === 'visibility-choice' && fail) throw new Error('unavailable') } } },
+      createMessagingSession: async () => ({ token: 'fixture-token', user: { userId: 'fixture-user' } }),
+      messagingOptions: { apiOrigin: 'https://chat.example.invalid', heartbeatMs: 20, lingerMs: 10,
+        fetchImpl: async () => new Response('{}', { status: 200 }),
+        connectSocket: async () => ({ open: true, emit() {}, close() {} }) },
+      revokeLegacyLink: async () => { if (failedStep === 'legacy' && fail) throw new Error('legacy unavailable') },
+      removeOwnerAssets: async () => { if (failedStep === 'assets' && fail) throw new Error('assets unavailable') },
+      mcpEndpoint: `${baseUrl}/mcp` }
+    handlers = [createPrivateBrowserHandler(options), createPrivateBrowserHandler(options)]
+    const start = await fetch(`${endpoint}/login`, { redirect: 'manual' })
+    const callback = await fetch(`${endpoint}/auth/callback/ideaflow?state=retry-state&code=synthetic`, { redirect: 'manual', headers: { Cookie: start.headers.getSetCookie()[0].split(';')[0] } })
+    assert.equal(callback.status, 303)
+    const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+    const page = await (await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).text()
+    assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })).status, 200)
+    const stream = failedStep === 'sessions' ? await fetch(`${endpoint}/messages/api/stream`, { headers: { Cookie: cookie, 'X-Worker': 'second' } }) : null
+    const streamReader = stream?.body.getReader()
+    if (streamReader) { assert.equal(stream.status, 200); await streamReader.read() }
+    const csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
+    if (failedStep === 'sessions') {
+      const other = { ownerId: 'other-owner', userId: 'other-user' }, otherSid = 'other-session'
+      f.register(other)
+      await store.put(createHash('sha256').update(otherSid).digest('hex'), { ...other, csrf: 'other-csrf', expiresAt: Date.now() + 60000 })
+      const incomplete = httpRequest(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Length': '1000', 'X-Stall': '1' } })
+      incomplete.on('error', () => {})
+      incomplete.write('csrf=')
+      await stalled
+      assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: `__Host-ul-session=${otherSid}` }, signal: AbortSignal.timeout(2000) })).status, 200)
+      incomplete.destroy()
+    }
+    const remove = () => fetch(`${endpoint}/delete-account`, { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, confirm: 'delete everything' }) })
+    const failed = await remove()
+    assert.notEqual(failed.status, 200)
+    assert.doesNotMatch(await failed.text(), /Your Unlinked account is deleted/)
+    assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).status, 200)
+    if (failedStep.startsWith('handle-')) { assert.equal(identityPresent, true); assert.equal(handlePresent, true) }
+    pauseRead = true
+    const pending = fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })
+    await readPending
+    fail = false
+    let deletionStarted = false
+    const retry = remove().then(response => { deletionStarted = true; return response })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(deletionStarted, false)
+    releaseRead()
+    assert.ok([200, 401].includes((await pending).status))
+    const retried = await retry
+    assert.equal(retried.status, 200)
+    assert.match(await retried.text(), /Your Unlinked account is deleted/)
+    if (streamReader) {
+      let chunk
+      do { chunk = await streamReader.read() } while (!chunk.done)
+    }
+    assert.equal(handlePresent, false)
+    assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie } })).status, 401)
+    assert.equal((await fetch(`${endpoint}/settings`, { headers: { Cookie: cookie, 'X-Worker': 'second' } })).status, 401)
+  })
+}

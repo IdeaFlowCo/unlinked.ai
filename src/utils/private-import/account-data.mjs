@@ -1,10 +1,16 @@
+import { investorJobsForAccount, investorReceiptId } from './investor-job.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { withoutSuspendedRows } from '../public-people/suspension-filter.mjs'
+import { sharedImportRowCache } from './import-row-cache.mjs'
 
 const SHA = /^[a-f0-9]{64}$/
 const TOMBSTONE_BATCH = 400
 const RECEIPT_PROBE_LIMIT = 600
+
+// A row receipt is durable before its checkpoint. At most one extra receipt
+// can exist beyond offset, including after an interrupted first row.
+const investorReceiptCount = job => Math.min(job.total, job.offset + 1)
 
 // The whole account in one reviewable JSON document. Reads use the same
 // owner-fenced readers as the pages; nothing bypasses tombstones or consent.
@@ -44,7 +50,19 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
   const confirmed = signupLookup ? await (typeof signupLookup.readForExport === 'function' ? signupLookup.readForExport(owner) : signupLookup.read(owner)) : null
   const signupProfile = confirmed ? { profile: confirmed.profile, receiptId: confirmed.receiptId, ...(confirmed.retired ? { retired: true, retiredByProfileId: confirmed.retiredByProfileId } : {}),
     provenance: { source: 'profile-lookup', selfAsserted: true, confirmation: 'self-asserted-public-profile-v1' } } : null
-  return { format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
+  const investorImports = []
+  for (const resource of (await investorJobsForAccount(owner.ownerId, backend)).jobs) {
+    signal?.throwIfAborted()
+    const job = resource.payload, receipts = []
+    for (let ordinal = 0; ordinal < investorReceiptCount(job); ordinal++) {
+      signal?.throwIfAborted()
+      const receipt = await backend.readResource('import', investorReceiptId(owner.ownerId, job.id, ordinal))
+      if (receipt && !receipt.deleted && receipt.sourceOwnerId === owner.ownerId) receipts.push(receipt.payload)
+    }
+    const bytes = await backend.readAsset(job.sourceDigest)
+    investorImports.push({ job, ...(job.source?.format === 'xlsx' ? { originalFile: { ...job.source, encoding: 'base64', base64: bytes.toString('base64') } } : { csv: bytes.toString('utf8') }), receipts })
+  }
+  return { investorImports, format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
     account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy, signupProfile }
 }
 
@@ -53,7 +71,14 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
 // agent grants. Tombstones erase the stored payloads and can never be revived.
 // Content is erased first and each job last, so an interrupted run stays
 // discoverable through the job listing and can simply be run again.
-export async function deleteAccountData({ owner, backend, jobs, grantIds = [], signupLookup, signal }) {
+export async function deleteAccountData({ rowCache = sharedImportRowCache, ...input }) {
+  // Rows are tombstoned before their import: the owner's cache is bypassed
+  // for the whole erase and emptied before and after it.
+  rowCache?.beginErase(input.owner.ownerId)
+  try { return await eraseAccountData(input) } finally { rowCache?.endErase(input.owner.ownerId) }
+}
+
+async function eraseAccountData({ owner, backend, jobs, grantIds = [], signupLookup, signal }) {
   if (signupLookup) await signupLookup.removeOwner(owner)
   const ownerId = owner.ownerId
   const writeBatch = typeof backend.writeBatch === 'function'
@@ -116,6 +141,16 @@ export async function deleteAccountData({ owner, backend, jobs, grantIds = [], s
     await erase(others)
     await erase([tombstone('import', resource.sourceId, resource.sourceRevision)])
   }
+  const investor = await investorJobsForAccount(ownerId, backend)
+  for (const resource of investor.jobs) {
+    const job = resource.payload
+    for (let ordinal = 0; ordinal < investorReceiptCount(job); ordinal++) {
+      signal?.throwIfAborted()
+      await eraseOne({ type: 'import', sourceId: investorReceiptId(ownerId, job.id, ordinal) })
+    }
+    await eraseOne({ type: 'import', sourceId: resource.sourceId })
+  }
+  if (investor.catalog) await eraseOne({ type: 'import', sourceId: investor.catalog.sourceId })
   for (const grantId of grantIds) {
     signal?.throwIfAborted()
     if (typeof grantId !== 'string' || !SHA.test(grantId)) continue

@@ -4,3 +4,5 @@
 // thousands each, so the bounds leave room to grow well past both.
 export const PUBLIC_INDEX_MAX_PROFILES = 100000
 export const PUBLIC_INDEX_MAX_CONNECTIONS = 500000
+// Whole-index text, including operator-published profile histories.
+export const PUBLIC_INDEX_MAX_TEXT_BYTES = 96 * 1024 * 1024

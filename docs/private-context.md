@@ -2,7 +2,7 @@
 
 Since 0.6.3 (unlinked-9kk.4), a signed-in member sees **Your private context** on a person's page: the notes, relations, importance and catch-up cadence they keep about that person. Only the owner sees it.
 
-The data is not stored by Unlinked. It is the owner's **Ideaflow people overlay** in Noos (`/api/overlay`, contract in Noos `docs/PEOPLE_OVERLAY.md`). OpenChat writes the same records, and so does any agent using the shared Ideaflow connector's private-people tools (`openchat__oc_*private*`) or, since catalog v7 (unlinked-9kk.5), the direct Unlinked key's private notes & relations tools (`unlinked_*private*`, `mcp-server/private-notes-tools.mjs`, which only forwards to `/api/overlay` as the grant owner with `source: direct-key` provenance). The panel itself only reads. Noos owns every overlay rule, including name ambiguity, provenance, relation types, search and neighbourhood, so Unlinked has no copy of that logic.
+The data is not stored by Unlinked. It is the owner's **Ideaflow people overlay** in Noos (`/api/overlay`, contract in Noos `docs/PEOPLE_OVERLAY.md`). OpenChat writes the same records, and so does any agent using the shared Ideaflow connector's private-people tools (`openchat__oc_*private*`) or, since catalog v7 (unlinked-9kk.5), Unlinked's private notes & relations tools (`unlinked_*private*`, `mcp-server/private-notes-tools.mjs`). Their provenance is described in [the agent API contract](agent-api.md#private-people-notes--relations-catalog-v7). The panel itself only reads. Noos owns every overlay rule, including name ambiguity, provenance, relation types, search and neighbourhood, so Unlinked has no copy of that logic.
 
 This replaces the separate Unlinked `note` store sketched in the 2026-10-02 overlay design (§1, unlinked-47t). That design's UX states and privacy boundaries still apply.
 
@@ -10,12 +10,13 @@ This replaces the separate Unlinked `note` store sketched in the 2026-10-02 over
 
 | Surface | How the person is matched |
 |---|---|
-| `/people/:id` (published profile), signed in | `unlinked:person:<id>`, plus `linkedin:in:<hash>` when the owner's own import contains the same person (`unlinked_lookup_contact` by `profileId`). |
-| `/network/contacts/:connectionId` (one of the owner's own imported contacts) | `linkedin:in:<sha256(linkedinSlug())>` from the owner's row, plus `unlinked:person:<id>` when that person has a published profile. On `/network`, private rows without a published profile now link to this page. |
+| `/people/:id` (published profile), signed in | Published person refs and exact LinkedIn refs resolved by `unlinked_lookup_contact`; see [private prospects before a public profile](#private-prospects-before-a-public-profile). |
+| `/network/contacts/:connectionId` (one of the owner's own imported contacts) | `linkedin:in:<sha256(linkedinSlug())>` from the owner's row, plus `unlinked:person:<id>` when that person has a published profile. A row with no LinkedIn address of its own (for example a member who joined by scanning a card) uses the address the owner attached privately on the contact page ("Know their LinkedIn?", [contact enrichment](contact-enrichment.md)), while it still matches the row's source. On `/network`, private rows without a published profile now link to this page. |
 
-When two refs name separate overlay entities (they were never joined in Noos), both are shown. Unlinked never joins them.
+When refs name separate overlay entities, both are shown. Reads never join them. Private-tool writes refuse conflicting entities and require the owner to select a record; see [the agent API contract](agent-api.md#private-people-notes--relations-catalog-v7).
 
 Each entity shows:
+- The owner's one-line description of the person (overlay `description`), when there is one.
 - Notes, newest first, with a source label from provenance, such as "Added by Claude via your Ideaflow connector", "Added by you" or "· inferred". Records written before 2026-10-09 carry no provenance and show no label.
 - Relations, worded from the person's side, with the other end linked where it is an Unlinked person: a published profile, or the owner's own contact page.
 - Importance and catch-up (cadence, last contact, next or due).
@@ -60,7 +61,7 @@ The runtime then signs a one-minute HS256 assertion for app `unlinked`, with the
 ## Export and deletion
 
 - **Export** (`/export`): includes `ideaflowPrivateContext`, the owner's copy of their whole overlay (Noos `GET /export`), marked `deletedWithUnlinkedAccount: false`. If Noos cannot be read, the export carries `{error: 'private_context_unavailable'}` instead.
-- **Delete everything** (`/delete-account`): does **not** delete the overlay. It belongs to the person's Ideaflow identity and is shared with OpenChat, so deleting an Unlinked account must not silently erase what they keep in OpenChat. The Settings copy says so and points to OpenChat or their agent. Noos `DELETE /api/overlay/owner` erases it all.
+- **Delete account** (`/delete-account`): does **not** delete the overlay. It belongs to the person's Ideaflow identity and is shared with OpenChat, so deleting an Unlinked account must not silently erase what they keep in OpenChat. Settings points to OpenChat to manage it. Noos `DELETE /api/overlay/owner` erases it all.
 - **App-level erasure** of refs in the `unlinked:` prefix (`POST /purge-ref` with a purge assertion) is not wired up. A published profile that is removed leaves owners' own notes in place, under a ref that no longer resolves.
 
 ## Configuration
@@ -82,3 +83,17 @@ Without the secret, or with one shorter than 32 characters, the feature is off. 
 - The "My knowledge" browser from RELATIONSHIP-MEMORY.md.
 - Search across the overlay in Unlinked.
 - Purge-ref on profile removal.
+
+## Private prospects before a public profile
+
+The owner may save an investor prospect before any public persona exists. A prospect with a valid LinkedIn address uses `linkedin:in:<sha256 canonical slug>`. When a readable public profile later carries that exact LinkedIn URL, the connector and browser private context resolve the existing owner-private entity, even without a LinkedIn archive connection. Read paths do not create or merge graph records. A public profile ID that merely looks like `li-<hash>`, names, and emails are not identity evidence. The public reader supplies the hash only from a currently readable canonical URL.
+
+Exa enrichment rows fill existing public profiles; they do not create them. A private-only prospect stays private. This attachment does not authorize publishing a profile or expose private notes, list membership, or counts to public readers or other owners.
+
+Identity reconciliation is bounded to eight distinct references before any remote
+private-person lookup, matching Noos's per-entity reference limit. Excessively
+linked public/source identities fail closed (`identity_conflict` for tools,
+`private_identity_limit`/unavailable for the browser), without truncating evidence
+or querying a partial set. Inspect or edit the existing private thing by its ID
+instead. This limit concerns one person's identity, not list size or pagination.
+Canceled connector/import requests stop before issuing another reference lookup.

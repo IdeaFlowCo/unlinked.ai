@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises'
@@ -11,6 +12,9 @@ import { ingestArchive } from '../src/utils/private-import/job.mjs'
 import { createNoosOwnerBackend, createScopedImportReader } from '../src/utils/private-import/noos-adapter.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
+import { deleteAccountData } from '../src/utils/private-import/account-data.mjs'
+import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
+import { createMemoryConnectionPrivacyStore } from '../mcp-server/connection-privacy-store.mjs'
 
 // Real private filesystem persistence exercises the production adapter's batch,
 // replay and asset paths. This is not a substitute for the Noos graph CI job.
@@ -72,6 +76,77 @@ async function fullArchive(count = 1001) {
   zip.file('Skills.csv', 'Name\nGraph systems\n')
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 }
+
+test('deletion waits for an active import while another owner progresses', async t => {
+  const f = await fixture(t), bytes = await fullArchive(2), a = f.backend('owner-a'), b = f.backend('owner-b')
+  const first = await stageArchive({ ownerId: 'owner-a', filename: 'a.zip', bytes, adapter: a.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const second = await stageArchive({ ownerId: 'owner-b', filename: 'b.zip', bytes, adapter: b.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const coordination = coordinatorFor({})
+  let releaseImport, importStarted, otherFinished
+  const started = new Promise(resolve => { importStarted = resolve })
+  const resume = new Promise(resolve => { releaseImport = resolve })
+  const other = new Promise(resolve => { otherFinished = resolve })
+  let paused = false
+  f.setHook(async (phase, items) => {
+    if (phase === 'before' && !paused && items.some(item => item.sourceOwnerId === 'owner-a' && item.payload?.status === 'parsing')) { paused = true; importStarted(); await resume }
+    if (phase === 'after' && items.some(item => item.sourceOwnerId === 'owner-b' && ['indexed', 'partial'].includes(item.payload?.status))) otherFinished()
+  })
+  let includeOther = false
+  const worker = createArchiveWorker({ coordination, listPendingImports: async () => [...Array.from({ length: 8 }, () => ({ id: first.id, owner: { ownerId: 'owner-a', userId: 'a' } })), ...(includeOther ? [{ id: second.id, owner: { ownerId: 'owner-b', userId: 'b' } }] : [])], getBackend: async owner => owner.ownerId === 'owner-a' ? a : b })
+  const running = worker.tick()
+  await started
+  let deleted = false
+  const deletion = (async () => {
+    const release = await coordination.acquire('owner:owner-a', true)
+    try {
+      await deleteAccountData({ owner: { ownerId: 'owner-a', userId: 'a' }, backend: a, jobs: [await a.readResource('import', first.id)] })
+      await rm(join(f.root, 'owner-a'), { recursive: true, force: true })
+      deleted = true
+    } finally { release() }
+  })()
+  includeOther = true
+  const nextTick = worker.tick()
+  await other
+  assert.equal(deleted, false)
+  releaseImport()
+  await Promise.all([running, deletion, nextTick])
+  assert.equal(deleted, true)
+  assert.equal((await a.readResource('import', first.id)).deleted, true)
+  await worker.tick()
+  await assert.rejects(readFile(join(f.root, 'owner-a', first.archiveSha256)), { code: 'ENOENT' })
+  assert.equal((await b.readResource('import', second.id)).payload.status, 'indexed')
+  await worker.stop()
+})
+
+test('capacity waiters do not delay deletion and blocked owners do not consume slots', async () => {
+  const coordination = coordinatorFor({}), blocked = await coordination.acquire('owner:blocked', true)
+  let resume, allStarted
+  const paused = new Promise(resolve => { resume = resolve })
+  const started = new Promise(resolve => { allStarted = resolve })
+  let running = 0, peak = 0, blockedStarted = false, ninthStarted = false
+  const jobs = [{ id: 'blocked-job', owner: { ownerId: 'blocked' } }, ...Array.from({ length: 8 }, (_, i) => ({ id: `job-${i}`, owner: { ownerId: `owner-${i}` } })), { id: 'ninth-job', owner: { ownerId: 'ninth' } }]
+  const worker = createArchiveWorker({ coordination, listPendingImports: async () => jobs, getBackend: async owner => {
+    if (owner.ownerId === 'blocked') blockedStarted = true
+    if (owner.ownerId === 'ninth') ninthStarted = true
+    running++; peak = Math.max(peak, running)
+    if (running === 8) allStarted()
+    await paused
+    running--
+    return { adapter: { withImport: async () => null }, readAsset: async () => null }
+  } })
+  const tick = worker.tick()
+  await started
+  const deletion = coordination.acquire('owner:ninth', true)
+  const releaseDeletion = await Promise.race([deletion, new Promise((_, reject) => setTimeout(() => reject(new Error('deletion blocked by capacity waiter')), 1000))])
+  assert.equal(ninthStarted, false)
+  assert.equal(blockedStarted, false)
+  releaseDeletion()
+  blocked()
+  resume()
+  await tick
+  assert.equal(peak, 8)
+  await worker.stop()
+})
 
 async function richProfileArchive(count = 401) {
   const zip = new JSZip()
@@ -440,4 +515,316 @@ test('owner profile reads only bounded profile chunks and preserves full fields'
   assert.deepEqual(profile.skills, ['Graph systems'])
   assert.ok(calls.includes(`import/${completed.assertionChunks[0]}`))
   assert.equal(calls.includes(`import/${completed.assertionChunks[1]}`), false)
+})
+
+test('several files in one upload and a later full export stack into one network; private fields stay private', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listImportIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && ['indexed', 'partial'].includes(row.payload?.status) && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listAccountGrantIds: async () => [] }
+  }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  handler = createPrivateBrowserHandler({ baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const csrfFor = async () => (await (await fetch(endpoint + '/import', { headers: { Cookie: cookie } })).text()).match(/name="csrf" value="([^"]+)"/)[1]
+  const post = async files => {
+    const form = new FormData(); form.set('csrf', await csrfFor())
+    for (const [bytes, name] of files) form.append('archive', new Blob([bytes]), name)
+    return fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })
+  }
+  const runAll = async () => {
+    const backend = await getBackend(owner)
+    for (const [, row] of Object.entries(await f.snapshot())) if (row.sourceOwnerId === owner.ownerId && row.payload?.status === 'uploaded' && row.payload?.backgroundVersion && !row.payload.receiptOf)
+      await runArchiveJob({ ownerId: owner.ownerId, id: row.sourceId, adapter: backend.adapter, readAsset: backend.readAsset })
+  }
+  // LinkedIn's Connections split in two: the second part has no header row.
+  const part1 = 'Notes:\n"When exporting your connection data..."\n\nFirst Name,Last Name,URL,Email Address,Company,Position,Connected On\nAda,Lovelace,https://www.linkedin.com/in/ada-l,ada@private.example,Engines,Analyst,01 Jan 2020\n'
+  const part2 = 'Grace,Hopper,https://www.linkedin.com/in/grace-h,grace@private.example,Navy,Admiral,02 Feb 2021\n'
+  const first = await post([[Buffer.from(part1), 'Connections.csv'], [Buffer.from(part2), 'Connections_2.csv']])
+  assert.equal(first.status, 303); assert.equal(first.headers.get('location'), '/profile')
+  await runAll()
+  let jobs = Object.values(await f.snapshot()).filter(row => row.sourceOwnerId === owner.ownerId && row.payload?.backgroundVersion && !row.payload.receiptOf)
+  assert.deepEqual(jobs.map(row => [row.payload.filename, row.payload.status, row.payload.counts.indexed]).sort(), [['Connections.csv', 'indexed', 1], ['Connections_2.csv', 'indexed', 1]])
+  // A later full export stacks on top: Grace again (once), a new person, and private-only files.
+  const zip = new JSZip()
+  zip.file('Connections.csv', 'First Name,Last Name,URL,Email Address,Company,Position,Connected On\nGrace,Hopper,https://www.linkedin.com/in/grace-h,grace@private.example,Navy,Admiral,02 Feb 2021\nAlan,Turing,https://www.linkedin.com/in/alan-t,,NPL,Researcher,03 Mar 2022\n')
+  zip.file('Profile.csv', 'First Name,Last Name,Headline\nStacked,Owner,Builder\n')
+  zip.file('messages.csv', 'CONVERSATION ID,FROM,TO,CONTENT\nc1,Stacked Owner,Grace Hopper,"secret plans"\n')
+  zip.file('PhoneNumbers.csv', 'Extension,Number,Type\n,+1 555 0199,Mobile\n')
+  const full = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  assert.equal((await post([[full, 'Complete_LinkedInDataExport_11-05-2026.zip']])).status, 303)
+  await runAll()
+  jobs = Object.values(await f.snapshot()).filter(row => row.sourceOwnerId === owner.ownerId && row.payload?.backgroundVersion && !row.payload.receiptOf)
+  assert.equal(jobs.length, 3)
+  assert.ok(jobs.every(row => ['indexed', 'partial'].includes(row.payload.status)))
+  const network = await (await fetch(endpoint + '/network', { headers: { Cookie: cookie } })).text()
+  for (const name of ['Ada Lovelace', 'Grace Hopper', 'Alan Turing']) assert.match(network, new RegExp(name))
+  // Grace is in two imports but is one entry: her name appears as often as Alan's, who is in one.
+  assert.equal(network.split('Grace Hopper').length, network.split('Alan Turing').length)
+  for (const secret of ['ada@private.example', 'grace@private.example', 'secret plans', '555 0199']) assert.doesNotMatch(network, new RegExp(secret))
+  // The full original is retained privately, byte for byte.
+  const backend = await getBackend(owner), fullJob = jobs.find(row => row.payload.filename.endsWith('.zip'))
+  assert.deepEqual(await backend.readAsset(fullJob.payload.archiveSha256), full)
+})
+
+test('the import form saves who can see your connections before staging; Settings changes it; bad values are refused', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listImportIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && ['indexed', 'partial'].includes(row.payload?.status) && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listAccountGrantIds: async () => [] }
+  }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  const privacy = createMemoryConnectionPrivacyStore(), order = []
+  const tracked = { ...privacy, set: async (o, v) => { order.push('privacy:' + v.audience); return privacy.set(o, v) } }
+  handler = createPrivateBrowserHandler({ connectionPrivacy: tracked, baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const page = async path => (await fetch(endpoint + path, { headers: { Cookie: cookie } })).text()
+  const csrfOf = html => html.match(/name="csrf" value="([^"]+)"/)[1]
+  const importPage = await page('/import')
+  assert.match(importPage, /Advanced: who can see your connections/)
+  assert.match(importPage, /<option value="everyone" selected>/)
+  const post = async (fields, files = [['First Name,Last Name,URL\nAda,Lovelace,https://www.linkedin.com/in/ada-l\n', 'Connections.csv']]) => {
+    const form = new FormData(); form.set('csrf', csrfOf(await page('/import')))
+    for (const [key, value] of Object.entries(fields)) form.append(key, value)
+    for (const [text, name] of files) form.append('archive', new Blob([text]), name)
+    return fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })
+  }
+  const before = Object.keys(await f.snapshot()).length
+  const bad = await post({ connectionsAudience: 'friends', connectionsScope: 'all' })
+  assert.notEqual(bad.status, 303)
+  assert.equal(Object.keys(await f.snapshot()).length, before, 'nothing staged after a refused choice')
+  assert.notEqual((await post({ connectionsAudience: 'members' })).status, 303, 'both fields or neither')
+  const good = await post({ connectionsAudience: 'connections', connectionsScope: 'shared' })
+  assert.equal(good.status, 303)
+  assert.deepEqual(await privacy.get(owner), { audience: 'connections', scope: 'shared' })
+  assert.ok(Object.keys(await f.snapshot()).length > before, 'staged after the choice was saved')
+  assert.deepEqual(order, ['privacy:connections'])
+  // An upload without the fields leaves the saved choice alone.
+  assert.equal((await post({}, [['First Name,Last Name,URL\nGrace,Hopper,https://www.linkedin.com/in/grace-h\n', 'Connections_2.csv']])).status, 303)
+  assert.deepEqual(await privacy.get(owner), { audience: 'connections', scope: 'shared' })
+  const settings = await page('/settings')
+  assert.match(settings, /Your connections can see the connections you have in common with them\./)
+  const form = new URLSearchParams({ csrf: csrfOf(settings), connectionsAudience: 'only_me', connectionsScope: 'shared' })
+  const saved = await fetch(endpoint + '/settings/connection-privacy', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form, redirect: 'manual' })
+  assert.equal(saved.status, 303); assert.equal(saved.headers.get('location'), '/settings?privacy=saved#connection-privacy')
+  assert.deepEqual(await privacy.get(owner), { audience: 'only_me', scope: 'all' })
+  assert.match(await page('/settings?privacy=saved'), /Saved\.[\s\S]*Only you can see your connections\./)
+})
+
+test('worker reports a repeatedly failing job with a fixed reason, throttled, and flags it stuck once', async () => {
+  const events = []
+  let clock = 1000
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-1', owner: { ownerId: 'owner-a', userId: 'a' } }],
+    getBackend: async () => { throw new Error('private_noos_timeout') }, onError: event => { events.push(event) }, now: () => clock })
+  for (let i = 0; i < 9; i++) { await worker.tick(); clock += 2000 }
+  await worker.stop()
+  const retries = events.filter(e => e.event === 'import_worker_retry')
+  assert.deepEqual(retries.map(e => e.attempt), [1, 2, 4, 8])
+  assert.ok(retries.every(e => e.reason === 'private_noos_timeout' && e.importId === 'job-1'))
+  assert.equal(retries[3].failingForMs, 14000)
+  const stuck = events.filter(e => e.event === 'import_worker_stuck')
+  assert.equal(stuck.length, 1); assert.equal(stuck[0].attempt, 5)
+})
+
+test('worker never reports a free-text error message', async () => {
+  const events = []
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-1', owner: { ownerId: 'owner-a', userId: 'a' } }],
+    getBackend: async () => { throw new Error('shan') }, onError: event => { events.push(event) } })
+  await worker.tick(); await worker.stop()
+  assert.equal(events[0].reason, 'unknown')
+  assert.ok(!JSON.stringify(events).includes('shan'))
+})
+
+test('worker throttles discovery failures and reports a finished job with counts only', async t => {
+  const events = []
+  const failing = createArchiveWorker({ listPendingImports: async () => { throw new Error('private_noos_timeout') }, getBackend: async () => ({}), onError: event => { events.push(event) } })
+  for (let i = 0; i < 5; i++) await failing.tick()
+  await failing.stop()
+  assert.deepEqual(events.filter(e => e.event === 'import_worker_discovery_failed').map(e => [e.attempt, e.reason]), [[1, 'private_noos_timeout'], [2, 'private_noos_timeout'], [4, 'private_noos_timeout']])
+
+  const f = await fixture(t), a = f.backend('owner-a'), bytes = await fullArchive(3)
+  const job = await stageArchive({ ownerId: 'owner-a', filename: 'small.zip', bytes, adapter: a.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const done = []
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: job.id, owner: { ownerId: 'owner-a', userId: 'a' } }], getBackend: async () => a, onError: event => { done.push(event) } })
+  await worker.tick(); await worker.tick(); await worker.stop()
+  const finished = done.filter(e => e.event === 'import_job_finished')
+  assert.equal(finished.length, 1)
+  assert.equal(finished[0].status, 'indexed'); assert.equal(finished[0].indexed, 5)
+  assert.ok(Number.isInteger(finished[0].durationMs))
+  assert.deepEqual(Object.keys(finished[0]).sort(), ['accepted', 'durationMs', 'event', 'failedFiles', 'importId', 'indexed', 'phase', 'rejected', 'sources', 'status'])
+})
+
+
+test('unsupported jobs report once', async () => {
+  const events = [], item = { id: 'job', owner: { ownerId: 'owner-a' } }
+  const worker = createArchiveWorker({ listPendingImports: async () => [item], getBackend: async () => ({ adapter: {
+    withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ status: 'uploaded', backgroundVersion: 'unsupported' }) })
+  } }), onError: event => events.push(event) })
+  await worker.tick(); await worker.tick(); await worker.stop()
+  assert.equal(events.filter(event => event.event === 'import_job_not_runnable').length, 1)
+})
+
+test('a single slow run reports once and stops reporting after completion', async () => {
+  const events = []
+  let release
+  const blocked = new Promise(resolve => { release = resolve })
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-slow', owner: { ownerId: 'owner-a' } }],
+    getBackend: async () => { await blocked; return { adapter: { withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ status: 'indexed', phase: 'private_observation_index_ready' }) }) } } },
+    slowAfterMs: 20, onError: event => events.push(event) })
+  const run = worker.tick()
+  await new Promise(resolve => setTimeout(resolve, 70))
+  release(); await run; await worker.stop()
+  const slow = events.filter(event => event.event === 'import_job_running_long')
+  assert.equal(slow.length, 1)
+  assert.equal(slow[0].importId, 'job-slow')
+  assert.ok(slow[0].elapsedMs >= 20)
+})
+
+
+test('lease-held returns do not reset consecutive failures', async () => {
+  const events = [], item = { id: 'job', owner: { ownerId: 'owner-a' } }
+  let leaseHeld = false
+  const worker = createArchiveWorker({ listPendingImports: async () => [item], getBackend: async () => {
+    if (!leaseHeld) throw new Error('private_noos_timeout')
+    return { adapter: { withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ ownerId: 'owner-a', status: 'parsing',
+      backgroundVersion: 'profile-first-v1', parserVersion: 'linkedin-archive-v7', lease: { id: 'other', expiresAt: Infinity } }) }) } }
+  }, onError: event => events.push(event) })
+  for (let i = 0; i < 5; i++) { leaseHeld = false; await worker.tick(); leaseHeld = true; await worker.tick() }
+  await worker.stop()
+  assert.deepEqual(events.filter(event => event.event === 'import_worker_retry').map(event => event.attempt), [1, 2, 4])
+  assert.equal(events.filter(event => event.event === 'import_worker_stuck').length, 1)
+})
+
+
+test('hanging event delivery does not hold the worker or owner coordination', async () => {
+  const jobs = [{ id: 'first', owner: { ownerId: 'owner-a' } }, { id: 'second', owner: { ownerId: 'owner-a' } }]
+  const handled = [], events = []
+  let held = 0
+  const worker = createArchiveWorker({ listPendingImports: async () => jobs,
+    coordination: { tryAcquireShared: () => { held++; return () => { held-- } } },
+    getBackend: async () => ({ adapter: { withImport: async (_owner, id, fn) => {
+      handled.push(id)
+      return fn({ getJob: async () => ({ status: 'indexed', phase: 'private_observation_index_ready' }) })
+    } } }), onError: event => { events.push(event); return new Promise(() => {}) } })
+  let timer
+  try {
+    await Promise.race([worker.tick(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('worker blocked on event delivery')), 1000) })])
+    await worker.stop()
+    assert.deepEqual(handled, ['first', 'second'])
+    assert.equal(held, 0)
+    assert.equal(events.length, 2)
+  } finally { clearTimeout(timer) }
+})
+
+
+test('failed imports report parsed source counts without changing saved receipts', async t => {
+  for (const unsupported of [false, true]) {
+    const f = await fixture(t), backend = f.backend('owner-a')
+    const bytes = unsupported ? await fullArchive(1) : Buffer.from('First Name,Last Name,URL\n,,\n')
+    const job = await stageArchive({ ownerId: 'owner-a', filename: unsupported ? 'input.zip' : 'Connections.csv', bytes, adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+    const adapter = unsupported ? { withImport: (owner, id, fn) => backend.adapter.withImport(owner, id, store =>
+      fn({ ...store, validatePublication: () => 'private_publication_support_limit' })) } : backend.adapter
+    const events = []
+    const worker = createArchiveWorker({ listPendingImports: async () => [{ id: job.id, owner: { ownerId: 'owner-a' } }],
+      getBackend: async () => ({ ...backend, adapter }), onError: event => events.push(event) })
+    await worker.tick(); await worker.stop()
+    const finished = events.find(event => event.event === 'import_job_finished')
+    assert.equal(finished.phase, unsupported ? 'unsupported_private_publication' : 'no_accepted_rows')
+    assert.equal(finished.sources, unsupported ? 3 : 1)
+    const saved = await backend.adapter.withImport('owner-a', job.id, store => store.getJob(job.id))
+    assert.deepEqual(saved.sources, [])
+  }
+})
+
+test('right after a restart, an import in progress shows its progress, not a busy or suspended page', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listImportIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && ['indexed', 'partial'].includes(row.payload?.status) && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listAccountGrantIds: async () => [],
+      // Someone else is suspended and the index is still warming: status unknown.
+      readSuppressions: async () => ({ ids: new Set(['someone-else']), refs: new Set(), complete: false, decided: new Set(['someone-else']) }) }
+  }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  handler = createPrivateBrowserHandler({ ownProfileId: async () => 'mine', baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const page = await (await fetch(endpoint + '/import', { headers: { Cookie: cookie } })).text()
+  const form = new FormData(); form.set('csrf', page.match(/name="csrf" value="([^"]+)"/)[1])
+  form.append('archive', new Blob(['First Name,Last Name,URL\nAda,Lovelace,https://www.linkedin.com/in/ada-l\n']), 'Connections.csv')
+  assert.equal((await fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })).status, 303)
+  // The worker has not run: the job is still uploaded.
+  const profile = await fetch(endpoint + '/profile', { headers: { Cookie: cookie } })
+  assert.equal(profile.status, 200)
+  const text = await profile.text()
+  assert.match(text, /Importing…|Reading your profile and connections/)
+  assert.doesNotMatch(text, /Profile hidden|Unlinked is busy|unavailable right now|temporarily unavailable/)
+  // Without an import in progress the same moment says the server is busy, not the profile.
+  const card = await fetch(endpoint + '/card', { headers: { Cookie: cookie } })
+  assert.equal(card.status, 503)
+  assert.match(await card.text(), /server is restarting or busy/)
+})
+
+test('a full export imports the owner’s profile photo as a private asset; no link or caption is kept; no photo never degrades the import', async t => {
+  const f = await fixture(t), ownerId = 'owner-photo', backend = f.backend(ownerId)
+  const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(300, 9)])
+  const zipWith = async rich => { const zip = new JSZip()
+    zip.file('Profile.csv', 'First Name,Last Name,Headline\nPhoto,Owner,Builder\n')
+    zip.file('Connections.csv', 'First Name,Last Name,URL\nAda,Lovelace,https://www.linkedin.com/in/ada-photo\n')
+    if (rich) zip.file('Rich_Media.csv', rich)
+    return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) }
+  const rich = 'Date/Time,Media Description,Media Link\n"You uploaded a profile photo on March 3, 2024 at 9:15 AM (GMT)",,https://media.licdn.com/dms/image/v2/X/profile/0/1?e=2147483647&v=beta&t=SIGNED\n"You uploaded a feed photo on November 15, 2024 at 8:18 PM (GMT)","Secret caption",https://media.licdn.com/dms/image/v2/Y/feed/0/2?e=2147483647&v=beta&t=SIGNED2\n'
+  const fetched = []
+  const run = async (bytes, name, fetchProfilePhoto) => {
+    const staged = await stageArchive({ ownerId, filename: name, bytes, adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+    return runArchiveJob({ ownerId, id: staged.id, adapter: backend.adapter, readAsset: backend.readAsset, fetchProfilePhoto })
+  }
+  const job = await run(await zipWith(rich), 'full.zip', async link => { fetched.push(link); return { bytes: JPEG, type: 'image/jpeg', sha256: createHash('sha256').update(JPEG).digest('hex') } })
+  assert.equal(job.status, 'indexed')
+  assert.equal(fetched.length, 1); assert.match(fetched[0], /\/X\/profile\//, 'only the profile photo link is fetched')
+  const digest = createHash('sha256').update(JPEG).digest('hex')
+  assert.deepEqual(await backend.readAsset(digest), JPEG, 'stored as an owner-private asset')
+  const snapshot = JSON.stringify(await f.snapshot())
+  assert.match(snapshot, new RegExp(`"photo sha256":"${digest}"`))
+  assert.doesNotMatch(snapshot, /t=SIGNED|Secret caption|media\.licdn\.com/, 'no signed link or caption outside the original archive')
+  // No working photo, or no Rich_Media.csv at all: the import is still complete.
+  assert.equal((await run(await zipWith(rich), 'full-again.zip', async () => { throw Error('photo_fetch_status') })).status, 'indexed')
+  assert.equal((await run(await zipWith(null), 'basic.zip', undefined)).status, 'indexed')
 })
