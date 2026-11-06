@@ -36,12 +36,13 @@ test('formula refusal names the cell and offers values-only recovery without ech
 })
 
 test('mapped LinkedIn hyperlink supplies exact identity while original text, private source and replay stay intact', async () => {
-  const bytes = await linkedWorkbook(), f = fixture(), owner = grant(), input = linkedInput(bytes)
+  const bytes = await linkedWorkbook('https://linkedin.com/in/Synthetic-Maya/'), f = fixture(), owner = grant(), input = linkedInput(bytes)
   const result = parse(bytes, input)
   assert.equal(result.parserVersion, 'investor-xlsx-v2')
   assert.equal(result.accepted[0].fields.LinkedIn, 'Profile')
   const hash = createHash('sha256').update('synthetic-maya').digest('hex')
   assert.equal(result.accepted[0].identity.linkedinRefHash, hash)
+  assert.equal(result.accepted[0].linkedinUrl, 'https://www.linkedin.com/in/Synthetic-Maya')
   const staged = await f.tools().unlinked_stage_investor_csv(owner, input)
   assert.equal((await f.tools().unlinked_stage_investor_csv(owner, input)).importId, staged.importId)
   await f.tools().unlinked_resume_investor_import(owner, { importId: staged.importId })
@@ -50,7 +51,7 @@ test('mapped LinkedIn hyperlink supplies exact identity while original text, pri
   assert.ok(person.refs.includes(`linkedin:in:${hash}`)); assert.equal(state.links.size, 1)
   const status = await f.tools().unlinked_get_investor_import(owner, { importId: staged.importId })
   assert.equal(status.receipts[0].fields.LinkedIn, 'Profile')
-  assert.deepEqual(status.receipts[0].sourceHyperlink, { cell: 'B2', relationshipId: 'profile', part: hyperlinkPart, target: 'https://www.linkedin.com/in/Synthetic-Maya' })
+  assert.deepEqual(status.receipts[0].sourceHyperlink, { cell: 'B2', relationshipId: 'profile', part: hyperlinkPart, target: 'https://linkedin.com/in/Synthetic-Maya/' })
   await assert.rejects(f.tools().unlinked_get_investor_import(grant('bob'), { importId: staged.importId }), error => error.code === 'not_found')
   assert.deepEqual(f.assets.get(`alice:${staged.sourceDigest}`), bytes)
 })
@@ -61,7 +62,9 @@ test('hyperlinks never change names or notes and conflicting or non-LinkedIn ide
   assert.equal(ordinary.accepted[0].notes[0].text, 'Profile')
   assert.equal(ordinary.accepted[0].identity.status, 'unresolved')
   const conflict = await linkedWorkbook(undefined, { 'xl/worksheets/sheet1.xml': linkedSheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'LinkedIn')}</row><row r="2">${inline('A2', 'Person')}${inline('B2', 'https://www.linkedin.com/in/another-person')}</row>`, '<hyperlink ref="B2" r:id="profile"/>') })
-  for (const [bytes, code] of [[nonIdentity, 'xlsx_hyperlink_target_unsupported'], [conflict, 'xlsx_hyperlink_identity_conflict']]) {
+  const missingName = await linkedWorkbook('javascript:alert(1)', { 'xl/worksheets/sheet1.xml': linkedSheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'LinkedIn')}</row><row r="2">${inline('B2', 'Profile')}</row>`, '<hyperlink ref="B2" r:id="profile"/>') })
+  const emptyRow = await linkedWorkbook('javascript:alert(1)', { 'xl/worksheets/sheet1.xml': linkedSheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'LinkedIn')}</row>`, '<hyperlink ref="B2" r:id="profile"/>') })
+  for (const [bytes, code] of [[nonIdentity, 'xlsx_hyperlink_target_unsupported'], [missingName, 'xlsx_hyperlink_target_unsupported'], [emptyRow, 'xlsx_hyperlink_target_unsupported'], [conflict, 'xlsx_hyperlink_identity_conflict']]) {
     const f = fixture()
     await assert.rejects(f.tools().unlinked_stage_investor_csv(grant(), linkedInput(bytes)), new RegExp(code))
     assert.equal(f.resources.size, 0); assert.equal(f.assets.size, 0)

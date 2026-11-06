@@ -109,6 +109,9 @@ New XLSX jobs use parser version `investor-xlsx-v2`. Existing v1 jobs keep their
 text-only parsing on resume and receipt recovery; upgrading never reinterprets a
 pending old row. Restaging the same workbook under v2 creates a distinct import,
 so resume an existing import by its id rather than restaging it to retry.
+On operational rollback, retain the original workbooks and do not resume v2 jobs
+with a pre-v2 parser; restore a v2-capable runtime before resuming those jobs.
+Existing v1 jobs retain their text-only semantics.
 
 Parsing uses the existing bounded ZIP reader and pinned saxes 6.0.0 (released
 2021-11-07), a strict streaming XML parser; its transitive `xmlchars` is locked to

@@ -254,19 +254,25 @@ export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false,
   const csv = Papa.unparse(table.map(row => row.values))
   if (Buffer.byteLength(csv) > INVESTOR_CSV_LIMITS.bytes) invalid('xlsx_table_size_limit')
   const parsed = parseInvestorCsv(Buffer.from(csv), mapping)
+  const column = parsed.headers.indexOf(mapping.linkedinUrl), targets = new Map()
+  for (const link of hyperlinks.values()) {
+    if (column < 0 || link.column !== column || link.row <= source.headerRow) continue
+    const target = linkedinUrl(link.target), slug = target && linkedinSlug(target)
+    if (!slug) invalid('xlsx_hyperlink_target_unsupported', { cell: link.cell })
+    targets.set(link.cell, { target, slug })
+  }
   for (const row of [...parsed.accepted, ...parsed.rejected]) {
     row.row = table[row.row - 1].number
     row.rowId = sha(`${parserVersion}\n${sourceDigest}\n${selected.id}\n${selected.path}\n${row.row}`)
-    const column = parsed.headers.indexOf(mapping.linkedinUrl), link = hyperlinks.get(cellName(column, row.row))
-    if (!row.reason && column >= 0 && link) {
-      const target = link.target.length <= 2048 && linkedinUrl(link.target)
-      if (!target) invalid('xlsx_hyperlink_target_unsupported', { cell: link.cell })
-      const slug = linkedinSlug(target), visible = row.linkedinUrl && linkedinUrl(row.linkedinUrl)
-      if (!slug) invalid('xlsx_hyperlink_target_unsupported', { cell: link.cell })
+    const link = column >= 0 && hyperlinks.get(cellName(column, row.row))
+    if (link) {
+      const { target, slug } = targets.get(link.cell)
+      const visible = row.fields[mapping.linkedinUrl] && linkedinUrl(row.fields[mapping.linkedinUrl].trim())
       if (visible && linkedinSlug(visible) !== slug) invalid('xlsx_hyperlink_identity_conflict', { cell: link.cell })
+      if (row.reason) continue
       row.linkedinUrl = target
       row.identity = { status: 'candidate', linkedinRefHash: linkedinRefHash(slug) }
-      row.sourceHyperlink = { cell: link.cell, relationshipId: link.relationshipId, part: link.part, target }
+      row.sourceHyperlink = { cell: link.cell, relationshipId: link.relationshipId, part: link.part, target: link.target }
     }
   }
   return { ...parsed, sourceDigest, parserVersion, selectedSheet: selected }
