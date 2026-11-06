@@ -24,6 +24,7 @@ inside an already enabled private-notes permission.
    supported. The response includes a validation preview and `importId`.
 2. Call `unlinked_resume_investor_import` with that `importId`. Each call commits
    10 rows by default (1–25 configurable). Repeat until `complete` or `partial`.
+   When creating a list, the first successful resume returns its `listId`.
    Staging and the user’s instruction to import are sufficient authorization for
    an unambiguous import; another human confirmation is not required.
 3. Read `unlinked_get_investor_import` for original row fields and outcome

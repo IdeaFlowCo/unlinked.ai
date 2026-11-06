@@ -160,8 +160,8 @@ tools for each scope; historical entries are immutable.
   does not deliver tool-list-change or notification pushes (`listChanged: false`).
   The notification tool reads the in-app feed on demand.
 - Catalog v6 added the read-only, owner-scoped `unlinked_lookup_contact` to every
-  scope. Current issuance is **catalog v7**: every v6 scope keeps its exact list
-  and gains a twin with the suffix `_and_private_notes` (scope grammar
+  scope. Catalog v7 kept each v6 scope's exact list
+  and added a twin with the suffix `_and_private_notes` (scope grammar
   `owner_network[_and_public][_and_write][_and_private_notes]`) that appends the
   twelve [private people notes & relations](#private-people-notes--relations-catalog-v7)
   tools. That is a **separate, default-on permission** (Jacob's decision on
@@ -170,7 +170,8 @@ tools for each scope; historical entries are immutable.
   A pre-v7 **OAuth connection** keeps exactly its consented scope and needs
   reconnection to consent to `private_notes`. Manual-key permissions
   (connection requests, private notes) are switched in Settings; OAuth apps
-  require actual consent/reconsent for additional permissions.
+  require actual consent/reconsent for additional permissions. Current issuance is
+  catalog v9; its investor tools are described in the [CSV workflow](investor-csv.md).
 
 OpenChat's production integration — stateless JSON-RPC `tools/call` POSTs to
 `/mcp` invoking `unlinked_search_network` / `unlinked_search_everyone` — is
@@ -657,8 +658,9 @@ independent of "Send and manage connection requests".
   private notes about; record new OpenChat people through the shared connector.
   Reads never create entities.
 - **Provenance.** Every write records `author: "agent:<key name>"` (API keys; the
-  default key is "Default key") or `"agent:<connected app>"` (OAuth), `source:
-  "direct-key"` and `assertion` `stated` (default) or `inferred`. Unlinked and
+  default key is "Default key") or `"agent:<connected app>"` (OAuth), `source`
+  `direct-key` for direct grants or `connector` for the shared connector, and
+  `assertion` `stated` (default) or `inferred`. Unlinked and
   OpenChat label each agent-written note and relation with it.
 - **Results** never include raw overlay refs: entity ends carry `profileId`,
   `linkedinRefHash` (+ `connectionId` when the owner imported them) or
@@ -670,8 +672,8 @@ independent of "Send and manage connection requests".
 | MCP tool (`unlinked_*`) | HTTP route (`/api/agent/v1/…`) | Fields | Shared connector equivalent (`openchat__…`) |
 |---|---|---|---|
 | `unlinked_get_person_private` | `GET private/person` | `profileId` (profile id, connection id or LinkedIn address) | `oc_get_unlinked_person_private` |
-| `unlinked_get_private_thing` | `GET private/thing` | `thingId` | `oc_get_private_thing` |
-| `unlinked_list_private_things` | `GET private/things` | `query?`, `kind?` | `oc_list_private_things` |
+| `unlinked_get_private_thing` | `GET private/thing` | `thingId`, `after?`, `limit?` | `oc_get_private_thing` |
+| `unlinked_list_private_things` | `GET private/things` | `query?`, `kind?`, `after?`, `limit?` | `oc_list_private_things` |
 | `unlinked_search_private` | `GET private/search` | `query?`, `relationType?`, `kind?`, `limit?` (one of the first three) | `oc_search_private` (also covers `oc_list_private_links` with a query) |
 | `unlinked_get_neighbourhood` | `GET private/neighbourhood` | `subjectKind`, `subjectId`, `depth?` (1–2) | `oc_get_neighbourhood` |
 | `unlinked_save_private_thing` | `POST private/things` | `kind`, `name`, `createNew?`, `clientRequestId?` | `oc_save_private_thing` |
@@ -686,6 +688,7 @@ Not on the direct key: `oc_get_person_private` / `oc_set_person_private` /
 `oc_list_catch_up` (OpenChat people and their catch-up cadence) — use the shared
 connector. Agents can switch between the two surfaces by dropping the
 `openchat__oc_` prefix for `unlinked_` and using `subjectKind: "unlinked"`.
+Paged private-thing enumeration does not accept `query`; use private search instead.
 
 **Three separate things.** Messaging = OpenChat, through the shared Ideaflow
 connector (`https://id.ideaflow.app/mcp`) with the OpenChat permission; it is not
@@ -699,7 +702,7 @@ for this.
 
 ## Shared connector delegation
 
-The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` on that host). The gateway forwards authorized calls to `POST /api/connector/mcp` with a dedicated `IDEAFLOW_CONNECTOR_SECRET` HS256 assertion, never a personal API key. Assertions bind the exact UTF-8 JSON body hash, `https://www.unlinked.ai/mcp` audience, Ideaflow issuer/subject, consented `unlinked:read` and optional `unlinked:write`, unique jti, and at most 60 seconds. Invalid/replayed assertions fail before account lookup. No account or linking is created by a call. The existing account tool service and live owner authorization are reused; write permission exposes only existing connection actions, never messaging or raw archives. Gateway disconnect revokes future assertions; in-flight authorized operations can finish. Deploy the per-service secret in the runtime env with the release; absence keeps the internal endpoint disabled.
+The public shared endpoint is `https://id.ideaflow.app/mcp` (setup at `/agents` on that host). The gateway forwards authorized calls to `POST /api/connector/mcp` with a dedicated `IDEAFLOW_CONNECTOR_SECRET` HS256 assertion, never a personal API key. Assertions bind the exact UTF-8 JSON body hash, `https://www.unlinked.ai/mcp` audience, Ideaflow issuer/subject, consented `unlinked:read` and optional `unlinked:write` and `unlinked:private_notes`, unique jti, and at most 60 seconds. Invalid/replayed assertions fail before account lookup. No account or linking is created by a call. The existing account tool service and live owner authorization are reused; write permission exposes only existing connection actions, never messaging or raw archives. Gateway disconnect revokes future assertions; in-flight authorized operations can finish. Deploy the per-service secret in the runtime env with the release; absence keeps the internal endpoint disabled.
 
 
 ### Named manual keys
