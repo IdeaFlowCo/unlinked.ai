@@ -131,6 +131,8 @@ export function createMemberAwarePhotoStore({ operator, members, readOwnerAsset,
       const entry = memberEntry(id)
       if (!entry) return operator.read(id)
       const bytes = await readOwnerAsset(entry.owner, entry.sha256)
+      // Gone (the import or account was deleted since the last index build): no photo.
+      if (bytes === null || bytes === undefined) return null
       if (!Buffer.isBuffer(bytes) || bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256 || sniffImageType(bytes) !== entry.type) throw new Error('profile_photo_blob_invalid')
       return { bytes, type: entry.type, sha256: entry.sha256 }
     },

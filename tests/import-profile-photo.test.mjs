@@ -97,3 +97,28 @@ test('the public index hands the server each account’s newest photo on its res
   assert.deepEqual({ ...entry, owner: { ...entry.owner } }, { owner, sha256: sha(JPEG), type: 'image/jpeg', bytes: JPEG.length })
   assert.doesNotMatch(JSON.stringify(snapshot), /bound-owner|ownPhoto/)
 })
+
+test('a messy Rich_Media.csv never degrades the import: bad bytes, multiline captions and size are all contained', async () => {
+  const photoRow = `"You uploaded a profile photo on March 3, 2024 at 9:15 AM (GMT)",,${link(2147483647, 'new')}`
+  // Non-UTF-8 caption anywhere in the file: skipped, not failed.
+  const badBytes = Buffer.concat([Buffer.from(`Date/Time,Media Description,Media Link\n${photoRow}\n"You uploaded a feed photo on May 1, 2024 at 1:00 PM (GMT)","`), Buffer.from([0xff, 0xfe]), Buffer.from('",x\n')])
+  const [bad] = parseArchive(badBytes, 'Rich_Media.csv').sources
+  assert.equal(bad.skipped, true); assert.equal(bad.error, undefined); assert.equal(bad.photoSkipped, 'invalid_utf8')
+  // Multiline and malformed caption rows: the photo row is kept, nothing counts as rejected.
+  const messy = `Date/Time,Media Description,Media Link\n"You uploaded a feed photo on May 1, 2024 at 1:00 PM (GMT)","line one\nline two, with commas",x\nbroken,row\n${photoRow}\n`
+  const [ok] = parseArchive(Buffer.from(messy), 'Rich_Media.csv').sources
+  assert.equal(ok.accepted.length, 1); assert.deepEqual(ok.rejected, []); assert.equal(ok.error, undefined)
+  // A huge Rich_Media.csv has its own row budget: Connections.csv after it still parses.
+  const zip = new JSZip()
+  zip.file('Rich_Media.csv', 'Date/Time,Media Description,Media Link\n' + '"You uploaded a feed photo on May 1, 2024 at 1:00 PM (GMT)",x,y\n'.repeat(99995))
+  zip.file('Connections.csv', 'First Name,Last Name,URL\nAda,Lovelace,https://www.linkedin.com/in/ada\n')
+  const parsed = parseArchive(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), 'export.zip')
+  assert.equal(parsed.sources.find(source => source.category === 'connections').accepted.length, 1)
+})
+
+test('a member photo whose asset is gone reads as no photo, not an error', async () => {
+  const id = 'member-signup-' + 'f'.repeat(64)
+  const store = createMemberAwarePhotoStore({ operator: { refresh: async () => {}, urlFor: () => null, read: async () => null },
+    members: () => new Map([[id, { owner: { ownerId: 'o', userId: 'u' }, sha256: sha(JPEG), type: 'image/jpeg', bytes: JPEG.length }]]), readOwnerAsset: async () => null })
+  assert.equal(await store.read(id), null)
+})

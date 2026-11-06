@@ -357,7 +357,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     signal?.throwIfAborted()
     const age = kept ? now() - kept.at : Infinity
     if (age < freshMs) return kept.value
-    if (!work) { const started = generation; const current = build().then(value=>{if(started===generation)kept=value?{value,at:now()}:null;return value},error=>{if(started===generation)kept=null;throw error}).finally(()=>{if(work===current)work=null}); work = current }
+    if (!work) { const started = generation; const current = build().then(value=>{if(started===generation)kept=value?{value,at:now()}:null;return value},error=>{if(started===generation){kept=null;if(typeof onMemberPhotos==='function')onMemberPhotos(new Map())}throw error}).finally(()=>{if(work===current)work=null}); work = current }
     if (age < staleMs) { work.catch(() => {}); return kept.value }
     const value=await work;signal?.throwIfAborted();return value
   }

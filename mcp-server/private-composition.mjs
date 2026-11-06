@@ -695,7 +695,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       // Members' own photos from their exports (owner-private assets) win for
       // their own profile; the operator set covers everyone else.
       profilePhotos: createMemberAwarePhotoStore({ operator: createProfilePhotoStore({ directory: join(assetRoot, PHOTO_DIRECTORY) }),
-        members: () => memberPhotos, readOwnerAsset: async (owner, sha256) => (await getBackend(owner)).readAsset(sha256) }),
+        members: () => memberPhotos,
+        // An asset deleted since the last index build reads as no photo (404), not an error.
+        readOwnerAsset: async (owner, sha256) => (await getBackend(owner)).readAsset(sha256).catch(error => { if (error?.message === 'private_observation_recovery_unavailable') return null; throw error }) }),
       memberInvitations,
       memberConnections,
       notifications,

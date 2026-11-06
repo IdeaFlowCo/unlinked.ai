@@ -171,7 +171,16 @@ function* csvRecords(text) {
   yield { text: text.slice(recordStart), newline: newline ?? '\n' }
 }
 
+// The profile-photo file is optional garnish: it has its own row budget (a
+// long Rich_Media.csv never starves Connections.csv) and every outcome other
+// than an accepted photo row is "skipped", never failed, rejected or partial.
 export function parseSource(source, budget = { remaining: LIMITS.rows }, limitError = 'csv_row_limit') {
+  if (categoryKey(source.path.split('/').pop().toLowerCase(), { direct: source.direct }) !== 'rich_media.csv') return parseSourceRows(source, budget, limitError)
+  const base = parseSourceRows(source, { remaining: LIMITS.rows }, 'csv_row_limit')
+  if (!base.error && base.accepted.length) return { ...base, rejected: [] }
+  return { ...base, accepted: [], rejected: [], skipped: true, photoSkipped: base.error ?? 'no_profile_photo_rows', error: undefined }
+}
+function parseSourceRows(source, budget, limitError) {
   const filename = source.path.split('/').pop().toLowerCase()
   // A CSV uploaded on its own is often renamed ("Connections (1).csv",
   // "Connections_sans_email.csv"); ZIP entries keep LinkedIn's names, plus
@@ -228,11 +237,6 @@ export function parseSource(source, budget = { remaining: LIMITS.rows }, limitEr
   }
   if (!headers && !base.error) base.error = 'csv_header_not_found'
   if (base.error) { base.accepted = []; base.rejected = [] }
-  // A missing or unreadable photo never degrades the import: the file is
-  // skipped with a reason instead of counted as failed.
-  if (spec.category === 'profile_photo' && (base.error || !base.accepted.length)) {
-    return { ...base, accepted: [], rejected: [], skipped: true, photoSkipped: base.error ?? 'no_profile_photo_rows', error: undefined }
-  }
   return base
 }
 
