@@ -178,7 +178,7 @@ export function createNoosOwnerBackend({ baseUrl, accessToken, ownerId, fetchImp
 
 // Agent grants never get the operational token or direct resource/asset access.
 // Every call reads the live publication: retained rows cannot bypass tombstones.
-export function createScopedImportReader({ readResource, readAsset, grant, maxAssertions = PRIVATE_PUBLICATION_ASSERTION_LIMIT, limitError = 'private_publication_support_limit' }) {
+export function createScopedImportReader({ readResource, readAsset, grant, maxAssertions = PRIVATE_PUBLICATION_ASSERTION_LIMIT, limitError = 'private_publication_support_limit', rowCache = null }) {
   if (!grant || !grant.ownerId || !Array.isArray(grant.importIds) || grant.importIds.length > 32) throw new Error('explicit_import_grant_required')
   if (!Number.isSafeInteger(maxAssertions) || maxAssertions < 0 || maxAssertions > PRIVATE_PUBLICATION_ASSERTION_LIMIT) throw new Error('private_publication_support_limit')
   const ownerId = grant.ownerId, allowed = new Set(grant.importIds)
@@ -187,42 +187,58 @@ export function createScopedImportReader({ readResource, readAsset, grant, maxAs
     if (!allowed.has(id)) throw new Error('private_import_not_found')
     const resource = await readResource('import', id)
     if (!isLiveImport(resource, id, ownerId)) throw new Error('private_import_not_found')
-    const rows = []
-    let ids = resource.payload.assertionIds
-    if (Array.isArray(resource.payload.assertionChunks)) {
-      if (new Set(resource.payload.assertionChunks).size !== resource.payload.assertionChunks.length || resource.payload.assertionChunks.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || resource.payload.assertionChunks.length > Math.ceil(PRIVATE_PUBLICATION_ASSERTION_LIMIT / CHUNK_ROWS) + Number(resource.payload.backgroundVersion === 'profile-first-v1')) throw new Error('private_publication_support_limit')
-      ids = []
-      for (const [ordinal, chunkId] of resource.payload.assertionChunks.entries()) {
+    // Chunk manifest + every row, all owner-checked. Takes its own signal so a
+    // shared cache fill is not bound to whichever caller started it.
+    const readVerified = async signal => {
+      const rows = []
+      let ids = resource.payload.assertionIds
+      if (Array.isArray(resource.payload.assertionChunks)) {
+        if (new Set(resource.payload.assertionChunks).size !== resource.payload.assertionChunks.length || resource.payload.assertionChunks.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || resource.payload.assertionChunks.length > Math.ceil(PRIVATE_PUBLICATION_ASSERTION_LIMIT / CHUNK_ROWS) + Number(resource.payload.backgroundVersion === 'profile-first-v1')) throw new Error('private_publication_support_limit')
+        ids = []
+        for (const [ordinal, chunkId] of resource.payload.assertionChunks.entries()) {
+          signal?.throwIfAborted()
+          const chunk = await readResource('import', chunkId)
+          if (!chunk || chunk.deleted || chunk.sourceOwnerId !== ownerId || chunk.payload?.kind !== 'private_observation_chunk' || chunk.payload.ownerId !== ownerId || chunk.payload.importId !== id || chunk.payload.ordinal !== ordinal || !Array.isArray(chunk.payload.assertionIds) || chunk.payload.assertionIds.length > CHUNK_ROWS || chunk.payload.indexedCount !== chunk.payload.assertionIds.length) throw new Error('private_publication_incomplete')
+          ids.push(...chunk.payload.assertionIds)
+        }
+      }
+      const counts = resource.payload.counts
+      if (!counts || !['accepted', 'indexed', 'rejected', 'skippedFiles', 'failedFiles'].every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0) ||
+          !Array.isArray(ids) || ids.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || new Set(ids).size !== ids.length || counts.accepted !== ids.length || counts.indexed !== ids.length) throw new Error('private_publication_incomplete')
+      const readRow = async assertionId => {
         signal?.throwIfAborted()
-        const chunk = await readResource('import', chunkId)
-        if (!chunk || chunk.deleted || chunk.sourceOwnerId !== ownerId || chunk.payload?.kind !== 'private_observation_chunk' || chunk.payload.ownerId !== ownerId || chunk.payload.importId !== id || chunk.payload.ordinal !== ordinal || !Array.isArray(chunk.payload.assertionIds) || chunk.payload.assertionIds.length > CHUNK_ROWS || chunk.payload.indexedCount !== chunk.payload.assertionIds.length) throw new Error('private_publication_incomplete')
-        ids.push(...chunk.payload.assertionIds)
+        const assertion = await readResource('assertion', assertionId)
+        if (!assertion || assertion.deleted || assertion.sourceOwnerId !== ownerId || assertion.payload?.id !== assertionId || assertion.payload.ownerId !== ownerId || assertion.payload.importId !== id) throw new Error('private_publication_incomplete')
+        let row = assertion.payload
+        if (row.fullObservationAsset) {
+          if (typeof readAsset !== 'function') throw new Error('private_observation_recovery_unavailable')
+          row = JSON.parse((await readAsset(row.fullObservationAsset)).toString('utf8'))
+          if (!row || row.id !== assertionId || row.ownerId !== ownerId || row.importId !== id || row.sourceId !== assertion.payload.sourceId) throw new Error('private_publication_incomplete')
+        }
+        signal?.throwIfAborted()
+        return row
       }
-    }
-    const counts = resource.payload.counts
-    if (!counts || !['accepted', 'indexed', 'rejected', 'skippedFiles', 'failedFiles'].every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0) ||
-        !Array.isArray(ids) || ids.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || new Set(ids).size !== ids.length || counts.accepted !== ids.length || counts.indexed !== ids.length) throw new Error('private_publication_incomplete')
-    if (ids.length > maxAssertions) throw new Error(limitError)
-    const readRow = async assertionId => {
-      signal?.throwIfAborted()
-      const assertion = await readResource('assertion', assertionId)
-      if (!assertion || assertion.deleted || assertion.sourceOwnerId !== ownerId || assertion.payload?.id !== assertionId || assertion.payload.ownerId !== ownerId || assertion.payload.importId !== id) throw new Error('private_publication_incomplete')
-      let row = assertion.payload
-      if (row.fullObservationAsset) {
-        if (typeof readAsset !== 'function') throw new Error('private_observation_recovery_unavailable')
-        row = JSON.parse((await readAsset(row.fullObservationAsset)).toString('utf8'))
-        if (!row || row.id !== assertionId || row.ownerId !== ownerId || row.importId !== id || row.sourceId !== assertion.payload.sourceId) throw new Error('private_publication_incomplete')
+      // Eight in-flight immutable observations bound memory/graph pressure while
+      // avoiding one full transport round trip per connection. Preserve manifest
+      // order and fail the whole read if any row or asset fails its owner checks.
+      for (let start = 0; start < ids.length; start += 8) {
+        signal?.throwIfAborted()
+        rows.push(...await Promise.all(ids.slice(start, start + 8).map(readRow)))
       }
-      signal?.throwIfAborted()
-      return row
+      return { ids, rows }
     }
-    // Eight in-flight immutable observations bound memory/graph pressure while
-    // avoiding one full transport round trip per connection. Preserve manifest
-    // order and fail the whole read if any row or asset fails its owner checks.
-    for (let start = 0; start < ids.length; start += 8) {
-      signal?.throwIfAborted()
-      rows.push(...await Promise.all(ids.slice(start, start + 8).map(readRow)))
-    }
+    // Only finished imports are cached: their row set is fixed for the revision.
+    const cacheable = Boolean(rowCache) && resource.payload.status === 'indexed' && Number.isSafeInteger(resource.sourceRevision)
+    const declared = resource.payload.counts?.indexed
+    if (Number.isSafeInteger(declared) && declared > maxAssertions) throw new Error(limitError)
+    // The manifest fingerprint guards the key even if content ever changed
+    // without a revision bump (the operational store bumps it on every put).
+    const version = cacheable ? `${resource.sourceRevision}:${digest(Buffer.from(JSON.stringify([resource.payload.assertionIds ?? null, resource.payload.assertionChunks ?? null, resource.payload.counts ?? null, resource.payload.indexVersion ?? null])))}` : null
+    const verified = cacheable
+      ? rowCache.get(ownerId, id, version) ?? await rowCache.load(ownerId, id, version, readVerified, signal)
+      : await readVerified(signal)
+    if (verified.ids.length > maxAssertions) throw new Error(limitError)
+    const rows = cacheable ? verified.rows.slice() : verified.rows
     // Recheck after row retrieval so a tombstone racing a delayed call wins.
     signal?.throwIfAborted()
     const latest = await readResource('import', id)
