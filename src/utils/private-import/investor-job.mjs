@@ -44,7 +44,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
     const parsed = parseInvestorCsv(bytes, job.mapping)
     return [...parsed.accepted, ...parsed.rejected].sort((a, b) => a.row - b.row)
   }
-  const register = async (backend, ownerId, importId) => {
+  const register = async (backend, ownerId, importId, beforeWrite) => {
     const id = investorCatalogId(ownerId)
     for (let attempt = 0; attempt < 5; attempt++) {
       const resource = await backend.readResource('import', id)
@@ -52,6 +52,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       if (current?.importIds.includes(importId)) return
       if ((current?.importIds.length ?? 0) >= 500) throw fail('invalid_input', 'Private CSV import catalog is full (500 imports).')
       try {
+        await beforeWrite()
         await write(backend, ownerId, { id, kind: `${KIND}_catalog`, ownerId, revision: (current?.revision ?? 0) + 1,
           importIds: [...(current?.importIds ?? []), importId] }, current?.revision ?? null)
         return
@@ -59,7 +60,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
     }
   }
   return {
-    async stage(grant, { csv, mapping, listName, listId }, signal) {
+    async stage(grant, { csv, mapping, listName, listId }, signal, revalidate) {
       signal?.throwIfAborted()
       const bytes = Buffer.from(csv, 'utf8')
       if (bytes.length > INVESTOR_UPLOAD_BYTES) throw fail('invalid_input', 'CSV exceeds 512 KiB; split it into parts and append each part to the same listId.')
@@ -77,8 +78,10 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       if (existing) return summary(await read(backend, grant.ownerId, id))
       // Validate the private graph identity before storing any source.
       await graph.validate(grant, listId)
-      await register(backend, grant.ownerId, id)
-      await backend.adapter.withImport(grant.ownerId, id, store => store.putAsset(parsed.sourceDigest, bytes))
+      const beforeWrite = async () => { signal?.throwIfAborted(); if (revalidate) await revalidate() }
+      await register(backend, grant.ownerId, id, beforeWrite)
+      await backend.adapter.withImport(grant.ownerId, id, async store => { await beforeWrite(); await store.putAsset(parsed.sourceDigest, bytes) })
+      await beforeWrite()
       await write(backend, grant.ownerId, job, null)
       return { ...summary(job), preview: { valid: parsed.accepted.length, rejected: parsed.rejected.length,
         exactReferences: parsed.accepted.filter(row => row.identity.linkedinRefHash).length,

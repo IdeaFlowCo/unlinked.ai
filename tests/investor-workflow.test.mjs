@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { fixture } from './helpers/investor-fixture.mjs'
 import { createAccountToolService, AccountToolError } from '../mcp-server/account-tools.mjs'
+import { createPrivateNotesTools } from '../mcp-server/private-notes-tools.mjs'
 import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION, effectiveAccountGrant } from '../mcp-server/account-grants.mjs'
 import { INVESTOR_TOOLS } from '../mcp-server/investor-tools.mjs'
 import { investorCatalogId, investorReceiptId } from '../src/utils/private-import/investor-job.mjs'
@@ -97,6 +98,23 @@ test('private note chunks preserve Unicode characters at size boundaries', async
   assert.ok(chunks.every(text => text.length <= 4000 && !/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/u.test(text)))
   assert.equal(chunks.map(text => text.replace(/^CSV [^\n]+\npart \d+\n/, '')).join(''), `Comment\n${note}`)
   assert.ok(chunks[1].includes('😀'))
+})
+
+test('staging rechecks revocation after graph validation and before each persistent write', async () => {
+  for (const revokeAt of [1, 2, 3]) {
+    const f = fixture(), owner = grant()
+    let validated = false, checks = 0
+    const options = { ...f.options, identityFor: async value => { validated = true; return f.options.identityFor(value) } }
+    const tools = createPrivateNotesTools(options)
+    await assert.rejects(tools.unlinked_stage_investor_csv(owner, input, undefined, async () => {
+      assert.equal(validated, true)
+      if (++checks === revokeAt) throw new AccountToolError('grant_revoked', 'revoked')
+    }), e => e.code === 'grant_revoked')
+    assert.equal(f.resources.size, revokeAt === 1 ? 0 : 1)
+    assert.equal(f.assets.size, revokeAt === 3 ? 1 : 0)
+    assert.equal([...f.resources.values()].some(value => value.payload.kind === 'investor_csv_v1'), false)
+    assert.equal((await tools.unlinked_stage_investor_csv(owner, input)).status, 'staged')
+  }
 })
 
 test('revocation mid-batch and transient failure retain progress without claiming completion', async () => {
