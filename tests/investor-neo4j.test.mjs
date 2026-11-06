@@ -2,11 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { pathToFileURL } from 'node:url'
 import { fixture } from './helpers/investor-fixture.mjs'
+import { workbook, workbookInput, worksheet, inline } from './helpers/investor-xlsx-fixture.mjs'
 const moduleRoot = process.env.UNLINKED_TEST_NOOS_MODULE_ROOT
 const uri = process.env.NOOS_OPERATIONAL_TEST_URI
 // Opt-in only via Noos scripts/test-operational.mjs, which owns a disposable
 // synthetic DB. No .env or production credentials are loaded by this test.
-test('investor CSV executes through real Neo4j overlay with >500 members and paged connector reads', { skip: !moduleRoot || !uri }, async t => {
+for (const format of ['CSV', 'XLSX']) test(`investor ${format} executes through real Neo4j overlay with >500 members and paged connector reads`, { skip: !moduleRoot || !uri }, async t => {
   assert.match(uri, /^bolt:\/\/127\.0\.0\.1:\d+$/)
   const { default: neo4j } = await import(pathToFileURL(`${moduleRoot}/node_modules/neo4j-driver/lib/index.js`))
   const { OverlayStore } = await import(pathToFileURL(`${moduleRoot}/src/overlay/store.ts`))
@@ -30,9 +31,11 @@ test('investor CSV executes through real Neo4j overlay with >500 members and pag
       return { status: 200, body: result }
     } catch (error) { if (error.status) return { status: error.status, body: { error: error.code } }; throw error }
   } }
-  const f = fixture(overlay), tools = f.tools(), grant = { ownerId: 'real-csv', userId: 'real-csv', agent: 'synthetic' }
+  const f = fixture(overlay), tools = f.tools(), grant = { ownerId: `real-${format}`, userId: `real-${format}`, agent: 'synthetic' }
   const csv = 'Name,Comment\n' + Array.from({ length: 503 }, (_, i) => `Investor ${i},Private comment ${i}`).join('\n')
-  const staged = await tools.unlinked_stage_investor_csv(grant, { csv, mapping: { name: 'Name', notes: ['Comment'] }, listName: '503 synthetic investors' })
+  const input = format === 'CSV' ? { csv, mapping: { name: 'Name', notes: ['Comment'] }, listName: '503 synthetic investors' }
+    : workbookInput(await workbook({ 'xl/worksheets/sheet1.xml': worksheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'Comment')}</row>` + Array.from({ length: 503 }, (_, i) => `<row r="${i + 2}">${inline(`A${i + 2}`, `Investor ${i}`)}${inline(`B${i + 2}`, `Private comment ${i}`)}</row>`).join('')) }))
+  const staged = await tools.unlinked_stage_investor_csv(grant, input)
   let status
   do { status = await tools.unlinked_resume_investor_import(grant, { importId: staged.importId, batchSize: 25 }) } while (status.status === 'processing')
   assert.equal(status.status, 'complete'); assert.equal(status.imported, 503)

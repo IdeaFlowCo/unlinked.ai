@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
+import Papa from 'papaparse'
 import { investorFileInput, parseInvestorFile } from '../src/utils/private-import/investor-file.mjs'
 import { fixture } from './helpers/investor-fixture.mjs'
 import { workbook, workbookInput, worksheet, inline, XMLNS } from './helpers/investor-xlsx-fixture.mjs'
@@ -99,6 +100,34 @@ test('inspection headers map to staged CSV and XLSX rows and spreadsheet escapes
   assert.deepEqual(headers, ['Name', 'Comment'])
   const result = parse(bytes, { mapping: { name: headers[0], notes: [headers[1]] } })
   assert.deepEqual(result.accepted.map(row => row.notes[0].text), ['Shared\rline _x0041_', 'Inline\rline _x0041_'])
+})
+
+test('shared-string and sparse-table amplification is rejected before serialization for inspection and staging', async t => {
+  const original = await workbook(), zip = await (await import('jszip')).default.loadAsync(original)
+  const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string')
+  const repeated = await workbook({
+    'xl/_rels/workbook.xml.rels': rels.replace('</Relationships>', '<Relationship Id="strings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>'),
+    'xl/sharedStrings.xml': `<sst xmlns="${XMLNS}"><si><t>${'🙂"'.repeat(6000)}</t></si></sst>`,
+    'xl/worksheets/sheet1.xml': worksheet(`<row r="1">${inline('A1', 'Name')}</row>` + Array.from({ length: 300 }, (_, i) => `<row r="${i + 2}"><c r="A${i + 2}" t="s"><v>0</v></c></row>`).join('')),
+  })
+  const columnName = i => i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + i % 26)
+  const header = Array.from({ length: 256 }, (_, i) => inline(`${columnName(i)}1`, i ? `Column ${i}` : 'Name')).join('')
+  const sparse = await workbook({ 'xl/worksheets/sheet1.xml': worksheet(`<row r="1">${header}</row>` + Array.from({ length: 900 }, (_, i) => `<row r="${i + 2}">${inline(`A${i + 2}`, 'Person')}</row>`).join('')) })
+  const unparse = t.mock.method(Papa, 'unparse', () => { throw Error('serialization_before_bound') })
+  for (const bytes of [repeated, sparse]) {
+    assert.ok(bytes.length < 512 * 1024)
+    for (const inspectOnly of [false, true]) assert.throws(() => parse(bytes, { inspectOnly, mapping: { name: 'Name' } }), /xlsx_table_size_limit/)
+  }
+  assert.equal(unparse.mock.callCount(), 0)
+})
+
+test('escaped Unicode pairs and string cells remain exact; malformed escaped surrogates are refused', async () => {
+  const bytes = await workbook({ 'xl/worksheets/sheet1.xml': worksheet(`<row r="1">${inline('A1', 'Name')}${inline('B1', 'Comment')}</row><row r="2">${inline('A2', 'Person')}<c r="B2" t="str"><v>_xD83D__xDE42_ _x005F_x0041_</v></c></row>`) })
+  assert.equal(parse(bytes).accepted[0].notes[0].text, '🙂 _x0041_')
+  for (const text of ['_xD800_', '_xDC00_', '_xD800_X']) {
+    const bad = await workbook({ 'xl/worksheets/sheet1.xml': worksheet(`<row r="1">${inline('A1', 'Name')}</row><row r="2">${inline('A2', text)}</row>`) })
+    assert.throws(() => parse(bad, { mapping: { name: 'Name' } }), /xlsx_invalid_text_escape/)
+  }
 })
 
 test('unsupported or malicious workbook inputs fail before any durable write', async () => {

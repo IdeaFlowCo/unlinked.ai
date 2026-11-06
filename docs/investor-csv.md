@@ -87,7 +87,10 @@ The format is deliberately bounded: .xlsx only (not legacy .xls, .xlsm, encrypte
 workbooks, ZIP64 or macro/binary parts), UTF-8 XML, up to 100 sheets, 200,000 cells,
 100,000 shared strings, 256 columns and physical rows up to 100,001. Existing ZIP
 bounds are 8 MiB per expanded part and 40 MiB total; XML is capped at depth 32 and
-1,000,000 elements per part. DTD/entity declarations and external workbook links
+1,000,000 elements per part. A conservative 8 MiB serialized-table budget counts
+every shared-string use, UTF-8 bytes, quote escaping and row padding before
+allocation; the 200,000-cell budget also counts sparse-cell padding. Inspection
+and staging enforce the same bounds. DTD/entity declarations and external workbook links
 are rejected. No external resources are fetched. Selected-sheet formulas and
 error cells fail explicitly; provide a values-only copy or CSV. Rich text and
 shared/inline strings are read as plain text; number/date values retain stored

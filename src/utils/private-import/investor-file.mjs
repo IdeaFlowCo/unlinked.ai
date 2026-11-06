@@ -15,7 +15,37 @@ const invalid = code => { throw new Error(code) }
 const attr = (node, name) => Object.values(node.attributes).find(a => a.local === name && !a.uri)?.value
 const relId = node => Object.values(node.attributes).find(a => a.local === 'id' && DOCREL.has(a.uri))?.value
 const decode = bytes => { try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { invalid('file_invalid_utf8') } }
-const decodeSpreadsheetText = value => value.replace(/_x([0-9a-fA-F]{4})_/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+const decodeSpreadsheetText = value => {
+  const decoded = value.replace(/_x([0-9a-fA-F]{4})_/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+  // Buffer's UTF-8 conversion would silently replace unpaired escaped surrogates.
+  for (let i = 0; i < decoded.length; i++) {
+    const code = decoded.charCodeAt(i)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = decoded.charCodeAt(++i)
+      if (!(next >= 0xdc00 && next <= 0xdfff)) invalid('xlsx_invalid_text_escape')
+    } else if (code >= 0xdc00 && code <= 0xdfff) invalid('xlsx_invalid_text_escape')
+  }
+  return decoded
+}
+
+// Charge an upper bound for CSV serialization BEFORE retaining resolved cells
+// or adding padding. Repeated shared-string references count on every use.
+function tableBudget() {
+  let bytes = 0, cells = 0
+  const add = (size, count = 0) => {
+    bytes += size; cells += count
+    if (bytes > INVESTOR_CSV_LIMITS.bytes || cells > XLSX_LIMITS.cells) invalid('xlsx_table_size_limit')
+  }
+  return {
+    row: () => add(2),
+    empty: count => add(count * 3, count),
+    value(value) {
+      let quotes = 0
+      for (const char of value) if (char === '"') quotes++
+      add(Buffer.byteLength(value, 'utf8') + quotes + 3, 1)
+    },
+  }
+}
 
 // No DOM, entity loading, network access, formula engine, or filesystem extraction.
 // The ZIP reader checks declared sizes before inflation and caps actual output.
@@ -84,7 +114,7 @@ function stringsFor(book) {
   return strings
 }
 function sheetRows(book, selected) {
-  const strings = stringsFor(book), rows = []
+  const strings = stringsFor(book), rows = [], budget = tableBudget()
   let row = null, cell = null, count = 0, previous = 0, previousColumn = -1
   xml(book.files.get(selected.path), 'worksheet', MAIN, {
     open(node, stack) {
@@ -92,6 +122,7 @@ function sheetRows(book, selected) {
       if (node.local === 'row' && stack.at(-2)?.local === 'sheetData') {
         const number = attr(node, 'r') === undefined ? previous + 1 : Number(attr(node, 'r'))
         if (row || !Number.isSafeInteger(number) || number <= previous || number > INVESTOR_CSV_LIMITS.rows + 1) invalid('xlsx_row_limit_or_order')
+        budget.row()
         row = { number, values: [] }; previous = number; previousColumn = -1
       } else if (node.local === 'c' && row && stack.at(-2)?.local === 'row') {
         if (cell || ++count > XLSX_LIMITS.cells) invalid('xlsx_cell_limit')
@@ -119,8 +150,11 @@ function sheetRows(book, selected) {
           if (!/^(0|[1-9][0-9]*)$/.test(value) || Number(value) >= strings.length) invalid('xlsx_invalid_string_index')
           value = strings[Number(value)]
         } else if (cell.type === 'inlineStr') value = decodeSpreadsheetText(cell.inline)
+        else if (cell.type === 'str') value = decodeSpreadsheetText(value)
         else if (cell.type === 'b') { if (!['0', '1'].includes(value)) invalid('xlsx_invalid_boolean'); value = value === '1' ? 'TRUE' : 'FALSE' }
         else if (!['n', 'str', 'd'].includes(cell.type)) invalid('xlsx_cell_type_unsupported')
+        budget.empty(cell.column - row.values.length)
+        budget.value(value)
         while (row.values.length < cell.column) row.values.push('')
         row.values.push(value); cell = null
       } else if (node.local === 'row' && row) {
@@ -132,7 +166,7 @@ function sheetRows(book, selected) {
       }
     },
   })
-  return rows
+  return { rows, budget }
 }
 
 export function investorFileInput({ csv, fileBase64, filename, sheet, headerRow = 1 }) {
@@ -168,11 +202,15 @@ export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false 
   if (source.sheet === undefined) { if (inspectOnly) return inventory; invalid('xlsx_sheet_selection_required') }
   const selected = book.sheets.find(s => s.name === source.sheet)
   if (!selected) invalid('xlsx_sheet_not_found')
-  const rows = sheetRows(book, selected), headerIndex = rows.findIndex(row => row.number === source.headerRow)
+  const { rows, budget } = sheetRows(book, selected), headerIndex = rows.findIndex(row => row.number === source.headerRow)
   if (headerIndex < 0) invalid('xlsx_header_row_missing')
   const table = rows.slice(headerIndex), width = table[0].values.length
   if (Buffer.byteLength(JSON.stringify(table[0].values)) > 60000) invalid('xlsx_header_size_limit')
-  for (const row of table) while (row.values.length < width) row.values.push('')
+  for (const row of table) {
+    const padding = Math.max(0, width - row.values.length)
+    budget.empty(padding)
+    while (row.values.length < width) row.values.push('')
+  }
   if (inspectOnly) return { ...inventory, selectedSheet: selected, headerRow: source.headerRow, headers: normalizeInvestorHeaders(table[0].values), dataRows: table.length - 1 }
   const csv = Papa.unparse(table.map(row => row.values))
   if (Buffer.byteLength(csv) > INVESTOR_CSV_LIMITS.bytes) invalid('xlsx_table_size_limit')
