@@ -19,17 +19,18 @@ function world(count) {
     const job = { id, ownerId: owner.ownerId, archiveSha256: sha('a' + n), consent: PUBLIC_UPLOAD_CONSENT, status: 'indexed', counts: { accepted: rows.length, indexed: rows.length, rejected: 0, skippedFiles: 0, failedFiles: 0 }, assertionIds: rows.map(row => row.id) }
     imports.set(id, { job, rows, revision: 4 }); items.push({ id, owner, revision: 4 })
   }
-  let clock = 0, importReads = 0, decisions = []
+  let clock = 0, importReads = 0, decisions = [], privacy = [], gate = null
   const backend = owner => ({ readResource: async (type, key) => {
     if (type === 'import' && imports.has(key)) { const entry = imports.get(key); return { sourceId: key, sourceOwnerId: owner.ownerId, sourceRevision: entry.revision, payload: entry.job } }
     const row = [...imports.values()].flatMap(entry => entry.rows).find(value => value.id === key)
     return row && row.ownerId === owner.ownerId ? { sourceOwnerId: owner.ownerId, payload: row } : null
   } })
   const read = createMemberPublicIndex({ includeDetails: true, freshMs: 1000, now: () => clock,
-    readLegacy: async () => legacy, discover: async () => items.map(item => ({ ...item })), getBackend: async owner => backend(owner),
-    readDecisions: async () => decisions,
+    readLegacy: async () => legacy, discover: async () => { if (gate) await gate.promise; return items.map(item => ({ ...item })) }, getBackend: async owner => backend(owner),
+    readDecisions: async () => decisions, readConnectionPrivacy: async () => privacy,
     publicPeople: { read: async dataset => { if (ENRICHMENT_DATASETS.includes(dataset)) return null; importReads++; const entry = imports.get(dataset.slice('public-import-'.length)); return entry ? projectPublicMemberImport({ job: entry.job, assertions: entry.rows }) : null }, publish: async () => {} } })
-  return { read, imports, items, tick: () => { clock += 2000 }, importReads: () => importReads, setDecisions: value => { decisions = value } }
+  return { read, imports, items, tick: () => { clock += 2000 }, importReads: () => importReads, setDecisions: value => { decisions = value }, setPrivacy: value => { privacy = value },
+    hold: () => { let release; gate = { promise: new Promise(resolve => { release = resolve }) }; return () => { const open = gate; gate = null; release() } } }
 }
 
 test('an unchanged source is reused after the first fingerprinted rebuild; changes still rebuild', async () => {
@@ -74,4 +75,30 @@ test('a source change detected by the fingerprint read fails like the build, nev
   w.imports.get(w.items[0].id).revision = 9
   w.tick()
   await assert.rejects(w.read(), /public_member_source_changed/)
+})
+
+test('a connection-privacy choice changes the fingerprint and rebuilds', async () => {
+  const w = world(2)
+  await w.read(); w.tick(); await w.read(); w.tick(); const reused = await w.read()
+  const reads = w.importReads()
+  w.setPrivacy([{ owner: w.items[0].owner, audience: 'members', scope: 'all' }])
+  w.tick(); const rebuilt = await w.read()
+  assert.equal(w.importReads(), reads + 2, 'a privacy change rebuilds')
+  assert.notEqual(rebuilt, reused)
+  assert.notEqual(rebuilt.revision, reused.revision, 'the choice is part of the revision')
+})
+
+test('invalidate during a fingerprint read is never answered by the old snapshot', async () => {
+  const w = world(2)
+  await w.read(); w.tick(); await w.read(); w.tick()
+  const release = w.hold()
+  const due = w.read()                       // fingerprinting, waiting on discover
+  await new Promise(resolve => setImmediate(resolve))
+  w.read.invalidate()
+  release()
+  await due.catch(() => {})
+  const reads = w.importReads()
+  const after = await w.read()
+  assert.equal(w.importReads(), reads + 2, 'after invalidate the next read builds in full')
+  assert.ok(after)
 })
