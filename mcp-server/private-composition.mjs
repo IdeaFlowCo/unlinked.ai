@@ -26,6 +26,7 @@ import { createNeo4jCompanyFactsStore } from './company-facts-store.mjs'
 import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
 import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
+import { createNeo4jConnectionPrivacyStore } from './connection-privacy-store.mjs'
 import { createIdeaflowProfileClient, createIdeaflowProfileProvider, createNeo4jIdeaflowProfileChoices } from './ideaflow-profile.mjs'
 import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
 import { createNeo4jProfileHandleStore, createProfileHandles } from './profile-handles.mjs'
@@ -95,7 +96,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createIdeaflowProfileChoiceStore: createNeo4jIdeaflowProfileChoices, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createConnectionPrivacyStore: createNeo4jConnectionPrivacyStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createIdeaflowProfileChoiceStore: createNeo4jIdeaflowProfileChoices, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -208,6 +209,9 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // The signed-in home's display choices (docs/member-home.md); UI preferences only.
     const homePreferences = typeof dependencies.createHomePreferenceStore === 'function' ? dependencies.createHomePreferenceStore(driver, 'neo4j') : undefined
     await homePreferences?.initialize()
+    // Members' choice of who can see their connections (docs/connection-privacy.md).
+    const connectionPrivacy = typeof dependencies.createConnectionPrivacyStore === 'function' ? dependencies.createConnectionPrivacyStore(driver, 'neo4j') : undefined
+    await connectionPrivacy?.initialize()
     // Members' choice to show or hide their Ideaflow interests and asks (docs/ideaflow-profile.md).
     const ideaflowProfileChoices = process.env.UNLINKED_IDEAFLOW_PROFILES !== 'off' && typeof dependencies.createIdeaflowProfileChoiceStore === 'function' ? dependencies.createIdeaflowProfileChoiceStore(driver, 'neo4j') : undefined
     await ideaflowProfileChoices?.initialize()
@@ -507,7 +511,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // sharing one LinkedIn address fold into one page; the copy already holding
     // the person's readable address survives (docs/profile-handles.md).
     const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true,
-      preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list,
+      preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list, readConnectionPrivacy: connectionPrivacy ? () => connectionPrivacy.list() : undefined,
       includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       readLegacy: async () => {
         const snapshot = await publicPeople.read('recovered-legacy-public-v1')
@@ -588,6 +592,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // Pre-build the shared index and keep it young, so neither the first
     // request after a restart nor the first after an idle gap pays the
     // rebuild in-band. The interval stays well inside the stale window.
+    // A member's new connection-privacy choice applies on the next read, not
+    // after the index freshness window (docs/connection-privacy.md).
+    if (connectionPrivacy && typeof readPublishedSnapshot?.invalidate === 'function') {
+      const { set, removeOwner } = connectionPrivacy
+      connectionPrivacy.set = async (...args) => { try { return await set(...args) } finally { readPublishedSnapshot.invalidate() } }
+      connectionPrivacy.removeOwner = async (...args) => { try { return await removeOwner(...args) } finally { readPublishedSnapshot.invalidate() } }
+    }
     if (readPublishedSnapshot && publicIndexFreshMs > 0 && publicIndexStaleMs > 0) {
       indexWarmKeeper = createIndexWarmKeeper({ read: readPublishedSnapshot, intervalMs: Math.max(publicIndexFreshMs, Math.min(45000, Math.floor(publicIndexStaleMs / 2))) })
       indexWarmKeeper.start()
@@ -658,6 +669,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       notifications,
       contactCards,
       homePreferences,
+      connectionPrivacy,
       profileSocialLinks,
       profileHandles,
       contactSlugs,

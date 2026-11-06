@@ -340,11 +340,14 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     },
     async unlinked_get_profile(grant, { id, connectionsCursor }, signal) {
       const { reader, captured } = publicReader(50)
+      // The member's own agent sees connections as the member would (docs/connection-privacy.md).
+      const mine = typeof ownProfileId === 'function' ? await ownProfileId(owner(grant)).catch(() => null) : null
+      const viewer = { signedIn: true, ...(mine ? { id: mine } : {}) }
       let result
       try {
-        result = await reader.profile({ id: profileHandles?.resolve(id)?.profileId ?? id, cursor: connectionsCursor, signal })
+        result = await reader.profile({ id: profileHandles?.resolve(id)?.profileId ?? id, cursor: connectionsCursor, signal, viewer })
         // A merged profile answers with the profile it was merged into.
-        if (result?.moved) result = { ...(await reader.profile({ id: result.moved, signal })), movedFrom: id }
+        if (result?.moved) result = { ...(await reader.profile({ id: result.moved, signal, viewer })), movedFrom: id }
       } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured) }
       // A handle names only a member's profile.
       if (!result?.profile || (profileHandles?.resolve(id) && !handleOf(result.profile))) throw new AccountToolError('not_found', 'No published public profile has that id.')

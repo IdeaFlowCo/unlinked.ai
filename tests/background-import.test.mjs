@@ -13,6 +13,7 @@ import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-impo
 import { COMBINED_UPLOAD_CONSENT } from '../src/utils/private-import/consent.mjs'
 import { deleteAccountData } from '../src/utils/private-import/account-data.mjs'
 import { coordinatorFor } from '../mcp-server/owner-coordination.mjs'
+import { createMemoryConnectionPrivacyStore } from '../mcp-server/connection-privacy-store.mjs'
 
 // Real private filesystem persistence exercises the production adapter's batch,
 // replay and asset paths. This is not a substitute for the Noos graph CI job.
@@ -576,4 +577,61 @@ test('several files in one upload and a later full export stack into one network
   // The full original is retained privately, byte for byte.
   const backend = await getBackend(owner), fullJob = jobs.find(row => row.payload.filename.endsWith('.zip'))
   assert.deepEqual(await backend.readAsset(fullJob.payload.archiveSha256), full)
+})
+
+test('the import form saves who can see your connections before staging; Settings changes it; bad values are refused', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listImportIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && ['indexed', 'partial'].includes(row.payload?.status) && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listAccountGrantIds: async () => [] }
+  }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  const privacy = createMemoryConnectionPrivacyStore(), order = []
+  const tracked = { ...privacy, set: async (o, v) => { order.push('privacy:' + v.audience); return privacy.set(o, v) } }
+  handler = createPrivateBrowserHandler({ connectionPrivacy: tracked, baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const page = async path => (await fetch(endpoint + path, { headers: { Cookie: cookie } })).text()
+  const csrfOf = html => html.match(/name="csrf" value="([^"]+)"/)[1]
+  const importPage = await page('/import')
+  assert.match(importPage, /Advanced: who can see your connections/)
+  assert.match(importPage, /<option value="everyone" selected>/)
+  const post = async (fields, files = [['First Name,Last Name,URL\nAda,Lovelace,https://www.linkedin.com/in/ada-l\n', 'Connections.csv']]) => {
+    const form = new FormData(); form.set('csrf', csrfOf(await page('/import')))
+    for (const [key, value] of Object.entries(fields)) form.append(key, value)
+    for (const [text, name] of files) form.append('archive', new Blob([text]), name)
+    return fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })
+  }
+  const before = Object.keys(await f.snapshot()).length
+  const bad = await post({ connectionsAudience: 'friends', connectionsScope: 'all' })
+  assert.notEqual(bad.status, 303)
+  assert.equal(Object.keys(await f.snapshot()).length, before, 'nothing staged after a refused choice')
+  assert.notEqual((await post({ connectionsAudience: 'members' })).status, 303, 'both fields or neither')
+  const good = await post({ connectionsAudience: 'connections', connectionsScope: 'shared' })
+  assert.equal(good.status, 303)
+  assert.deepEqual(await privacy.get(owner), { audience: 'connections', scope: 'shared' })
+  assert.ok(Object.keys(await f.snapshot()).length > before, 'staged after the choice was saved')
+  assert.deepEqual(order, ['privacy:connections'])
+  // An upload without the fields leaves the saved choice alone.
+  assert.equal((await post({}, [['First Name,Last Name,URL\nGrace,Hopper,https://www.linkedin.com/in/grace-h\n', 'Connections_2.csv']])).status, 303)
+  assert.deepEqual(await privacy.get(owner), { audience: 'connections', scope: 'shared' })
+  const settings = await page('/settings')
+  assert.match(settings, /Your connections can see the connections you have in common with them\./)
+  const form = new URLSearchParams({ csrf: csrfOf(settings), connectionsAudience: 'only_me', connectionsScope: 'shared' })
+  const saved = await fetch(endpoint + '/settings/connection-privacy', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form, redirect: 'manual' })
+  assert.equal(saved.status, 303); assert.equal(saved.headers.get('location'), '/settings?privacy=saved#connection-privacy')
+  assert.deepEqual(await privacy.get(owner), { audience: 'only_me', scope: 'all' })
+  assert.match(await page('/settings?privacy=saved'), /Saved\.[\s\S]*Only you can see your connections\./)
 })

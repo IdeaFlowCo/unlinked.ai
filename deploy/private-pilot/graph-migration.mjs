@@ -25,6 +25,8 @@ export const LABELS = Object.freeze([
   'UnlinkedContactSlug',
   // Members' show/hide choice for Ideaflow interests and asks (mcp-server/ideaflow-profile.mjs).
   'UnlinkedIdeaflowProfileChoice',
+  // Members' choice of who can see their connections (mcp-server/connection-privacy-store.mjs).
+  'UnlinkedConnectionPrivacy',
   // Reviewed source schema exists for these currently empty domains. Later
   // email/invitation writes must remain included in shared recovery snapshots.
   'UnlinkedEmailInviteLock', 'UnlinkedEmailSend', 'UnlinkedEmailSuppression', 'UnlinkedMemberInvitation',

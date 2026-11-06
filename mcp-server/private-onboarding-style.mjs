@@ -336,6 +336,10 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .drop p{margin:0 0 14px}
 .unlinked-onboarding .drop.over{border-color:var(--brand);background:var(--tint)}
 .unlinked-onboarding .drop ul{margin:8px 0 0;padding-left:18px}
+.unlinked-onboarding details.advanced{margin:16px 0;padding:12px 16px;border:1px solid var(--line);border-radius:var(--r);background:#fff}
+.unlinked-onboarding details.advanced summary{cursor:pointer;font-weight:600;min-height:28px}
+.unlinked-onboarding details.advanced label{display:block;margin:12px 0 0;font-weight:600}
+.unlinked-onboarding details.advanced select{display:block;width:100%;max-width:420px;min-height:44px;margin-top:6px;padding:8px 12px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;color:var(--fg);font:inherit;font-size:16px}
 .unlinked-onboarding input[type=file]{display:block;width:100%;max-width:100%;margin:14px 0;font:inherit}
 .unlinked-onboarding input[type=text],.unlinked-onboarding textarea{display:block;width:100%;min-width:0;padding:12px 14px;margin-top:7px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;color:var(--fg);font:inherit;font-size:16px}
 .unlinked-onboarding input::placeholder{color:var(--muted);opacity:1}
