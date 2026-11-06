@@ -88,7 +88,7 @@ Read-only source mounts must contain locked dependencies supplied in the approve
 ## Private destinations and invitation recovery
 
 Create the proposed root and each private state, runtime and backup directory with mode 700 only after target approval.
-All private env, operator config, invitation bundle, audit receipts and snapshot files must use mode 600 under the operator UID/GID. Browser callback success/denial and worker retry events append to `audit/browser-events.jsonl` with bounded sanitized fields only; no tokens, identity subjects, email addresses, cookies, authorization URLs, queries or archive content belong there.
+All private env, operator config, invitation bundle, audit receipts and snapshot files must use mode 600 under the operator UID/GID. For audit privacy, rotation and worker diagnostics, see [durable archive import](../../docs/durable-archive-import.md#worker-observability).
 Run the helper as the private file-owning release operator, not as root.
 The existing Noos operator's read-only `sudo -n docker info` route was verified; direct socket access is denied.
 The helper uses noninteractive sudo only for Docker commands and preserves exactly `PILOT_ORIGIN`, `PILOT_UID`, `PILOT_GID`, `PILOT_NEO4J_IMAGE`, `PILOT_RUNTIME_IMAGE` and `PILOT_NGINX_IMAGE` for Compose, with `PILOT_ORIGIN` derived from the validated manifest rather than the ambient shell.

@@ -689,6 +689,22 @@ test('unsupported jobs report once', async () => {
   assert.equal(events.filter(event => event.event === 'import_job_not_runnable').length, 1)
 })
 
+test('a single slow run reports once and stops reporting after completion', async () => {
+  const events = []
+  let release
+  const blocked = new Promise(resolve => { release = resolve })
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-slow', owner: { ownerId: 'owner-a' } }],
+    getBackend: async () => { await blocked; return { adapter: { withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ status: 'indexed', phase: 'private_observation_index_ready' }) }) } } },
+    slowAfterMs: 20, onError: event => events.push(event) })
+  const run = worker.tick()
+  await new Promise(resolve => setTimeout(resolve, 70))
+  release(); await run; await worker.stop()
+  const slow = events.filter(event => event.event === 'import_job_running_long')
+  assert.equal(slow.length, 1)
+  assert.equal(slow[0].importId, 'job-slow')
+  assert.ok(slow[0].elapsedMs >= 20)
+})
+
 
 test('lease-held returns do not reset consecutive failures', async () => {
   const events = [], item = { id: 'job', owner: { ownerId: 'owner-a' } }

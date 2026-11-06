@@ -29,7 +29,7 @@ async function fixture(t) {
   // Explicit process-side contract doubles. Real Noos graph/provisioning evidence
   // is separate; this test executes composition, signed bearer and HTTP routing.
   class OperationalStore {
-    async listPendingImportJobs() { return [] }
+    async listPendingImportJobs() { if (state.discoveryError) throw new Error(state.discoveryError); return [] }
     async listImportJobIds() { return state.importJobs ?? [] }
     ready = false
     async initialize() { this.ready = true; state.storeInitialized = true }
@@ -378,7 +378,8 @@ test('production dispatcher keeps profile recipient resolution separate from car
 
 test('composition initializes with a safety report store', async t => {
   const { options } = await fixture(t)
-  options.modules.createSafetyReportStore = () => ({ initialize: async () => {} })
+  options.modules.createSafetyReportStore = () => Object.fromEntries(
+    ['initialize', 'create', 'read', 'list', 'setStatus', 'forgetReporter'].map(name => [name, async () => {}]))
   const dependencies = await createPrivatePilotDependencies(options)
   t.after(dependencies.close)
   assert.ok(dependencies)
@@ -396,4 +397,34 @@ test('concurrent audit rotations retain newly written events', async t => {
   const live = await readFile(join(directory, 'browser-events.jsonl'), 'utf8')
   assert.deepEqual(live.trim().split('\n').map(line => JSON.parse(line).id).sort((a, b) => a - b), Array.from({ length: 12 }, (_, id) => id))
   assert.equal((await readFile(join(directory, 'browser-events.1.jsonl'))).length, 8 * 1024 * 1024)
+})
+
+test('worker discovery failure reaches both the container log and private audit without error text', async t => {
+  const { options, state } = await fixture(t)
+  state.discoveryError = 'sensitive name and filename.csv'
+  const lines = [], originalLog = console.log
+  console.log = line => lines.push(line)
+  let dependencies
+  try {
+    dependencies = await createPrivatePilotDependencies(options)
+    for (let i = 0; i < 100 && !lines.length; i++) await new Promise(resolve => setTimeout(resolve, 10))
+    assert.equal(lines.length, 1)
+    const event = JSON.parse(lines[0]).unlinkedImportWorker
+    assert.equal(event.event, 'import_worker_discovery_failed')
+    assert.equal(event.reason, 'unknown')
+    assert.equal(event.attempt, 1)
+    const auditPath = join(options.root, 'audit', 'browser-events.jsonl')
+    let audit
+    for (let i = 0; i < 100; i++) {
+      audit = await readFile(auditPath, 'utf8').catch(() => '')
+      if (audit) break
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    assert.deepEqual(JSON.parse(audit), event)
+    assert.ok(!lines[0].includes(state.discoveryError))
+    if (process.env.UNLINKED_TEST_EVIDENCE) originalLog(`Operator container log: ${lines[0]}\nPersisted private audit: ${audit.trim()}`)
+  } finally {
+    console.log = originalLog
+    await dependencies?.close()
+  }
 })
