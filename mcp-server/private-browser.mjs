@@ -340,21 +340,26 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
   // Authoritative: the stored decisions via the owner's backend. Proves "not
   // suspended" only when nothing is suspended or the index confirmed it.
   // Throws when it cannot tell.
-  const ownSuspended = async (owner, ownerBackend) => {
-    if (typeof ownProfileId !== 'function' || !owner?.ownerId) return false
+  // Why the owner's own profile is hidden (docs/profile-suspension.md): null
+  // when it is not; 'decision' when an operator suspended it; 'address' when
+  // it shares a LinkedIn address with a suspended profile. Throws when that
+  // cannot be established (for example while the index warms after a restart).
+  const ownSuspension = async (owner, ownerBackend) => {
+    if (typeof ownProfileId !== 'function' || !owner?.ownerId) return null
     const backendValue = ownerBackend ?? await getBackend(owner)
     if (typeof backendValue?.readSuppressions !== 'function') {
-      if (typeof readPublishedSnapshot !== 'function') return false
+      if (typeof readPublishedSnapshot !== 'function') return null
       const mine = await ownProfileId(owner)
-      return mine ? suspendedProfile(mine) : false
+      return mine && await suspendedProfile(mine) ? 'decision' : null
     }
     const suppressions = await backendValue.readSuppressions()
-    if (!suppressions) return false
+    if (!suppressions) return null
     const mine = await ownProfileId(owner)
-    if (mine && suppressions.ids.has(mine)) return true
+    if (mine && suppressions.ids.has(mine)) return suppressions.decided && !suppressions.decided.has(mine) ? 'address' : 'decision'
     if (!suppressions.complete) throw Error('suspension_status_unavailable')
-    return false
+    return null
   }
+  const ownSuspended = async (owner, ownerBackend) => Boolean(await ownSuspension(owner, ownerBackend))
   // The card for a token, or null when it is unknown, hidden, its owner's
   // profile is suspended, or that cannot be established.
   const openCard = async cardToken => {
@@ -2161,8 +2166,20 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
       }
       if (signup && ((request.method === 'GET' && ['/profile', '/card', '/scan'].includes(url.pathname)) || ((request.method === 'GET' && url.pathname === '/profile/handle/check') || (request.method === 'POST' && ['/profile/links', '/profile/handle', '/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname))))) {
         let hidden
-        try { hidden = await ownSuspended(session.owner, backend) } catch { render(response, 'Profile unavailable', '<p>Your Unlinked profile is unavailable right now. Please try again in a minute.</p>', 503); return }
-        if (hidden) { render(response, 'Profile unavailable', '<p>Your Unlinked profile is temporarily unavailable. Your account and sign-in are unaffected. Questions: <a href="mailto:support@ideaflow.app">support@ideaflow.app</a>.</p>', 404); return }
+        try { hidden = await ownSuspension(session.owner, backend) } catch {
+          // The server could not confirm the profile's status (usually the
+          // minute after a restart while the people index warms). Not an
+          // import failure and not a suspension: say so, and keep an import's
+          // progress visible rather than hiding it behind this page.
+          if (request.method === 'GET' && url.pathname === '/profile') {
+            const jobs = await bounded(() => jobResources(), null), props = jobs ? jobProps(jobs) : null
+            if (props?.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status)) { journey(response, renderImporting(props), props.importJob); return }
+          }
+          response.setHeader('Retry-After', '30')
+          render(response, 'Unlinked is busy', `<p><b>Unlinked couldn’t load your profile just now.</b> The server is restarting or busy. This is not a problem with your import or your account.</p><p>Any import you started keeps running on the server, and nothing was lost. Wait a minute, then <a href="${html(url.pathname)}">try again</a>.</p>`, 503); return
+        }
+        if (hidden === 'address') { render(response, 'Profile hidden', '<p>Your Unlinked profile is hidden because its LinkedIn address matches a profile that was taken down. Your account, sign-in and imports are unaffected. Email <a href="mailto:support@ideaflow.app">support@ideaflow.app</a> and we will sort it out.</p>', 404); return }
+        if (hidden) { render(response, 'Profile hidden', '<p>Your Unlinked profile is hidden by Unlinked support. Your account, sign-in and imports are unaffected. Email <a href="mailto:support@ideaflow.app">support@ideaflow.app</a> to ask why or to have it restored.</p>', 404); return }
       }
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
         const jobs = await jobResources(), props = jobProps(jobs)

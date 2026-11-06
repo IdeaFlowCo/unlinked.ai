@@ -174,7 +174,7 @@ test('over HTTP: direct links, the API, photos and the account\'s own /profile a
     const response = await app.go(path, { headers: { Cookie: cookie } })
     assert.equal(response.status, 404, path)
     const page = await response.text()
-    if (['/profile', '/card', '/scan'].includes(path)) assert.match(page, /temporarily unavailable/)
+    if (['/profile', '/card', '/scan'].includes(path)) assert.match(page, /hidden by Unlinked support/)
     assert.doesNotMatch(page, /Morgan Singh/)
   }
   const network = await (await app.go('/network?q=morgan', { headers: { Cookie: cookie } })).text()
@@ -275,14 +275,26 @@ test('a suspended owner sees no identifying page while the public index is down;
     const response = await app.go(path, { headers: { Cookie: cookie } })
     assert.equal(response.status, 404, path)
     const page = await response.text()
-    assert.match(page, /temporarily unavailable/); assert.doesNotMatch(page, /Avery Lee|linkedin\.com\/in\/avery/, path)
+    assert.match(page, /hidden by Unlinked support/); assert.doesNotMatch(page, /Avery Lee|linkedin\.com\/in\/avery/, path)
+  }
+  // Hidden only because it shares a LinkedIn address with a suspended profile: says so.
+  suppressions = { ids: new Set([app.legacyId, 'someone-else']), refs: new Set(), complete: true, decided: new Set(['someone-else']) }
+  for (const path of pages) {
+    const response = await app.go(path, { headers: { Cookie: cookie } })
+    assert.equal(response.status, 404, path)
+    const page = await response.text()
+    assert.match(page, /LinkedIn address matches a profile that was taken down/); assert.doesNotMatch(page, /Avery Lee|linkedin\.com\/in\/avery/, path)
   }
   // Someone else is suspended and the index cannot say whether this profile shares their address: unavailable.
   suppressions = { ids: new Set(['imported']), refs: new Set([MORGAN]), complete: false }
   for (const path of pages) {
     const response = await app.go(path, { headers: { Cookie: cookie } })
     assert.equal(response.status, 503, path)
-    assert.doesNotMatch(await response.text(), /Avery Lee|linkedin\.com\/in\/avery/, path)
+    assert.equal(response.headers.get('retry-after'), '30')
+    const page = await response.text()
+    // Says what happened: the server, not the import or the account.
+    assert.match(page, /server is restarting or busy\. This is not a problem with your import or your account/)
+    assert.doesNotMatch(page, /Avery Lee|linkedin\.com\/in\/avery/, path)
   }
   // The suspension lookup itself failing is unavailable too.
   suppressions = null

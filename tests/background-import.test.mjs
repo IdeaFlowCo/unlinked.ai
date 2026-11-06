@@ -760,3 +760,43 @@ test('failed imports report parsed source counts without changing saved receipts
     assert.deepEqual(saved.sources, [])
   }
 })
+
+test('right after a restart, an import in progress shows its progress, not a busy or suspended page', async t => {
+  const f = await fixture(t), owner = { ownerId: 'owner-a', userId: 'owner-a' }
+  const getBackend = async ownerArg => {
+    const backend = f.backend(ownerArg.ownerId)
+    return { ...backend,
+      listImportJobIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listImportIds: async () => Object.entries(await f.snapshot()).filter(([key, row]) => key.startsWith('import/') && row.sourceOwnerId === ownerArg.ownerId && ['indexed', 'partial'].includes(row.payload?.status) && row.payload?.id === row.sourceId && !row.payload.kind && !row.payload.receiptOf).map(([, row]) => row.sourceId),
+      listAccountGrantIds: async () => [],
+      // Someone else is suspended and the index is still warming: status unknown.
+      readSuppressions: async () => ({ ids: new Set(['someone-else']), refs: new Set(), complete: false, decided: new Set(['someone-else']) }) }
+  }
+  let handler
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)) })
+  const endpoint = `http://127.0.0.1:${server.address().port}`, baseUrl = endpoint.replace('http:', 'https:')
+  handler = createPrivateBrowserHandler({ ownProfileId: async () => 'mine', baseUrl, dataMode: 'private_live', backgroundImports: true, getBackend,
+    login: { begin: async () => ({ location: 'https://synthetic.invalid/sign-in', transaction: { state: 'synthetic-state' } }),
+      finish: async url => ({ issuer: 'https://synthetic.invalid', subject: url.searchParams.get('code'), verifiedEmail: 'display-only@example.invalid' }) },
+    resolveOwner: async identity => identity.subject === owner.ownerId ? owner : null,
+    signup: async () => { throw new Error('not used') }, issueAccountGrant: async () => {}, revokeAccountGrant: async () => {} })
+  const start = await fetch(endpoint + '/login', { redirect: 'manual' })
+  const callback = await fetch(endpoint + '/auth/callback/ideaflow?code=owner-a&state=synthetic-state', { redirect: 'manual', headers: { Cookie: start.headers.get('set-cookie').split(';')[0] } })
+  const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  const page = await (await fetch(endpoint + '/import', { headers: { Cookie: cookie } })).text()
+  const form = new FormData(); form.set('csrf', page.match(/name="csrf" value="([^"]+)"/)[1])
+  form.append('archive', new Blob(['First Name,Last Name,URL\nAda,Lovelace,https://www.linkedin.com/in/ada-l\n']), 'Connections.csv')
+  assert.equal((await fetch(endpoint + '/upload', { method: 'POST', headers: { Cookie: cookie, Origin: baseUrl }, body: form, redirect: 'manual' })).status, 303)
+  // The worker has not run: the job is still uploaded.
+  const profile = await fetch(endpoint + '/profile', { headers: { Cookie: cookie } })
+  assert.equal(profile.status, 200)
+  const text = await profile.text()
+  assert.match(text, /Importing…|Reading your profile and connections/)
+  assert.doesNotMatch(text, /Profile hidden|Unlinked is busy|unavailable right now|temporarily unavailable/)
+  // Without an import in progress the same moment says the server is busy, not the profile.
+  const card = await fetch(endpoint + '/card', { headers: { Cookie: cookie } })
+  assert.equal(card.status, 503)
+  assert.match(await card.text(), /server is restarting or busy/)
+})
