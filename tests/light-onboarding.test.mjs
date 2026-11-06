@@ -303,6 +303,19 @@ test('found lookup results render escaped information and an explicit native cla
   assert.match(oneMember.content, /Listed by 1 member<\/p>/)
 })
 
+test('find-me confirmation sits above a long profile and repeats at its end', () => {
+  const positions = Array.from({ length: 6 }, (_, i) => ({ title: `Role ${i}`, company: `Company ${i}` }))
+  const found = extra => renderOwnProfile({ ...account, lookupResult: { status: 'found', source: 'profile-lookup', profileName: 'Sam Lee', headline: 'Builder', claimAction: '/claim-me', claimToken: 'tok', ...extra } }).content
+  const long = found({ positions, education: [{ institution: 'MIT' }] })
+  const yes = [...long.matchAll(/type="submit">Yes, that's me/g)].map(m => m.index)
+  assert.equal(yes.length, 2)
+  assert.ok(long.indexOf('Builder') < yes[0] && yes[0] < long.indexOf('Role 0'), 'first confirmation before experience')
+  assert.ok(yes[1] > long.indexOf('MIT'), 'second confirmation after education')
+  const short = found({ positions: positions.slice(0, 1) })
+  assert.equal([...short.matchAll(/type="submit">Yes, that's me/g)].length, 1)
+  assert.ok(short.indexOf("Yes, that's me") < short.indexOf('Role 0'))
+})
+
 test('lookup and claim forms reject actions that could send CSRF tokens off-host', () => {
   for (const action of ['https://evil.test/find-me', '//evil.test/find-me', 'javascript:alert(1)', '/\\evil.test', '/find-me\n', '/find-me\u0000', '/find-me#fragment', undefined]) {
     const view = renderOwnProfile({ ...account, linkedinLookup: { action }, lookupResult: { status: 'found', profileName: 'Sam', claimAction: action } })
