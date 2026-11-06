@@ -17,10 +17,10 @@ const METHODS = new Set(['suggest', 'list', 'profile', 'card', 'unlistedGroup', 
 const sources = new Map() // sourceKey -> { current, previous, timer }
 const transfers = new Map() // transfer id -> { sourceKey, cacheKey, snapshot }
 let nextTransfer = 1, released = 0, begun = 0
-// The configured cap (from the host) wins over V8's report, which shows the
-// process flag instead of resourceLimits when --max-old-space-size is set.
-const configuredLimit = Number.isSafeInteger(workerData?.heapLimitMb) ? workerData.heapLimitMb * 1048576 : Infinity
-const heapNow = () => { const stats = getHeapStatistics(); return { used: stats.used_heap_size, limit: Math.min(stats.heap_size_limit, configuredLimit) } }
+// V8's own limit is the effective one: a process-level --max-old-space-size
+// (for example from NODE_OPTIONS) applies to this isolate too and overrides
+// resourceLimits.maxOldGenerationSizeMb in either direction (measured).
+const heapNow = () => { const stats = getHeapStatistics(); return { used: stats.used_heap_size, limit: stats.heap_size_limit } }
 
 const entryFor = (sourceKey, cacheKey) => {
   const slot = sources.get(sourceKey)

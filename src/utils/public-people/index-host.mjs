@@ -43,8 +43,14 @@ let active = null
 export const activePublicIndexHost = () => isMainThread ? active : null
 export const installPublicIndexHost = host => { active = host ?? null; return active }
 
-export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs', import.meta.url), resourceLimits, keepOldBelow, chunkSize = CHUNK, callTimeoutMs = CALL_TIMEOUT_MS, installTimeoutMs = INSTALL_TIMEOUT_MS, backoffMs = RESPAWN_BACKOFF_MS, onDisabled = () => process.stderr.write('unlinked_public_index_worker_disabled\n'), createWorker = (url, options) => new Worker(url, options), now = Date.now } = {}) {
+// A process-level --max-old-space-size (CLI or NODE_OPTIONS) sets every
+// isolate's old-space limit, the worker's included: resourceLimits'
+// maxOldGenerationSizeMb is then ignored, higher or lower (measured on Node 22).
+export const processHeapFlag = (argv = process.execArgv, nodeOptions = process.env.NODE_OPTIONS ?? '') => /--max-old-space-size(?:=|\s+)\d+/.test(`${argv.join(' ')} ${nodeOptions}`)
+
+export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs', import.meta.url), resourceLimits, keepOldBelow, onCapIgnored = () => process.stderr.write('unlinked_public_index_worker_heap_cap_ignored\n'), chunkSize = CHUNK, callTimeoutMs = CALL_TIMEOUT_MS, installTimeoutMs = INSTALL_TIMEOUT_MS, backoffMs = RESPAWN_BACKOFF_MS, onDisabled = () => process.stderr.write('unlinked_public_index_worker_disabled\n'), createWorker = (url, options) => new Worker(url, options), now = Date.now } = {}) {
   if (!Number.isSafeInteger(chunkSize) || chunkSize < 1 || !Number.isSafeInteger(callTimeoutMs) || callTimeoutMs < 1 || !Number.isSafeInteger(installTimeoutMs) || installTimeoutMs < 1 || !Number.isSafeInteger(backoffMs) || backoffMs < 0) throw new TypeError('public_index_host_configuration_invalid')
+  let warnedCap = false
   let worker = null, generation = 0, nextId = 1, crashedAt = -Infinity, previousCrashAt = -Infinity, closed = false, disabled = false, failuresWithoutInstall = 0
   const pending = new Map() // id -> { resolve, reject, timer }
   const installed = new Map() // sourceKey -> Set(cacheKey) believed installed in the current worker
@@ -69,7 +75,8 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
     const mine = ++generation
     let created
     // The worker cannot read its own cap reliably when the process sets --max-old-space-size.
-    const workerData = { ...(resourceLimits ? { heapLimitMb: resourceLimits.maxOldGenerationSizeMb } : {}), ...(typeof keepOldBelow === 'number' ? { keepOldBelow } : {}) }
+    const workerData = { ...(typeof keepOldBelow === 'number' ? { keepOldBelow } : {}) }
+    if (resourceLimits?.maxOldGenerationSizeMb && processHeapFlag() && !warnedCap) { warnedCap = true; onCapIgnored() }
     try { created = createWorker(workerUrl, { ...(resourceLimits ? { resourceLimits } : {}), workerData }) }
     catch { noteFailure(); throw unavailable() }
     created.on('message', message => {

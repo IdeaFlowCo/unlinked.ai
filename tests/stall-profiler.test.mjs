@@ -50,4 +50,26 @@ test('summaries count only samples inside the stall windows', () => {
   const summary = summarizeStalls(profile, [[100.5, 102.5]], 100)
   assert.equal(summary.sampled_ms, 2)
   assert.deepEqual(summary.self, [['inStall mcp-server/a.mjs:3', 2]])
+  assert.deepEqual(summary.app, [['inStall mcp-server/a.mjs:3', 2]], 'our own frames are ranked separately')
+})
+
+test('a quiet window does not stop the profile; rotation time is never reported as a stall', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'stall-')); await chmod(directory, 0o700)
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  let stops = 0
+  const { Session } = await import('node:inspector/promises')
+  const session = new Session(), post = session.post.bind(session)
+  session.post = (method, params) => { if (method === 'Profiler.stop') stops++; return post(method, params) }
+  const profiler = await startStallProfiler({ directory, stallMs: 300, windowMs: 1000, maxProfileMs: 60000, session })
+  await new Promise(resolve => setTimeout(resolve, 2300))
+  assert.equal(stops, 0, 'no stall, young profile: no stop')
+  await profiler.stop()
+  assert.deepEqual(await readdir(directory), [])
+})
+
+test('the process heap flag is detected wherever it is set', async () => {
+  const { processHeapFlag } = await import('../src/utils/public-people/index-host.mjs')
+  assert.equal(processHeapFlag([], '--max-old-space-size=768'), true)
+  assert.equal(processHeapFlag(['--max-old-space-size', '1024'], ''), true)
+  assert.equal(processHeapFlag(['--inspect=0'], '--enable-source-maps'), false)
 })

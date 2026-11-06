@@ -23,7 +23,10 @@ const frameOf = node => {
 export function summarizeStalls(profile, windows, perfAtStart, { top = 25, stacks = 6, depth = 14 } = {}) {
   const byId = new Map(profile.nodes.map(node => [node.id, node])), parent = new Map()
   for (const node of profile.nodes) for (const child of node.children ?? []) parent.set(child, node.id)
-  const self = new Map(), inclusive = new Map(), stackMs = new Map()
+  const self = new Map(), inclusive = new Map(), stackMs = new Map(), app = new Map()
+  // Our own code (mcp-server/, src/), so runtime internals such as
+  // runMicrotasks never crowd out the frame that actually did the work.
+  const ours = frame => / (?:mcp-server|src)\//.test(frame)
   let sampled = 0, t = profile.startTime
   const inside = ms => windows.some(([a, b]) => ms >= a && ms <= b)
   for (let i = 0; i < profile.samples.length; i++) {
@@ -41,45 +44,58 @@ export function summarizeStalls(profile, windows, perfAtStart, { top = 25, stack
     }
     if (!frames.length) continue
     self.set(frames[0], (self.get(frames[0]) ?? 0) + weight)
-    for (const frame of new Set(frames)) inclusive.set(frame, (inclusive.get(frame) ?? 0) + weight)
+    for (const frame of new Set(frames)) { inclusive.set(frame, (inclusive.get(frame) ?? 0) + weight); if (ours(frame)) app.set(frame, (app.get(frame) ?? 0) + weight) }
     const key = frames.join(' < ')
     stackMs.set(key, (stackMs.get(key) ?? 0) + weight)
   }
   const rank = (map, n) => [...map].sort((a, b) => b[1] - a[1]).slice(0, n).map(([frame, value]) => [frame, Math.round(value)])
-  return { sampled_ms: Math.round(sampled), self: rank(self, top), inclusive: rank(inclusive, top), stacks: rank(stackMs, stacks).map(([stack, value]) => ({ ms: value, stack: stack.split(' < ') })) }
+  return { sampled_ms: Math.round(sampled), app: rank(app, top), self: rank(self, top), inclusive: rank(inclusive, top), stacks: rank(stackMs, stacks).map(([stack, value]) => ({ ms: value, stack: stack.split(' < ') })) }
 }
 
-export async function startStallProfiler({ directory, stallMs = 500, windowMs = 60000, samplingUs = 1000, keep = 240, now = () => new Date(), session = new Session() } = {}) {
-  if (!isAbsolute(directory ?? '') || !Number.isSafeInteger(stallMs) || stallMs < 50 || !Number.isSafeInteger(windowMs) || windowMs < 1000 || !Number.isSafeInteger(samplingUs) || samplingUs < 100 || !Number.isSafeInteger(keep) || keep < 1 || keep > 1000) throw new Error('stall_profiler_configuration_invalid')
+// 10 ms sampling still gives ~50 samples per 500 ms stall; stopping a profile
+// costs time proportional to its samples and nodes, all on the main thread.
+export async function startStallProfiler({ directory, stallMs = 500, windowMs = 60000, samplingUs = 10000, maxProfileMs = Math.max(300000, windowMs), keep = 240, now = () => new Date(), session = new Session() } = {}) {
+  if (!isAbsolute(directory ?? '') || !Number.isSafeInteger(stallMs) || stallMs < 50 || !Number.isSafeInteger(windowMs) || windowMs < 1000 || !Number.isSafeInteger(samplingUs) || samplingUs < 100 || !Number.isSafeInteger(maxProfileMs) || maxProfileMs < windowMs || !Number.isSafeInteger(keep) || keep < 1 || keep > 1000) throw new Error('stall_profiler_configuration_invalid')
   const info = await lstat(directory)
   if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o700 || info.uid !== process.getuid()) throw new Error('stall_profiler_directory_not_private')
   session.connect()
   let windows = [], perfAtStart = 0, stopped = false, running = false, warned = false, last = performance.now()
+  // The profiler's own stop/restart blocks the loop briefly; that gap is
+  // reported as rotation time, never as a stall.
+  let rotation = [-Infinity, -Infinity], rotationMs = 0, selfStalls = 0
   const begin = async () => { await session.post('Profiler.start'); running = true; perfAtStart = performance.now() }
   try {
     await session.post('Profiler.enable')
     await session.post('Profiler.setSamplingInterval', { interval: samplingUs })
     await begin()
   } catch (error) { try { session.disconnect() } catch {} throw error }
-  const ticker = setInterval(() => { const at = performance.now(); if (at - last - 20 >= stallMs) windows.push([last, at]); last = at }, 20)
+  const ticker = setInterval(() => { const at = performance.now(); if (at - last - 20 >= stallMs) { if (last <= rotation[1] && at >= rotation[0]) selfStalls++; else windows.push([last, at]) } last = at }, 20)
   ticker.unref()
   const prune = async () => {
     const names = (await readdir(directory)).filter(name => FILE.test(name)).sort()
     for (const name of names.slice(0, Math.max(0, names.length - keep))) await unlink(join(directory, name)).catch(() => {})
   }
-  const rotate = async () => {
+  // Rotates (stops, summarizes, restarts) only after a window with stalls, or
+  // when the running profile reaches `maxProfileMs`, so a quiet process pays
+  // for a stop at most every few minutes.
+  const rotate = async ({ force = false } = {}) => {
     if (stopped) return
-    const seen = windows; windows = []
-    const startedAt = perfAtStart
     // A failed restart is retried on the next window instead of stopping profiling for good.
     if (!running) { await begin(); return }
+    if (!force && !windows.length && performance.now() - perfAtStart < maxProfileMs) return
+    const seen = windows; windows = []
+    const startedAt = perfAtStart
     running = false
+    const began = performance.now()
+    rotation = [began, Infinity]
     const { profile } = await session.post('Profiler.stop')
     try { await begin() } catch { if (!warned) { warned = true; process.stderr.write('unlinked_stall_profiler_restart_failed\n') } }
+    rotationMs = Math.round(performance.now() - began)
+    rotation = [began, performance.now() + 25]
     if (!seen.length) return
     const summary = summarizeStalls(profile, seen, startedAt)
     const at = now()
-    const row = { schema: 1, event: 'stall_profile', at: at.toISOString(), window_ms: windowMs, stall_threshold_ms: stallMs, stalls: seen.length, stall_ms: seen.map(([a, b]) => Math.round(b - a)).sort((a, b) => b - a).slice(0, 20), ...summary }
+    const row = { schema: 1, event: 'stall_profile', at: at.toISOString(), window_ms: windowMs, sampling_us: samplingUs, stall_threshold_ms: stallMs, rotation_ms: rotationMs, self_stalls: selfStalls, stalls: seen.length, stall_ms: seen.map(([a, b]) => Math.round(b - a)).sort((a, b) => b - a).slice(0, 20), ...summary }
     const name = `stall-${at.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}.json`
     const file = await open(join(directory, name), constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
     try { await file.writeFile(JSON.stringify(row)) } finally { await file.close() }
@@ -89,7 +105,7 @@ export async function startStallProfiler({ directory, stallMs = 500, windowMs = 
   const timer = setInterval(() => { chain = chain.then(rotate).catch(() => {}) }, windowMs)
   timer.unref()
   return {
-    rotate: () => (chain = chain.then(rotate)),
+    rotate: () => (chain = chain.then(() => rotate({ force: true }))),
     async stop() { stopped = true; clearInterval(timer); clearInterval(ticker); await chain.catch(() => {}); if (running) await session.post('Profiler.stop').catch(() => {}); running = false; session.disconnect() },
   }
 }
