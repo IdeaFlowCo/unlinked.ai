@@ -411,9 +411,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         rows = (await session.executeRead(tx => tx.run(`MATCH (d:UnlinkedProfileDecision) WHERE d.kind = 'suspend' AND coalesce(d.revoked, false) = false
           RETURN d.profileId AS id, d.linkedinRefHash AS ref LIMIT 5001`))).records
       } finally { await session.close() }
-      const ids = new Set(), refs = new Set()
+      // `decided`: profiles an operator suspended by id. Everything else in `ids`
+      // is hidden because it shares a LinkedIn address with one of them.
+      const ids = new Set(), refs = new Set(), decided = new Set()
       for (const record of rows) {
-        if (typeof record.get('id') === 'string') ids.add(record.get('id'))
+        if (typeof record.get('id') === 'string') { ids.add(record.get('id')); decided.add(record.get('id')) }
         if (typeof record.get('ref') === 'string' && /^[a-f0-9]{64}$/.test(record.get('ref'))) refs.add(record.get('ref'))
       }
       // Nothing suspended: authoritatively nobody is.
@@ -429,7 +431,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         for (const ref of index.refs) refs.add(ref)
         complete = true
       } catch { /* the stored decisions alone still apply */ }
-      return { ids, refs, complete }
+      return { ids, refs, complete, decided }
     }
     let requestDiagnostics
     if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {

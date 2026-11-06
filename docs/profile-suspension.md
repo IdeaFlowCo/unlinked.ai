@@ -105,3 +105,13 @@ rolling back re-exposes suspended profiles. Before such a rollback, add a
 operator CLI refuses new decisions while a `suspend` is active.
 
 Tests: `tests/profile-suspension.test.mjs`.
+
+## What the owner sees (unlinked-l7yv)
+
+The owner's `/profile`, `/card` and `/scan` say which case applies, instead of one ambiguous "temporarily unavailable":
+
+- **Suspended by support** (a `suspend` decision names this profile): 404, "hidden by Unlinked support", with the support address.
+- **Hidden by address** (the profile shares a LinkedIn address with a suspended profile, so it is in the index's suspended set but not in the stored decisions, which `readSuppressions` returns as `decided`): 404, saying the LinkedIn address matches a profile that was taken down.
+- **Status unknown** (the decision read worked but the warming index cannot confirm whether this profile shares a suspended address, typically the minute after a restart): 503 with `Retry-After: 30`. The page says the server is restarting or busy, that this is not a problem with the import or the account, and that an import keeps running. `/profile` shows the import's progress page instead when an import is in progress, because that page shows no profile content.
+
+Background: Jacob saw the old wording during an import on 2026-11-06. Cloudflare analytics show the only `/profile` errors in 72 hours were two 503s at 01:22Z, 80 seconds after a deploy restarted the runtime (01:20:45Z). That is the "status unknown" case, not a suspension or an import failure.
