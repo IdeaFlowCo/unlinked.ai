@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
+import { renderPeople } from '../mcp-server/private-onboarding-views.mjs'
 import {createServer} from 'node:http'
 import {mkdtemp,rm,mkdir} from 'node:fs/promises'
 import {join} from 'node:path'
@@ -9,9 +10,9 @@ import {browserPerformanceScript,createBrowserPerformanceRecorder,safeBrowserPer
 import {createPrivateBrowserHandler} from '../mcp-server/private-browser.mjs'
 import {createDiagnosticsStore} from '../mcp-server/request-diagnostics-store.mjs'
 import {readBrowserPerformance,summarizeBrowserPerformance} from '../scripts/read-browser-performance.mjs'
-function browser({memory=new Map(),path='/people/private-person',origin=1000,now=500,status=200,hidden=false}={}){
+function browser({memory=new Map(),path='/people/private-person',origin=1000,now=500,status=200,hidden=false,softError=false}={}){
  const listeners=new Map(),frames=[],micro=[],sent=[];const on=(name,fn)=>{listeners.set(name,[...(listeners.get(name)??[]),fn])}
- const context={URL,JSON,Number,Math,queueMicrotask:fn=>micro.push(fn),setTimeout:fn=>micro.push(fn),requestAnimationFrame:fn=>frames.push(fn),location:new URL('https://example.test'+path),performance:{timeOrigin:origin,now:()=>now,getEntriesByType:()=>[{type:'navigate',responseStart:200,responseEnd:350}]},sessionStorage:{getItem:k=>memory.get(k)??null,setItem:(k,v)=>memory.set(k,v),removeItem:k=>memory.delete(k)},document:{visibilityState:hidden?'hidden':'visible',readyState:'complete',addEventListener:on},addEventListener:on,fetch:async(url,options)=>{sent.push({url,options,body:JSON.parse(options.body)})}}
+ const context={URL,JSON,Number,Math,queueMicrotask:fn=>micro.push(fn),setTimeout:fn=>micro.push(fn),requestAnimationFrame:fn=>frames.push(fn),location:new URL('https://example.test'+path),performance:{timeOrigin:origin,now:()=>now,getEntriesByType:()=>[{type:'navigate',responseStart:200,responseEnd:350}]},sessionStorage:{getItem:k=>memory.get(k)??null,setItem:(k,v)=>memory.set(k,v),removeItem:k=>memory.delete(k)},document:{querySelector:selector=>softError&&selector==='[data-page-load-error]'?{}:null,visibilityState:hidden?'hidden':'visible',readyState:'complete',addEventListener:on},addEventListener:on,fetch:async(url,options)=>{sent.push({url,options,body:JSON.parse(options.body)})}}
  vm.runInNewContext(browserPerformanceScript(status),context)
  const fire=(name,event={})=>{for(const fn of listeners.get(name)??[])fn(event)}
  const flush=()=>{for(let i=0;i<10&&(micro.length||frames.length);i++){for(const fn of micro.splice(0))fn();for(const fn of frames.splice(0)){now+=16;fn()}}}
@@ -68,4 +69,11 @@ test('private persisted report produces percentiles, error counts and honest tim
  const report=await readBrowserPerformance({directory,since:'2020-01-01T00:00:00Z'}),g=report.groups[0]
  assert.equal(report.records,7);assert.equal(g.ok,6);assert.equal(g.error,1);assert.equal(g.p50_ms,300);assert.equal(g.p95_ms,3000);assert.equal(g.over_2s,1);assert.ok(report.first_at)
  assert.deepEqual(summarizeBrowserPerformance([{schema:1,event:'browser_performance',route:'secret'}]).groups,[])
+})
+
+test('HTTP 200 search fallbacks do not count as successful page loads',()=>{
+ for(const state of ['error','unavailable'])assert.match(renderPeople({state,everyone:[]}).content,/data-page-load-error/)
+ assert.doesNotMatch(renderPeople({state:'ready',everyone:[]}).content,/data-page-load-error/)
+ const b=browser({status:200,softError:true});b.flush();b.fire('load');b.flush()
+ assert.deepEqual(b.sent.map(row=>row.body.outcome),['error','error'])
 })

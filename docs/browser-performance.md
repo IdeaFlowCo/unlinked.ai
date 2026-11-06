@@ -50,6 +50,6 @@ node scripts/read-browser-performance.mjs \
 
 This reads all bounded retained files and reports per-release/page-type/metric/
 start-kind counts, success p50/p95/p99/max, over-two-second counts, TTFB/render p95,
-errors, cancellations, capped durations and observed time coverage. Failures are
+errors, cancellations, capped durations and observed time coverage. HTTP error pages and typed People fallback states (including HTTP 200) count as errors. Failed enhanced searches preserve the previous result set and offer a native retry. Failures are
 not mixed into successful-load percentiles. No public diagnostics endpoint exists.
 The script validates ownership, permissions, symlinks, hard links and file bounds.

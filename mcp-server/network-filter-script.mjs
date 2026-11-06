@@ -23,7 +23,7 @@ export const NETWORK_FILTER_SCRIPT = `(()=>{
       const response=await fetch(url,{credentials:'same-origin',signal:controller.signal,headers:{'Accept':'text/html'}});
       if(!response.ok||response.redirected)throw Error('network_filter_failed');
       const text=await response.text();if(current!==version)return;
-      const doc=new DOMParser().parseFromString(text,'text/html'),next=doc.querySelector('[data-network]');if(!next)throw Error('network_filter_failed');
+      const doc=new DOMParser().parseFromString(text,'text/html'),next=doc.querySelector('[data-network]');if(!next||next.hasAttribute('data-page-load-error'))throw Error('network_filter_failed');
       const active=document.activeElement;const focused=root.contains(active)?focusKey(active):null;
       const openDisclosures=[...root.querySelectorAll('details[open]')].map(details=>details.querySelector('summary')).filter(Boolean).map(focusKey);
       const oldInput=textInput(active)?active:root.querySelector('#network-query');const start=oldInput.selectionStart,end=oldInput.selectionEnd;
