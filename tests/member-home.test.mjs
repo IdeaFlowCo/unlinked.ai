@@ -123,7 +123,7 @@ test('a member whose only import is recovered from their original Unlinked accou
   assert.doesNotMatch(refresh.body, /aria-label="Getting started"|import-reminder/)
   // Profile and Settings stop saying there is no file.
   const profile = await get('/profile')
-  assert.match(profile.body, /href="\/import">Upload a newer export</)
+  assert.match(profile.body, /href="\/import">Import a newer export</)
   assert.match(profile.body, /Your LinkedIn files from your original Unlinked account are on this account\./)
   assert.doesNotMatch(profile.body, /You can add your file later/)
   const settings = await get('/settings')
@@ -264,4 +264,33 @@ test('the isolated pilot forwards the home preference store to the browser', asy
   const hidden = await go('/home/import-reminder', { method: 'POST', headers: { Cookie: cookie, Origin: `https://127.0.0.1:${port}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: home.match(/name="csrf" value="([^"]+)"/)[1], reminder: 'dismissed' }) })
   assert.equal(hidden.status, 303)
   assert.equal((await preferences.get(owner)).importReminder, 'dismissed')
+})
+
+
+test('imports navigation shows owned history and saves private names and tags', async t => {
+  const home = await site(t, { jobs: [job(1, 'indexed')] })
+  const page = await home.get('/imports')
+  assert.equal(page.status, 200)
+  assert.match(page.body, /href="\/imports">.*Imports<\/a>/)
+  assert.match(page.body, /Fictional-1.zip/)
+  const csrf = home.csrfFrom(page.body)
+  assert.equal((await home.post(`/imports/${id(1)}/metadata`, { csrf: 'wrong', name: 'Old', tags: 'one' })).status, 400)
+  assert.equal((await home.post(`/imports/${id(2)}/metadata`, { csrf, name: 'Old', tags: 'one' })).status, 404)
+  assert.equal((await home.post(`/imports/${id(1)}/metadata`, { csrf, name: 'My network', tags: 'friends, founders' })).status, 303)
+  const updated = await home.get('/imports')
+  assert.match(updated.body, /My network/)
+  assert.match(updated.body, /Tags: friends, founders/)
+  const exported = await home.get('/export')
+  assert.deepEqual(JSON.parse(exported.body).imports[0].organization, { name: 'My network', tags: ['friends', 'founders'] })
+  assert.deepEqual(home.writes, [])
+})
+
+test('import labels are isolated by owner, bounded, and removed with account preferences', async () => {
+  const store = createMemoryHomePreferenceStore()
+  await store.setImportMetadata(owner, id(1), 'Network', 'friends, founders, friends')
+  assert.deepEqual(await store.getImportMetadata(owner, id(1)), { name: 'Network', tags: ['friends', 'founders'] })
+  assert.equal(await store.getImportMetadata({ ownerId: owner.ownerId, userId: 'someone-else' }, id(1)), null)
+  await assert.rejects(store.setImportMetadata(owner, id(1), 'x'.repeat(121), ''), /invalid/)
+  await store.removeOwner(owner)
+  assert.equal(await store.getImportMetadata(owner, id(1)), null)
 })

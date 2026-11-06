@@ -44,7 +44,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderChatPerson, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderChatPerson, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderImports, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
@@ -302,7 +302,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
   const signInOptions = (request, switching = false) => switching || cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|imports|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -2034,7 +2034,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
         return { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
-      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts?.accepted ?? 0, indexed: payload.counts?.indexed ?? 0, rejected: payload.counts?.rejected ?? 0, failedFiles: payload.counts?.failedFiles ?? 0, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
+      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, createdAt: payload.createdAt, kind: payload.origin?.kind, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts?.accepted ?? 0, indexed: payload.counts?.indexed ?? 0, rejected: payload.counts?.rejected ?? 0, failedFiles: payload.counts?.failedFiles ?? 0, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
       // What this member has imported, from both sources that count (uploads
       // here and files recovered from their original Unlinked account), so no
       // page tells someone with an import to bring one (unlinked-5e5). Reads only.
@@ -2591,6 +2591,26 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         await connectionPrivacy.set(session.owner, choice)
         redirect(response, '/settings?privacy=saved#connection-privacy'); return
       }
+      const importMetadataMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/metadata$/)
+      if (signup && request.method === 'POST' && importMetadataMatch && typeof homePreferences?.setImportMetadata === 'function') {
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || ['name', 'tags'].some(key => input.getAll(key).length !== 1) || [...input.keys()].some(key => !['csrf', 'name', 'tags'].includes(key))) throw new Error('private_browser_csrf')
+        const resource = await backend.readResource('import', importMetadataMatch[1])
+        if (!resource || resource.deleted || resource.sourceOwnerId !== session.owner.ownerId || resource.payload?.id !== importMetadataMatch[1] || resource.payload.kind || resource.payload.receiptOf || resource.payload.origin?.kind === ADDED_PERSON) { response.writeHead(404).end(); return }
+        await homePreferences.setImportMetadata(session.owner, importMetadataMatch[1], input.get('name'), input.get('tags'))
+        redirect(response, '/imports'); return
+      }
+      if (signup && request.method === 'GET' && url.pathname === '/imports') {
+        const jobs = await jobResources(), props = jobProps(jobs)
+        let recovered = null, recoveredUnavailable = false
+        if (typeof backend.readLegacyFiles === 'function') {
+          try { recovered = await backend.readLegacyFiles() } catch { recoveredUnavailable = true }
+        }
+        const metadataAvailable = typeof homePreferences?.getImportMetadata === 'function' && typeof homePreferences?.setImportMetadata === 'function'
+        const imports = await Promise.all(summaries(jobs).map(async item => ({ ...item, metadata: metadataAvailable ? await homePreferences.getImportMetadata(session.owner, item.id) : null })))
+        journey(response, renderImports({ ...props, imports, recovered: recovered?.objects ?? [], recoveredUnavailable, metadataAvailable }), props.importJob)
+        return
+      }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // Settings shows the owner's live key, but a page view never creates
         // one: a member creates a key when they want to connect an app.
@@ -2647,6 +2667,12 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const jobs = await jobResources()
         const grants = await backend.listAccountGrantIds()
         const data = await exportAccountData({ owner: session.owner, backend, jobs, grants, signupLookup })
+        if (typeof homePreferences?.getImportMetadata === 'function') {
+          for (const item of data.imports) {
+            const metadata = await homePreferences.getImportMetadata(session.owner, item.id)
+            if (metadata) item.organization = metadata
+          }
+        }
         data.account.accountLabel = session.accountLabel
         data.account.displayName = session.displayName
         // The contact card's details belong to the export; its link does not.

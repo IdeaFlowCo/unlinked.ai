@@ -27,3 +27,10 @@ Every Home also has a network search, waiting connection requests / notification
 ## Reminder preference
 
 `POST /home/import-reminder` (`reminder=dismissed|shown`, session CSRF) stores one per-account display choice in `UnlinkedHomePreference {ownerId}` (`mcp-server/home-preferences.mjs`, unique on `ownerId`, user-checked on read). It is a UI preference only: it never touches imports, their status or the export reminder email, and it never hides a real import status. Account deletion removes it. The label is in the graph migration's `LABELS`; a runtime rolled back to a release without that label must have these nodes and the constraint dropped before its next shared export (the rollback script for this release does so).
+
+
+## Imports
+
+The Me menu links to `/imports`, the member's import history and the entry to import another file. The page lists uploaded jobs and separately identifies recovered files; original recovered files remain downloadable from Settings. Names and comma-separated tags on uploaded imports are private organization only. They do not change imported people or their audiences. They are stored on the owner's `UnlinkedHomePreference` as per-import properties, included in account export, and removed with the account. Only a CSRF-protected request for an import owned by the current session can edit them. Recovered files do not yet have editable labels.
+
+Import visibility is read-only here. Connection audience controls are separate work and must be enforced across readers before an editable privacy control can be offered.
