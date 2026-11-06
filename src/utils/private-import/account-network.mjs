@@ -1,6 +1,7 @@
 import { validTimestamp, connectionDate } from '../network-order.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
+import { sharedImportRowCache } from './import-row-cache.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from './consent.mjs'
 import { createPrivateSearch } from './ai-search.mjs'
 import { matchNetworkText } from './network-text-search.mjs'
@@ -41,7 +42,7 @@ export async function withSearchDeadline({ signal, budgetMs, label = 'search', r
 
 // One authenticated account, all its currently published imports. Source
 // assertions keep their original IDs and provenance; no email/URL ownership.
-export function createAccountNetwork({ owner, getBackend, complete, observationLimit = 100000 }) {
+export function createAccountNetwork({ owner, getBackend, complete, observationLimit = 100000, rowCache = sharedImportRowCache }) {
   if (!owner?.ownerId || !owner.userId || typeof getBackend !== 'function') throw new Error('verified_owner_required')
   if (!Number.isSafeInteger(observationLimit) || observationLimit < 0 || observationLimit > 100000) throw new Error('account_observation_limit')
   const networkId = privateId(owner.ownerId, 'account-network-v1')
@@ -55,7 +56,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
     let indexed = 0
     for (const id of ids) {
       signal?.throwIfAborted()
-      const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit' })
+      const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit', rowCache })
       const publication = await readImport(id, { signal })
       requireCombinedUploadConsent(publication.consent)
       for (const row of publication.assertions) assertions.push({ ...row, ...(publication.importedAt ? { importedAt: publication.importedAt } : {}), ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })

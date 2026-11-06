@@ -1,6 +1,7 @@
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { withoutSuspendedRows } from '../public-people/suspension-filter.mjs'
+import { sharedImportRowCache } from './import-row-cache.mjs'
 
 const SHA = /^[a-f0-9]{64}$/
 const TOMBSTONE_BATCH = 400
@@ -53,7 +54,14 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
 // agent grants. Tombstones erase the stored payloads and can never be revived.
 // Content is erased first and each job last, so an interrupted run stays
 // discoverable through the job listing and can simply be run again.
-export async function deleteAccountData({ owner, backend, jobs, grantIds = [], signupLookup, signal }) {
+export async function deleteAccountData({ rowCache = sharedImportRowCache, ...input }) {
+  // Rows are tombstoned before their import, so cached rows are dropped before
+  // erasing and again after, discarding any fill that raced the erase.
+  rowCache?.forgetOwner(input.owner.ownerId)
+  try { return await eraseAccountData(input) } finally { rowCache?.forgetOwner(input.owner.ownerId) }
+}
+
+async function eraseAccountData({ owner, backend, jobs, grantIds = [], signupLookup, signal }) {
   if (signupLookup) await signupLookup.removeOwner(owner)
   const ownerId = owner.ownerId
   const writeBatch = typeof backend.writeBatch === 'function'
