@@ -123,7 +123,7 @@ test('a member whose only import is recovered from their original Unlinked accou
   assert.doesNotMatch(refresh.body, /aria-label="Getting started"|import-reminder/)
   // Profile and Settings stop saying there is no file.
   const profile = await get('/profile')
-  assert.match(profile.body, /href="\/import">Upload a newer export</)
+  assert.match(profile.body, /href="\/import">Import a newer export</)
   assert.match(profile.body, /Your LinkedIn files from your original Unlinked account are on this account\./)
   assert.doesNotMatch(profile.body, /You can add your file later/)
   const settings = await get('/settings')
@@ -223,16 +223,21 @@ const enabled = /^bolt:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uri ?? '') && pro
 test('real Neo4j home preferences: owner-keyed upsert, user check and removal', { skip: !enabled }, async t => {
   const neo4j = createRequire(import.meta.url)(process.env.UNLINKED_TEST_NEO4J_DRIVER)
   const driver = neo4j.driver(uri, neo4j.auth.basic('neo4j', process.env.UNLINKED_TEST_NEO4J_PASSWORD))
-  t.after(() => driver.close())
   const store = createNeo4jHomePreferenceStore(driver, 'neo4j', { now: () => 5 })
   await store.initialize()
   const member = { ownerId: randomUUID(), userId: 'user-' + randomUUID() }
-  t.after(() => store.removeOwner(member))
+  t.after(async () => { try { await store.removeOwner(member) } finally { await driver.close() } })
   await store.set(member, { importReminder: 'dismissed' })
   await store.set(member, { importReminder: 'shown' })
   assert.deepEqual(await store.get(member), { importReminder: 'shown', updatedAt: 5 })
   assert.equal(await store.get({ ...member, userId: 'other' }), null)
+  await store.setImportMetadata(member, id(1), 'Network', 'friends, founders')
+  assert.deepEqual(await store.getImportMetadata(member, id(1)), { name: 'Network', tags: ['friends', 'founders'] })
+  assert.deepEqual(await store.getImportMetadataBatch(member, [id(1), id(2)]), { [id(1)]: { name: 'Network', tags: ['friends', 'founders'] }, [id(2)]: null })
+  assert.equal(await store.getImportMetadata({ ...member, userId: 'other' }, id(1)), null)
+  await assert.rejects(store.setImportMetadata({ ...member, userId: 'other' }, id(1), 'Wrong', ''), /mismatch/)
   await store.removeOwner(member)
+  assert.equal(await store.getImportMetadata(member, id(1)), null)
   assert.equal(await store.get(member), null)
 })
 
@@ -264,4 +269,80 @@ test('the isolated pilot forwards the home preference store to the browser', asy
   const hidden = await go('/home/import-reminder', { method: 'POST', headers: { Cookie: cookie, Origin: `https://127.0.0.1:${port}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: home.match(/name="csrf" value="([^"]+)"/)[1], reminder: 'dismissed' }) })
   assert.equal(hidden.status, 303)
   assert.equal((await preferences.get(owner)).importReminder, 'dismissed')
+})
+
+
+test('imports navigation shows owned history and saves private names and tags', async t => {
+  const home = await site(t, { jobs: [job(1, 'indexed')] })
+  const page = await home.get('/imports')
+  assert.equal(page.status, 200)
+  assert.match(page.body, /href="\/imports">.*Imports<\/a>/)
+  assert.match(page.body, /Fictional-1.zip/)
+  const csrf = home.csrfFrom(page.body)
+  assert.equal((await home.post(`/imports/${id(1)}/metadata`, { csrf: 'wrong', name: 'Old', tags: 'one' })).status, 400)
+  assert.equal((await home.post(`/imports/${id(2)}/metadata`, { csrf, name: 'Old', tags: 'one' })).status, 404)
+  assert.equal((await home.post(`/imports/${id(1)}/metadata`, { csrf, name: 'My network', tags: 'friends, founders' })).status, 303)
+  const updated = await home.get('/imports')
+  assert.match(updated.body, /My network/)
+  assert.match(updated.body, /Tags: friends, founders/)
+  const exported = await home.get('/export')
+  assert.deepEqual(JSON.parse(exported.body).imports[0].organization, { name: 'My network', tags: ['friends', 'founders'] })
+  assert.deepEqual(home.writes, [])
+})
+
+test('import labels are isolated by owner, bounded, and removed with account preferences', async () => {
+  const store = createMemoryHomePreferenceStore()
+  await store.setImportMetadata(owner, id(1), 'Network', 'friends, founders, friends')
+  assert.deepEqual(await store.getImportMetadata(owner, id(1)), { name: 'Network', tags: ['friends', 'founders'] })
+  assert.equal(await store.getImportMetadata({ ownerId: owner.ownerId, userId: 'someone-else' }, id(1)), null)
+  await assert.rejects(store.setImportMetadata(owner, id(1), 'x'.repeat(121), ''), /invalid/)
+  await store.removeOwner(owner)
+  assert.equal(await store.getImportMetadata(owner, id(1)), null)
+})
+
+
+test('history survives unavailable labels and isolates other owners and deleted jobs', async t => {
+  const foreign = job(2, 'indexed'); foreign.sourceOwnerId = 'other-owner'
+  const removed = { ...job(3, 'indexed'), deleted: true }
+  const preferences = createMemoryHomePreferenceStore()
+  preferences.getImportMetadataBatch = async () => { throw new Error('unavailable') }
+  const home = await site(t, { jobs: [job(1, 'indexed'), foreign, removed], preferences })
+  const page = await home.get('/imports')
+  assert.equal(page.status, 200)
+  assert.match(page.body, /names and tags are unavailable/)
+  assert.match(page.body, /Fictional-1.zip/)
+  assert.doesNotMatch(page.body, /Fictional-[23].zip/)
+  const csrf = home.csrfFrom(page.body)
+  for (const n of [2, 3]) assert.equal((await home.post(`/imports/${id(n)}/metadata`, { csrf, name: 'Wrong', tags: '' })).status, 404)
+})
+
+
+test('history reports recorded consent only for supported complete records', async t => {
+  const { COMBINED_UPLOAD_CONSENT, PUBLIC_UPLOAD_CONSENT } = await import('../src/utils/private-import/consent.mjs')
+  const home = await site(t, { jobs: [job(1, 'indexed', { consent: COMBINED_UPLOAD_CONSENT }), job(2, 'indexed', { consent: PUBLIC_UPLOAD_CONSENT }), job(3, 'indexed'), job(4, 'indexed', { consent: { ...COMBINED_UPLOAD_CONSENT, boundedOpenAIProcessing: false } })] })
+  const page = await home.get('/imports')
+  const articles = [...page.body.matchAll(/<article class="card sec">(.*?)<\/article>/gs)].map(match => match[1])
+  const row = n => articles.find(article => article.includes(`Fictional-${n}.zip`))
+  assert.match(row(1), /private retention.*bounded OpenAI processing.*remain private/)
+  assert.match(row(2), /private retention.*bounded OpenAI processing.*may be published/)
+  for (const n of [3, 4]) assert.match(row(n), /Recorded consent: unknown/)
+})
+
+test('history pages uploads and recovered files together with bounded metadata reads', async t => {
+  const preferences = createMemoryHomePreferenceStore()
+  const batches = []
+  const batch = preferences.getImportMetadataBatch
+  preferences.getImportMetadataBatch = async (member, ids) => { batches.push(ids); return batch(member, ids) }
+  const recovered = { objects: Array.from({ length: 35 }, (_, i) => ({ filename: `Legacy-${i}.csv`, accepted: i })) }
+  const home = await site(t, { jobs: [job(1, 'indexed')], recovered, preferences })
+  const first = await home.get('/imports'), second = await home.get('/imports?page=2')
+  assert.match(first.body, /Page 1 of 2/)
+  assert.match(first.body, /Fictional-1.zip/)
+  assert.match(first.body, /Legacy-28.csv/)
+  assert.doesNotMatch(first.body, /Legacy-29.csv/)
+  assert.match(second.body, /Page 2 of 2/)
+  assert.match(second.body, /Legacy-29.csv/)
+  assert.match(second.body, /Legacy-34.csv/)
+  assert.doesNotMatch(second.body, /Legacy-28.csv|Fictional-1.zip|No imported files/)
+  assert.deepEqual(batches, [[id(1)], []])
 })

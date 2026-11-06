@@ -173,7 +173,7 @@ test('People keeps the empty global header search above its own scoped toolbar s
 test('People distinguishes empty own browsing, own no-match results and absent imports', () => {
   const empty = renderPeople({ ...account, own: [], query: '' })
   assert.match(empty.content, /Bring your LinkedIn export to see your people\./)
-  assert.match(empty.content, /href="\/import">Add a file →/)
+  assert.match(empty.content, /href="\/import">Import a file →/)
   assert.doesNotMatch(empty.content, /No people matched/)
   const noMatch = renderPeople({ ...account, own: [], query: 'ocean logistics' })
   assert.match(noMatch.content, /No people matched\. Try another name or company\./)

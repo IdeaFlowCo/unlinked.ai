@@ -44,7 +44,7 @@ import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
 import { composeAccountScope, effectiveAccountGrant } from './account-grants.mjs'
 import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-import/owner-profile.mjs'
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
-import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderChatPerson, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
+import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderChatPerson, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderImports, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
@@ -302,7 +302,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
   const signInOptions = (request, switching = false) => switching || cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|imports|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -2034,7 +2034,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const active = ordered.find(resource => ['uploaded', 'parsing', 'indexing'].includes(resource.payload.status)) ?? ordered.find(resource => resource.payload.backgroundVersion)
         return { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, publicProfessionalSearch: dataMode === 'private_live' && typeof readPublishedSnapshot === 'function', importJob: active ? importJobStatus(active.payload) : undefined }
       }
-      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts?.accepted ?? 0, indexed: payload.counts?.indexed ?? 0, rejected: payload.counts?.rejected ?? 0, failedFiles: payload.counts?.failedFiles ?? 0, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
+      const summaries = jobs => jobs.map(({ sourceId, payload }) => ({ id: sourceId, createdAt: payload.createdAt, kind: payload.origin?.kind, filename: payload.origin?.kind === ADDED_PERSON ? `Added by you: ${payload.origin.label}` : payload.filename, consent: payload.consent, sha256: payload.archiveSha256, status: payload.status, accepted: payload.counts?.accepted ?? 0, indexed: payload.counts?.indexed ?? 0, rejected: payload.counts?.rejected ?? 0, failedFiles: payload.counts?.failedFiles ?? 0, ...(payload.error ? { errorMessage: importErrorMessage(payload) } : {}), visibility: payload.consent?.version === PUBLIC_UPLOAD_CONSENT.version && payload.consent.publicProfessionalSearch === true ? 'public' : 'private' }))
       // What this member has imported, from both sources that count (uploads
       // here and files recovered from their original Unlinked account), so no
       // page tells someone with an import to bring one (unlinked-5e5). Reads only.
@@ -2591,6 +2591,36 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         await connectionPrivacy.set(session.owner, choice)
         redirect(response, '/settings?privacy=saved#connection-privacy'); return
       }
+      const importMetadataMatch = url.pathname.match(/^\/imports\/([a-f0-9]{64})\/metadata$/)
+      if (signup && request.method === 'POST' && importMetadataMatch && typeof homePreferences?.setImportMetadata === 'function') {
+        const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+        if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || ['name', 'tags'].some(key => input.getAll(key).length !== 1) || [...input.keys()].some(key => !['csrf', 'name', 'tags'].includes(key))) throw new Error('private_browser_csrf')
+        const resource = await backend.readResource('import', importMetadataMatch[1])
+        if (!resource || resource.deleted || resource.sourceOwnerId !== session.owner.ownerId || resource.payload?.id !== importMetadataMatch[1] || resource.payload.kind || resource.payload.receiptOf || resource.payload.origin?.kind === ADDED_PERSON) { response.writeHead(404).end(); return }
+        await homePreferences.setImportMetadata(session.owner, importMetadataMatch[1], input.get('name'), input.get('tags'))
+        redirect(response, '/imports'); return
+      }
+      if (signup && request.method === 'GET' && url.pathname === '/imports') {
+        const jobs = await jobResources(), props = jobProps(jobs)
+        let recovered = null, recoveredUnavailable = false
+        if (typeof backend.readLegacyFiles === 'function') {
+          try { recovered = await backend.readLegacyFiles() } catch { recoveredUnavailable = true }
+        }
+        const metadataAvailable = typeof homePreferences?.getImportMetadataBatch === 'function' && typeof homePreferences?.setImportMetadata === 'function'
+        const allImports = summaries(jobs).filter(item => item.kind !== ADDED_PERSON).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+        const history = [...allImports.map(item => ({ type: 'upload', item })), ...(recovered?.objects ?? []).map(item => ({ type: 'recovered', item }))]
+        const pages = Math.max(1, Math.ceil(history.length / 30))
+        const requested = Number(url.searchParams.get('page') || 1)
+        const page = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, pages) : 1
+        const selected = history.slice((page - 1) * 30, page * 30)
+        const selectedImports = selected.filter(entry => entry.type === 'upload').map(entry => entry.item)
+        const selectedRecovered = selected.filter(entry => entry.type === 'recovered').map(entry => entry.item)
+        let labels = {}, metadataUnavailable = false
+        if (metadataAvailable) { try { labels = await homePreferences.getImportMetadataBatch(session.owner, selectedImports.map(item => item.id)) } catch { metadataUnavailable = true } }
+        const imports = selectedImports.map(item => ({ ...item, metadata: labels[item.id] ?? null }))
+        journey(response, renderImports({ ...props, imports, recovered: selectedRecovered, recoveredUnavailable, metadataAvailable: metadataAvailable && !metadataUnavailable, metadataUnavailable, page, pages }), props.importJob)
+        return
+      }
       if (signup && request.method === 'GET' && url.pathname === '/settings') {
         // Settings shows the owner's live key, but a page view never creates
         // one: a member creates a key when they want to connect an app.
@@ -2647,6 +2677,10 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const jobs = await jobResources()
         const grants = await backend.listAccountGrantIds()
         const data = await exportAccountData({ owner: session.owner, backend, jobs, grants, signupLookup })
+        if (typeof homePreferences?.getImportMetadataBatch === 'function') {
+          const metadata = await homePreferences.getImportMetadataBatch(session.owner, data.imports.map(item => item.id))
+          for (const item of data.imports) if (metadata[item.id]) item.organization = metadata[item.id]
+        }
         data.account.accountLabel = session.accountLabel
         data.account.displayName = session.displayName
         // The contact card's details belong to the export; its link does not.
@@ -2817,7 +2851,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const id = importMatch[1], resource = await backend.readResource('import', id)
         if (!resource || resource.deleted || resource.sourceOwnerId !== session.owner.ownerId || resource.payload?.id !== id || resource.payload.receiptOf || resource.payload.kind) { response.writeHead(404).end(); return }
         const job = resource.payload
-        render(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><p>Search uses the bounded OpenAI processing authorized at upload.</p><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Query-time search; no shared people index.</small>'}</form>${!signup && typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a search-only agent to search this import using the bounded OpenAI processing authorized at upload. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : signup ? '<p><a href="/network">Search my whole network</a> · <a href="/settings">Connect my agent</a></p>' : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
+        render(response, 'Import receipt', `<article><p>Status: <strong>${html(job.status)}</strong>. Accepted: ${html(job.counts.accepted)}. Indexed: ${html(job.counts.indexed)}.</p><p>${job.phase === 'unsupported_private_publication' ? 'This archive exceeds the bounded publication limit. No observations were published.' : html(job.phase)}</p><small>Receipt ${html(id)}<br>Original SHA-256 ${html(job.archiveSha256)}</small></article>${['partial', 'indexed'].includes(job.status) ? `<form method="post" action="/search">${hidden(session, id)}<label>Search this import <input required type="text" maxlength="1024" name="query" placeholder="Who works on distributed systems?"></label><p>Search uses the bounded OpenAI processing authorized at upload.</p><button${typeof complete !== 'function' ? ' disabled' : ''}>Search privately</button>${typeof complete !== 'function' ? '<small>AI credential is not configured.</small>' : '<small>Search this import privately.</small>'}</form>${!signup && typeof issueGrant === 'function' && mcpEndpoint ? `<form method="post" action="/setup">${hidden(session, id)}<p>Authorize a search-only agent to search this import using the bounded OpenAI processing authorized at upload. The configuration contains a short-lived bearer grant; raw archives are excluded.</p><button>Download scoped agent setup</button></form>` : signup ? '<p><a href="/network">Search my whole network</a> · <a href="/settings">Connect my agent</a></p>' : '<p>Scoped agent setup is not configured.</p>'}` : ''}`)
         return
       }
       if (request.method === 'POST' && ['/search', '/setup', '/logout', '/switch-account'].includes(url.pathname)) {
