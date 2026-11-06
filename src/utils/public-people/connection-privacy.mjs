@@ -63,45 +63,56 @@ export function connectionPolicies(value, known) {
   return policies
 }
 
-// The connections visible to one viewer. `connected` is the whole symmetric
-// graph (id -> Set), `listedBy(a, b)` says whether a's own listing holds the
-// a–b connection. `viewer` is { id?: published profile id, signedIn: bool,
-// known?: Set of published ids the viewer is connected to through their own
-// private network }. A missing viewer is an anonymous visitor.
+// The connections visible to one viewer (docs/connection-privacy.md).
+// `connected` is the whole symmetric graph (id -> Set); `listedBy(a, b)` says
+// whether a's own listing holds the a–b connection (an export row, or an
+// accepted invitation, which both people listed). `viewer` is
+// { id?: published profile id, signedIn: bool }; missing means anonymous.
+//
+// Relationships are only ever taken from the owner's side: you are someone's
+// connection when THEIR list names you, never because your own upload names
+// them. Anyone can upload a file listing anyone, so a self-made list must not
+// open someone else's private connections.
 export function createConnectionVisibility({ policies, connected, listedBy, viewer }) {
   const signedIn = viewer?.signedIn === true
   const self = signedIn && typeof viewer.id === 'string' ? viewer.id : null
-  const mine = new Set([...(self ? connected.get(self) ?? [] : []), ...(signedIn && viewer.known instanceof Set ? viewer.known : [])])
   const within = new Map()
+  const neighbors = id => connected.get(id) ?? new Set()
+  // Second degree: the owner listed you, or listed someone who listed you.
+  const nearOwner = owner => {
+    if (!within.has(owner)) {
+      let near = listedBy(owner, self)
+      if (!near) for (const via of neighbors(owner)) if (listedBy(owner, via) && listedBy(via, self)) { near = true; break }
+      within.set(owner, near)
+    }
+    return within.get(owner)
+  }
   const audienceAllows = (owner, policy) => {
     switch (policy.audience) {
       case 'everyone': return true
       case 'members': return signedIn
-      case 'connections': return Boolean(self) && (connected.get(owner)?.has(self) ?? false)
-      case 'second_degree': {
-        if (!self) return false
-        if (!within.has(owner)) {
-          const theirs = connected.get(owner) ?? new Set()
-          let near = theirs.has(self)
-          if (!near) for (const id of mine) if (theirs.has(id)) { near = true; break }
-          within.set(owner, near)
-        }
-        return within.get(owner)
-      }
+      case 'connections': return Boolean(self) && listedBy(owner, self)
+      case 'second_degree': return Boolean(self) && nearOwner(owner)
       default: return false
     }
   }
-  // Whether `owner`'s own listing of `other` may be shown.
+  // Whether `owner`'s choice lets this viewer see owner's connection to `other`.
+  // "In common" means `other` is in the viewer's own list (or is the viewer).
   const allowedBy = (owner, other) => {
     if (owner === self) return true
     const policy = policies.get(owner)
     if (!policy) return true
     if (!audienceAllows(owner, policy)) return false
-    return policy.scope === 'all' || other === self || mine.has(other)
+    return policy.scope === 'all' || other === self || (Boolean(self) && listedBy(self, other))
   }
-  const visible = (a, b) => {
+  // Shown on `page`'s profile: page's own choice allows it, and someone who
+  // listed the connection allows it. So a private importer's list stays off
+  // the profiles of the people it imported, and a member's own choice governs
+  // their own page even for connections others listed.
+  const visible = (page, other) => {
     if (!policies.size) return true
-    return (listedBy(a, b) && allowedBy(a, b)) || (listedBy(b, a) && allowedBy(b, a))
+    if (!allowedBy(page, other)) return false
+    return listedBy(page, other) || (listedBy(other, page) && allowedBy(other, page))
   }
   return { visible, restricted: policies.size > 0 }
 }

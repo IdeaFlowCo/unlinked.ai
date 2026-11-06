@@ -108,7 +108,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   if (!Number.isSafeInteger(linkedinEnrichmentTextBudget) || linkedinEnrichmentTextBudget < 0 || linkedinEnrichmentTextBudget > LINKEDIN_ENRICHMENT_TEXT_BUDGET) throw Error('public_enrichment_text_budget_invalid')
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
   if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
-  let work = null, kept = null
+  let work = null, kept = null, generation = 0
   const detailCache = new Map()
   // Operator merges and renames apply last, over the complete union.
   // Operator and automatic decisions; the index's own merges come first.
@@ -230,7 +230,15 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     if (!Array.isArray(privacy) || privacy.length > 10000) throw Error('public_connection_privacy_invalid')
     const privacyByProfile = new Map()
     for (const entry of privacy) {
-      const choice = connectionPrivacyValue(entry), id = profileFor.get(`${entry?.owner?.ownerId}\u0000${entry?.owner?.userId}`)
+      const key = `${entry?.owner?.ownerId}\u0000${entry?.owner?.userId}`
+      // A member linked to a recovered legacy profile may have no import yet;
+      // their legacy connections are theirs too.
+      if (!profileFor.has(key) && connectionPrivacyValue(entry) && entry.owner) {
+        const backend = await getBackend(entry.owner).catch(() => null)
+        const linked = typeof backend?.readLegacyProfile === 'function' ? await backend.readLegacyProfile().catch(() => null) : null
+        if (linked?.profileId && profiles.some(value => value.id === linked.profileId)) profileFor.set(key, linked.profileId)
+      }
+      const choice = connectionPrivacyValue(entry), id = profileFor.get(key)
       if (!choice) throw Error('public_connection_privacy_invalid')
       if (id && !isDefaultConnectionPrivacy(choice)) privacyByProfile.set(id, choice)
     }
@@ -249,7 +257,10 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     for (const [id, value] of overlays) { const index = profiles.findIndex(profile => profile.id === id); const previous = profiles[index]; profiles[index] = { ...value.profile, ...(!value.profile.linkedinUrl && previous.linkedinUrl ? {linkedinUrl:previous.linkedinUrl} : {}) }; if (value.profile.linkedinUrl) verified.add(id) }
     if (typeof readInviteEdges === 'function') {
       const known = new Set(profiles.map(value => value.id)), edges = (await readInviteEdges()).filter(edge => known.has(edge.fromId) && known.has(edge.toId))
-      connections.push(...edges)
+      // An accepted invitation is a connection both people chose, so it counts
+      // as listed by each of them (docs/connection-privacy.md). The graph is
+      // symmetric already; only who "listed" it changes.
+      connections.push(...edges, ...edges.map(edge => ({ fromId: edge.toId, toId: edge.fromId })))
       revisions.push('invites:' + hash(JSON.stringify(edges.map(edge => [edge.fromId, edge.toId]).sort())))
     }
     // Replayed source edges are canonicalized without changing their receipts.
@@ -279,10 +290,12 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       // Keyed by the profile each account resolves to after merges. When two
       // accounts fold into one profile, the more private choice wins.
       const shown = new Set(result.profiles.map(profile => profile.id)), connectionPrivacy = {}
-      const rank = choice => CONNECTION_AUDIENCES.indexOf(choice.audience) * 2 + Number(choice.scope === 'shared')
+      // Stricter on each dimension: the narrower audience and, if either chose it, "in common".
       for (const [id, choice] of privacyByProfile) {
-        const target = result.aliases?.[id] ?? id
-        if (shown.has(target) && (!connectionPrivacy[target] || rank(choice) > rank(connectionPrivacy[target]))) connectionPrivacy[target] = { ...choice }
+        const target = result.aliases?.[id] ?? id, prior = connectionPrivacy[target]
+        if (!shown.has(target)) continue
+        const audience = prior && CONNECTION_AUDIENCES.indexOf(prior.audience) > CONNECTION_AUDIENCES.indexOf(choice.audience) ? prior.audience : choice.audience
+        connectionPrivacy[target] = { ...connectionPrivacyValue({ audience, scope: choice.scope === 'shared' || prior?.scope === 'shared' ? 'shared' : 'all' }) }
       }
       return { ...result, connectionPrivacy }
     }
@@ -304,13 +317,17 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     signal?.throwIfAborted()
     const age = kept ? now() - kept.at : Infinity
     if (age < freshMs) return kept.value
-    if (!work) work=build().then(value=>{kept=value?{value,at:now()}:null;return value},error=>{kept=null;throw error}).finally(()=>{work=null})
+    if (!work) { const started = generation; const current = build().then(value=>{if(started===generation)kept=value?{value,at:now()}:null;return value},error=>{if(started===generation)kept=null;throw error}).finally(()=>{if(work===current)work=null}); work = current }
     if (age < staleMs) { work.catch(() => {}); return kept.value }
     const value=await work;signal?.throwIfAborted();return value
   }
   // The revision hashes every input above (legacy, enrichment, each import,
   // links, invites, members, decisions), so readers may reuse a compiled index.
   read.revisionIdentifiesContent = true
+  // Drop the kept build now (a member made their connections more private);
+  // a build already running cannot store its older result, and the next read
+  // waits for a fresh one instead of serving the stale window.
+  read.invalidate = () => { generation++; kept = null; work = null }
   return read
 }
 

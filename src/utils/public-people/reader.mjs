@@ -256,8 +256,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     if (!plain(value) || typeof value.signedIn !== 'boolean' || (value.id !== undefined && value.id !== null && !idValid(value.id)) || Object.keys(value).some(key => !['signedIn', 'id'].includes(key))) invalid()
     return value
   }
-  const visibilityFor = (data, viewer, known) => createConnectionVisibility({ policies: data.policies, connected: data.connected, listedBy: data.listedBy,
-    viewer: viewer ? { signedIn: viewer.signedIn, ...(viewer.id ? { id: data.aliases.get(viewer.id) ?? viewer.id } : {}), ...(known ? { known } : {}) } : null })
+  // The viewer's private `known` set never widens what they see: relationships
+  // come only from the published owner-side lists (docs/connection-privacy.md).
+  const visibilityFor = (data, viewer) => createConnectionVisibility({ policies: data.policies, connected: data.connected, listedBy: data.listedBy,
+    viewer: viewer ? { signedIn: viewer.signedIn, ...(viewer.id ? { id: data.aliases.get(viewer.id) ?? viewer.id } : {}) } : null })
   // Connection lists can differ per viewer, so a signed-in viewer's cursors are theirs.
   const viewerScope = viewer => viewer ? `:v=${hash(JSON.stringify([viewer.signedIn === true, viewer.id ?? null]))}` : ''
   const queryValue = value => { if (value === undefined) return ''; if (typeof value !== 'string' || value.length > 200) invalid(); return normalized(value) }
@@ -341,7 +343,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
       if (data.aliases.has(id)) return { moved: data.aliases.get(id) }
       if (!data.details.has(id)) return null
-      const visibility = visibilityFor(data, viewer, known)
+      const visibility = visibilityFor(data, viewer)
       let rows = data.ordered.filter(person => person.id !== id && data.connected.get(id).has(person.id) && visibility.visible(id, person.id))
       const connectionCount = rows.length
       // For a signed-in viewer, who they both know across the whole list (not
@@ -365,7 +367,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { id, signal, known } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id) || (known !== undefined && !(known instanceof Set))) invalid()
       const data = await snapshot(signal)
-      const resolved = data.aliases.get(id) ?? id, visibility = visibilityFor(data, viewer, known)
+      const resolved = data.aliases.get(id) ?? id, visibility = visibilityFor(data, viewer)
       const summary = data.summaries.get(resolved)
       if (!summary) return null
       let mutual
@@ -429,11 +431,11 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // merged addresses resolved). Used to avoid offering "Connect" to people
     // who are already connected through an import.
     async linked(request = {}) {
-      const { fromId, toId, signal } = requestValue(request)
+      const { fromId, toId, signal } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(fromId) || !idValid(toId)) invalid()
       const data = await snapshot(signal)
       const from = data.aliases.get(fromId) ?? fromId, to = data.aliases.get(toId) ?? toId
-      return from !== to && Boolean(data.connected.get(from)?.has(to))
+      return from !== to && Boolean(data.connected.get(from)?.has(to)) && visibilityFor(data, viewer).visible(from, to)
     },
     // Everyone the public graph connects to one profile (either direction,
     // merged addresses resolved), as public summaries in name order.

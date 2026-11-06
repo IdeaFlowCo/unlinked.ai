@@ -592,6 +592,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // Pre-build the shared index and keep it young, so neither the first
     // request after a restart nor the first after an idle gap pays the
     // rebuild in-band. The interval stays well inside the stale window.
+    // A member's new connection-privacy choice applies on the next read, not
+    // after the index freshness window (docs/connection-privacy.md).
+    if (connectionPrivacy && typeof readPublishedSnapshot?.invalidate === 'function') {
+      const { set, removeOwner } = connectionPrivacy
+      connectionPrivacy.set = async (...args) => { try { return await set(...args) } finally { readPublishedSnapshot.invalidate() } }
+      connectionPrivacy.removeOwner = async (...args) => { try { return await removeOwner(...args) } finally { readPublishedSnapshot.invalidate() } }
+    }
     if (readPublishedSnapshot && publicIndexFreshMs > 0 && publicIndexStaleMs > 0) {
       indexWarmKeeper = createIndexWarmKeeper({ read: readPublishedSnapshot, intervalMs: Math.max(publicIndexFreshMs, Math.min(45000, Math.floor(publicIndexStaleMs / 2))) })
       indexWarmKeeper.start()

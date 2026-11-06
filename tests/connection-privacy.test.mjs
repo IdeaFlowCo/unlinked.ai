@@ -16,7 +16,7 @@ const person = id => ({ id, name: id[0].toUpperCase() + id.slice(1), positions: 
 const ids = ['alice', 'bob', 'carol', 'vic', 'dan', 'eve', 'stranger']
 const edges = [['alice', 'bob'], ['alice', 'carol'], ['alice', 'vic'], ['vic', 'dan'], ['eve', 'carol'], ['dan', 'eve']]
 const snapshot = connectionPrivacy => ({ state: 'published', complete: true, revision: 'privacy-test-' + JSON.stringify(connectionPrivacy ?? null).length, profiles: ids.map(person),
-  connections: edges.map(([fromId, toId]) => ({ fromId, toId })), members: ids, legacyMembers: [], ...(connectionPrivacy ? { connectionPrivacy } : {}) })
+  connections: edges.map(([fromId, toId]) => ({ fromId, toId })), members: [...ids], legacyMembers: [], ...(connectionPrivacy ? { connectionPrivacy } : {}) })
 const readerOver = value => createPublicPeopleReader({ readPublishedSnapshot: async () => structuredClone(value) })
 const listOf = async (reader, id, viewer, extra = {}) => (await reader.profile({ id, ...(viewer ? { viewer } : {}), ...extra })).profile.connections.map(row => row.id).sort()
 const as = id => ({ signedIn: true, id })
@@ -56,13 +56,13 @@ test('each audience, viewed by: anonymous, a stranger, a 2nd-degree member, a co
   }
 })
 
-test('"shared" shows only connections the viewer has too; a signed-in viewer without a profile uses their own known set', async () => {
+test('"shared" shows only connections the viewer listed too; a private known set never widens it', async () => {
   const reader = readerOver(snapshot({ alice: { audience: 'members', scope: 'shared' } }))
   // eve also has carol; vic is alice's connection himself and so sees himself only.
   assert.deepEqual(await listOf(reader, 'alice', as('eve')), ['carol'])
   assert.deepEqual(await listOf(reader, 'alice', as('vic')), ['vic'])
   assert.deepEqual(await listOf(reader, 'alice', as('stranger')), [])
-  assert.deepEqual(await listOf(reader, 'alice', { signedIn: true }, { known: new Set(['bob']) }), ['bob'])
+  assert.deepEqual(await listOf(reader, 'alice', { signedIn: true }, { known: new Set(['bob']) }), [])
   assert.deepEqual(await listOf(reader, 'alice'), [])
 })
 
@@ -90,12 +90,30 @@ test('hover-card mutual counts and neighbors follow the same rule; cursors are b
   await assert.rejects(reader.profile({ id: 'alice', viewer: { signedIn: 'yes' } }), /public_people_input_invalid/)
 })
 
-test('visibility function: two listers, any allowing wins', () => {
+test('visibility: a page shows a connection when its own choice allows it and someone who listed it allows it', () => {
   const connected = new Map([['a', new Set(['b'])], ['b', new Set(['a'])]])
-  const listed = new Set(['a>b', 'b>a'])
-  const vis = policies => createConnectionVisibility({ policies: new Map(Object.entries(policies)), connected, listedBy: (x, y) => listed.has(`${x}>${y}`), viewer: null })
-  assert.equal(vis({ a: { audience: 'only_me', scope: 'all' } }).visible('a', 'b'), true, 'b published it')
-  assert.equal(vis({ a: { audience: 'only_me', scope: 'all' }, b: { audience: 'members', scope: 'all' } }).visible('a', 'b'), false)
+  const vis = (policies, listed) => createConnectionVisibility({ policies: new Map(Object.entries(policies)), connected, listedBy: (x, y) => listed.includes(`${x}>${y}`), viewer: null })
+  // Both listed it: a's private page hides it, b's public page shows it.
+  assert.equal(vis({ a: { audience: 'only_me', scope: 'all' } }, ['a>b', 'b>a']).visible('a', 'b'), false)
+  assert.equal(vis({ a: { audience: 'only_me', scope: 'all' } }, ['a>b', 'b>a']).visible('b', 'a'), true)
+  // Only private a listed it: hidden on b's page too.
+  assert.equal(vis({ a: { audience: 'only_me', scope: 'all' } }, ['a>b']).visible('b', 'a'), false)
+})
+
+test('a self-made list never makes you someone’s connection or 2nd degree', async () => {
+  // mallory uploads a file naming alice and everyone alice knows.
+  const value = snapshot({ alice: { audience: 'connections', scope: 'shared' } })
+  value.profiles.push(person('mallory'))
+  value.connections.push(...['alice', 'bob', 'carol', 'vic'].map(toId => ({ fromId: 'mallory', toId })))
+  value.members.push('mallory')
+  const reader = readerOver(value)
+  assert.deepEqual(await listOf(reader, 'alice', as('mallory')), [])
+  const second = snapshot({ alice: { audience: 'second_degree', scope: 'all' } })
+  second.profiles.push(person('mallory')); second.members.push('mallory')
+  second.connections.push({ fromId: 'mallory', toId: 'vic' })
+  assert.deepEqual(await listOf(readerOver(second), 'alice', as('mallory')), [], 'listing vic yourself is not being listed by vic')
+  second.connections.push({ fromId: 'vic', toId: 'mallory' })
+  assert.deepEqual(await listOf(readerOver(second), 'alice', as('mallory')), ['bob', 'carol', 'vic'], 'vic listing mallory is')
 })
 
 test('second-degree search for an agent skips people reachable only through a private list', async () => {
@@ -106,7 +124,9 @@ test('second-degree search for an agent skips people reachable only through a pr
   const viaVic = { ...snapshot(), connections: [...snapshot().connections, { fromId: 'eve', toId: 'vic' }] }
   assert.deepEqual((await read(viaVic)({ degree: 2 })).profiles.map(row => row.id), ['dan'])
   assert.deepEqual((await read({ ...viaVic, connectionPrivacy: { vic: { audience: 'only_me', scope: 'all' } } })({ degree: 2 })).profiles.map(row => row.id), [])
-  assert.deepEqual((await read({ ...viaVic, connectionPrivacy: { vic: { audience: 'connections', scope: 'all' } } })({ degree: 2 })).profiles.map(row => row.id), ['dan'], 'eve is vic’s connection')
+  assert.deepEqual((await read({ ...viaVic, connectionPrivacy: { vic: { audience: 'connections', scope: 'all' } } })({ degree: 2 })).profiles.map(row => row.id), [], 'eve listing vic does not make her vic’s connection')
+  const mutual = { ...viaVic, connections: [...viaVic.connections, { fromId: 'vic', toId: 'eve' }], connectionPrivacy: { vic: { audience: 'connections', scope: 'all' } } }
+  assert.deepEqual((await read(mutual)({ degree: 2 })).profiles.map(row => row.id), ['dan'], 'vic listed eve')
 })
 
 test('the public index carries each account’s choice on its resolved profile and rebuilds when it changes', async () => {
@@ -116,19 +136,23 @@ test('the public index carries each account’s choice on its resolved profile a
     { id: 'd'.repeat(64), importId: id, ownerId: owner.ownerId, category: 'connections', subject: 'https://www.linkedin.com/in/someone', fields: { 'first name': 'Some', 'last name': 'One', 'email address': 'hidden@example.invalid' } }]
   const legacy = { state: 'published', complete: true, revision: 'legacy-v1', profiles: [person('legacy')], connections: [] }
   const store = createMemoryConnectionPrivacyStore()
-  const read = createMemberPublicIndex({ readLegacy: async () => legacy, discover: async () => [{ id, owner, revision: 4 }], readConnectionPrivacy: () => store.list(),
+  let clock = 0
+  const read = createMemberPublicIndex({ freshMs: 60000, now: () => clock, readLegacy: async () => legacy, discover: async () => [{ id, owner, revision: 4 }], readConnectionPrivacy: () => store.list(),
     getBackend: async () => ({ readResource: async () => ({ sourceId: id, sourceOwnerId: owner.ownerId, sourceRevision: 4, payload: job }) }),
     publicPeople: { read: async dataset => ENRICHMENT_DATASETS.includes(dataset) ? null : projectPublicMemberImport({ job, assertions }), publish: async () => {} } })
   const open = await read()
   assert.equal(open.connectionPrivacy, undefined)
   await store.set(owner, { audience: 'connections', scope: 'shared' })
   await store.set({ ownerId: 'nobody', userId: 'nobody' }, { audience: 'only_me', scope: 'all' })
+  assert.equal((await read()).revision, open.revision, 'kept build within the freshness window')
+  read.invalidate()
   const closed = await read()
   assert.deepEqual(closed.connectionPrivacy, { ['member-import-' + id]: { audience: 'connections', scope: 'shared' } })
   assert.notEqual(open.revision, closed.revision)
   const reader = readerOver(closed)
   assert.deepEqual((await reader.profile({ id: 'member-import-' + id })).profile.connections, [])
   assert.ok(!JSON.stringify(closed).includes('hidden@example.invalid'))
+  clock += 1
   await store.set(owner, DEFAULT_CONNECTION_PRIVACY)
   assert.deepEqual(await store.list(), [{ owner: { ownerId: 'nobody', userId: 'nobody' }, audience: 'only_me', scope: 'all' }])
 })
