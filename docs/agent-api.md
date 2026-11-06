@@ -288,15 +288,15 @@ read `importCount: 0` while `unlinked_list_connections` listed them.
 `grant.toolRefresh` explains same-key tool refresh and explicit permissions; see the
 [permission and tool-refresh policy](#optional-connection-actions).
 
-### `GET /api/agent/v1/people?q&mode&presence&sort&cursor&limit` ⇄ `unlinked_list_people`
+### `GET /api/agent/v1/people?q&mode&presence&enrichmentStatus&sort&cursor&limit` ⇄ `unlinked_list_people`
 Deterministic listing of the published public People index.
 `q` ≤ 200 chars; `mode` `best` (default) or `exact`; `presence` uses the
 [public People presence contract](public-people-reader.md#historical-membership),
-omitted for everyone. `sort` `best` (default: relevance
+omitted for everyone. `enrichmentStatus` filters by the [enrichment status contract](public-people-reader.md#enrichment-status). `sort` `best` (default: relevance
 with `q`, else the stored name order), `name`, `name-desc` or `raw` (see
 [Name ordering](#name-ordering)). The filter and sort are bound into the cursor.
 Response: `{ kind, revision, sort? (when not best), total, match?, profiles: [{ id, name, headline?,
-location?, presence?, connectionCount? }], nextCursor?, visibility: "public" }`.
+location?, presence?, enrichmentStatus, detailLevel, connectionCount? }], nextCursor?, visibility: "public" }`.
 `presence` and `connectionCount` (connections counted from both ends) are present
 whenever the published snapshot names its members.
 
@@ -337,11 +337,11 @@ another value is `cursor_invalid`).
 
 Response: `{ kind, degree, grouping (degree 1), sort, revision, total,
 anchorId? (degree 2), connections: [{ id, name, headline?, company?,
-linkedinUrl?, publishedProfileId?, linkedinRefHash?, connectedAt?, importedAt?,
+linkedinUrl?, publishedProfileId?, linkedinRefHash?, presence, enrichmentStatus, detailLevel, connectedAt?, importedAt?,
 provenance, visibility, sources: [{ id, name, provenance, visibility }] }],
 nextCursor? }`. Grouped `provenance` is the primary source's; `visibility` is
 `owner_private` when any source is. Every source `id` (and the entry `id`) is a
-valid `connectionId` for `unlinked_lookup_contact`.
+valid `connectionId` for `unlinked_lookup_contact`. Status comes from the published profile and is `unknown` when public evidence is unavailable, for both grouping modes.
 
 #### Name ordering
 `name` compares a key that starts at the first Unicode letter or number
@@ -380,10 +380,10 @@ own contacts without paging; give exactly one input:
 
 Response: `{ kind, contact: { connectionId | null, name, headline?, company?,
 linkedinRefHash | null, sourceLinkedinRefHash?, sourceLinkedinRefHashes?,
-publishedProfileId | null, publishedProfileIds?, provenance? },
+publishedProfileId | null, publishedProfileIds?, provenance?, presence, enrichmentStatus, detailLevel },
 publicReconciliationComplete?, visibility }`. Additional source hashes and
 published IDs identify related exact references; `publicReconciliationComplete`
-indicates whether the public index was available for reconciliation.
+indicates whether the public index was available for reconciliation. The three status fields are `unknown` when public evidence is unavailable; see the [status contract](public-people-reader.md#enrichment-status).
 `linkedinRefHash` is the SHA-256 hex of the canonical LinkedIn slug
 (`linkedinSlug()` in `src/utils/public-people/url-identity.mjs`: decoded,
 lowercased) — the value of the Ideaflow people-overlay ref `linkedin:in:<hash>`

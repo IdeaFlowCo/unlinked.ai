@@ -93,7 +93,7 @@ test('existing immutable imports gain retained links and dates via scoped reads,
   assert.doesNotMatch(JSON.stringify(first),/PRIVATE_EMAIL/)
   const reads=assertionReads; await read();assert.equal(assertionReads,reads)
   assert.equal(JSON.stringify(cached),original)
-  items=[]; const removed=await read();assert.deepEqual(removed.profiles,legacy.profiles)
+  items=[]; const removed=await read();assert.deepEqual(removed.profiles,legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'})))
   items=[{id,owner,revision:4}];await read();assert.ok(assertionReads>reads)
 })
 
@@ -112,10 +112,10 @@ test('operator replacement clears stale content and retains only supplemental pr
   const read = createMemberPublicIndex({ includeDetails: true, discover: async () => [], readLegacy: async () => ({ ...legacy, profiles: [original] }),
     publicPeople: { read: async () => ({ state: 'published', complete: true, revision: 'curated-enrichment-v1:replacement', profiles: [replacement], connections: [] }) } })
   const result = (await read()).profiles[0]
-  assert.deepEqual(result, { ...replacement, linkedinUrl: original.linkedinUrl, website: original.website, industry: original.industry })
+  assert.deepEqual(result, { ...replacement, enrichmentStatus: 'enriched', linkedinUrl: original.linkedinUrl, website: original.website, industry: original.industry })
   assert.equal(result.headline, undefined); assert.equal(result.about, undefined); assert.equal(result.location, undefined); assert.equal(result.company, undefined)
   assert.deepEqual(result.positions, []); assert.deepEqual(result.education, []); assert.deepEqual(result.skills, [])
-  replacement = { ...replacement, linkedinUrl: 'https://www.linkedin.com/in/new-person', website: 'https://new.example.test', industry: 'New industry' }
-  assert.deepEqual((await read()).profiles[0], replacement)
+  replacement = { ...replacement, enrichmentStatus: 'enriched', linkedinUrl: 'https://www.linkedin.com/in/new-person', website: 'https://new.example.test', industry: 'New industry' }
+  assert.deepEqual((await read()).profiles[0], { ...replacement, enrichmentStatus: 'enriched' })
   assert.equal(original.headline, 'Obsolete headline')
 })

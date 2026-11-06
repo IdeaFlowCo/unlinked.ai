@@ -70,7 +70,7 @@ test('the reader answers who they both know for a viewer\'s set, members first, 
   assert.equal('mutual' in plain.profile, false)
   const known = new Set(['ann', 'bob', 'zed', 'out'])
   const { profile } = await reader.profile({ id: 'peter', known })
-  assert.deepEqual(profile.mutual, { total: 3, preview: [{ id: 'zed', name: 'Zed Member', presence: 'member', connectionCount: 1, detailLevel: 'basic' }, { id: 'ann', name: 'Ann Imported', presence: 'shadow', connectionCount: 2, detailLevel: 'basic' }, { id: 'bob', name: 'Bob Imported', presence: 'shadow', connectionCount: 1, detailLevel: 'basic' }] })
+  assert.deepEqual(profile.mutual, { total: 3, preview: [{ id: 'zed', name: 'Zed Member', presence: 'member', connectionCount: 1, detailLevel: 'basic', enrichmentStatus: 'unknown' }, { id: 'ann', name: 'Ann Imported', presence: 'shadow', connectionCount: 2, detailLevel: 'basic', enrichmentStatus: 'unknown' }, { id: 'bob', name: 'Bob Imported', presence: 'shadow', connectionCount: 1, detailLevel: 'basic', enrichmentStatus: 'unknown' }] })
   // The whole set counts even while the sidebar is searched or paged; a bigger set previews three.
   assert.equal((await reader.profile({ id: 'peter', known, query: 'zed' })).profile.mutual.total, 3)
   assert.equal((await reader.profile({ id: 'peter', known: new Set(['ann', 'bob', 'zed', 'owner']) })).profile.mutual.preview.length, 3)

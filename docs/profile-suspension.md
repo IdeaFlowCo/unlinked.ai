@@ -23,7 +23,9 @@ messaging from a profile, and every agent/MCP tool. It hides:
   decision stores the SHA-256 of the canonical LinkedIn slug
   (`linkedinRefHash`, never the address), and the composition also suspends
   any imported `public-<row>` copy whose LinkedIn address matches
-  (`urlIdentitySuspensions`). A new import, a sign-up that claims the same
+  (`urlIdentitySuspensions`). Matching also follows linked addresses from
+  curated and source rows through merged profiles, so alternate addresses do
+  not leave a connected copy visible. A new import, a sign-up that claims the same
   LinkedIn address, or a recovered-profile claim therefore cannot re-list
   the person while the suspension is active, even if the original import is
   later deleted.

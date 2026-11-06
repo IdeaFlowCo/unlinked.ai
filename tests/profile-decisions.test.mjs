@@ -164,3 +164,52 @@ test('the operator records who decided and why, keeps the active set valid, and 
   assert.equal((await operateProfileDecisions({ args: ['list'], session })).decisions.length, 1); assert.equal(nodes.length, 2)
   await assert.rejects(operateProfileDecisions({ args: ['revoke', merged.decision.id, 'jacob'], session }), /not_found/)
 })
+
+
+test('large connected suspension preserves unrelated profiles and removal tombstones', () => {
+  const count = 10000
+  const ref = index => index.toString(16).padStart(64, '0')
+  const linked = Array.from({ length: count }, (_, index) => person(`linked-${index}`, `Linked ${index}`))
+  const kept = Array.from({ length: count }, (_, index) => person(`kept-${index}`, `Kept ${index}`))
+  const snapshot = { state: 'published', complete: true, revision: 'large-suspension', profiles: [...linked, ...kept, person('removed', 'Removed'), person('alias', 'Alias')], connections: [] }
+  const decisions = [{ id: 'suspend', kind: 'suspend', profileId: 'linked-0' }, { id: 'remove', kind: 'remove', profileId: 'removed' }, { id: 'merge', kind: 'merge', profileId: 'alias', survivorId: 'removed' }]
+  const result = applyProfileDecisions(snapshot, decisions, { identityRefs: profile => {
+    if (!profile.id.startsWith('linked-')) return []
+    const index = Number(profile.id.slice('linked-'.length))
+    return [ref(index), ref(index + 1)]
+  } })
+  assert.deepEqual(result.profiles.map(profile => profile.id), kept.map(profile => profile.id))
+  assert.deepEqual(new Set(result.suspended), new Set(linked.map(profile => profile.id)))
+  assert.equal(result.suspendedRefs.length, count + 1)
+  assert.deepEqual(new Set(result.removed), new Set(['removed', 'alias']))
+})
+
+
+test('large suspension revisions are stable and reflect changed closure membership', () => {
+  const ref = index => index.toString(16).padStart(64, '0')
+  const count = 6000
+  const profiles = Array.from({ length: count }, (_, index) => person(`p-${index}`, `Person ${index}`))
+  const snapshot = { state: 'published', complete: true, revision: 'closure-revision', profiles, connections: [] }
+  const decisions = Array.from({ length: 3000 }, (_, index) => ({ id: `s-${index}`, kind: 'suspend', profileId: `p-${index}` }))
+  const options = { identityRefs: profile => { const index = Number(profile.id.slice(2)); return [ref(index), ref(index + 1)] } }
+  const first = applyProfileDecisions(snapshot, decisions, options)
+  const reordered = applyProfileDecisions({ ...snapshot, profiles: [...profiles].reverse() }, decisions, options)
+  assert.equal(first.suspended.length, count)
+  assert.equal(first.revision, reordered.revision)
+  const changed = applyProfileDecisions({ ...snapshot, profiles: profiles.slice(0, -1) }, decisions, options)
+  assert.equal(changed.suspended.length, count - 1)
+  assert.notEqual(first.revision, changed.revision)
+})
+
+test('public reader accepts bounded suspension tombstones and multiple references', async () => {
+  const ref = index => index.toString(16).padStart(64, '0')
+  const profiles = Array.from({ length: 10 }, (_, index) => person(`p-${index}`, `Person ${index}`))
+  const snapshot = { state: 'published', complete: true, revision: 'bounded-tombstones', profiles, connections: [] }
+  const decisions = [{ id: 's', kind: 'suspend', profileId: 'p-0' }, ...Array.from({ length: 12 }, (_, index) => ({ id: `ghost-${index}`, kind: 'suspend', profileId: `missing-${index}` }))]
+  const result = applyProfileDecisions(snapshot, decisions, { identityRefs: profile => { const index = Number(profile.id.slice(2)); return [ref(index), ref(index + 1)] } })
+  assert.equal(result.suspended.length, 22)
+  assert.equal(result.suspendedRefs.length, 11)
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => result, maxProfiles: 10 })
+  const tombstones = await reader.suspensions()
+  assert.equal(tombstones.ids.size, 22); assert.equal(tombstones.refs.size, 11)
+})

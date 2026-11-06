@@ -124,7 +124,7 @@ test('grouping "none" returns one row per source record in the historical shape'
   assert.equal(emilies.length, 3)
   for (const entry of connections) {
     assert.equal(entry.sources, undefined)
-    assert.deepEqual(Object.keys(entry).filter(key => !['id', 'name', 'headline', 'company', 'linkedinUrl', 'provenance', 'visibility'].includes(key)), [])
+    assert.deepEqual(Object.keys(entry).filter(key => !['id', 'name', 'headline', 'company', 'linkedinUrl', 'provenance', 'visibility', 'presence', 'enrichmentStatus', 'detailLevel'].includes(key)), [])
   }
 })
 
@@ -204,4 +204,38 @@ test('unlinked_list_people accepts name, name-desc and raw orders', async () => 
   const desc = await people('name-desc')
   assert.equal(desc.profiles[0].name, 'Someone Else')
   assert.deepEqual(orderNetwork([{ id: 'b', name: '🚀 B' }, { id: 'a', name: 'a' }], 'name').map(value => value.id), ['a', 'b'])
+})
+
+
+test('connection status follows published identity in both grouping modes and falls back safely', async () => {
+  const published = async () => ({ ...(await snapshot()), members: ['legacy-emily'], profiles: (await snapshot()).profiles.map(p => p.id === 'legacy-emily' ? { ...p, enrichmentStatus: 'enriched' } : p) })
+  const call = async (source, grouping, cursor) => (await createAccountToolService({ getBackend: async () => backend(), readPublishedSnapshot: source, lookupSlug: slug => selfClaims.lookupSlug(slug) }).call({ grant, name: 'unlinked_list_connections', input: { grouping, limit: 2, ...(cursor ? { cursor } : {}) } })).result
+  for (const grouping of ['person', 'none']) {
+    let cursor, all = [], total
+    do { const page = await call(published, grouping, cursor); all.push(...page.connections); total = page.total; cursor = page.nextCursor } while (cursor)
+    assert.equal(all.length, total)
+    const emilies = all.filter(entry => [emily.id, emilyAgain.id].includes(entry.id) || entry.provenance.path?.toId === 'legacy-emily')
+    assert.ok(emilies.length)
+    for (const entry of emilies) { assert.equal(entry.presence, 'member'); assert.equal(entry.enrichmentStatus, 'enriched') }
+    const missing = all.find(entry => entry.id === noUrlOne.id)
+    assert.equal(missing.presence, 'unknown'); assert.equal(missing.enrichmentStatus, 'unknown')
+    const unavailable = await call(async () => { throw Error('offline') }, grouping)
+    for (const entry of unavailable.connections) { assert.equal(entry.presence, 'unknown'); assert.equal(entry.enrichmentStatus, 'unknown') }
+  }
+})
+
+
+test('connection status resolves a different published import by exact address', async () => {
+  let reads = 0
+  const source = async () => { reads++; return { ...(await snapshot()), members: ['public-other-import'], profiles: [...(await snapshot()).profiles, profile('public-other-import', 'Public Sam', { linkedinUrl: 'https://www.linkedin.com/in/sam-lee-1', enrichmentStatus: 'enriched' })] } }
+  const localService = createAccountToolService({ getBackend: async () => backend(), readPublishedSnapshot: source, lookupSlug: async () => null })
+  for (const grouping of ['person', 'none']) {
+    reads = 0
+    const result = (await localService.call({ grant, name: 'unlinked_list_connections', input: { grouping, q: 'Sam Lee' } })).result
+    const match = result.connections.find(entry => entry.id === samOne.id)
+    assert.equal(match.presence, 'member'); assert.equal(match.enrichmentStatus, 'enriched')
+    const other = result.connections.find(entry => entry.id === samTwo.id)
+    assert.equal(other.presence, 'unknown'); assert.equal(other.enrichmentStatus, 'unknown')
+    assert.equal(reads, 1)
+  }
 })

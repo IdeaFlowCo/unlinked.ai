@@ -139,3 +139,5 @@ use values-only XLSX or CSV. Original XLSX recovery through the status tool retu
 base64 chunks with byte offsets: decode each chunk before concatenating.
 
 Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence.
+
+MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment status) and `docs/agent-api.md`.

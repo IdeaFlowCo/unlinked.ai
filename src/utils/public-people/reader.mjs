@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES, PUBLIC_INDEX_MAX_TEXT_BYTES } from './limits.mjs'
 import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
+import { PROFILE_DECISION_LIMIT } from './profile-decisions.mjs'
 import { SEARCH_MODES, companyPageName, createQueryMatcher, rankMatches, words } from './text-match.mjs'
 import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-index.mjs'
 import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
@@ -49,6 +50,7 @@ const immutableIdentity = (value, ancestors = new Set()) => {
   return valid
 }
 // member: confirmed current account; legacy: recovered account awaiting claim; shadow: imported contact.
+export const ENRICHMENT_STATUS = Object.freeze(['enriched', 'not_recorded', 'unknown'])
 export const PRESENCE = Object.freeze(['member', 'legacy', 'shadow'])
 const requestValue = value => {
   if (!plain(value) || Reflect.ownKeys(value).some(key => !Object.hasOwn(Object.getOwnPropertyDescriptor(value, key), 'value'))) invalid()
@@ -174,6 +176,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         const company = text(input.company)
         summary.detailLevel = profileDetailLevel(detail)
         detail.detailLevel = summary.detailLevel
+        if (input.enrichmentStatus !== undefined && !ENRICHMENT_STATUS.includes(input.enrichmentStatus)) unavailable()
+        summary.enrichmentStatus = detail.enrichmentStatus = input.enrichmentStatus ?? 'unknown'
         summaries.set(input.id, summary); details.set(input.id, detail)
         // Everything searchable is already public on the profile page.
         tokens.set(input.id, { name: words(summary.name), text: words([summary.name, summary.headline, company, detail.about, ...detail.positions.flatMap(position => [position.title, position.company, position.description]), ...detail.education.flatMap(school => [school.institution, school.degree]), ...detail.skills].filter(Boolean).join(' ')),
@@ -227,10 +231,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // so an account's own pages and photos can stay hidden too
       // (docs/profile-suspension.md).
       const suspended = new Set()
-      if (value.suspended !== undefined) for (const id of array(value.suspended, maxProfiles)) { if (!idValid(id) || summaries.has(id) || aliases.has(id)) unavailable(); suspended.add(id) }
+      if (value.suspended !== undefined) for (const id of array(value.suspended, maxProfiles + Math.max(maxProfiles, PROFILE_DECISION_LIMIT))) { if (!idValid(id) || summaries.has(id) || aliases.has(id)) unavailable(); suspended.add(id) }
       // SHA-256 LinkedIn slug references of suspended people, for owner-private rows.
       const suspendedRefs = new Set()
-      if (value.suspendedRefs !== undefined) for (const ref of array(value.suspendedRefs, maxProfiles)) { if (typeof ref !== 'string' || !/^[a-f0-9]{64}$/.test(ref)) unavailable(); suspendedRefs.add(ref) }
+      if (value.suspendedRefs !== undefined) for (const ref of array(value.suspendedRefs, 2 * maxProfiles + Math.max(maxProfiles, PROFILE_DECISION_LIMIT))) { if (typeof ref !== 'string' || !/^[a-f0-9]{64}$/.test(ref)) unavailable(); suspendedRefs.add(ref) }
       // Addresses an operator removal took out; never published, only named.
       const removed = new Set()
       if (Array.isArray(value.removed)) for (const id of value.removed) if (idValid(id) && !summaries.has(id)) removed.add(id)
@@ -323,18 +327,18 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known, listed: listedFor(data.unlisted, groups) }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
     },
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [], unlistedGroups, filters: inputFilters = {}, networkSeeds, networkSelf } = requestValue(request)
+      const { query = '', cursor, signal, mode = 'best', presence, enrichmentStatus, sort = 'best', includeTotal = false, exclude = [], unlistedGroups, filters: inputFilters = {}, networkSeeds, networkSelf } = requestValue(request)
       const groups = groupsValue(unlistedGroups), filters = peopleFilters(inputFilters), viewer = networkSeeds ? viewerValue(request.viewer) : null
       if (networkSeeds !== undefined && (!Array.isArray(networkSeeds) || networkSeeds.length > maxProfiles || !networkSeeds.every(idValid))) invalid()
       if (networkSelf !== undefined && !idValid(networkSelf)) invalid()
       if (filters.degree && !networkSeeds) invalid()
-      if (!PUBLIC_LIST_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
+      if (!PUBLIC_LIST_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence)) || (enrichmentStatus !== undefined && !ENRICHMENT_STATUS.includes(enrichmentStatus))) invalid()
       // `exclude`: published ids the caller already shows elsewhere on the page
       // (a signed-in owner's own people), left out before paging and totals.
       if (!Array.isArray(exclude) || exclude.length > maxProfiles || !exclude.every(idValid)) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
       // The presence filter and exclusions are part of the cursor scope, so a page never mixes filters.
-      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}${groupScope(groups)}${Object.keys(filters).length ? `filters=${hash(JSON.stringify(filters))}:` : ''}${networkSeeds ? `network=${hash(JSON.stringify([networkSelf, [...networkSeeds].sort(), viewerScope(viewer)]))}:` : ''}`
+      const filter = `${enrichmentStatus ? `enrichment=${enrichmentStatus}:` : ''}${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}${groupScope(groups)}${Object.keys(filters).length ? `filters=${hash(JSON.stringify(filters))}:` : ''}${networkSeeds ? `network=${hash(JSON.stringify([networkSelf, [...networkSeeds].sort(), viewerScope(viewer)]))}:` : ''}`
       const data0 = exclude.length ? await snapshot(signal) : null
       const excluded = data0 ? new Set(exclude.map(id => data0.aliases.get(id) ?? id)) : null
       const without = excluded?.size ? `x=${hash([...excluded].sort().join('\n'))}:` : ''
@@ -343,12 +347,12 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // A snapshot that does not name its members has no presence, so it matches no filter.
       const listed = listedFor(data.unlisted, groups)
       const degrees = networkSeeds ? connectionDegrees({ seeds: networkSeeds.map(id => data.aliases.get(id) ?? id), self: data.aliases.get(networkSelf) ?? networkSelf, connected: data.connected, visible: visibilityFor(data, viewer).visible }) : null
-      const people = data.ordered.filter(person => (!presence || person.presence === presence) && listed(person.id) && matchesPeopleFilters(data.details.get(person.id), filters) && (!filters.degree || degrees.get(person.id) === Number(filters.degree)))
+      const people = data.ordered.filter(person => (!presence || person.presence === presence) && (!enrichmentStatus || person.enrichmentStatus === enrichmentStatus) && listed(person.id) && matchesPeopleFilters(data.details.get(person.id), filters) && (!filters.degree || degrees.get(person.id) === Number(filters.degree)))
         .map(person => degrees?.get(person.id) ? { ...person, connectionDegree: degrees.get(person.id) } : person)
       // Exclusions apply after ranking, so leaving out the full matches the
       // page already shows never promotes people who match only some words.
       const kept = rows => excluded?.size ? rows.filter(person => !excluded.has(person.id)) : rows
-      if (!matcher) { const rows = kept(people); return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), ...(presence || includeTotal ? { total: rows.length } : {}) } }
+      if (!matcher) { const rows = kept(people); return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), ...(presence || enrichmentStatus || includeTotal ? { total: rows.length } : {}) } }
       // `match` says whether the rows have every word ('all') or only some of them.
       const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id)), rows = kept(ranked.rows)
       return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: rows.length }

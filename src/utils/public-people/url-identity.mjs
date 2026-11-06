@@ -98,13 +98,22 @@ export function linkedinIdentityMerges({ profiles, members = [], absorbers = mem
     if (decision.kind === 'merge') mergedAway.add(decision.profileId)
     if (decision.kind === 'remove') removed.add(decision.profileId)
   }
+  const candidates = profiles.filter(profile => !mergedAway.has(profile.id))
+  const parent = new Map(candidates.map(profile => [profile.id, profile.id])), owners = new Map()
+  const root = id => { let value = id; while (parent.get(value) !== value) value = parent.get(value); while (parent.get(id) !== id) { const next = parent.get(id); parent.set(id, value); id = next } return value }
+  for (const profile of candidates) {
+    const value = refFor(profile), refs = Array.isArray(value) ? value : [value]
+    for (const ref of new Set(refs.filter(Boolean))) {
+      if (!owners.has(ref)) { owners.set(ref, profile.id); continue }
+      const a = root(owners.get(ref)), b = root(profile.id)
+      if (a !== b) parent.set(b, a)
+    }
+  }
   const groups = new Map()
-  for (const profile of profiles) {
-    if (mergedAway.has(profile.id)) continue
-    const ref = refFor(profile)
-    if (!ref) continue
-    if (!groups.has(ref)) groups.set(ref, [])
-    groups.get(ref).push(profile.id)
+  for (const profile of candidates) {
+    const key = root(profile.id)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(profile.id)
   }
   const merges = [], survivorFor = new Map()
   const fold = (survivorId, ids, extra = {}) => { for (const id of ids) { merges.push({ id: `same-linkedin:${id}`, kind: 'merge', profileId: id, survivorId, ...extra }); survivorFor.set(id, survivorId) } }

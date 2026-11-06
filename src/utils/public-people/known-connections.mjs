@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { CONNECTION_SORTS, orderNetwork } from '../network-order.mjs'
 import { connectionPolicies, createConnectionVisibility } from './connection-privacy.mjs'
+import { profileDetailLevel } from './detail-level.mjs'
 const hash = value => createHash('sha256').update(value).digest('hex')
-const summary = profile => ({ id:profile.id,name:profile.name,...Object.fromEntries(['headline','company','location'].filter(key=>typeof profile[key]==='string').map(key=>[key,profile[key]])) })
+const summary = (profile, members, legacy) => ({ id:profile.id,name:profile.name,...Object.fromEntries(['headline','company','location'].filter(key=>typeof profile[key]==='string').map(key=>[key,profile[key]])), presence: members ? members.has(profile.id) ? 'member' : legacy.has(profile.id) ? 'legacy' : 'shadow' : 'unknown', enrichmentStatus: ['enriched','not_recorded'].includes(profile.enrichmentStatus) ? profile.enrichmentStatus : 'unknown', detailLevel: profileDetailLevel(profile) })
 
 // The caller is captured by an already authenticated server/grant factory.
 // Email/URL and request parameters never choose a graph anchor or another owner.
@@ -17,6 +18,8 @@ export function createKnownConnectionsReader({ owner, getBackend, readPublishedS
     if (!anchor) throw Error('known_connections_anchor_unavailable')
     const snapshot=await readPublishedSnapshot({signal})
     if (!snapshot || snapshot.state!=='published' || snapshot.complete!==true || typeof snapshot.revision!=='string' || !Array.isArray(snapshot.profiles) || snapshot.profiles.length>PUBLIC_INDEX_MAX_PROFILES || !Array.isArray(snapshot.connections) || snapshot.connections.length>PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('known_connections_unavailable')
+    if (snapshot.members !== undefined && (!Array.isArray(snapshot.members) || (snapshot.legacyMembers !== undefined && !Array.isArray(snapshot.legacyMembers)))) throw Error('known_connections_unavailable')
+    const members = snapshot.members === undefined ? null : new Set(snapshot.members), legacy = new Set(snapshot.legacyMembers ?? [])
     const people=new Map(snapshot.profiles.map(profile=>[profile.id,profile]))
     if (people.size!==snapshot.profiles.length || !people.has(anchor.profileId)) throw Error('known_connections_anchor_unavailable')
     const outgoing=new Map()
@@ -50,7 +53,7 @@ export function createKnownConnectionsReader({ owner, getBackend, readPublishedS
     const selected=ordered.slice(offset,offset+pageSize), current=await backend.readLegacyProfile(), finalSnapshot=await readPublishedSnapshot({signal})
     if(!current || current.receiptId!==anchor.receiptId || current.profileId!==anchor.profileId || current.revision!==anchor.revision || finalSnapshot?.revision!==snapshot.revision || finalSnapshot?.state!=='published' || finalSnapshot?.complete!==true) throw Error('known_connections_changed')
     signal?.throwIfAborted()
-    return {scope:'owner_connections',degree,revision:snapshot.revision,sourceRevision:anchor.revision,anchorId:anchor.profileId,total:matches.length,profiles:selected.map(summary),paths:selected.map(profile=>paths.get(profile.id)),...(offset+selected.length<matches.length?{nextCursor:Buffer.from(JSON.stringify({binding,offset:offset+selected.length})).toString('base64url')}:{})}
+    return {scope:'owner_connections',degree,revision:snapshot.revision,sourceRevision:anchor.revision,anchorId:anchor.profileId,total:matches.length,profiles:selected.map(profile=>summary(profile,members,legacy)),paths:selected.map(profile=>paths.get(profile.id)),...(offset+selected.length<matches.length?{nextCursor:Buffer.from(JSON.stringify({binding,offset:offset+selected.length})).toString('base64url')}:{})}
   }
 }
 

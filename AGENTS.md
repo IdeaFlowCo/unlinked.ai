@@ -203,3 +203,5 @@ Private CSV/XLSX investor/list imports reuse the three catalog-v9 tools. Explici
 sheet selection, whole-workbook private-retention acknowledgement, bounded
 ZIP/XML parsing, original-byte recovery and provenance: `docs/investor-csv.md`.
 Browser list upload remains CSV-only; XLSX is available through MCP/REST.
+
+MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment status) and `docs/agent-api.md`.

@@ -68,7 +68,7 @@ export function usableProfileDecisions(decisions, { limit = PROFILE_DECISION_LIM
   return usable.filter(value => value.kind !== 'merge' || !merged.has(value.survivorId))
 }
 
-export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISION_LIMIT } = {}) {
+export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISION_LIMIT, identityRefs } = {}) {
   const decisions = usableProfileDecisions(stored, { limit })
   if (!decisions.length) return snapshot
   const known = new Map(snapshot.profiles.map(profile => [profile.id, profile]))
@@ -86,10 +86,31 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
   // decision, and the suspended profile's own while it is still published.
   const suspensions = decisions.filter(value => value.kind === 'suspend')
   const suspendedRefs = new Set(suspensions.map(value => value.linkedinRefHash).filter(refHash))
-  const profileRef = profile => { const slug = parseLinkedinProfileUrl(profile?.linkedinUrl)?.slug; return slug ? linkedinRefHash(slug) : null }
-  for (const value of suspensions) { const ref = known.has(value.profileId) ? profileRef(known.get(point(value.profileId))) : null; if (ref) suspendedRefs.add(ref) }
+  const profileRefs = profile => {
+    if (!profile) return []
+    if (typeof identityRefs === 'function') return identityRefs(profile)
+    const slug = parseLinkedinProfileUrl(profile.linkedinUrl)?.slug
+    return slug ? [linkedinRefHash(slug)] : []
+  }
+  const refsByProfile = new Map(), profilesByRef = new Map()
+  for (const profile of snapshot.profiles) {
+    const id = point(profile.id)
+    if (!refsByProfile.has(id)) refsByProfile.set(id, new Set())
+    for (const ref of profileRefs(profile)) if (refHash(ref)) {
+      refsByProfile.get(id).add(ref)
+      if (!profilesByRef.has(ref)) profilesByRef.set(ref, new Set())
+      profilesByRef.get(ref).add(id)
+    }
+  }
   const suspended = new Set(suspensions.filter(value => known.has(value.profileId)).map(value => point(value.profileId)))
-  if (suspendedRefs.size) for (const profile of snapshot.profiles) if (suspendedRefs.has(profileRef(profile))) suspended.add(point(profile.id))
+  const queue = [...suspendedRefs], profileQueue = [...suspended]
+  for (let refIndex = 0, profileIndex = 0; refIndex < queue.length || profileIndex < profileQueue.length;) {
+    if (profileIndex < profileQueue.length) {
+      for (const ref of refsByProfile.get(profileQueue[profileIndex++]) ?? []) if (!suspendedRefs.has(ref)) { suspendedRefs.add(ref); queue.push(ref) }
+    } else {
+      for (const id of profilesByRef.get(queue[refIndex++]) ?? []) if (!suspended.has(id)) { suspended.add(id); profileQueue.push(id) }
+    }
+  }
   const removedByDecision = new Set(removals.values())
   const removed = new Set([...removedByDecision, ...suspended])
   // Unlisting follows merges to the profile shown; a removed profile has nothing to unlist.
@@ -103,20 +124,30 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
   // A merge marked `fill: false` (a member absorbing an imported copy of
   // themselves) keeps only the survivor's own fields.
   const keepOwn = new Set(decisions.filter(value => value.kind === 'merge' && value.fill === false).map(value => value.profileId))
+  const legacyMembers = new Set(snapshot.legacyMembers ?? [])
   const survivors = new Map()
-  for (const [mergedId, survivorId] of merges) survivors.set(survivorId, keepOwn.has(mergedId) ? survivors.get(survivorId) ?? known.get(survivorId) : fill(survivors.get(survivorId) ?? known.get(survivorId), known.get(mergedId)))
+  for (const [mergedId, survivorId] of merges) {
+    const survivor = survivors.get(survivorId) ?? known.get(survivorId), merged = known.get(mergedId)
+    let value = keepOwn.has(mergedId) ? survivor : fill(survivor, merged)
+    if (!keepOwn.has(mergedId) && legacyMembers.has(mergedId) && !members.has(survivorId) && !legacyMembers.has(survivorId)) {
+      value = { ...value }
+      for (const key of ['name', 'headline', 'location', 'about', 'company', 'industry', 'linkedinUrl', 'website', 'positions', 'education', 'skills']) if (merged[key] !== undefined) value[key] = merged[key]
+    }
+    survivors.set(survivorId, merged.enrichmentStatus === 'enriched' ? { ...value, enrichmentStatus: 'enriched' } : value)
+  }
   const profiles = snapshot.profiles.filter(profile => !merges.has(profile.id) && !removed.has(profile.id)).map(profile => {
     const value = survivors.get(profile.id) ?? profile
     return renames.has(profile.id) ? { ...value, name: renames.get(profile.id) } : value
   })
+  const survivingIds = new Set(profiles.map(profile => profile.id))
   const pairs = new Map()
   for (const edge of snapshot.connections) {
     const fromId = point(edge.fromId), toId = point(edge.toId)
     if (fromId !== toId && !removed.has(fromId) && !removed.has(toId)) pairs.set(`${fromId}\u0000${toId}`, { fromId, toId })
   }
-  const suspendedList = [...suspended].sort()
+  const suspendedDigest = suspensions.length ? hash(JSON.stringify([...suspended].sort())) : ''
   const applied = decisions.filter(value => value.kind === 'merge' ? merges.has(value.profileId) : value.kind === 'remove' ? removals.has(value.profileId) : value.kind === 'unlist' ? unlists.has(value.profileId) : value.kind === 'suspend' ? true : renames.has(value.profileId))
-    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.kind === 'unlist' ? `${unlists.get(value.profileId).id}#${unlists.get(value.profileId).group ?? ''}` : value.kind === 'suspend' ? `${value.linkedinRefHash ?? ''}#${suspendedList.join(',')}` : value.name.trim()])
+    .map(value => [value.id, value.kind, value.profileId, value.kind === 'merge' ? value.survivorId : value.kind === 'remove' ? removals.get(value.profileId) : value.kind === 'unlist' ? `${unlists.get(value.profileId).id}#${unlists.get(value.profileId).group ?? ''}` : value.kind === 'suspend' ? `${value.linkedinRefHash ?? ''}#${suspendedDigest}` : value.name.trim()])
   // One entry per shown profile; the first decision about it wins.
   const unlisted = [...new Map([...unlists.values()].reverse().map(value => [value.id, value])).values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   return {
@@ -133,7 +164,7 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
     // into them, and every suspension's own id as a tombstone even while that
     // profile is not published, so the account's own pages, photos and
     // owner-private rows stay hidden too. Never published, only named.
-    ...(suspensions.length ? { suspended: [...new Set([...suspended, ...[...merges].filter(([, survivor]) => suspended.has(survivor)).map(([mergedId]) => mergedId), ...suspensions.map(value => value.profileId).filter(value => !merges.has(value) || suspended.has(point(value)))])].filter(value => !profiles.some(profile => profile.id === value)).sort() } : {}),
+    ...(suspensions.length ? { suspended: [...new Set([...suspended, ...[...merges].filter(([, survivor]) => suspended.has(survivor)).map(([mergedId]) => mergedId), ...suspensions.map(value => value.profileId).filter(value => !merges.has(value) || suspended.has(point(value)))])].filter(value => !survivingIds.has(value)).sort() } : {}),
     ...(suspendedRefs.size ? { suspendedRefs: [...suspendedRefs].sort() } : {}),
     // Every id a removal took out (the removed profile, the decision's own id
     // and addresses merged into it). Never published, only named, so an
