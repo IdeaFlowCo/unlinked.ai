@@ -334,3 +334,28 @@ test('a published profile without LinkedIn still reconciles validated aliases', 
   await f.options.overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'New', refs: [`unlinked:person:${profile.id}`] })
   await assert.rejects(call('unlinked_add_private_note', { subjectKind: 'unlinked', subjectId: profile.id, text: 'Ambiguous' }), e => e.code === 'identity_conflict')
 })
+
+test('link preflight rejects either conflicting endpoint before any graph write', async () => {
+  const f = fixture(), alice = grant('alice')
+  const fresh = { ...profile, id: 'fresh-link-person', linkedinUrl: 'https://linkedin.com/in/fresh-link-person' }
+  let writes = 0
+  const overlay = { request: async (identity, method, path, body) => {
+    if (method !== 'GET' && path !== 'lookup') writes++
+    return f.options.overlay.request(identity, method, path, body)
+  } }
+  const service = createAccountToolService({ ...f.options, overlay,
+    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'link-preflight', profiles: [profile, fresh], connections: [] }),
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [] }) })
+  const identity = await f.options.identityFor(alice)
+  for (const [name, reference] of [['Public', `unlinked:person:${profile.id}`], ['LinkedIn', `linkedin:in:${ref}`]]) {
+    await overlay.request(identity, 'POST', 'entities', { kind: 'person', name, refs: [reference] })
+  }
+  const before = writes, original = structuredClone([...f.state('alice').entities.values()])
+  for (const [from, to] of [[fresh.id, profile.id], [profile.id, fresh.id]]) {
+    await assert.rejects(service.call({ grant: alice, name: 'unlinked_add_private_link', input: { subjectKind: 'unlinked', subjectId: from, relation: 'knows', toKind: 'unlinked', toId: to } }),
+      error => error.code === 'identity_conflict' && error.details.candidates.length === 2)
+    assert.equal(writes, before)
+    assert.deepEqual([...f.state('alice').entities.values()], original)
+    assert.equal(f.state('alice').links.size, 0)
+  }
+})

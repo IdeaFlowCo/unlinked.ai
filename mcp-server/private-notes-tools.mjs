@@ -136,7 +136,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
   }
   // The entity a subject names. Writes create the entity for an Unlinked
   // person (ensureRefs joins profile and import refs); reads never create.
-  const subject = async (grant, identity, kind, value, { create }, signal) => {
+  const subject = async (grant, identity, kind, value, { create, checkOnly = false }, signal) => {
     if (kind === 'thing') {
       if (!ENTITY_ID.test(value)) throw fail('not_found', 'Nothing of the owner’s has that id.')
       return { id: value }
@@ -152,6 +152,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
     if (!create) return { ...named, entities: found }
     if (found.length > 1 || found.some(entity => entity.kind !== 'person'))
       throw fail('identity_conflict', 'Exact references name different private records. Ask the owner which one, then use its thing id.', { candidates: found.map(entity => ({ id: entity.id, name: entity.name })) })
+    if (checkOnly) return { ...named, entities: found }
     const made = await overlayCall(identity, 'POST', 'entities', { kind: 'person', name: named.name, refs: named.refs })
     if (made.unattached?.length) throw fail('identity_conflict', 'Exact references changed or could not be attached. Inspect the private records before retrying.')
     return { ...named, id: made.entity.id }
@@ -271,7 +272,8 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       if ((createNew || clientRequestId !== undefined) && toName === undefined) throw fail('invalid_input', 'createNew and clientRequestId apply only with toName.')
       if (createNew && !clientRequestId) throw fail('invalid_input', 'createNew needs a clientRequestId so a retry returns the same entity.')
       const identity = await who(grant)
-      if (toKind === 'unlinked') await person(grant, toId, signal, { requireComplete: true })
+      await subject(grant, identity, kind, value, { create: true, checkOnly: true }, signal)
+      if (named) await subject(grant, identity, toKind, toId, { create: true, checkOnly: true }, signal)
       const from = await subject(grant, identity, kind, value, { create: true }, signal)
       let to
       if (named) to = await subject(grant, identity, toKind, toId, { create: true }, signal)
