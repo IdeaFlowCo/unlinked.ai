@@ -67,3 +67,26 @@ test('LinkedIn evidence survives member merges and budgets, then disappears on r
  assert.equal((await reader.profile({id:'member'})).profile.enrichmentStatus,'not_recorded')
  assert.equal((await reader.profile({id:'complete'})).profile.enrichmentStatus,'not_recorded')
 })
+
+test('curated evidence preserves confirmed and historical members without import overlays', async () => {
+ const profiles=['member','historical','shadow'].map(id=>person(id,{headline:'Own headline',about:'Own about',skills:['Own skill']}))
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>['member'],readLegacyMembers:async()=>['historical'],publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:profiles.map(p=>person(p.id,{headline:'External headline'})),connections:[]})}})
+ const result=await read()
+ for(const id of ['member','historical']) assert.deepEqual(result.profiles.find(p=>p.id===id),{...profiles.find(p=>p.id===id),enrichmentStatus:'enriched'})
+ assert.equal(result.profiles.find(p=>p.id==='shadow').headline,'External headline')
+})
+
+test('every linked owner upload contributes evidence even when only the newest supplies text', async () => {
+ const {PUBLIC_UPLOAD_CONSENT}=await import('../src/utils/private-import/consent.mjs')
+ const older='a'.repeat(64), newer='b'.repeat(64), source='c'.repeat(64), dataset=LINKEDIN_ENRICHMENT_DATASETS[0]
+ const owner={ownerId:'owner',userId:'user'}, link={profileId:'claimed',sourceSha256:source,receiptId:'link',revision:1}
+ let active=[older,newer]
+ const jobs=Object.fromEntries([older,newer].map((id,index)=>[id,{id,ownerId:owner.ownerId,archiveSha256:source,consent:PUBLIC_UPLOAD_CONSENT,status:'indexed',counts:{accepted:1,indexed:1},createdAt:index+1}]))
+ const snapshots=Object.fromEntries([older,newer].map(id=>[id,{state:'published',complete:true,revision:'member-public-v1:'+id,profiles:[person('member-import-'+id,{name:id===older?'Older':'Newest',linkedinUrl:'https://www.linkedin.com/in/'+(id===older?'enriched-old':'plain-new')})],connections:[]}]))
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,revision:'legacy-public-v1:'+source,profiles:[person('claimed')]}),discover:async()=>active.map(id=>({id,owner,revision:1})),readMembers:async()=>['claimed'],linkedinEnrichmentDatasets:[dataset],getBackend:async()=>({readResource:async(type,id)=>({sourceOwnerId:owner.ownerId,sourceRevision:1,payload:jobs[id]}),readLegacyProfile:async()=>link}),publicPeople:{read:async name=>name===dataset?{state:'published',complete:true,revision:dataset+':1',profiles:[person(linkedinEnrichmentId('enriched-old'))],connections:[]}:snapshots[name.slice('public-import-'.length)]??null}})
+ let result=(await read()).profiles.find(p=>p.id==='claimed')
+ assert.equal(result.name,'Newest'); assert.equal(result.enrichmentStatus,'enriched')
+ active=[newer]
+ result=(await read()).profiles.find(p=>p.id==='claimed')
+ assert.equal(result.name,'Newest'); assert.equal(result.enrichmentStatus,'not_recorded')
+})

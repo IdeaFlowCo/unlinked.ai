@@ -141,7 +141,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     // Members whose LinkedIn address comes from their own uploaded archive or a
     // confirmed recovered account, never from a URL typed at signup.
     const verified = new Set()
-    const evidence = new Set()
+    const evidence = new Set(), curated = new Map()
     const positions = new Map(profiles.map((value, index) => [value.id, index]))
     for (const dataset of enrichmentDatasets) {
       const enrichment = await publicPeople.read(dataset)
@@ -151,9 +151,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         const index = positions.get(row.id)
         if (index !== undefined) {
           evidence.add(row.id)
-          const supplemental = {}
-          for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profiles[index][key]) supplemental[key] = profiles[index][key]
-          profiles[index] = { ...row, ...supplemental, enrichmentStatus: 'enriched' }
+          curated.set(row.id, row)
         }
       }
       revisions.push(enrichment.revision)
@@ -230,6 +228,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         if (linked.sourceSha256 !== legacy.revision.slice('legacy-public-v1:'.length) || !profiles.some(value => value.id === linked.profileId)) throw Error('public_member_legacy_link_invalid')
         const ownId = 'member-import-' + item.id, own = snapshot.profiles.find(value => value.id === ownId)
         if (!own) throw Error('public_member_source_changed')
+        if (byLinkedin.has(profileLinkedinRef(own))) evidence.add(linked.profileId)
         profiles.push(...snapshot.profiles.filter(value => value.id !== ownId))
         connections.push(...snapshot.connections.map(edge => ({ fromId: edge.fromId === ownId ? linked.profileId : edge.fromId, toId: edge.toId })))
         const winner = overlays.get(linked.profileId), key = [resource.payload.createdAt ?? 0, item.id]
@@ -327,6 +326,15 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const uniqueConnections = [...new Map(connections.map(edge => [`${edge.fromId}\u0000${edge.toId}`, edge])).values()]
     if (uniqueConnections.length > PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('shared_public_capacity_limit')
     const finalize = async snapshot => {
+      // Membership is known now: curated text must never replace members' words.
+      const protectedIds = new Set([...members, ...(snapshot.legacyMembers ?? [])])
+      snapshot = { ...snapshot, profiles: snapshot.profiles.map(profile => {
+        const row = curated.get(profile.id)
+        if (!row || protectedIds.has(profile.id)) return profile
+        const supplemental = {}
+        for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profile[key]) supplemental[key] = profile[key]
+        return { ...row, ...supplemental }
+      }) }
       for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
       for (const profile of snapshot.profiles) if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id)
       const decided = await decide(snapshot, ownerMerges, members, verified)
