@@ -232,7 +232,12 @@ test('real Neo4j home preferences: owner-keyed upsert, user check and removal', 
   await store.set(member, { importReminder: 'shown' })
   assert.deepEqual(await store.get(member), { importReminder: 'shown', updatedAt: 5 })
   assert.equal(await store.get({ ...member, userId: 'other' }), null)
+  await store.setImportMetadata(member, id(1), 'Network', 'friends, founders')
+  assert.deepEqual(await store.getImportMetadata(member, id(1)), { name: 'Network', tags: ['friends', 'founders'] })
+  assert.equal(await store.getImportMetadata({ ...member, userId: 'other' }, id(1)), null)
+  await assert.rejects(store.setImportMetadata({ ...member, userId: 'other' }, id(1), 'Wrong', ''), /mismatch/)
   await store.removeOwner(member)
+  assert.equal(await store.getImportMetadata(member, id(1)), null)
   assert.equal(await store.get(member), null)
 })
 
