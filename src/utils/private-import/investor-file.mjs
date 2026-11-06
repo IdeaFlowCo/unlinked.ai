@@ -3,7 +3,7 @@ import path from 'node:path'
 import Papa from 'papaparse'
 import { SaxesParser } from 'saxes'
 import { unpackArchive } from './archive.mjs'
-import { parseInvestorCsv, INVESTOR_CSV_LIMITS } from './investor-csv.mjs'
+import { parseInvestorCsv, normalizeInvestorHeaders, INVESTOR_CSV_LIMITS } from './investor-csv.mjs'
 
 export const INVESTOR_FILE_BYTES = 512 * 1024
 export const XLSX_LIMITS = Object.freeze({ sheets: 100, cells: 200000, strings: 100000, nodes: 1000000, depth: 32 })
@@ -15,6 +15,7 @@ const invalid = code => { throw new Error(code) }
 const attr = (node, name) => Object.values(node.attributes).find(a => a.local === name && !a.uri)?.value
 const relId = node => Object.values(node.attributes).find(a => a.local === 'id' && DOCREL.has(a.uri))?.value
 const decode = bytes => { try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { invalid('file_invalid_utf8') } }
+const decodeSpreadsheetText = value => value.replace(/_x([0-9a-fA-F]{4})_/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
 
 // No DOM, entity loading, network access, formula engine, or filesystem extraction.
 // The ZIP reader checks declared sizes before inflation and caps actual output.
@@ -78,7 +79,7 @@ function stringsFor(book) {
         if (value.length > INVESTOR_CSV_LIMITS.fieldChars) invalid('xlsx_cell_size_limit')
       }
     },
-    close(node) { if (main(node) && node.local === 'si') { strings.push(value); value = null; if (strings.length > XLSX_LIMITS.strings) invalid('xlsx_string_limit') } },
+    close(node) { if (main(node) && node.local === 'si') { strings.push(decodeSpreadsheetText(value)); value = null; if (strings.length > XLSX_LIMITS.strings) invalid('xlsx_string_limit') } },
   })
   return strings
 }
@@ -117,7 +118,7 @@ function sheetRows(book, selected) {
         if (cell.type === 's') {
           if (!/^(0|[1-9][0-9]*)$/.test(value) || Number(value) >= strings.length) invalid('xlsx_invalid_string_index')
           value = strings[Number(value)]
-        } else if (cell.type === 'inlineStr') value = cell.inline
+        } else if (cell.type === 'inlineStr') value = decodeSpreadsheetText(cell.inline)
         else if (cell.type === 'b') { if (!['0', '1'].includes(value)) invalid('xlsx_invalid_boolean'); value = value === '1' ? 'TRUE' : 'FALSE' }
         else if (!['n', 'str', 'd'].includes(cell.type)) invalid('xlsx_cell_type_unsupported')
         while (row.values.length < cell.column) row.values.push('')
@@ -157,8 +158,8 @@ export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false 
   const sourceDigest = sha(bytes)
   if (source?.format !== 'xlsx') {
     if (!inspectOnly) return parseInvestorCsv(bytes, mapping)
-    const parsed = Papa.parse(decode(bytes).replace(/^\uFEFF/, ''), { preview: 1, dynamicTyping: false })
-    const headers = parsed.data[0] ?? []
+    const parsed = Papa.parse(decode(bytes).replace(/^\uFEFF/, ''), { preview: 1, skipEmptyLines: 'greedy', dynamicTyping: false })
+    const headers = normalizeInvestorHeaders(parsed.data[0] ?? [])
     if (headers.length > INVESTOR_CSV_LIMITS.columns || headers.some(v => v.length > INVESTOR_CSV_LIMITS.fieldChars) || Buffer.byteLength(JSON.stringify(headers)) > 60000) invalid('csv_invalid_header')
     return { sourceDigest, format: 'csv', headers, retained: false }
   }
@@ -172,7 +173,7 @@ export function parseInvestorFile(bytes, source, mapping, { inspectOnly = false 
   const table = rows.slice(headerIndex), width = table[0].values.length
   if (Buffer.byteLength(JSON.stringify(table[0].values)) > 60000) invalid('xlsx_header_size_limit')
   for (const row of table) while (row.values.length < width) row.values.push('')
-  if (inspectOnly) return { ...inventory, selectedSheet: selected, headerRow: source.headerRow, headers: table[0].values, dataRows: table.length - 1 }
+  if (inspectOnly) return { ...inventory, selectedSheet: selected, headerRow: source.headerRow, headers: normalizeInvestorHeaders(table[0].values), dataRows: table.length - 1 }
   const csv = Papa.unparse(table.map(row => row.values))
   if (Buffer.byteLength(csv) > INVESTOR_CSV_LIMITS.bytes) invalid('xlsx_table_size_limit')
   const parsed = parseInvestorCsv(Buffer.from(csv), mapping)

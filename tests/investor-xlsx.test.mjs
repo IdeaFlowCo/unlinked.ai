@@ -81,6 +81,26 @@ test('shared and inline strings, explicit later header row, sparse cells and typ
   assert.equal(result.accepted[0].notes[0].text, 'TRUE')
 })
 
+test('inspection headers map to staged CSV and XLSX rows and spreadsheet escapes decode once', async () => {
+  const csv = Buffer.from('\n Name , Comment \nAda,private\n')
+  const csvSource = { format: 'csv' }
+  const csvHeaders = parseInvestorFile(csv, csvSource, undefined, { inspectOnly: true }).headers
+  assert.deepEqual(csvHeaders, ['Name', 'Comment'])
+  assert.equal(parseInvestorFile(csv, csvSource, { name: csvHeaders[0], notes: [csvHeaders[1]] }).accepted[0].notes[0].text, 'private')
+
+  const base = await workbook(), zip = await (await import('jszip')).default.loadAsync(base)
+  const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string')
+  const bytes = await workbook({
+    'xl/_rels/workbook.xml.rels': rels.replace('</Relationships>', '<Relationship Id="strings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>'),
+    'xl/sharedStrings.xml': `<sst xmlns="${XMLNS}"><si><t>Shared_x000D_line _x005F_x0041_</t></si></sst>`,
+    'xl/worksheets/sheet1.xml': worksheet(`<row r="1">${inline('A1', ' Name ')}${inline('B1', ' Comment ')}</row><row r="2">${inline('A2', 'Ada')}<c r="B2" t="s"><v>0</v></c></row><row r="3">${inline('A3', 'Grace')}${inline('B3', 'Inline_x000D_line _x005F_x0041_')}</row>`),
+  })
+  const headers = parse(bytes, { inspectOnly: true }).headers
+  assert.deepEqual(headers, ['Name', 'Comment'])
+  const result = parse(bytes, { mapping: { name: headers[0], notes: [headers[1]] } })
+  assert.deepEqual(result.accepted.map(row => row.notes[0].text), ['Shared\rline _x0041_', 'Inline\rline _x0041_'])
+})
+
 test('unsupported or malicious workbook inputs fail before any durable write', async () => {
   const normal = await workbook(), zip = await (await import('jszip')).default.loadAsync(normal)
   const wb = await zip.file('xl/workbook.xml').async('string'), rels = await zip.file('xl/_rels/workbook.xml.rels').async('string')
