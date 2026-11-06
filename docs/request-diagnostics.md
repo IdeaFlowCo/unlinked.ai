@@ -208,5 +208,5 @@ Set `UNLINKED_STALL_PROFILE_DIR` to an existing directory with mode 700, owned b
   - the heaviest stacks.
 - **Privacy.** Only code locations and numbers are written, never request, owner, argument or value data.
 - **Retention.** The newest 240 files are kept.
-- **Cost.** Sampling overhead is small at 10 ms. A quiet process pays one profile stop every 5 minutes.
+- **Cost.** Sampling overhead is small at 10 ms, but each rotation (after every stall window, and at least every 5 minutes) blocks the loop while V8 serializes the profile. On the production host that took 0.8–1.2 s (0.6.93, 2026-11-06), because cost follows the number of distinct stacks. **Enable it only while investigating, then unset it.**
 - **Stopping.** Unset the variable to stop on the next restart.

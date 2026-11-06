@@ -65,3 +65,32 @@ test('profile decisions and identity merges are identical through either schedul
   const slugIndex = new Map(profiles.slice(3000).map(profile => [profile.linkedinUrl.split('/in/')[1], profile.id]))
   assert.deepEqual(await urlIdentityMergesAsync({ rows, slugIndex }), urlIdentityMerges({ rows, slugIndex }))
 })
+
+test('connectionDate agrees with the original per-call formatter on every month and edge case', async () => {
+  const { connectionDate, validTimestamp } = await import('../src/utils/network-order.mjs')
+  const original = value => {
+    if (typeof value !== 'string') return undefined
+    if (!/^\d{1,2} [A-Za-z]{3} \d{4}$/.test(value) && !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined
+    const at = validTimestamp(Date.parse(value + (/^[0-9]{4}-/.test(value) ? 'T00:00:00Z' : ' 00:00:00 GMT')))
+    if (!at) return undefined
+    const date = new Date(at)
+    if (/^[0-9]{4}-/.test(value)) return date.toISOString().slice(0, 10) === value ? at : undefined
+    const [day, month, year] = value.split(' ')
+    return date.getUTCDate() === Number(day) && date.getUTCFullYear() === Number(year) && date.toLocaleString('en', { month: 'short', timeZone: 'UTC' }).toLowerCase() === month.toLowerCase() ? at : undefined
+  }
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Sept', 'jan', 'OCT', 'Foo']
+  const inputs = [undefined, null, 5, '', 'yesterday', '2026-02-30', '2026-02-28', '2024-02-29', '1999-12-31', '0000-01-01']
+  for (const month of months) for (const day of ['1', '01', '15', '29', '30', '31', '32']) for (const year of ['1999', '2024', '2026']) inputs.push(`${day} ${month} ${year}`)
+  for (const value of inputs) { assert.equal(connectionDate(value), original(value), String(value)); assert.equal(connectionDate(value), original(value), `cached ${value}`) }
+})
+
+test('a dense snapshot array is walked once per length; a new or changed array is checked again', async () => {
+  const { createPublicPeopleReader } = await import('../src/utils/public-people/reader.mjs')
+  const profiles = [{ id: 'a', name: 'Ada', positions: [], education: [], skills: [] }], connections = []
+  const snapshot = { state: 'published', complete: true, revision: 'dense-1', profiles, connections }
+  const source = async () => snapshot
+  assert.equal((await createPublicPeopleReader({ readPublishedSnapshot: source }).list({})).profiles.length, 1)
+  // A sparse array of a different length is rejected exactly as before.
+  const sparse = [...profiles]; sparse[2] = { id: 'c', name: 'C', positions: [], education: [], skills: [] }
+  await assert.rejects(createPublicPeopleReader({ readPublishedSnapshot: async () => ({ ...snapshot, revision: 'dense-2', profiles: sparse }) }).list({}), { status: 503 })
+})

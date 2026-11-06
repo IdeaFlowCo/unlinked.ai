@@ -161,6 +161,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   const build = async (preread = null) => {
     // Cold builds walk every profile and edge; each long loop gives the event
     // loop a turn between ~15 ms slices (same steps, same result).
+    // A build invalidated while it ran must not publish its photo map over a newer one.
+    const startedGeneration = generation
     let slice = performance.now()
     const turn = async () => { if (performance.now() - slice >= 15) { await new Promise(resolve => setImmediate(resolve)); slice = performance.now() } }
     const legacy = preread?.legacy ?? await readLegacy()
@@ -386,7 +388,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       result = { ...result, profiles: result.profiles.map(profile => ({ ...profile, enrichmentStatus: enriched.has(profile.id) ? 'enriched' : 'not_recorded' })) }
       // Member photos for the photo route: resolved profile id -> owner + blob.
       // Kept on the server side only; never part of the public snapshot.
-      if (typeof onMemberPhotos === 'function') {
+      if (typeof onMemberPhotos === 'function' && generation === startedGeneration) {
         const shown = new Set(result.profiles.map(profile => profile.id)), photos = new Map()
         for (const [id, value] of photoCandidates) {
           const target = result.aliases?.[id] ?? id, prior = photos.get(target)

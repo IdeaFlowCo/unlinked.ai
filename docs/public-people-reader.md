@@ -164,3 +164,10 @@ Bench on the M5 (`bench-cold.mjs`; 50k company rows; 100k profiles, 400k edges, 
 |---|---|---|---|---|
 | Company facts cold read | 350 ms | 26 ms | 355 ms | 234 ms |
 | Member cold build | 686 ms | 31 ms | 691 ms | 581 ms |
+
+Steady-state follow-ups found by the 0.6.93 stall profiles, in the same release:
+
+- **Network reads.** An owner network read called `connectionDate` twice per row, and each call ran an Intl month formatter: ~330 ms for a 12k-row network. The month names are now computed once, with the same formatter, and results are cached per distinct date string (bounded).
+- **Reader validation.** The reader walked the provider's 100k+-entry profile and edge arrays for holes on every call (up to ~80 ms). An array already found dense at its current length is not walked again.
+- **Photo map.** A member-index build invalidated while it ran no longer publishes its photo map over a newer build's.
+- **The stall profiler** costs about 0.8–1.2 s per rotation on the production host, even at 10 ms sampling: stop cost follows the number of distinct stacks a long-running server accumulates. Enable `UNLINKED_STALL_PROFILE_DIR` only while investigating.

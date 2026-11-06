@@ -28,8 +28,21 @@ export function compareCodePoints(a, b) {
   return Number(i < a.length) - Number(j < b.length)
 }
 export const validTimestamp = value => Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000 ? value : undefined
+// The same short month names the check used to format per call, computed once:
+// an Intl format per row (twice per row in a network read) cost ~330 ms for a
+// 12k-row network on the production host.
+const SHORT_MONTHS = Array.from({ length: 12 }, (_, month) => new Date(Date.UTC(2000, month, 1)).toLocaleString('en', { month: 'short', timeZone: 'UTC' }).toLowerCase())
+// Pure, and exports repeat dates heavily: remember recent answers (bounded).
+const connectionDates = new Map()
 export function connectionDate(value) {
   if (typeof value !== 'string') return undefined
+  if (connectionDates.has(value)) return connectionDates.get(value)
+  const at = parseConnectionDate(value)
+  if (connectionDates.size >= 20000) connectionDates.clear()
+  connectionDates.set(value, at)
+  return at
+}
+function parseConnectionDate(value) {
   // LinkedIn Connections.csv uses e.g. "04 Oct 2026"; do not guess ambiguous numeric dates.
   if (!/^\d{1,2} [A-Za-z]{3} \d{4}$/.test(value) && !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined
   const at = validTimestamp(Date.parse(value + (/^[0-9]{4}-/.test(value) ? 'T00:00:00Z' : ' 00:00:00 GMT')))
@@ -37,7 +50,7 @@ export function connectionDate(value) {
   const date = new Date(at)
   if (/^[0-9]{4}-/.test(value)) return date.toISOString().slice(0, 10) === value ? at : undefined
   const [day, month, year] = value.split(' ')
-  return date.getUTCDate() === Number(day) && date.getUTCFullYear() === Number(year) && date.toLocaleString('en', { month: 'short', timeZone: 'UTC' }).toLowerCase() === month.toLowerCase() ? at : undefined
+  return date.getUTCDate() === Number(day) && date.getUTCFullYear() === Number(year) && SHORT_MONTHS[date.getUTCMonth()] === month.toLowerCase() ? at : undefined
 }
 const idOrder = (a, b) => compareCodePoints(String(a.id ?? ''), String(b.id ?? ''))
 // Sort-key accessors are computed once per row, not once per comparison.
