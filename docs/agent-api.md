@@ -658,10 +658,14 @@ independent of "Send and manage connection requests".
 - **Naming people.** `subjectKind`/`toKind` `unlinked` takes a published profile
   id, a connection id from `unlinked_list_connections` (an imported LinkedIn
   contact) or a `linkedin.com/in/` address, resolved with the owner-scoped
-  `unlinked_lookup_contact` (only the caller's own imports). Refs are
+  `unlinked_lookup_contact` (published profiles and only the caller's own imports). Refs are
   `unlinked:person:<id>` for published profiles and `linkedin:in:<sha256 of the
-  canonical slug>` for the owner's imports — never a plaintext address; both are
-  joined on one entity with `ensureRefs`. `thing` takes an overlay entity id.
+  canonical slug>` for exact public or owner-import addresses — never a plaintext
+  address. Writes attach compatible refs with `ensureRefs`; conflicting private
+  entities are refused rather than merged. Both named endpoints of a link are
+  checked before writes, but a later independent race or outage can still leave
+  a partial write. See [private context](private-context.md#private-prospects-before-a-public-profile)
+  for reconciliation and its limits. `thing` takes an overlay entity id.
   `user` (OpenChat user id) works only for OpenChat people the owner already has
   private notes about; record new OpenChat people through the shared connector.
   Reads never create entities.

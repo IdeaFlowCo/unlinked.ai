@@ -86,7 +86,7 @@ Without the secret, or with one shorter than 32 characters, the feature is off. 
 
 ## Private prospects before a public profile
 
-The owner may save an investor prospect before any public persona exists. Its private entity uses `linkedin:in:<sha256 canonical slug>`. When a readable public profile later carries that exact LinkedIn URL, the connector and browser private context resolve the existing owner-private entity, even without a LinkedIn archive connection. Read paths do not create or merge graph records. A public profile ID that merely looks like `li-<hash>`, names, and emails are not identity evidence. The public reader supplies the hash only from a currently readable canonical URL.
+The owner may save an investor prospect before any public persona exists. A prospect with a valid LinkedIn address uses `linkedin:in:<sha256 canonical slug>`. When a readable public profile later carries that exact LinkedIn URL, the connector and browser private context resolve the existing owner-private entity, even without a LinkedIn archive connection. Read paths do not create or merge graph records. A public profile ID that merely looks like `li-<hash>`, names, and emails are not identity evidence. The public reader supplies the hash only from a currently readable canonical URL.
 
 Exa enrichment rows fill existing public profiles; they do not create them. A private-only prospect stays private. This attachment does not authorize publishing a profile or expose private notes, list membership, or counts to public readers or other owners.
 
