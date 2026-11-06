@@ -359,3 +359,38 @@ test('link preflight rejects either conflicting endpoint before any graph write'
     assert.equal(f.state('alice').links.size, 0)
   }
 })
+
+test('oversized public identity stops before overlay reads in connector and browser; cancellation stops further lookups', async () => {
+  const f = fixture(), owner = grant('bounded-owner')
+  let count = 1000, lookups = 0, cancel = false
+  const controller = new AbortController()
+  const service = createAccountToolService({ ...f.options,
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [] }),
+    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: `bounded-${count}`, connections: [],
+      profiles: Array.from({ length: count }, (_, i) => ({ ...profile, id: `bounded-${i}` })) }),
+    overlay: { request: async (...args) => {
+      if (args[2] === 'lookup') { lookups++; if (cancel) controller.abort() }
+      return f.options.overlay.request(...args)
+    } } })
+  const call = (name, input, signal) => service.call({ grant: owner, name, input, signal }).then(value => value.result)
+  await assert.rejects(call('unlinked_get_person_private', { profileId: 'bounded-0' }), e => e.code === 'identity_conflict')
+  assert.equal(lookups, 0)
+  const context = createPrivateContext({ identityFor: f.options.identityFor,
+    lookupContact: (_who, input) => call('unlinked_lookup_contact', input),
+    overlay: { lookup: async () => { lookups++; return null } } })
+  await assert.rejects(context.forProfile(owner, 'bounded-0'), e => e.code === 'private_identity_limit')
+  assert.equal(lookups, 0)
+  count = 8 // Eight public IDs plus the LinkedIn ref exceed the bound.
+  await assert.rejects(call('unlinked_get_person_private', { profileId: 'bounded-0' }), e => e.code === 'identity_conflict')
+  await assert.rejects(context.forProfile(owner, 'bounded-0'), e => e.code === 'private_identity_limit')
+  assert.equal(lookups, 0)
+  count = 7 // Exactly eight distinct references remain readable, without truncation.
+  assert.deepEqual((await call('unlinked_get_person_private', { profileId: 'bounded-0' })).entities, [])
+  assert.equal(lookups, 8)
+  assert.equal((await context.forProfile(owner, 'bounded-0')).state, 'empty')
+  assert.equal(lookups, 16)
+  lookups = 0
+  count = 3; cancel = true
+  await assert.rejects(call('unlinked_get_person_private', { profileId: 'bounded-0' }, controller.signal), e => e.name === 'AbortError')
+  assert.equal(lookups, 1)
+})

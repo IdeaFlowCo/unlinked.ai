@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { createInvestorTools } from './investor-tools.mjs'
-import { OverlayUnavailable } from './private-context.mjs'
+import { MAX_PRIVATE_PERSON_REFS, OverlayUnavailable } from './private-context.mjs'
 
 // Private people notes & relations for the direct Unlinked key and OAuth
 // connector (grant catalog v7, permission "Private people notes & relations").
@@ -123,7 +123,9 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       const refs = [...(HASH.test(contact.linkedinRefHash ?? '') ? [`linkedin:in:${contact.linkedinRefHash}`] : []),
         ...([...new Set([contact.sourceLinkedinRefHash, ...(contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(value => `linkedin:in:${value}`)),
         ...([...new Set([contact.publishedProfileId, ...(contact.publishedProfileIds ?? [])])].filter(Boolean).map(id => `unlinked:person:${id}`))]
-      if (refs.length) return { refs, name: clean(contact.name, 120) || 'Unnamed', person: { name: contact.name ?? null, profileId: contact.publishedProfileId ?? null, connectionId: owned ? contact.connectionId ?? null : null, linkedinRefHash: owned ? contact.linkedinRefHash ?? null : null } }
+      const unique = [...new Set(refs)]
+      if (unique.length > MAX_PRIVATE_PERSON_REFS) throw fail('identity_conflict', 'Too many exact references for one private person. Inspect or edit the existing private thing by its id.')
+      if (unique.length) return { refs: unique, name: clean(contact.name, 120) || 'Unnamed', person: { name: contact.name ?? null, profileId: contact.publishedProfileId ?? null, connectionId: owned ? contact.connectionId ?? null : null, linkedinRefHash: owned ? contact.linkedinRefHash ?? null : null } }
     }
     if (unavailable) throw unavailable
     throw fail('not_found', 'No published Unlinked profile or contact of the owner matches that id or LinkedIn address.')
@@ -148,7 +150,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
     }
     const named = await person(grant, value, signal, { requireComplete: create })
     const found = []
-    for (const ref of named.refs) { const entity = await existingByRef(identity, ref); if (entity && !found.some(value => value.id === entity.id)) found.push(entity) }
+    for (const ref of named.refs) { signal?.throwIfAborted(); const entity = await existingByRef(identity, ref); if (entity && !found.some(value => value.id === entity.id)) found.push(entity) }
     if (!create) return { ...named, entities: found }
     if (found.length > 1 || found.some(entity => entity.kind !== 'person'))
       throw fail('identity_conflict', 'Exact references name different private records. Ask the owner which one, then use its thing id.', { candidates: found.map(entity => ({ id: entity.id, name: entity.name })) })

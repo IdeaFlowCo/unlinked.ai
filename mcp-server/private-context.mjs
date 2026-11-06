@@ -11,6 +11,9 @@ import { profilePath } from '../src/utils/public-people/profile-handles.mjs'
 
 export const OVERLAY_APP = 'unlinked'
 export const OVERLAY_AUDIENCE = 'noos-people-overlay'
+// Noos permits eight refs per entity. Never fan out an ambiguous identity
+// into unbounded remote lookups; explicit entity IDs remain available.
+export const MAX_PRIVATE_PERSON_REFS = 8
 const HASH = /^[a-f0-9]{64}$/
 const ENTITY_ID = /^[A-Za-z0-9_-]{1,80}$/
 
@@ -150,6 +153,8 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   })
   // Every ref that may name this person for this owner; each entity once.
   const read = async (owner, refs) => {
+    refs = [...new Set(refs)]
+    if (refs.length > MAX_PRIVATE_PERSON_REFS) throw new OverlayUnavailable('private_identity_limit')
     const who = await identity(owner)
     if (!who) return { state: 'no_identity' }
     const seen = new Map()

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { createInvestorJobs } from '../src/utils/private-import/investor-job.mjs'
 import { unicodeChunkEnd } from '../src/utils/private-import/unicode-chunk.mjs'
+import { MAX_PRIVATE_PERSON_REFS } from './private-context.mjs'
 
 const importId = z.string().regex(/^[a-f0-9]{64}$/)
 const column = z.string().min(1).max(32768)
@@ -45,7 +46,9 @@ export function createInvestorTools({ getBackend, who, overlayCall, existingByRe
         refs.push(`unlinked:private:${createHash('sha256').update(`investor-row:${job.id}:${row.rowId}`).digest('hex').slice(0, 32)}`)
       }
       const unique = [...new Set(refs)], matches = []
+      if (unique.length > MAX_PRIVATE_PERSON_REFS) return { status: 'rejected', reason: 'too_many_exact_references' }
       for (const ref of unique) {
+        signal?.throwIfAborted()
         const entity = await existingByRef(identity, ref)
         if (entity && !matches.some(value => value.id === entity.id)) matches.push(entity)
       }
