@@ -59,7 +59,8 @@ import { publicSearchDocument } from './public-web-search.mjs'
 import { createMembersOnlySnapshotReader, iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 import { BlockError } from './member-blocks.mjs'
-import { renderPeopleError, MAX_UPLOAD_FILES } from './private-onboarding-views.mjs'
+import { renderPeopleError, MAX_UPLOAD_FILES, renderListImport } from './private-onboarding-views.mjs'
+import { LIST_ERRORS, LIST_UPLOAD_BYTES, DEFAULT_LIST_NAME } from './private-list-imports.mjs'
 
 import { coordinatorFor } from './owner-coordination.mjs'
 
@@ -175,7 +176,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ privateListImports, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -188,6 +189,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
   if (contactCards !== undefined && ['read', 'save', 'rotate', 'syncIdentity', 'open', 'exportOwner', 'removeOwner'].some(key => typeof contactCards[key] !== 'function')) throw new Error('contact_card_configuration_required')
   if (homePreferences !== undefined && ['get', 'set', 'removeOwner'].some(key => typeof homePreferences?.[key] !== 'function')) throw new Error('home_preference_configuration_required')
   if (connectionPrivacy !== undefined && ['get', 'set', 'list', 'removeOwner'].some(key => typeof connectionPrivacy?.[key] !== 'function')) throw new Error('connection_privacy_configuration_required')
+  if (privateListImports !== undefined && privateListImports !== null && ['stage', 'status', 'resume', 'running'].some(key => typeof privateListImports[key] !== 'function')) throw new Error('private_list_imports_configuration_required')
   if (profileSocialLinks !== undefined && ['get', 'set', 'forProfile', 'removeOwner'].some(key => typeof profileSocialLinks?.[key] !== 'function')) throw new Error('profile_links_configuration_required')
   if (profileHandles !== undefined && ['resolve', 'handleFor', 'ensure', 'availability', 'rename', 'removeProfile'].some(key => typeof profileHandles?.[key] !== 'function')) throw new Error('profile_handles_configuration_required')
   // Every emitted /people/ link prefers the member's handle (docs/profile-handles.md).
@@ -2087,7 +2089,7 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
           const jobs = await jobResources(), props = jobProps(jobs), summary = await importSummary(jobs)
           // An unreadable choice leaves the control out: a form must never resubmit a guessed default.
         const privacyChoice = connectionPrivacy ? await bounded(() => connectionPrivacy.get(session.owner), null) : null
-          const archive = extra => journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic', ...(privacyChoice ? { connectionPrivacy: privacyChoice } : {}), ...extra }), props.importJob, uploadProgressScript())
+          const archive = extra => journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, syntheticMode: dataMode === 'synthetic', listUploads: Boolean(privateListImports), ...(privacyChoice ? { connectionPrivacy: privacyChoice } : {}), ...extra }), props.importJob, uploadProgressScript())
           if (url.pathname === '/import') { archive(summary.lastComplete ? { refresh: summary } : {}); return }
           // Home. A member with nothing imported keeps the default-on getting-started
           // reminder until they hide it; everyone else gets their real status and next steps.
@@ -2796,6 +2798,45 @@ export function createPrivateBrowserHandler({ connectionPrivacy, createMessaging
         const jobs = await jobResources(), props = jobProps(jobs)
         journey(response, renderSettings({ ...props, selectedKeyId: replacement, keyManagement: Boolean(accountKeys), imports: summaries(jobs), grants: settingsGrants(await grantList(session.owner, backend)), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector,
           agentAccess: { scope: issued.scope, missingTools: [], regenerated: true }, connectionActionsAvailable }), props.importJob, agentSetupCopyScript()); return
+      }
+      // A list of people from a CSV, such as followers (docs/investor-csv.md).
+      // Owner-private list members; never connections, never public.
+      const listMatch = url.pathname.match(/^\/import\/list\/([a-f0-9]{64})(\/continue)?$/)
+      if (signup && privateListImports && ((request.method === 'POST' && url.pathname === '/import/list') || listMatch)) {
+        const listFailure = async code => {
+          const props = jobProps(await jobResources())
+          journey(response, renderBringArchive({ ...props, limitBytes: LIMITS.archiveBytes, listUploads: true, listError: LIST_ERRORS[code] ?? LIST_ERRORS.list_failed }), props.importJob, uploadProgressScript(), code === 'list_unavailable' ? 503 : 400)
+        }
+        if (request.method === 'POST' && url.pathname === '/import/list') {
+          const bytes = await body(request, LIST_UPLOAD_BYTES + 65536).catch(error => { if (error?.message === 'private_body_limit') return null; throw error })
+          if (!bytes) { await listFailure('list_too_large'); return }
+          const form = await new Request(new URL('/import/list', base), { method: 'POST', headers: { 'Content-Type': request.headers['content-type'] ?? '' }, body: bytes }).formData()
+          if (form.getAll('csrf').length !== 1 || form.get('csrf') !== session.csrf || form.getAll('listFile').length !== 1 || form.getAll('listName').length > 1 || [...form.keys()].some(key => !['csrf', 'listFile', 'listName'].includes(key))) throw new Error('private_browser_csrf')
+          const file = form.get('listFile'), listName = String(form.get('listName') ?? DEFAULT_LIST_NAME).trim().slice(0, 120) || DEFAULT_LIST_NAME
+          if (!file || typeof file.arrayBuffer !== 'function' || !/\.csv$/i.test(file.name ?? '')) { await listFailure('list_not_csv'); return }
+          let csv
+          try { csv = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(await file.arrayBuffer())) } catch { await listFailure('list_not_utf8'); return }
+          let staged
+          try { staged = await privateListImports.stage(session.owner, { csv, listName }) }
+          catch (error) { await listFailure(LIST_ERRORS[error?.code] ? error.code : error?.code === 'upstream_unavailable' ? 'list_unavailable' : 'list_failed'); return }
+          redirect(response, `/import/list/${staged.importId}`); return
+        }
+        const importId = listMatch[1]
+        if (request.method === 'POST' && listMatch[2]) {
+          const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
+          if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => key !== 'csrf')) throw new Error('private_browser_csrf')
+          privateListImports.resume(session.owner, importId)
+          redirect(response, `/import/list/${importId}`); return
+        }
+        if (request.method === 'GET' && !listMatch[2]) {
+          const offset = Number(url.searchParams.get('offset') ?? '0')
+          if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100000) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
+          let list
+          try { list = await privateListImports.status(session.owner, importId, offset) }
+          catch (error) { if (error?.code === 'not_found') { response.writeHead(404).end(); return } await listFailure('list_unavailable'); return }
+          const props = jobProps(await jobResources())
+          journey(response, renderListImport({ ...props, list, running: privateListImports.running(session.owner, importId) }), props.importJob); return
+        }
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         if (uploadBusy) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }

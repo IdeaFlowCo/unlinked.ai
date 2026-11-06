@@ -1,3 +1,4 @@
+import { createPrivateListImports, LIST_TOOLS } from './private-list-imports.mjs'
 import { diagnosticTransport, requestDiagnostic } from './request-diagnostics.mjs'
 import { createIdeaflowConnectorHandler } from './ideaflow-connector.mjs'
 import { createMessagingHandler, MESSAGING_PATH } from './messaging.mjs'
@@ -8,7 +9,7 @@ import { createPrivateBrowserHandler } from './private-browser.mjs'
 import { coordinatorFor } from './owner-coordination.mjs'
 import { createPrivateHostedHandler } from './private-hosted.mjs'
 import { createPrivateGrantService } from './private-grants.mjs'
-import { createAccountGrantService } from './account-grants.mjs'
+import { createAccountGrantService, composeAccountScope } from './account-grants.mjs'
 import { createAccountHostedHandler } from './account-hosted.mjs'
 import { createAccountAgentApiHandler } from './account-api.mjs'
 import { createAccountToolService } from './account-tools.mjs'
@@ -45,7 +46,12 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   // signed-in session owner only.
   const privateContext = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateContext({ overlay, identityFor: overlayIdentity, ...(contactSlugs ? { contactPath: id => contactSlugs.pathFor(id) } : {}),
     lookupContact: async (owner, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: 'owner', tools: ['unlinked_lookup_contact'] }, name: 'unlinked_lookup_contact', input })).result }) : null
-  const browser = createPrivateBrowserHandler({ ideaflowProfiles, recordPublicAdmission: requestDiagnostics?.publicAdmission, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, getBackend, complete, readPublishedSnapshot,
+  // Browser list uploads (followers and other lists, docs/investor-csv.md):
+  // the same private list import as the agent tools, run as the signed-in
+  // owner through an in-process grant limited to those three tools.
+  const privateListImports = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateListImports({
+    call: async (owner, name, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: composeAccountScope({ privateNotes: true }), tools: [...LIST_TOOLS], agent: 'Unlinked import page', app: true }, name, input })).result }) : null
+  const browser = createPrivateBrowserHandler({ privateListImports, ideaflowProfiles, recordPublicAdmission: requestDiagnostics?.publicAdmission, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, getBackend, complete, readPublishedSnapshot,
     issueAccountGrant: accountGrants?.issueGrant, ensureAccountGrant: accountGrants?.ensureGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
     issueGrant: grants.issueGrant, mcpEndpoint: new URL('/mcp', base).href, dataMode, backgroundImports, audit,
     oauth: oauth ?? undefined, listAccountGrants: accountGrants?.listGrants, accountKeys: accountGrants, ...(lookupCompanyFacts ? { lookupCompanyFacts } : {}), profilePhotos, autoSignIn, privateContext })

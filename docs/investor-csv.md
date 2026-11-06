@@ -120,3 +120,20 @@ list/pagination support first, then Unlinked, then the shared gateway scope.
 Noos graph semantics also have an OpenChat vendored copy; update that copy through
 its owner’s normal release when adding list editing there. No new graph labels or
 credential destinations are required by this change.
+
+## Browser upload: followers and other lists (unlinked-h2e4)
+
+LinkedIn's data export has no followers file. `Member_Follows.csv` lists the people the member follows, not their followers. Members who have followers in a CSV (from LinkedIn analytics, another tool or a spreadsheet) can upload it on the import page under **Upload a list of people, such as your LinkedIn followers**, which is closed by default.
+
+- `mcp-server/private-list-imports.mjs` detects the mapping from the header row (case and spacing are ignored):
+  - Name / Full Name, or First Name + Last Name
+  - Profile URL / LinkedIn URL / Public Profile URL
+  - Headline / Title / Position
+  - Company
+  - Email
+
+  With no name column, the page explains what to add. The upload is limited to 512 KB; larger lists are split into several files with the same list name.
+- It stages and runs the import above through the shared tool service, as the signed-in owner, with an in-process grant limited to the three list tools plus private-notes permission (`private-pilot.mjs`). That grant has `app: true`, so notes and links record provenance `author: owner`, `source: app`.
+- A paced background runner resumes batches of 25, about one every 1.5 s, well under the owner's per-minute tool budget. After five consecutive transient failures it stops, and `/import/list/<importId>` offers **Continue importing**. That page shows counts and the rows with their outcomes (20 per page), named through the import's mapping.
+- The people are owner-private list members (`contains`), never connections, never public, and nobody is notified. They appear in each person's private notes panel and through the list tools for the owner's agent.
+- Not yet: a "Follows you" label in My people, which needs list membership joined to network rows.
