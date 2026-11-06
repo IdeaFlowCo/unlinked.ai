@@ -11,6 +11,9 @@ import { profilePath } from '../src/utils/public-people/profile-handles.mjs'
 
 export const OVERLAY_APP = 'unlinked'
 export const OVERLAY_AUDIENCE = 'noos-people-overlay'
+// Noos permits eight refs per entity. Never fan out an ambiguous identity
+// into unbounded remote lookups; explicit entity IDs remain available.
+export const MAX_PRIVATE_PERSON_REFS = 8
 const HASH = /^[a-f0-9]{64}$/
 const ENTITY_ID = /^[A-Za-z0-9_-]{1,80}$/
 
@@ -109,6 +112,10 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
     return value && typeof value.issuer === 'string' && typeof value.subject === 'string' ? value : null
   }
   const contact = async (owner, input) => { try { return await lookupContact(owner, input) } catch { return null } }
+  const identityContact = async (owner, input) => {
+    try { return await lookupContact(owner, input) }
+    catch (error) { if (error?.code === 'not_found') return null; throw new OverlayUnavailable() }
+  }
   // Where a relation's other end lives in Unlinked, for the owner: a published
   // profile, else their own imported contact (at its owner-private slug when
   // it has one, docs/contact-slugs.md); other ends are plain text.
@@ -146,6 +153,8 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   })
   // Every ref that may name this person for this owner; each entity once.
   const read = async (owner, refs) => {
+    refs = [...new Set(refs)]
+    if (refs.length > MAX_PRIVATE_PERSON_REFS) throw new OverlayUnavailable('private_identity_limit')
     const who = await identity(owner)
     if (!who) return { state: 'no_identity' }
     const seen = new Map()
@@ -161,19 +170,21 @@ export function createPrivateContext({ overlay, identityFor, lookupContact, now 
   }
   return {
     configured,
-    // A published profile: its own ref, plus the owner's import of the same person.
+    // A published profile: its own ref and exact public/owner-import LinkedIn
+    // identity. A private prospect can predate this public profile entirely.
     async forProfile(owner, profileId) {
       if (typeof profileId !== 'string' || !profileId || profileId.length > 160) return { state: 'empty' }
-      const found = await contact(owner, { profileId })
-      const hash = found?.visibility === 'owner_private' && HASH.test(found.contact?.linkedinRefHash ?? '') ? found.contact.linkedinRefHash : null
-      return read(owner, [refOf.person(profileId), ...(hash ? [refOf.linkedin(hash)] : [])])
+      const found = await identityContact(owner, { profileId })
+      const hash = HASH.test(found?.contact?.linkedinRefHash ?? '') ? found.contact.linkedinRefHash : null
+      return read(owner, [refOf.person(profileId), ...((found?.contact?.publishedProfileIds ?? []).filter(Boolean).map(refOf.person)), ...(found?.contact?.publishedProfileId && found.contact.publishedProfileId !== profileId ? [refOf.person(found.contact.publishedProfileId)] : []), ...(hash ? [refOf.linkedin(hash)] : []), ...([...new Set([found?.contact?.sourceLinkedinRefHash, ...(found?.contact?.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin))])
     },
     // One of the owner's own imported contacts; null when it is not theirs.
     async forContact(owner, connectionId) {
-      const found = await contact(owner, { connectionId })
+      const found = await identityContact(owner, { connectionId })
       if (!found?.contact || found.visibility !== 'owner_private') return null
       const refs = [...(HASH.test(found.contact.linkedinRefHash ?? '') ? [refOf.linkedin(found.contact.linkedinRefHash)] : []),
-        ...(found.contact.publishedProfileId ? [refOf.person(found.contact.publishedProfileId)] : [])]
+        ...([...new Set([found.contact.sourceLinkedinRefHash, ...(found.contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(refOf.linkedin)),
+        ...([...new Set([found.contact.publishedProfileId, ...(found.contact.publishedProfileIds ?? [])])].filter(Boolean).map(refOf.person))]
       return refs.length ? read(owner, refs) : { state: 'empty' }
     },
     async neighbourhood(owner, entityId, depth) {

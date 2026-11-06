@@ -211,7 +211,7 @@ an extra sanitized `cause` identifier).
 | `ambiguous_name` | 409 | (private notes) Several of the owner's saved things share that name. The body adds `candidates` (`id`, `kind`, `name`, the owner's own); ask the user, then pass an id, or `createNew` with `clientRequestId`. |
 | `identity_unavailable` | 409 | (private notes) The account has no Ideaflow sign-in identity, so it has no people overlay. Sign in to Unlinked with Ideaflow once. |
 | `import_busy` | 409 | An investor import is being changed or has an active batch; retry after the lease expires. |
-| `identity_conflict` | 409 | Exact references changed during an investor import; inspect the private person before retrying. |
+| `identity_conflict` | 409 | Exact references identify conflicting private records or could not be attached; inspect them and have the owner select the intended record before retrying. |
 
 Private-notes input refusals from the overlay are `invalid_input` with an extra
 `overlayCode` (for example `invalid_relation`).
@@ -374,14 +374,20 @@ own contacts without paging; give exactly one input:
 - `profileId`: a published profile id; answers with the owner's connection to
   that person when there is one, otherwise the public profile only.
 - `refHashes`: up to 100 `linkedinRefHash` values; answers the owner's contacts
-  among them (`{ kind, contacts: [...] }`, unmatched hashes are omitted).
+  among them (`{ kind, contacts: [...] }`, unmatched hashes are omitted). When
+  multiple owner contacts share a source hash, the contact includes sorted
+  `connectionIds` alongside the existing `connectionId`.
 
 Response: `{ kind, contact: { connectionId | null, name, headline?, company?,
-linkedinRefHash | null, publishedProfileId | null, provenance? }, visibility }`.
+linkedinRefHash | null, sourceLinkedinRefHash?, sourceLinkedinRefHashes?,
+publishedProfileId | null, publishedProfileIds?, provenance? },
+publicReconciliationComplete?, visibility }`. Additional source hashes and
+published IDs identify related exact references; `publicReconciliationComplete`
+indicates whether the public index was available for reconciliation.
 `linkedinRefHash` is the SHA-256 hex of the canonical LinkedIn slug
 (`linkedinSlug()` in `src/utils/public-people/url-identity.mjs`: decoded,
 lowercased) — the value of the Ideaflow people-overlay ref `linkedin:in:<hash>`
-OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`).
+OpenChat uses for imported contacts (Noos `docs/PEOPLE_OVERLAY.md`). A public-only profile lookup also returns this hash when the readable public profile has an exact LinkedIn URL. See [private context](private-context.md#private-prospects-before-a-public-profile) for the identity and read boundaries.
 `publishedProfileId` is set when the same person has a published profile (the
 row's own published profile, or one with the same LinkedIn address).
 `visibility` is `owner_private` when the answer comes from the owner's own
@@ -652,10 +658,14 @@ independent of "Send and manage connection requests".
 - **Naming people.** `subjectKind`/`toKind` `unlinked` takes a published profile
   id, a connection id from `unlinked_list_connections` (an imported LinkedIn
   contact) or a `linkedin.com/in/` address, resolved with the owner-scoped
-  `unlinked_lookup_contact` (only the caller's own imports). Refs are
+  `unlinked_lookup_contact` (published profiles and only the caller's own imports). Refs are
   `unlinked:person:<id>` for published profiles and `linkedin:in:<sha256 of the
-  canonical slug>` for the owner's imports — never a plaintext address; both are
-  joined on one entity with `ensureRefs`. `thing` takes an overlay entity id.
+  canonical slug>` for exact public or owner-import addresses — never a plaintext
+  address. Writes attach compatible refs with `ensureRefs`; conflicting private
+  entities are refused rather than merged. Both named endpoints of a link are
+  checked before writes, but a later independent race or outage can still leave
+  a partial write. See [private context](private-context.md#private-prospects-before-a-public-profile)
+  for reconciliation and its limits. `thing` takes an overlay entity id.
   `user` (OpenChat user id) works only for OpenChat people the owner already has
   private notes about; record new OpenChat people through the shared connector.
   Reads never create entities.
@@ -665,7 +675,8 @@ independent of "Send and manage connection requests".
   `assertion` `stated` (default) or `inferred`. Unlinked and
   OpenChat label each agent-written note and relation with it.
 - **Results** never include raw overlay refs: entity ends carry `profileId`,
-  `linkedinRefHash` (+ `connectionId` when the owner imported them) or
+  `linkedinRefHash` (+ `connectionId` when the owner imported them, and sorted
+  `connectionIds` when multiple owner contacts match its exact hashes) or
   `openchatUserId`. Every result is `visibility: "owner_private"`.
 - **Budgets.** Shared with the deterministic budget (120 calls per owner per
   minute). Writes revalidate the key before running and report a landed write

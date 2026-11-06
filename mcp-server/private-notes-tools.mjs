@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { createInvestorTools } from './investor-tools.mjs'
-import { OverlayUnavailable } from './private-context.mjs'
+import { MAX_PRIVATE_PERSON_REFS, OverlayUnavailable } from './private-context.mjs'
 
 // Private people notes & relations for the direct Unlinked key and OAuth
 // connector (grant catalog v7, permission "Private people notes & relations").
@@ -103,14 +103,16 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
 
   // An Unlinked person, named only from data the owner can already read: a
   // published profile, or the owner's own import (validated against it).
-  const person = async (grant, value, signal) => {
+  const person = async (grant, value, signal, { requireComplete = false } = {}) => {
     const tries = /linkedin\.com\/in\//i.test(value) ? [{ linkedinUrl: value }]
       : [...(value.length <= 128 ? [{ connectionId: value }] : []), ...(value.length <= 160 ? [{ profileId: value }] : [])]
     let unavailable = null
     for (const input of tries) {
+      signal?.throwIfAborted()
       let found
-      try { found = await lookupContact(grant, input, signal) }
+      try { found = await lookupContact(grant, input, signal); signal?.throwIfAborted() }
       catch (error) {
+        signal?.throwIfAborted()
         if (['not_found', 'invalid_input'].includes(error?.code)) continue
         // One lookup path down (e.g. the People index): try the others first.
         if (error?.code === 'upstream_unavailable') { unavailable = error; continue }
@@ -118,10 +120,14 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       }
       const contact = found?.contact
       if (!contact) continue
+      if (requireComplete && found.publicReconciliationComplete === false) throw fail('upstream_unavailable', 'The published public People index is not configured; private identity cannot be reconciled for a write.')
       const owned = found.visibility === 'owner_private'
-      const refs = [...(owned && HASH.test(contact.linkedinRefHash ?? '') ? [`linkedin:in:${contact.linkedinRefHash}`] : []),
-        ...(contact.publishedProfileId ? [`unlinked:person:${contact.publishedProfileId}`] : [])]
-      if (refs.length) return { refs, name: clean(contact.name, 120) || 'Unnamed', person: { name: contact.name ?? null, profileId: contact.publishedProfileId ?? null, connectionId: owned ? contact.connectionId ?? null : null, linkedinRefHash: owned ? contact.linkedinRefHash ?? null : null } }
+      const refs = [...(HASH.test(contact.linkedinRefHash ?? '') ? [`linkedin:in:${contact.linkedinRefHash}`] : []),
+        ...([...new Set([contact.sourceLinkedinRefHash, ...(contact.sourceLinkedinRefHashes ?? [])])].filter(value => HASH.test(value ?? '')).map(value => `linkedin:in:${value}`)),
+        ...([...new Set([contact.publishedProfileId, ...(contact.publishedProfileIds ?? [])])].filter(Boolean).map(id => `unlinked:person:${id}`))]
+      const unique = [...new Set(refs)]
+      if (unique.length > MAX_PRIVATE_PERSON_REFS) throw fail('identity_conflict', 'Too many exact references for one private person. Inspect or edit the existing private thing by its id.', { reason: 'too_many_exact_references' })
+      if (unique.length) return { refs: unique, name: clean(contact.name, 120) || 'Unnamed', person: { name: contact.name ?? null, profileId: contact.publishedProfileId ?? null, connectionId: owned ? contact.connectionId ?? null : null, linkedinRefHash: owned ? contact.linkedinRefHash ?? null : null } }
     }
     if (unavailable) throw unavailable
     throw fail('not_found', 'No published Unlinked profile or contact of the owner matches that id or LinkedIn address.')
@@ -134,7 +140,7 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
   }
   // The entity a subject names. Writes create the entity for an Unlinked
   // person (ensureRefs joins profile and import refs); reads never create.
-  const subject = async (grant, identity, kind, value, { create }, signal) => {
+  const subject = async (grant, identity, kind, value, { create, checkOnly = false }, signal) => {
     if (kind === 'thing') {
       if (!ENTITY_ID.test(value)) throw fail('not_found', 'Nothing of the owner’s has that id.')
       return { id: value }
@@ -144,13 +150,15 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       if (!found) throw fail('not_found', 'The owner has no private notes about that OpenChat person yet. Record OpenChat people through the shared Ideaflow connector (openchat__ tools) first; this key can then link to them.')
       return { id: found.id }
     }
-    const named = await person(grant, value, signal)
-    if (!create) {
-      const found = []
-      for (const ref of named.refs) { const entity = await existingByRef(identity, ref); if (entity && !found.some(value => value.id === entity.id)) found.push(entity) }
-      return { ...named, entities: found }
-    }
+    const named = await person(grant, value, signal, { requireComplete: create })
+    const found = []
+    for (const ref of named.refs) { signal?.throwIfAborted(); const entity = await existingByRef(identity, ref); if (entity && !found.some(value => value.id === entity.id)) found.push(entity) }
+    if (!create) return { ...named, entities: found }
+    if (found.length > 1 || found.some(entity => entity.kind !== 'person'))
+      throw fail('identity_conflict', 'Exact references name different private records. Ask the owner which one, then use its thing id.', { candidates: found.map(entity => ({ id: entity.id, name: entity.name })) })
+    if (checkOnly) return { ...named, entities: found }
     const made = await overlayCall(identity, 'POST', 'entities', { kind: 'person', name: named.name, refs: named.refs })
+    if (made.unattached?.length) throw fail('identity_conflict', 'Exact references changed or could not be attached. Inspect the private records before retrying.')
     return { ...named, id: made.entity.id }
   }
 
@@ -161,11 +169,18 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
     const visit = node => { if (Array.isArray(node)) node.forEach(visit); else if (node && typeof node === 'object') { if (Array.isArray(node.refs)) for (const ref of node.refs) { const hash = LINKEDIN_REF.exec(ref)?.[1]; if (hash) hashes.add(hash) } Object.values(node).forEach(visit) } }
     visit(value)
     const connections = new Map()
-    if (hashes.size) {
+    const allHashes = [...hashes]
+    for (let offset = 0; offset < allHashes.length; offset += 100) {
+      signal?.throwIfAborted()
       try {
-        const found = await lookupContact(grant, { refHashes: [...hashes].slice(0, 100) }, signal)
-        for (const contact of found?.contacts ?? []) connections.set(contact.linkedinRefHash, contact.connectionId)
-      } catch { /* annotation is best-effort */ }
+        const found = await lookupContact(grant, { refHashes: allHashes.slice(offset, offset + 100) }, signal)
+        signal?.throwIfAborted()
+        for (const contact of found?.contacts ?? []) {
+          const ids = connections.get(contact.linkedinRefHash) ?? new Set()
+          for (const id of [contact.connectionId, ...(contact.connectionIds ?? [])]) if (id) ids.add(id)
+          connections.set(contact.linkedinRefHash, ids)
+        }
+      } catch { signal?.throwIfAborted() }
     }
     const rewrite = node => {
       if (Array.isArray(node)) return node.map(rewrite)
@@ -174,10 +189,15 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       for (const [key, child] of Object.entries(node)) if (key !== 'refs' && key !== 'ownerKey') out[key] = rewrite(child)
       if (Array.isArray(node.refs)) {
         const profileId = node.refs.map(ref => PERSON_REF.exec(ref)?.[1]).find(Boolean)
-        const hash = node.refs.map(ref => LINKEDIN_REF.exec(ref)?.[1]).find(Boolean)
+        const exactHashes = [...new Set(node.refs.map(ref => LINKEDIN_REF.exec(ref)?.[1]).filter(Boolean))]
+        const hash = exactHashes[0]
         const user = node.refs.map(ref => OPENCHAT_USER_REF.exec(ref)?.[1]).find(Boolean)
         if (profileId) out.profileId = profileId
-        if (hash) { out.linkedinRefHash = hash; out.connectionId = connections.get(hash) ?? null }
+        if (hash) {
+          const ids = [...new Set(exactHashes.flatMap(value => [...(connections.get(value) ?? [])]))].sort()
+          out.linkedinRefHash = hash; out.connectionId = ids[0] ?? null
+          if (ids.length > 1) out.connectionIds = ids
+        }
         if (user) out.openchatUserId = user
       }
       return out
@@ -268,6 +288,8 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
       if ((createNew || clientRequestId !== undefined) && toName === undefined) throw fail('invalid_input', 'createNew and clientRequestId apply only with toName.')
       if (createNew && !clientRequestId) throw fail('invalid_input', 'createNew needs a clientRequestId so a retry returns the same entity.')
       const identity = await who(grant)
+      await subject(grant, identity, kind, value, { create: true, checkOnly: true }, signal)
+      if (named) await subject(grant, identity, toKind, toId, { create: true, checkOnly: true }, signal)
       const from = await subject(grant, identity, kind, value, { create: true }, signal)
       let to
       if (named) to = await subject(grant, identity, toKind, toId, { create: true }, signal)

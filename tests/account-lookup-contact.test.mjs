@@ -27,7 +27,7 @@ function backendFor(who) {
   }
 }
 const snapshot = async () => ({ state: 'published', complete: true, revision: 'lookup-fixture-v1', connections: [],
-  profiles: ['pub-ada', 'pub-member', 'pub-stranger', 'pub-grace-legacy'].map(id => ({ id, name: `Published ${id}`, headline: 'Public headline', positions: [], education: [], skills: [] })) })
+  profiles: ['pub-ada', 'pub-member', 'pub-stranger', 'pub-grace-legacy'].map(id => ({ id, name: `Published ${id}`, headline: 'Public headline', ...({ 'pub-ada': { linkedinUrl: 'https://www.linkedin.com/in/synthetic-ada' }, 'pub-stranger': { linkedinUrl: 'https://www.linkedin.com/in/someone-public' } }[id] ?? {}), positions: [], education: [], skills: [] })) })
 const slugs = new Map([['synthetic-ada', 'pub-ada'], ['someone-public', 'pub-stranger']])
 const service = createAccountToolService({ getBackend: async who => backendFor(who), readPublishedSnapshot: snapshot, lookupSlug: slug => slugs.get(slug) ?? null })
 const grantFor = who => ({ ...who, scope: 'owner_network_and_public', version: CURRENT_ACCOUNT_GRANT_VERSION, tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, 'owner_network_and_public')] })
@@ -68,7 +68,7 @@ test('by LinkedIn address, with or without scheme, trailing slash or case', asyn
     assert.equal((await lookup({ linkedinUrl })).contact.connectionId, ada.id)
   // Not imported, but a published profile has that address: public data only.
   const published = await lookup({ linkedinUrl: 'https://www.linkedin.com/in/someone-public' })
-  assert.deepEqual(published, { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: 'Published pub-stranger', headline: 'Public headline', linkedinRefHash: sha('someone-public'), publishedProfileId: 'pub-stranger' }, visibility: 'public' })
+  assert.deepEqual(published, { kind: 'unlinked_lookup_contact', publicReconciliationComplete: true, contact: { connectionId: null, name: 'Published pub-stranger', headline: 'Public headline', linkedinRefHash: sha('someone-public'), publishedProfileId: 'pub-stranger' }, visibility: 'public' })
   await refused({ linkedinUrl: 'https://www.linkedin.com/in/nobody-here' }, 'not_found')
   await refused({ linkedinUrl: 'https://example.com/in/synthetic-ada' }, 'invalid_input')
 })
@@ -143,7 +143,7 @@ test('a LinkedIn address the owner attached privately keys a profile-less contac
   // A changed source (here: the person later got a different row shape) drops the private key.
   fingerprint = 'stale'
   assert.equal((await call({ connectionId: id })).contact.linkedinRefHash, null)
-  // A failing private store never breaks the lookup.
+  // A failing private store prevents incomplete identity reconciliation.
   const broken = createAccountToolService({ getBackend: async who => backend(who), readPublishedSnapshot: snapshot, contactAddresses: async () => { throw Error('store down') } })
-  assert.equal((await broken.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: id } })).result.contact.linkedinRefHash, null)
+  await assert.rejects(broken.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: id } }), error => error.code === 'upstream_unavailable')
 })

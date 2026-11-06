@@ -27,7 +27,7 @@ const ada = row('Ada', 'Synthetic', 'https://www.linkedin.com/in/synthetic-ada')
 const bo = row('Bo', 'Private', 'https://www.linkedin.com/in/synthetic-bo')
 const adaHash = sha('synthetic-ada'), boHash = sha('synthetic-bo')
 const profile = (id, name) => ({ id, name, headline: 'Public headline', positions: [], education: [], skills: [] })
-const snapshot = async () => ({ state: 'published', complete: true, revision: 'context-fixture-v1', connections: [], profiles: [profile('pub-ada', 'Ada Synthetic'), profile('pub-cy', 'Cy Published')] })
+const snapshot = async () => ({ state: 'published', complete: true, revision: 'context-fixture-v1', connections: [], profiles: [{ ...profile('pub-ada', 'Ada Synthetic'), linkedinUrl: 'https://www.linkedin.com/in/synthetic-ada' }, profile('pub-cy', 'Cy Published')] })
 const slugs = new Map([['synthetic-ada', 'pub-ada']])
 const backendFor = who => {
   const mine = who.ownerId === owner.ownerId
