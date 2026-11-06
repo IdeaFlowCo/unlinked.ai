@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs'
 export const FEEDBACK_WIDGET_SITE = 'https://worldissuetracker.com'
 export const FEEDBACK_WIDGET_SCRIPT = `${FEEDBACK_WIDGET_SITE}/widget/wit-feedback.js`
 export const FEEDBACK_WIDGET_API = 'https://api.worldissuetracker.com'
+// Screenshot attachments upload by signed PUT straight to WIT's GCS bucket.
+export const FEEDBACK_UPLOAD_ORIGIN = 'https://storage.googleapis.com'
 export const FEEDBACK_TRACKER_SLUG = 'unlinked-feedback'
 export const FEEDBACK_TOKEN_PATH = '/wit-feedback-token'
 const FEEDBACK_TOKEN_EXCHANGE = `${FEEDBACK_WIDGET_API}/functions/v1/feedback-token`
