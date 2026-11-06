@@ -426,7 +426,7 @@ test('oversized investor row is durably rejected and later rows resume without r
 
 
 test('investor import propagates unrelated identity and availability errors', async () => {
-  for (const code of ['identity_conflict', 'upstream_unavailable', 'permission_denied']) {
+  for (const code of ['identity_conflict', 'upstream_unavailable', 'scope_not_granted']) {
     const f = fixture(), owner = grant(`error-${code}`)
     f.options.lookupContact = async () => { throw new AccountToolError(code, 'Synthetic failure', { reason: 'other' }) }
     const tools = f.tools()
@@ -467,4 +467,35 @@ test('aborting the first alternate lookup stops fallback even when wrapped as un
   }
   await assert.rejects(f.tools().unlinked_get_person_private(grant('abort-owner'), { profileId: 'alternate-id' }, controller.signal), error => error === reason)
   assert.deepEqual(calls, [{ connectionId: 'alternate-id' }])
+})
+
+test('paged private annotations process every hash in bounded, cancellable batches', async () => {
+  const owner = grant('paged-annotation-owner'), batches = [], controller = new AbortController()
+  const entries = Array.from({ length: 51 }, (_, i) => ({ id: `entity-${i}`, kind: 'person', name: `Person ${i}`,
+    refs: [`linkedin:in:${sha(`public-${i}`)}`, `linkedin:in:${sha(`source-${i}`)}`] }))
+  const f = fixture({ request: async (identity, method, path) => {
+    assert.equal(identity.subject, owner.ownerId)
+    assert.equal(method, 'GET')
+    assert.match(path, /^entity-pages/)
+    return { status: 200, body: { entities: entries, nextCursor: null } }
+  } })
+  let cancel = false, failFirst = false
+  f.options.lookupContact = async (who, input) => {
+    assert.equal(who.ownerId, owner.ownerId)
+    batches.push(input.refHashes)
+    if (cancel) controller.abort()
+    if (failFirst && batches.length === 1) throw new Error('synthetic outage')
+    return { contacts: input.refHashes.includes(sha('source-50')) ? [{ linkedinRefHash: sha('source-50'), connectionId: 'owner-source-50' }] : [] }
+  }
+  const tools = f.tools()
+  const page = await tools.unlinked_list_private_things(owner, { kind: 'person', limit: 100 })
+  assert.deepEqual(batches.map(batch => batch.length), [100, 2])
+  assert.equal(page.entities[50].connectionId, 'owner-source-50')
+  batches.length = 0; failFirst = true
+  const partial = await tools.unlinked_list_private_things(owner, { kind: 'person', limit: 100 })
+  assert.equal(partial.entities[50].connectionId, 'owner-source-50')
+  assert.deepEqual(batches.map(batch => batch.length), [100, 2])
+  batches.length = 0; failFirst = false; cancel = true
+  await assert.rejects(tools.unlinked_list_private_things(owner, { kind: 'person', limit: 100 }, controller.signal), error => error.name === 'AbortError')
+  assert.deepEqual(batches.map(batch => batch.length), [100])
 })

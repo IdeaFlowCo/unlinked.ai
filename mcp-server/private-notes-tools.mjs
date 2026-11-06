@@ -169,9 +169,11 @@ export function createPrivateNotesTools({ overlay, identityFor, lookupContact, c
     const visit = node => { if (Array.isArray(node)) node.forEach(visit); else if (node && typeof node === 'object') { if (Array.isArray(node.refs)) for (const ref of node.refs) { const hash = LINKEDIN_REF.exec(ref)?.[1]; if (hash) hashes.add(hash) } Object.values(node).forEach(visit) } }
     visit(value)
     const connections = new Map()
-    if (hashes.size) {
+    const allHashes = [...hashes]
+    for (let offset = 0; offset < allHashes.length; offset += 100) {
+      signal?.throwIfAborted()
       try {
-        const found = await lookupContact(grant, { refHashes: [...hashes].slice(0, 100) }, signal)
+        const found = await lookupContact(grant, { refHashes: allHashes.slice(offset, offset + 100) }, signal)
         signal?.throwIfAborted()
         for (const contact of found?.contacts ?? []) {
           const ids = connections.get(contact.linkedinRefHash) ?? new Set()
