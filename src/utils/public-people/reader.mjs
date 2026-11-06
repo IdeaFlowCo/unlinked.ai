@@ -1,3 +1,4 @@
+import { peopleFilters, matchesPeopleFilters, connectionDegrees } from './search-filters.mjs'
 import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { createHash } from 'node:crypto'
@@ -322,15 +323,18 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known, listed: listedFor(data.unlisted, groups) }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
     },
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [], unlistedGroups } = requestValue(request)
-      const groups = groupsValue(unlistedGroups)
+      const { query = '', cursor, signal, mode = 'best', presence, sort = 'best', includeTotal = false, exclude = [], unlistedGroups, filters: inputFilters = {}, networkSeeds, networkSelf } = requestValue(request)
+      const groups = groupsValue(unlistedGroups), filters = peopleFilters(inputFilters), viewer = networkSeeds ? viewerValue(request.viewer) : null
+      if (networkSeeds !== undefined && (!Array.isArray(networkSeeds) || networkSeeds.length > maxProfiles || !networkSeeds.every(idValid))) invalid()
+      if (networkSelf !== undefined && !idValid(networkSelf)) invalid()
+      if (filters.degree && !networkSeeds) invalid()
       if (!PUBLIC_LIST_SORTS.includes(sort) || !SEARCH_MODES.includes(mode) || (presence !== undefined && !PRESENCE.includes(presence))) invalid()
       // `exclude`: published ids the caller already shows elsewhere on the page
       // (a signed-in owner's own people), left out before paging and totals.
       if (!Array.isArray(exclude) || exclude.length > maxProfiles || !exclude.every(idValid)) invalid()
       const normalizedQuery = queryValue(query), matcher = normalizedQuery ? createQueryMatcher(normalizedQuery, mode) : null
       // The presence filter and exclusions are part of the cursor scope, so a page never mixes filters.
-      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}${groupScope(groups)}`
+      const filter = `${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}${groupScope(groups)}${Object.keys(filters).length ? `filters=${hash(JSON.stringify(filters))}:` : ''}${networkSeeds ? `network=${hash(JSON.stringify([networkSelf, [...networkSeeds].sort(), viewerScope(viewer)]))}:` : ''}`
       const data0 = exclude.length ? await snapshot(signal) : null
       const excluded = data0 ? new Set(exclude.map(id => data0.aliases.get(id) ?? id)) : null
       const without = excluded?.size ? `x=${hash([...excluded].sort().join('\n'))}:` : ''
@@ -338,7 +342,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const decodedCursor = cursorValue(cursor, scope), data = data0 ?? await snapshot(signal)
       // A snapshot that does not name its members has no presence, so it matches no filter.
       const listed = listedFor(data.unlisted, groups)
-      const people = data.ordered.filter(person => (!presence || person.presence === presence) && listed(person.id))
+      const degrees = networkSeeds ? connectionDegrees({ seeds: networkSeeds.map(id => data.aliases.get(id) ?? id), self: data.aliases.get(networkSelf) ?? networkSelf, connected: data.connected, visible: visibilityFor(data, viewer).visible }) : null
+      const people = data.ordered.filter(person => (!presence || person.presence === presence) && listed(person.id) && matchesPeopleFilters(data.details.get(person.id), filters) && (!filters.degree || degrees.get(person.id) === Number(filters.degree)))
+        .map(person => degrees?.get(person.id) ? { ...person, connectionDegree: degrees.get(person.id) } : person)
       // Exclusions apply after ranking, so leaving out the full matches the
       // page already shows never promotes people who match only some words.
       const kept = rows => excluded?.size ? rows.filter(person => !excluded.has(person.id)) : rows
@@ -455,11 +461,12 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // The public summaries for known IDs, so a private row can link to the
     // matching public profile only when one is published.
     async lookup(request = {}) {
-      const { ids, signal } = requestValue(request)
+      const { ids, signal, filters = {}, details = false, listedOnly = false } = requestValue(request)
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(idValid)) invalid()
       const data = await snapshot(signal)
       const resolved = id => data.aliases.get(id) ?? id
-      return new Map(ids.filter(id => data.summaries.has(resolved(id))).map(id => [id, withPhoto(data.summaries.get(resolved(id)))]))
+      const parsed = peopleFilters(filters), listed = listedFor(data.unlisted, new Set())
+      return new Map(ids.filter(id => data.summaries.has(resolved(id)) && (!listedOnly || listed(resolved(id))) && matchesPeopleFilters(data.details.get(resolved(id)), parsed)).map(id => [id, withPhoto((details ? data.details : data.summaries).get(resolved(id)))]))
     },
     // Whether the public graph already connects two profiles (either direction,
     // merged addresses resolved). Used to avoid offering "Connect" to people

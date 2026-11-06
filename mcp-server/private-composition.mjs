@@ -1,3 +1,4 @@
+import { createNeo4jSavedSearchLists } from './saved-search-lists.mjs'
 import { createAuditQueue } from './audit-queue.mjs'
 import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
@@ -98,7 +99,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createConnectionPrivacyStore: createNeo4jConnectionPrivacyStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createIdeaflowProfileChoiceStore: createNeo4jIdeaflowProfileChoices, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createConnectionPrivacyStore: createNeo4jConnectionPrivacyStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createIdeaflowProfileChoiceStore: createNeo4jIdeaflowProfileChoices, createSavedSearchLists: createNeo4jSavedSearchLists, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -220,6 +221,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const ideaflowProfileChoices = process.env.UNLINKED_IDEAFLOW_PROFILES !== 'off' && typeof dependencies.createIdeaflowProfileChoiceStore === 'function' ? dependencies.createIdeaflowProfileChoiceStore(driver, 'neo4j') : undefined
     await ideaflowProfileChoices?.initialize()
     // Member-published public profile links (docs/profile-social-links.md).
+    const savedSearchLists = dependencies.createSavedSearchLists?.(driver, 'neo4j')
+    await savedSearchLists?.initialize()
     const profileSocialLinks = typeof dependencies.createProfileLinkStore === 'function' ? dependencies.createProfileLinkStore(driver, 'neo4j') : undefined
     await profileSocialLinks?.initialize()
     // Member handles: readable /people/<handle> addresses (docs/profile-handles.md).
@@ -704,6 +707,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       contactCards,
       homePreferences,
       connectionPrivacy,
+      savedSearchLists,
       profileSocialLinks,
       profileHandles,
       contactSlugs,
