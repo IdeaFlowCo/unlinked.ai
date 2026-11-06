@@ -117,3 +117,20 @@ The compiled index now lives in one worker thread. Each compile used to block th
 - **Tests.** `npm run test:index-worker` runs the reader suites with the worker installed. `tests/public-index-worker.test.mjs` covers method-by-method equivalence with in-process results, revision pinning, worker loss and disablement.
 
 Still on the main thread: assembling a changed member snapshot (`createMemberPublicIndex`) and its validation pass in each reader call.
+
+## No-change rebuilds (2026-11-06)
+
+`createMemberPublicIndex` rebuilds on its freshness interval: every 45 s through the warm keeper, and whenever a read comes after the fresh window. A rebuild used to reassemble the whole snapshot even when nothing had changed, which allocated about 120 MB per rebuild at the index caps.
+
+Now a due rebuild first computes a fingerprint of everything the build reads:
+
+- the legacy and enrichment revisions;
+- the discovered imports, plus each import's live resource and legacy link;
+- signups and connection-privacy choices, including how unresolved owners resolve to legacy profiles;
+- invites, members, legacy members and decisions.
+
+If this fingerprint equals the one read before the kept build, the kept snapshot is reused as the same object, with nothing assembled. The fingerprint is always read before the build it describes. A change that races a rebuild can therefore cause one extra rebuild, never a stale reuse.
+
+A changed source still rebuilds, and the build reuses the legacy snapshot and import list the fingerprint read, so its read count is the same as before. The first due rebuild after a cold start still builds, because there is no fingerprint to compare yet. `invalidate()` drops the kept build, so a connection-privacy change still forces a full rebuild on the next read. A fingerprint read that fails falls back to a full build, which fails closed as before.
+
+The fingerprint leaves out one input: `preferSurvivor`'s live handle state. It does not change the revision, and readers already pin compiled indexes to the revision.

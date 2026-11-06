@@ -143,10 +143,12 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     }) }
     return applyProfileDecisions(prepared, decisions, options)
   }
-  const build = async () => {
-    const legacy = await readLegacy()
+  // `preread`: the legacy snapshot and import list a fingerprint just read,
+  // so a changed rebuild reads them once, exactly as before.
+  const build = async (preread = null) => {
+    const legacy = preread ? preread.legacy : await readLegacy()
     if (!legacy) return null
-    const items = await discover()
+    const items = preread ? preread.items : await discover()
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
     if (!Array.isArray(items) || items.length > 1000) throw Error('public_member_import_limit')
     const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision, 'enrichment-status-v1', ...(includeDetails ? ['profile-details-v1', hash(JSON.stringify(legacy.profiles))] : [])], linkedChecks = [], overlays = new Map(), members = new Set(), ownerImports = new Map()
@@ -398,11 +400,63 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     revisions.push('members:' + hash(JSON.stringify(memberIds)))
     return finalize({state:'published',complete:true,revision:'shared-public-v1:'+hash(JSON.stringify(revisions)),profiles,connections:uniqueConnections,members:memberIds,legacyMembers})
   }
+  // Everything a build reads, as identities (revisions, receipts, ids) or
+  // hashes of small lists, so an unchanged source can be recognised without
+  // assembling and allocating the whole snapshot again. Read before a rebuild:
+  // a change racing the rebuild can only cause one more rebuild, never a stale
+  // reuse. `preferSurvivor` (live handle state) is not part of it; readers
+  // already pin compiled indexes to the revision, which it does not change.
+  const fingerprint = async () => {
+    const legacy = await readLegacy()
+    if (!legacy) return null
+    const items = await discover()
+    if (!Array.isArray(items) || items.length > 1000) return null
+    const parts = [legacy.revision]
+    for (const dataset of [...enrichmentDatasets, ...linkedinEnrichmentDatasets]) parts.push((await publicPeople.read(dataset))?.revision ?? null)
+    const signups = typeof readSignupProfiles === 'function' ? await readSignupProfiles() : []
+    if (!Array.isArray(signups)) return null
+    parts.push(signups.map(row => [row.profile?.id, row.receiptId, row.owner?.ownerId, row.owner?.userId]))
+    const owners = new Set(signups.map(row => `${row.owner?.ownerId}\u0000${row.owner?.userId}`))
+    const perItem = []
+    for (let start = 0; start < items.length; start += 8) perItem.push(...await Promise.all(items.slice(start, start + 8).map(async item => {
+      owners.add(`${item.owner.ownerId}\u0000${item.owner.userId}`)
+      const backend = await getBackend(item.owner), resource = await backend.readResource('import', item.id)
+      if (!sourceValid(resource, item)) throw Error('public_member_source_changed')
+      const linked = typeof backend.readLegacyProfile === 'function' ? await backend.readLegacyProfile() : null
+      return [item.id, item.owner.ownerId, item.owner.userId, item.revision, linked ? [linked.profileId, linked.receiptId, linked.revision, linked.sourceSha256] : null]
+    })))
+    parts.push(perItem)
+    const privacy = typeof readConnectionPrivacy === 'function' ? await readConnectionPrivacy() : []
+    if (!Array.isArray(privacy)) return null
+    parts.push(privacy)
+    // A member with a privacy choice but no import or signup resolves through
+    // their own legacy link, exactly as the build looks it up.
+    const unresolved = privacy.filter(entry => entry?.owner && !owners.has(`${entry.owner.ownerId}\u0000${entry.owner.userId}`))
+    for (let start = 0; start < unresolved.length; start += 8) parts.push(await Promise.all(unresolved.slice(start, start + 8).map(async entry => {
+      const backend = await getBackend(entry.owner)
+      return (typeof backend?.readLegacyProfile === 'function' ? await backend.readLegacyProfile() : null)?.profileId ?? null
+    })))
+    parts.push(typeof readInviteEdges === 'function' ? await readInviteEdges() : null)
+    parts.push(typeof readMembers === 'function' ? await readMembers() : null)
+    parts.push(typeof readLegacyMembers === 'function' ? await readLegacyMembers() : null)
+    parts.push(typeof readDecisions === 'function' ? await readDecisions() : null)
+    return { print: hash(JSON.stringify(parts)), legacy, items }
+  }
+  // A due rebuild first compares the fingerprint read now with the one read
+  // before the kept build; if equal, the kept snapshot is reused as it is.
+  const rebuild = async () => {
+    const held = kept
+    let probe = null
+    if (held) { try { probe = await fingerprint() } catch { probe = null } }
+    const print = probe?.print ?? null
+    if (held && print !== null && held.print === print && kept === held) return { value: held.value, print, reused: true }
+    return { value: await build(probe ? { legacy: probe.legacy, items: probe.items } : null), print, reused: false }
+  }
   const read = async ({signal} = {}) => {
     signal?.throwIfAborted()
     const age = kept ? now() - kept.at : Infinity
     if (age < freshMs) return kept.value
-    if (!work) { const started = generation; const current = build().then(value=>{if(started===generation)kept=value?{value,at:now()}:null;return value},error=>{if(started===generation){kept=null;if(typeof onMemberPhotos==='function')onMemberPhotos(new Map())}throw error}).finally(()=>{if(work===current)work=null}); work = current }
+    if (!work) { const started = generation; const current = rebuild().then(({value,print})=>{if(started===generation)kept=value?{value,at:now(),print}:null;return value},error=>{if(started===generation){kept=null;if(typeof onMemberPhotos==='function')onMemberPhotos(new Map())}throw error}).finally(()=>{if(work===current)work=null}); work = current }
     if (age < staleMs) { work.catch(() => {}); return kept.value }
     const value=await work;signal?.throwIfAborted();return value
   }

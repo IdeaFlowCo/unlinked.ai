@@ -176,10 +176,13 @@ test('inside the stale window the kept index answers while one refresh runs behi
   // The refresh result serves the next read without another build.
   const refreshed = await read()
   assert.deepEqual(refreshed.profiles, legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'}))); assert.equal(discovers, 4)
-  // Past the stale window a read waits for the rebuild.
+  // Past the stale window a read waits for the rebuild. Nothing it reads
+  // changed since the refresh, so the fingerprint (one discover) reuses the
+  // kept snapshot instead of assembling it again (member-index-rebuild-skip).
   clock = 20000
   const blocked = await read()
-  assert.deepEqual(blocked.profiles, legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'}))); assert.equal(discovers, 6)
+  assert.deepEqual(blocked.profiles, legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'}))); assert.equal(discovers, 5)
+  assert.equal(blocked, refreshed)
   // A failed refresh serves the kept build once, then fails closed.
   clock = 26000
   failRefresh = true
@@ -187,7 +190,7 @@ test('inside the stale window the kept index answers while one refresh runs behi
   await settle()
   failRefresh = false
   const rebuilt = await read()
-  assert.notEqual(rebuilt, blocked); assert.equal(discovers, 8)
+  assert.notEqual(rebuilt, blocked); assert.equal(discovers, 7)
   for (const staleMs of [-1, 0.5, 600001, 500]) assert.throws(() => createMemberPublicIndex({ freshMs: 1000, staleMs, readLegacy: async () => legacy, discover: async () => [], publicPeople: { read: async () => null } }), /public_member_index_freshness_invalid/)
 })
 
