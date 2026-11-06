@@ -21,7 +21,8 @@ inside an already enabled private-notes permission.
 1. Call `unlinked_stage_investor_csv` with `csv`, `listName` and an explicit header
    mapping, for example `{name:"Investor",linkedinUrl:"LinkedIn",company:"Firm",
    notes:["Comments"]}`. `firstName`, `lastName`, `email` and `title` are also
-   supported. The response includes a validation preview and `importId`.
+   supported. A names-only, single-column CSV is valid; malformed quoting is
+   rejected. The response includes a validation preview and `importId`.
 2. Call `unlinked_resume_investor_import` with that `importId`. Each call commits
    10 rows by default (1–25 configurable). Repeat until `complete` or `partial`.
    When creating a list, the first successful resume returns its `listId`.
