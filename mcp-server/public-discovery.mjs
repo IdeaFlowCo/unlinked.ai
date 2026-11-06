@@ -1,7 +1,8 @@
 import { browserPerformanceScript } from './browser-performance.mjs'
 import { CONNECTION_FEEDBACK_SRC } from './connection-feedback.mjs'
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { agentSetupCopyScript, renderAgents, renderDataLiberation, renderImportGuide, renderMeet, renderSupport, fillMeHeadline, fillNavAlerts, iosAppView, TOP_BAR_SCRIPT, PRIVACY_URL, TERMS_URL } from './private-onboarding-views.mjs'
 import { iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
@@ -11,13 +12,18 @@ import { ANALYTICS_ORIGIN, analyticsTag } from './ideaflow-analytics.mjs'
 
 const root = new URL('../', import.meta.url)
 const requireFromRoot = createRequire(new URL('package.json', root))
+// The QR decoder (257 KB) is versioned by content and loaded with defer: an
+// unversioned, render-blocking no-store copy was fetched on every /scan view.
+const jsqrPath = () => requireFromRoot.resolve('jsqr/dist/jsQR.js')
+export const JSQR_VERSION = (() => { try { return createHash('sha256').update(readFileSync(jsqrPath())).digest('hex').slice(0, 16) } catch { return 'unavailable' } })()
+export const JSQR_SRC = `/public-assets/jsqr.js?v=${JSQR_VERSION}`
 const assets = new Map([
   ['/public-assets/openchat-card.js', ['src/utils/openchat-card.js', 'text/javascript']],
   ['/public-assets/unlinked-card.js', ['src/utils/unlinked-card.js', 'text/javascript']],
   ['/public-assets/meet-scan.js', ['src/utils/meet-scan.js', 'text/javascript']],
   ['/public-assets/linkedin-profile-url.mjs', ['src/utils/linkedin-profile-url.mjs', 'text/javascript']],
   ['/public-assets/browser-card-scanner.js', ['src/utils/browser-card-scanner.js', 'text/javascript']],
-  ['/public-assets/jsqr.js', [() => requireFromRoot.resolve('jsqr/dist/jsQR.js'), 'text/javascript']],
+  ['/public-assets/jsqr.js', [jsqrPath, 'text/javascript']],
   // Installable-app surface: exact source-controlled static files only. The
   // service worker never caches member or session content (see public/sw.js).
   ['/manifest.webmanifest', ['public/manifest.webmanifest', 'application/manifest+json']],
@@ -80,6 +86,12 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     // pass-through — so /sw.js carries the narrowest policy that lets a
     // same-origin-only worker work.
     if (pathname === '/sw.js') response.setHeader('Content-Security-Policy', "default-src 'none'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+    if (pathname === '/public-assets/jsqr.js') {
+      let query = null
+      try { query = new URL(request.url ?? '', 'http://unlinked.invalid').searchParams } catch {}
+      const versioned = query?.get('v') === JSQR_VERSION && [...query.keys()].length === 1
+      response.setHeader('Cache-Control', versioned ? 'public, max-age=31536000, immutable' : 'no-cache')
+    }
     if (pathname === '/public-assets/browser-card-scanner.js') content = content.toString().replace("from 'jsqr'", "from '/public-assets/jsqr-module.mjs'")
   } else if (pathname === '/public-assets/jsqr-module.mjs') { type = 'text/javascript'; content = 'export default globalThis.jsQR;' }
   else {
@@ -95,7 +107,7 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     if (pathname === '/meet') {
       response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'self' 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
       response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
-      content = document(renderMeet(chrome), page).replace(/<\/html>$/, '') + `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}</script></html>`
+      content = document(renderMeet(chrome), page).replace(/<\/html>$/, '') + `<script nonce="${nonce}" src="${JSQR_SRC}" defer></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}</script></html>`
     }
   }
   response.writeHead(200, { 'Content-Type': type })
