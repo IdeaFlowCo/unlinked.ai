@@ -8,6 +8,7 @@ import { createAccountAgentApiHandler } from '../mcp-server/account-api.mjs'
 import { createAccountHostedHandler } from '../mcp-server/account-hosted.mjs'
 import { createIdeaflowConnectorHandler } from '../mcp-server/ideaflow-connector.mjs'
 import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION } from '../mcp-server/account-grants.mjs'
+import { workbook, workbookInput } from './helpers/investor-xlsx-fixture.mjs'
 
 test('escaped CSV crosses REST, direct MCP and signed shared connector within bounded source limits', async t => {
   const f = fixture(), owner = { ownerId: 'alice', userId: 'alice' }, scope = 'owner_network_and_private_notes'
@@ -53,6 +54,17 @@ test('escaped CSV crosses REST, direct MCP and signed shared connector within bo
     assert.ok(surface === 'rest' ? denied.error : denied.result?.isError || denied.error)
   }
   assert.equal((await request('shared', { query: '\u0001'.repeat(200000) }, 'unlinked_whoami')).status, 413)
+  const xlsx = workbookInput(await workbook())
+  for (const surface of ['rest', 'direct', 'shared']) {
+    const inspection = await request(surface, { fileBase64: xlsx.fileBase64, filename: xlsx.filename, inspectOnly: true })
+    assert.equal(inspection.status, 200)
+    const body = await inspection.json(), inventory = surface === 'rest' ? body : JSON.parse(body.result.content[0].text)
+    assert.equal(inventory.sheets.length, 2); assert.equal(inventory.retained, false)
+    const response = await request(surface, { ...xlsx, listName: `Workbook ${surface}` })
+    assert.equal(response.status, 200)
+    const data = await response.json(), staged = surface === 'rest' ? data : JSON.parse(data.result.content[0].text)
+    assert.equal(staged.status, 'staged'); assert.equal(staged.sourceFile.selectedSheet.name, xlsx.sheet)
+  }
   assert.equal((await request('shared', { csv, mapping: { name: 'Name' }, listName: 'denied' }, 'unlinked_stage_investor_csv', 'unlinked:read')).status, 413)
   for (const surface of ['rest', 'shared']) assert.ok((await request(surface, { csv: '\u0001'.repeat(750000) })).status >= 400)
 })

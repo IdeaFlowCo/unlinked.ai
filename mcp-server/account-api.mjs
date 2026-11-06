@@ -41,7 +41,7 @@ const ROUTES = Object.freeze({
   'POST /api/agent/v1/contacts/lookup': { tool: 'unlinked_lookup_contact', body: ['connectionId', 'linkedinUrl', 'profileId', 'refHashes'] },
   // Private people notes & relations (catalog v7, separate permission).
   'GET /api/agent/v1/private/person': { tool: 'unlinked_get_person_private', query: ['profileId'] },
-  'POST /api/agent/v1/private/investor-imports': { tool: 'unlinked_stage_investor_csv', body: ['csv', 'mapping', 'listName', 'listId'], limit: 4 * 1024 * 1024 },
+  'POST /api/agent/v1/private/investor-imports': { tool: 'unlinked_stage_investor_csv', body: ['csv', 'fileBase64', 'filename', 'sheet', 'headerRow', 'inspectOnly', 'retainOriginalConfirmed', 'mapping', 'listName', 'listId'], limit: 4 * 1024 * 1024 },
   'POST /api/agent/v1/private/investor-imports/resume': { tool: 'unlinked_resume_investor_import', body: ['importId', 'batchSize'] },
   'GET /api/agent/v1/private/investor-imports/status': { tool: 'unlinked_get_investor_import', query: ['importId', 'offset', 'limit', 'sourceOffset'], numbers: ['offset', 'limit', 'sourceOffset'] },
   'GET /api/agent/v1/private/thing': { tool: 'unlinked_get_private_thing', query: ['thingId', 'after', 'limit'], numbers: ['limit'] },

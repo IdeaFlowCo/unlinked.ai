@@ -36,7 +36,7 @@ export const OAUTH_SCOPE_DESCRIPTIONS = Object.freeze({
   network: 'Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile’s recorded paths, and (where available) your connection requests and notifications.',
   people: 'Search and read the published People index on Unlinked (public professional profiles only).',
   connections: 'Send connection requests to members, and accept, ignore or withdraw your connection requests, under the same rules and daily limits as the site.',
-  private_notes: 'Read and write your private people, notes, relations and lists, including investor CSVs you provide and their contact fields — only you see them, in Unlinked and OpenChat. Never notifies anyone; not a connection request and not messaging.',
+  private_notes: 'Read and write your private people, notes, relations and lists, including investor CSV/XLSX files you provide and their contact fields — only you see them, in Unlinked and OpenChat. Never notifies anyone; not a connection request and not messaging.',
 })
 
 const CODE_SECONDS = 60, CODE_CAPACITY = 1000

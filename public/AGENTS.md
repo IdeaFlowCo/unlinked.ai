@@ -52,7 +52,7 @@ An explicit account grant authorizes current/future owner imports, same-owner sa
 Never derive owner authority from typed email, archive fields, profile IDs or a URL.
 The backend binds signed Ideaflow issuer/subject to the owner; recovered-profile confirmation uses only server-held signed email evidence plus CSRF and can be revoked.
 It enforces owner/publication/grant state on each call.
-Raw LinkedIn archives, recovered original files, and archive contact emails and phone numbers are excluded from network search. OpenAI receives bounded relevant professional details. Private investor CSV access is described below.
+Raw LinkedIn archives, recovered original files, and archive contact emails and phone numbers are excluded from network search. OpenAI receives bounded relevant professional details. Private investor list access is described below.
 Everyone browsing is public at GET /api/people?q=&mode=&cursor= and GET /api/people/:id. The default mode `best` matches every word in any form and order ("investors" finds "investor"), and returns people who match some of the words when nobody has them all; the response's `match` is `all`, `some` or `none`. `mode=exact` matches the typed phrase as written. A person with an operator-published profile photo carries `photo`, a same-origin versioned URL of GET /people/:id/photo (JPEG, PNG or WebP; 404 when there is none).
 Everyone AI retrieval considers all public profiles, then ranks at most200 matching professional candidates. No archive is required.
 Old single-tool grants retain their original narrower scope.
@@ -111,10 +111,10 @@ When operator-enabled, direct REST/MCP responses include a server-generated X-Re
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract `docs/public-people-reader.md` (Historical membership); filter values are published in [OpenAPI](https://www.unlinked.ai/openapi.json).
 
-## Private investor/contact CSV lists
+## Private investor/contact CSV and XLSX lists
 
 With Private people notes & relations permission, an agent can read investor
-CSVs you provide, including contact fields and private notes. Call
+CSV/XLSX files you provide, including contact fields and private notes. Call
 `unlinked_stage_investor_csv(csv,listName,mapping,listId?)`, then repeat
 `unlinked_resume_investor_import(importId,batchSize?)` until complete or partial.
 Read original fields and outcomes with `unlinked_get_investor_import`, paging with
@@ -127,3 +127,13 @@ members with `unlinked_get_private_thing(thingId:listId,limit:100)`, following
 nextCursor as after. The shared connector prefixes tools with `unlinked__` and
 requires separately consented `unlinked:private_notes`; connection-write access
 alone is insufficient. Existing graph quotas apply; errors never mean completion.
+
+For XLSX use the same `unlinked_stage_investor_csv` tool with `fileBase64`,
+`filename` and `inspectOnly:true` to discover sheets without retaining anything.
+Select an exact `sheet` and optional physical `headerRow` (default 1), then provide
+`mapping`, `listName` and `retainOriginalConfirmed:true` only after owner
+authorization to retain the **whole original workbook, including hidden and
+unselected tabs**, privately on the server. Only the selected sheet is imported.
+512 KiB original-file limit. Selected-sheet formulas, macros and .xls are rejected;
+use values-only XLSX or CSV. Original XLSX recovery through the status tool returns
+base64 chunks with byte offsets: decode each chunk before concatenating.

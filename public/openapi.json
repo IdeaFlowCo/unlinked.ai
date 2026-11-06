@@ -2488,7 +2488,7 @@
     "/api/agent/v1/private/investor-imports": {
       "post": {
         "operationId": "unlinked_stage_investor_csv",
-        "summary": "Stage an uploaded investor/contact CSV in the owner’s private database. Supply exact header names in mapping; map private comments with notes (an array of column names). Retains the original file and fields. Returns importId and, for a newly staged import, a validation preview; then call unlinked_resume_investor_import to commit. Same bytes, mapping, listName and list target replay the same import. Name/email never auto-match; exact LinkedIn addresses can match existing private/public personas. Each unmatched source row becomes a separate private person. At most 512 KiB per part: split larger files by complete CSV rows, repeating the header, and use the first resulting listId for subsequent parts. listId appends to an existing private list; otherwise creates a distinct list. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "Inspect or stage an investor/contact CSV or XLSX in the owner’s private database (the tool name remains compatible). Supply exactly one of csv (UTF-8 text) or fileBase64 (canonical base64 original bytes, requires filename ending .csv or .xlsx); maximum original size 512 KiB. inspectOnly:true writes nothing and needs no mapping/listName: XLSX returns exact sheet names, ids, paths and visibility; with sheet set it also returns headers. XLSX staging always requires an exact sheet name, headerRow (1 by default), mapping, listName, and retainOriginalConfirmed:true ONLY after owner authorization to retain the ENTIRE original workbook including unselected/hidden tabs privately on the server. Only the selected sheet is imported; never guess a tab. Selected-sheet formulas, macros, encrypted or legacy .xls files are rejected; supply a values-only XLSX or CSV. Mapping uses exact header names; private comments use notes:[column names]. Returns importId and a new import’s validation preview; resume to commit. Same bytes, sheet/header, mapping, listName and list target replay the same import. Name/email never auto-match; exact LinkedIn references may match a readable persona, otherwise each source row becomes a private person. listId appends to an existing private list. Larger files must be split by complete rows, retaining headers; append later parts to the first listId. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
         "security": [
           {
             "accountGrant": []
@@ -2510,6 +2510,32 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 524288
+                  },
+                  "fileBase64": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 699052
+                  },
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "sheet": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "headerRow": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000
+                  },
+                  "inspectOnly": {
+                    "type": "boolean"
+                  },
+                  "retainOriginalConfirmed": {
+                    "type": "boolean"
                   },
                   "listName": {
                     "type": "string",
@@ -2571,11 +2597,6 @@
                     "additionalProperties": false
                   }
                 },
-                "required": [
-                  "csv",
-                  "listName",
-                  "mapping"
-                ],
                 "additionalProperties": false
               }
             }
@@ -2594,7 +2615,7 @@
     "/api/agent/v1/private/investor-imports/resume": {
       "post": {
         "operationId": "unlinked_resume_investor_import",
-        "summary": "Commit/resume one bounded batch (default 10, maximum 25 rows) from a staged CSV. Repeat with the same importId until status complete or partial; never report completion before then. Durable row receipts and idempotent graph writes survive process restarts. import_busy means retry later. On other errors, progress is retained: inspect status and retry after fixing the cause. Existing graph quotas apply (5,000 entities and links per owner). Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "Commit/resume one bounded batch (default 10, maximum 25 rows) from a staged CSV or selected XLSX sheet. Repeat with the same importId until status complete or partial; never report completion before then. Durable row receipts and idempotent graph writes survive process restarts. import_busy means retry later. On other errors, progress is retained: inspect status and retry after fixing the cause. Existing graph quotas apply (5,000 entities and links per owner). Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
         "security": [
           {
             "accountGrant": []
@@ -2643,7 +2664,7 @@
     "/api/agent/v1/private/investor-imports/status": {
       "get": {
         "operationId": "unlinked_get_investor_import",
-        "summary": "Read an investor import’s status and private original row fields with outcome receipts. Page with nextOffset until null, at most 20 rows per call, fewer when encoded fields are large. Oversized individual rows explicitly report sourceRecovery instead of inline fields. To recover the exact original CSV, set sourceOffset:0, concatenate source.text chunks, and follow source.nextOffset until null (offsets count JavaScript UTF-16 code units; each chunk is at most 32768). A partial import has rejected rows; inspect reasons. This reads the original outcome, not a guarantee that the owner has not subsequently edited/deleted graph records. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "Read an investor import’s status and private original row fields with outcome receipts, including XLSX sheet and physical row provenance. Page with nextOffset until null, at most 20 rows per call, fewer when encoded fields are large. Oversized rows report sourceRecovery. Recover the original file with sourceOffset:0 and follow source.nextOffset until null. CSV returns source.text chunks (UTF-16 offsets, at most 32768 code units); XLSX returns source.base64 chunks (BYTE offsets, at most 32768 bytes). Decode EACH base64 chunk separately, concatenate bytes and verify sourceDigest. The entire original XLSX includes unselected/hidden sheets and remains owner-private. A partial import has rejected rows; inspect reasons. This reads original outcomes, not the owner’s subsequent graph edits/deletions. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
         "security": [
           {
             "accountGrant": []

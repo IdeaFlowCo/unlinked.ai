@@ -198,3 +198,8 @@ Private recent-contact enrichment and the viewer-only LinkedIn candidate review
 flow are documented in [docs/contact-enrichment.md](docs/contact-enrichment.md).
 An accepted Unlinked connection/invite is not an imported contact. Keep its
 source label distinct, and never treat a name search as identity evidence.
+
+Private CSV/XLSX investor/list imports reuse the three catalog-v9 tools. Explicit
+sheet selection, whole-workbook private-retention acknowledgement, bounded
+ZIP/XML parsing, original-byte recovery and provenance: `docs/investor-csv.md`.
+Browser list upload remains CSV-only; XLSX is available through MCP/REST.

@@ -8,6 +8,7 @@ import { linkedinRefHash, linkedinSlug } from '../public-people/url-identity.mjs
 export const INVESTOR_CSV_LIMITS = Object.freeze({ bytes: 8 * 1024 * 1024, rows: 100000, columns: 256, fieldChars: 32768 })
 const sha = value => createHash('sha256').update(value).digest('hex')
 const invalid = code => { throw new Error(code) }
+export const normalizeInvestorHeaders = headers => headers.map(value => value.trim())
 
 /** Parse a CSV with caller-selected column names. The original fields remain
  * attached to each row for private provenance. Stable row IDs identify source
@@ -25,7 +26,7 @@ export function parseInvestorCsv(input, mapping) {
   if (parsed.errors.some(error => error.code !== 'UndetectableDelimiter' || !singleColumn)) invalid('csv_invalid_format')
   if (!parsed.data.length) invalid('csv_missing_header')
   if (parsed.data.length - 1 > INVESTOR_CSV_LIMITS.rows) invalid('csv_row_limit')
-  const headers = parsed.data[0].map(value => value.trim())
+  const headers = normalizeInvestorHeaders(parsed.data[0])
   if (!headers.length || headers.length > INVESTOR_CSV_LIMITS.columns || headers.some(value => !value || value.length > INVESTOR_CSV_LIMITS.fieldChars)) invalid('csv_invalid_header')
   if (new Set(headers.map(value => value.toLocaleLowerCase('en-US'))).size !== headers.length) invalid('csv_duplicate_header')
   if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) invalid('csv_invalid_mapping')

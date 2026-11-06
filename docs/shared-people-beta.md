@@ -24,7 +24,7 @@ Member identity, live import overlays and source precedence follow the [profile 
 
 New account grants include `unlinked_search_everyone` and `unlinked_search_network`; `unlinked_search_network` degree/cursor mode and signed `GET /api/my-connections` read recorded one/two-hop paths from the current complete public snapshot only after an explicitly confirmed recovered-profile anchor. Old single-tool grants keep their exact original scope.
 Stored grant and owner binding are checked before and after model work; revocation remains durable.
-No grant exposes raw LinkedIn archives, recovered original files or identity/provider credentials. Owner-private investor CSV access is covered by the [CSV workflow](investor-csv.md).
+No grant exposes raw LinkedIn archives, recovered original files or identity/provider credentials. Owner-private investor CSV/XLSX access is covered by the [investor list workflow](investor-csv.md).
 
 The complete shared snapshot follows the [public reader bounds](public-people-reader.md); the recovered seed uses 16,296 profiles.
 Exceeding the bound fails explicitly rather than truncating; this is a real scaling limit for subsequent member additions, separate from the owner-private parser/import limit of 100,000 records.

@@ -47,7 +47,25 @@
       2
     ],
     "connectionAnchor": "explicitly confirmed recovered profile",
-    "recoveredOriginals": "browser-only after explicit recovered-account confirmation"
+    "recoveredOriginals": "browser-only after explicit recovered-account confirmation",
+    "privateListFiles": {
+      "formats": [
+        "csv",
+        "xlsx"
+      ],
+      "tool": "unlinked_stage_investor_csv",
+      "permission": "private_notes",
+      "maxOriginalBytes": 524288,
+      "xlsx": {
+        "explicitSheetSelection": true,
+        "inspectionWrites": false,
+        "originalRetention": "Entire workbook, including unselected and hidden tabs; owner-private; requires retainOriginalConfirmed:true after disclosure and owner authorization",
+        "imports": "Selected sheet only",
+        "sourceRecovery": "Decode each base64 chunk separately; offsets count bytes"
+      },
+      "connectionsCreated": false,
+      "publicProfilesCreated": false
+    }
   },
   "mcp": {
     "url": "https://www.unlinked.ai/mcp",
