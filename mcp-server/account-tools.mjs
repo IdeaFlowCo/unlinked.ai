@@ -494,23 +494,6 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         const summaries = await publishedFor(picked)
         return { kind: 'unlinked_lookup_contact', contacts: await Promise.all(picked.map(async (candidate, index) => ({ ...await contactOf(candidate, summaries[index]), linkedinRefHash: linkedinRefHash(candidate.slug) }))), visibility: 'owner_private' }
       }
-      const reconcile = async (target, preferred = null) => {
-        const summaries = await publishedFor(ordered)
-        let targetRef, refs, relatedIds
-        try {
-          relatedIds = await reader.linkedinProfileIds({ id: target.id, signal })
-          targetRef = await reader.linkedinRef({ id: target.id, signal })
-          const ids = [...new Set(summaries.filter(Boolean).map(summary => summary.id))]
-          refs = new Map(await Promise.all(ids.map(async id => [id, await reader.linkedinRef({ id, signal })])))
-        } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
-        const indexes = summaries.flatMap((summary, index) => summary && (summary.id === target.id || (targetRef && refs.get(summary.id) === targetRef)) ? [index] : [])
-        if (!indexes.length) return null
-        const contacts = await Promise.all(indexes.map(index => contactOf(ordered[index], summaries[index])))
-        const contact = contacts.find(value => value.connectionId === preferred?.entry.id) ?? contacts[0]
-        const sourceLinkedinRefHashes = [...new Set(contacts.flatMap(value => [value.sourceLinkedinRefHash, value.linkedinRefHash]).filter(value => value && value !== contact.linkedinRefHash))]
-        const publishedProfileIds = [...new Set([target.id, ...relatedIds, ...contacts.map(value => value.publishedProfileId)].filter(id => id && id !== contact.publishedProfileId))]
-        return { ...contact, ...(sourceLinkedinRefHashes.length ? { sourceLinkedinRefHashes } : {}), ...(publishedProfileIds.length ? { publishedProfileIds } : {}) }
-      }
       let candidate = null
       if (mode === 'linkedinUrl' && reader) {
         try { published = await reader.lookupLinkedin({ address: input.linkedinUrl, signal }) }
@@ -518,27 +501,50 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       }
       if (mode === 'connectionId') candidate = ordered.find(value => value.entry.id === input.connectionId) ?? null
       else if (mode === 'linkedinUrl' && !published) candidate = ordered.find(value => value.slug === wantedSlug) ?? null
-      else {
-        const contact = await reconcile(published)
-        if (contact) return { kind: 'unlinked_lookup_contact', contact, visibility: 'owner_private' }
-        // Published, but not among the owner's contacts: public data only.
-        let publicRef, publishedProfileIds
-        try { publicRef = await reader.linkedinRef({ id: published.id, signal }); publishedProfileIds = (await reader.linkedinProfileIds({ id: published.id, signal })).filter(id => id !== published.id) }
-        catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
-        return { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: publicRef, publishedProfileId: published.id, ...(publishedProfileIds.length ? { publishedProfileIds } : {}) }, visibility: 'public' }
+      if (!published && !candidate) throw new AccountToolError('not_found', mode === 'connectionId' ? 'No connection of the owner has that id.' : 'Neither the owner’s contacts nor a published profile have that LinkedIn address.')
+      const summaries = await publishedFor(ordered)
+      let refs = new Map(), targetRef = null
+      try {
+        if (published) targetRef = await reader.linkedinRef({ id: published.id, signal })
+        const ids = [...new Set(summaries.filter(Boolean).map(summary => summary.id))]
+        refs = new Map(await Promise.all(ids.map(async id => [id, await reader.linkedinRef({ id, signal })])))
+      } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+      const parents = ordered.map((_, index) => index), byKey = new Map()
+      const root = index => { while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index] } return index }
+      for (let index = 0; index < ordered.length; index++) {
+        const summary = summaries[index], source = linkedinRefHash(ordered[index].slug), publicRef = summary && refs.get(summary.id)
+        const keys = [...(source ? [`h:${source}`] : []), ...(publicRef ? [`h:${publicRef}`] : []), ...(summary ? [`p:${summary.id}`] : [])]
+        for (const key of keys) {
+          const other = byKey.get(key)
+          if (other === undefined) byKey.set(key, index)
+          else { const left = root(index), right = root(other); if (left !== right) parents[left] = right }
+        }
       }
-      if (candidate) {
-        const [summary] = await publishedFor([candidate])
-        const contact = summary ? await reconcile(summary, candidate) : await contactOf(candidate, summary)
-        return { kind: 'unlinked_lookup_contact', contact, visibility: 'owner_private' }
+      let start = candidate ? ordered.indexOf(candidate) : byKey.get(`p:${published.id}`)
+      if (start === undefined && targetRef) start = byKey.get(`h:${targetRef}`)
+      const indexes = start === undefined || start < 0 ? [] : ordered.flatMap((_, index) => root(index) === root(start) ? [index] : [])
+      const publicIds = new Set(published ? [published.id] : []), hashes = new Set(targetRef ? [targetRef] : [])
+      const related = new Map()
+      for (const index of indexes) {
+        const summary = summaries[index], source = linkedinRefHash(ordered[index].slug), publicRef = summary && refs.get(summary.id)
+        if (source) hashes.add(source)
+        if (summary) publicIds.add(summary.id)
+        if (publicRef) { hashes.add(publicRef); if (!related.has(publicRef)) related.set(publicRef, summary.id) }
       }
-      if (mode === 'linkedinUrl' && reader) {
-        let summary
-        try { summary = await reader.lookupLinkedin({ address: input.linkedinUrl, signal }) }
-        catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
-        if (summary) return { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: summary.name, ...(summary.headline ? { headline: summary.headline } : {}), linkedinRefHash: await reader.linkedinRef({ id: summary.id, signal }), publishedProfileId: summary.id }, visibility: 'public' }
+      if (targetRef) related.set(targetRef, published.id)
+      try {
+        for (const id of related.values()) for (const relatedId of await reader.linkedinProfileIds({ id, signal })) publicIds.add(relatedId)
+      } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+      const primary = candidate ?? (indexes.length ? ordered[indexes[0]] : null)
+      if (primary) {
+        const preferredIndex = ordered.indexOf(primary)
+        const summary = summaries[preferredIndex] ?? indexes.map(index => summaries[index]).find(Boolean) ?? published
+        const contact = await contactOf(primary, summary)
+        const sourceLinkedinRefHashes = [...hashes].filter(hash => hash !== contact.linkedinRefHash)
+        const publishedProfileIds = [...publicIds].filter(id => id !== contact.publishedProfileId)
+        return { kind: 'unlinked_lookup_contact', contact: { ...contact, ...(sourceLinkedinRefHashes.length ? { sourceLinkedinRefHashes } : {}), ...(publishedProfileIds.length ? { publishedProfileIds } : {}) }, visibility: 'owner_private' }
       }
-      throw new AccountToolError('not_found', mode === 'connectionId' ? 'No connection of the owner has that id.' : 'Neither the owner’s contacts nor a published profile have that LinkedIn address.')
+      return { kind: 'unlinked_lookup_contact', contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: targetRef, publishedProfileId: published.id, ...([...publicIds].some(id => id !== published.id) ? { publishedProfileIds: [...publicIds].filter(id => id !== published.id) } : {}) }, visibility: 'public' }
     },
     async unlinked_ai_search(grant, { query, scope, timeoutMs = 40000 }, signal) {
       // Default to the widest scope the grant actually covers, so the natural

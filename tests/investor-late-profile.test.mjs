@@ -217,3 +217,39 @@ test('duplicate published profile references conflict even without owner connect
   for (const person of [profile, twin]) await f.options.overlay.request(identity, 'POST', 'entities', { kind: 'person', name: person.id, refs: [`unlinked:person:${person.id}`] })
   await assert.rejects(service.call({ grant: alice, name: 'unlinked_add_private_note', input: { subjectKind: 'unlinked', subjectId: profile.id, text: 'Ambiguous' } }), e => e.code === 'identity_conflict')
 })
+
+test('exact identity closure follows owner sources and public targets in both directions', async () => {
+  const f = fixture(), alice = grant('alice'), bob = grant('bob')
+  const otherProfile = { ...profile, id: 'second-component-profile', linkedinUrl: 'https://www.linkedin.com/in/second-component-public' }
+  const old = ['component-old-a', 'component-old-b', 'component-old-c', 'unrelated-source']
+  const row = (id, address, target) => ({ id, category: 'connections', fields: { 'first name': 'Same Name', url: `https://linkedin.com/in/${address}` }, provenance: target ? { source: 'recovered-legacy-public-v1', toId: target } : { source: 'private-import' } })
+  const rows = [row('untargeted', old[0]), row('first-target', old[0], profile.id), row('bridge-one', old[1], profile.id), row('bridge-two', old[1], otherProfile.id), row('last-target', old[2], otherProfile.id), row('unrelated', old[3])]
+  let writes = 0, reads = 0
+  const overlay = { request: async (identity, method, path, body) => {
+    if (method !== 'GET' && path !== 'lookup') writes++
+    return f.options.overlay.request(identity, method, path, body)
+  } }
+  const service = createAccountToolService({ ...f.options, overlay,
+    readPublishedSnapshot: async () => { reads++; return { state: 'published', complete: true, revision: 'component', profiles: [profile, otherProfile], connections: [] } },
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [], readLegacyObservations: async () => ({ assertions: who.ownerId === 'alice' ? rows : [] }) }) })
+  const call = (name, input, who = alice) => service.call({ grant: who, name, input, signal: new AbortController().signal }).then(value => value.result)
+  const identity = await f.options.identityFor(alice)
+  const made = []
+  for (const address of [old[0], 'second-component-public', old[3]]) made.push((await overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'Same Name', refs: [`linkedin:in:${sha(address)}`] })).body.entity)
+  const before = writes
+  for (const subjectId of ['untargeted', 'first-target', 'bridge-one', 'bridge-two', 'last-target', profile.id, otherProfile.id, `https://linkedin.com/in/${old[0]}`, `https://linkedin.com/in/${old[2]}`]) {
+    reads = 0
+    const result = await call('unlinked_get_person_private', { profileId: subjectId })
+    assert.deepEqual(new Set(result.entities.map(entity => entity.id)), new Set(made.slice(0, 2).map(entity => entity.id)))
+    assert.ok(reads <= 2)
+    reads = 0
+    await assert.rejects(call('unlinked_add_private_note', { subjectKind: 'unlinked', subjectId, text: 'Ambiguous' }), e => e.code === 'identity_conflict')
+    assert.equal(reads, 1)
+  }
+  assert.deepEqual((await call('unlinked_get_person_private', { profileId: 'unrelated' })).entities.map(entity => entity.id), [made[2].id])
+  assert.deepEqual((await call('unlinked_get_person_private', { profileId: profile.id }, bob)).entities, [])
+  assert.equal(writes, before)
+  const corrected = await call('unlinked_add_private_note', { subjectKind: 'thing', subjectId: made[0].id, text: 'Owner selected this record' })
+  assert.equal(corrected.entityId, made[0].id)
+  assert.equal(writes, before + 1)
+})
