@@ -290,3 +290,47 @@ test('missing public evidence permits owner reads but blocks identity-dependent 
   const online = serviceFor(async () => ({ state: 'published', complete: true, revision: 'empty', profiles: [], connections: [] }))
   assert.equal((await call(online, 'unlinked_lookup_contact', { connectionId: 'private-source' })).publicReconciliationComplete, true)
 })
+
+test('explicit targets, source URL matches, and validated aliases all join the exact component', async () => {
+  const f = fixture(), alice = grant('alice'), bob = grant('bob')
+  const other = { ...profile, id: 'url-match-person', linkedinUrl: 'https://linkedin.com/in/url-match-person' }
+  const aliases = { 'old-public-a': profile.id, 'old-public-b': other.id }
+  const row = { id: 'linked-row', category: 'connections', fields: { 'first name': 'Person', url: other.linkedinUrl }, provenance: { source: 'recovered-legacy-public-v1', toId: 'old-public-a' } }
+  let writes = 0, snapshotReads = 0
+  const overlay = { request: async (identity, method, path, body) => {
+    if (method !== 'GET' && path !== 'lookup') writes++
+    return f.options.overlay.request(identity, method, path, body)
+  } }
+  const service = createAccountToolService({ ...f.options, overlay,
+    readPublishedSnapshot: async () => { snapshotReads++; return { state: 'published', complete: true, revision: 'aliases', profiles: [profile, other], aliases, connections: [] } },
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [], readLegacyObservations: async () => ({ assertions: who.ownerId === 'alice' ? [row] : [] }) }) })
+  const call = (name, input, who = alice) => service.call({ grant: who, name, input, signal: new AbortController().signal }).then(value => value.result)
+  const identity = await f.options.identityFor(alice)
+  const first = (await overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'Private A', refs: ['unlinked:person:old-public-a'] })).body.entity
+  const second = (await overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'Private B', refs: ['unlinked:person:old-public-b'] })).body.entity
+  const before = writes
+  for (const subjectId of ['linked-row', profile.id, other.id, 'old-public-a', 'old-public-b', profile.linkedinUrl, other.linkedinUrl]) {
+    snapshotReads = 0
+    const card = await call('unlinked_get_person_private', { profileId: subjectId })
+    assert.deepEqual(new Set(card.entities.map(value => value.id)), new Set([first.id, second.id]))
+    assert.ok(snapshotReads <= 2)
+    await assert.rejects(call('unlinked_add_private_note', { subjectKind: 'unlinked', subjectId, text: 'Ambiguous' }), e => e.code === 'identity_conflict' && e.details.candidates.length === 2)
+  }
+  assert.equal(writes, before)
+  assert.deepEqual((await call('unlinked_get_person_private', { profileId: other.id }, bob)).entities, [])
+  const direct = await call('unlinked_add_private_note', { subjectKind: 'thing', subjectId: second.id, text: 'Owner selected' })
+  assert.equal(direct.entityId, second.id)
+})
+
+test('a published profile without LinkedIn still reconciles validated aliases', async () => {
+  const f = fixture(), alice = grant('alice'), withoutUrl = { ...profile, linkedinUrl: undefined }
+  const service = createAccountToolService({ ...f.options,
+    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'no-url-alias', profiles: [withoutUrl], aliases: { 'old-no-url': profile.id }, connections: [] }),
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [] }) })
+  const identity = await f.options.identityFor(alice)
+  const old = (await f.options.overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'Old', refs: ['unlinked:person:old-no-url'] })).body.entity
+  const call = (name, input) => service.call({ grant: alice, name, input }).then(value => value.result)
+  assert.equal((await call('unlinked_get_person_private', { profileId: profile.id })).entities[0].id, old.id)
+  await f.options.overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'New', refs: [`unlinked:person:${profile.id}`] })
+  await assert.rejects(call('unlinked_add_private_note', { subjectKind: 'unlinked', subjectId: profile.id, text: 'Ambiguous' }), e => e.code === 'identity_conflict')
+})

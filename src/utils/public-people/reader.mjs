@@ -209,10 +209,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       const ordered = [...summaries.values()].sort((a, b) => compare(normalized(a.name), normalized(b.name)) || compare(a.id, b.id))
       // A merged profile's address points at its survivor.
-      const aliases = new Map()
+      const aliases = new Map(), aliasesById = new Map()
       if (value.aliases !== undefined) {
         if (!plain(value.aliases) || Object.keys(value.aliases).length > maxProfiles) unavailable()
-        for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to) }
+        for (const [from, to] of Object.entries(value.aliases)) { if (!idValid(from) || summaries.has(from) || !summaries.has(to)) unavailable(); aliases.set(from, to); if (!aliasesById.has(to)) aliasesById.set(to, []); aliasesById.get(to).push(from) }
       }
       // Autocomplete companies come only from visible positions, never raw imports.
       const companies = new Map()
@@ -243,7 +243,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         if (!previous || Number(detail.presence === 'member') > Number(previous.presence === 'member') ||
           (Number(detail.presence === 'member') === Number(previous.presence === 'member') && compare(detail.id, previous.id) < 0)) linkedinProfiles.set(slug, detail)
       }
-      const data = { revision: value.revision, ordered, summaries, details, linkedinProfiles, linkedinIds, connected, policies, listedBy, tokens, aliases, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
+      const data = { revision: value.revision, ordered, summaries, details, linkedinProfiles, linkedinIds, connected, policies, listedBy, tokens, aliases, aliasesById, unlisted, suspended, suspendedRefs, removed, companyList: [...companies.values()] }
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
@@ -437,8 +437,11 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { id, signal } = requestValue(request)
       if (!idValid(id)) invalid()
       const data = await snapshot(signal), resolved = data.aliases.get(id) ?? id
-      const parsed = parseLinkedinProfileUrl(data.details.get(resolved)?.linkedinUrl)
-      return parsed ? [...(data.linkedinIds.get(parsed.slug) ?? [])] : []
+      const detail = data.details.get(resolved)
+      if (!detail) return []
+      const parsed = parseLinkedinProfileUrl(detail.linkedinUrl)
+      const ids = parsed ? data.linkedinIds.get(parsed.slug) ?? [] : [resolved]
+      return ids.flatMap(value => [value, ...(data.aliasesById.get(value) ?? [])])
     },
     // Exact identity from a currently readable public address, never an id's
     // spelling, a name, or an email. Private callers use it only in their own overlay.

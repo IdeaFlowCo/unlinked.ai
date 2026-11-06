@@ -461,15 +461,16 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       const privateSlug = row => { const value = attached.get(row.id); return value && value.fingerprint === contactFingerprint(row) ? rowSlug({ fields: { url: value.address } }) : null }
       const ordered = rows.map(row => ({ row, entry: connectionEntry(row), slug: rowSlug(row) ?? privateSlug(row) }))
         .sort((a, b) => a.entry.name.localeCompare(b.entry.name) || a.entry.id.localeCompare(b.entry.id))
-      // Each candidate row's published profile: its own target, else a published profile with the same LinkedIn address.
+      // Each candidate row's published identity evidence.
       const publishedFor = async candidates => {
-        if (!reader || !candidates.length) return candidates.map(() => null)
+        if (!reader || !candidates.length) return candidates.map(() => [])
         try {
           await reader.lookup({ ids: [], signal })
           return await Promise.all(candidates.map(async candidate => {
             const target = usableProfileId(rowPublicTarget(candidate.row))
             const explicit = target ? (await reader.lookup({ ids: [target], signal })).get(target) : null
-            return explicit ?? (candidate.slug ? await reader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(candidate.slug)}`, signal }) : null)
+            const byAddress = candidate.slug ? await reader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(candidate.slug)}`, signal }) : null
+            return [...new Map([explicit, byAddress].filter(Boolean).map(summary => [summary.id, summary])).values()]
           }))
         } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
       }
@@ -492,7 +493,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
           if (value && wanted.has(value) && !seen.has(value)) { seen.add(value); picked.push(candidate) }
         }
         const summaries = await publishedFor(picked)
-        return { kind: 'unlinked_lookup_contact', contacts: await Promise.all(picked.map(async (candidate, index) => ({ ...await contactOf(candidate, summaries[index]), linkedinRefHash: linkedinRefHash(candidate.slug) }))), visibility: 'owner_private' }
+        return { kind: 'unlinked_lookup_contact', contacts: await Promise.all(picked.map(async (candidate, index) => ({ ...await contactOf(candidate, summaries[index][0] ?? null), linkedinRefHash: linkedinRefHash(candidate.slug) }))), visibility: 'owner_private' }
       }
       let candidate = null
       if (mode === 'linkedinUrl' && reader) {
@@ -509,14 +510,14 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       let refs = new Map(), targetRef = null
       try {
         if (published) targetRef = await reader.linkedinRef({ id: published.id, signal })
-        const ids = [...new Set(summaries.filter(Boolean).map(summary => summary.id))]
+        const ids = [...new Set(summaries.flat().map(summary => summary.id))]
         refs = new Map(await Promise.all(ids.map(async id => [id, await reader.linkedinRef({ id, signal })])))
       } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
       const parents = ordered.map((_, index) => index), byKey = new Map()
       const root = index => { while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index] } return index }
       for (let index = 0; index < ordered.length; index++) {
-        const summary = summaries[index], source = linkedinRefHash(ordered[index].slug), publicRef = summary && refs.get(summary.id)
-        const keys = [...(source ? [`h:${source}`] : []), ...(publicRef ? [`h:${publicRef}`] : []), ...(summary ? [`p:${summary.id}`] : [])]
+        const source = linkedinRefHash(ordered[index].slug)
+        const keys = [...(source ? [`h:${source}`] : []), ...summaries[index].flatMap(summary => [`p:${summary.id}`, ...(refs.get(summary.id) ? [`h:${refs.get(summary.id)}`] : [])])]
         for (const key of keys) {
           const other = byKey.get(key)
           if (other === undefined) byKey.set(key, index)
@@ -529,19 +530,24 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       const publicIds = new Set(published ? [published.id] : []), hashes = new Set(targetRef ? [targetRef] : [])
       const related = new Map()
       for (const index of indexes) {
-        const summary = summaries[index], source = linkedinRefHash(ordered[index].slug), publicRef = summary && refs.get(summary.id)
+        const source = linkedinRefHash(ordered[index].slug)
         if (source) hashes.add(source)
-        if (summary) publicIds.add(summary.id)
-        if (publicRef) { hashes.add(publicRef); if (!related.has(publicRef)) related.set(publicRef, summary.id) }
+        for (const summary of summaries[index]) {
+          const publicRef = refs.get(summary.id)
+          publicIds.add(summary.id)
+          if (publicRef) hashes.add(publicRef)
+          const key = publicRef ? `h:${publicRef}` : `p:${summary.id}`
+          if (!related.has(key)) related.set(key, summary.id)
+        }
       }
-      if (targetRef) related.set(targetRef, published.id)
+      if (published) related.set(targetRef ? `h:${targetRef}` : `p:${published.id}`, published.id)
       try {
         for (const id of related.values()) for (const relatedId of await reader.linkedinProfileIds({ id, signal })) publicIds.add(relatedId)
       } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
       const primary = candidate ?? (indexes.length ? ordered[indexes[0]] : null)
       if (primary) {
         const preferredIndex = ordered.indexOf(primary)
-        const summary = summaries[preferredIndex] ?? indexes.map(index => summaries[index]).find(Boolean) ?? published
+        const summary = summaries[preferredIndex][0] ?? indexes.flatMap(index => summaries[index])[0] ?? published
         const contact = await contactOf(primary, summary)
         const sourceLinkedinRefHashes = [...hashes].filter(hash => hash !== contact.linkedinRefHash)
         const publishedProfileIds = [...publicIds].filter(id => id !== contact.publishedProfileId)
