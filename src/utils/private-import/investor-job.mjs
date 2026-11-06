@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { parseInvestorCsv } from './investor-csv.mjs'
 import { privateId } from './job.mjs'
+import { isUnicodeBoundary, unicodeChunkEnd } from './unicode-chunk.mjs'
 
 export const INVESTOR_UPLOAD_BYTES = 512 * 1024
 export const INVESTOR_JOB_KIND = 'investor_csv_v1'
@@ -89,8 +90,9 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       if (sourceOffset !== undefined) {
         const csv = (await sourceFor(backend, job)).toString('utf8')
         if (!Number.isSafeInteger(sourceOffset) || sourceOffset < 0 || sourceOffset > csv.length) throw fail('invalid_input', 'Source offset exceeds this import.')
+        if (!isUnicodeBoundary(csv, sourceOffset)) throw fail('invalid_input', 'Source offset splits a Unicode character.')
         signal?.throwIfAborted()
-        const text = csv.slice(sourceOffset, sourceOffset + 32768), next = sourceOffset + text.length
+        const next = unicodeChunkEnd(csv, sourceOffset, 32768), text = csv.slice(sourceOffset, next)
         return { ...summary(job), source: { text, offset: sourceOffset, nextOffset: next < csv.length ? next : null, offsetUnit: 'utf16_code_units' } }
       }
       if (offset > job.total) throw fail('invalid_input', 'Offset exceeds this import.')

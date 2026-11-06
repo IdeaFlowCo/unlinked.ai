@@ -73,6 +73,32 @@ test('oversized metadata is rejected without storing a catalog or asset', async 
   assert.equal(f.assets.size, 0)
 })
 
+test('source chunks preserve Unicode characters and UTF-16 offsets', async () => {
+  const tools = fixture().tools(), owner = grant()
+  const csv = `Name,Comment\nAlice,${'x'.repeat(32768 - 'Name,Comment\nAlice,'.length - 1)}😀end`
+  const staged = await tools.unlinked_stage_investor_csv(owner, { csv, mapping: { name: 'Name' }, listName: 'Unicode' })
+  const first = (await tools.unlinked_get_investor_import(owner, { importId: staged.importId, sourceOffset: 0 })).source
+  assert.equal(first.nextOffset, 32767)
+  const second = (await tools.unlinked_get_investor_import(owner, { importId: staged.importId, sourceOffset: first.nextOffset })).source
+  assert.equal(first.text + second.text, csv)
+  assert.ok(second.text.startsWith('😀'))
+  assert.equal(second.nextOffset, null)
+  await assert.rejects(tools.unlinked_get_investor_import(owner, { importId: staged.importId, sourceOffset: 32768 }), e => e.code === 'invalid_input')
+})
+
+test('private note chunks preserve Unicode characters at size boundaries', async () => {
+  const f = fixture(), tools = f.tools(), owner = grant()
+  const headerLength = `CSV ${'a'.repeat(64)} row 2 field 1\npart 1\n`.length
+  const note = `${'x'.repeat(4000 - headerLength - 'Comment\n'.length - 1)}😀end`
+  const staged = await tools.unlinked_stage_investor_csv(owner, { csv: `Name,Comment\nAlice,${note}`, mapping: { name: 'Name', notes: ['Comment'] }, listName: 'Unicode' })
+  await tools.unlinked_resume_investor_import(owner, { importId: staged.importId })
+  const chunks = [...f.state('alice').notes.values()].map(n => n.text)
+  assert.equal(chunks.length, 2)
+  assert.ok(chunks.every(text => text.length <= 4000 && !/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/u.test(text)))
+  assert.equal(chunks.map(text => text.replace(/^CSV [^\n]+\npart \d+\n/, '')).join(''), `Comment\n${note}`)
+  assert.ok(chunks[1].includes('😀'))
+})
+
 test('revocation mid-batch and transient failure retain progress without claiming completion', async () => {
   const f = fixture(), tools = f.tools(), owner = grant()
   const staged = await tools.unlinked_stage_investor_csv(owner, input)

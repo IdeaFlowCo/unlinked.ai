@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { createInvestorJobs } from '../src/utils/private-import/investor-job.mjs'
+import { unicodeChunkEnd } from '../src/utils/private-import/unicode-chunk.mjs'
 
 const importId = z.string().regex(/^[a-f0-9]{64}$/)
 const column = z.string().min(1).max(32768)
@@ -59,7 +60,7 @@ export function createInvestorTools({ getBackend, who, overlayCall, existingByRe
         const text = `${note.column}\n${note.text}`
         for (let start = 0, part = 1; start < text.length; part++) {
           signal?.throwIfAborted(); if (revalidate) await revalidate()
-          const header = `${prefix}part ${part}\n`, chunk = text.slice(start, start + 4000 - header.length)
+          const header = `${prefix}part ${part}\n`, chunk = text.slice(start, unicodeChunkEnd(text, start, 4000 - header.length))
           start += chunk.length
           const added = await overlayCall(identity, 'POST', `entities/${entityId}/notes`, { text: header + chunk, provenance: provenance(grant) })
           noteIds.push(added.note.id)
