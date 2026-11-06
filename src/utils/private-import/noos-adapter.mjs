@@ -153,6 +153,19 @@ export function createNoosOwnerBackend({ baseUrl, accessToken, ownerId, fetchImp
       if (!response) throw new Error('private_noos_binding_not_found')
       return response.json()
     },
+    // Atomic owner-private import records, used to publish a job and its catalog.
+    // Keep this separate from deletion-only writeBatch below.
+    async writeImportBatch(items) {
+      if (!Array.isArray(items) || !items.length || items.length > 600) throw new Error('private_resource_key_invalid')
+      for (const item of items) {
+        if (!item || item.namespace !== 'unlinked' || item.type !== 'import' || item.sourceOwnerId !== ownerId ||
+            item.audience !== 'owner' || item.deleted !== false || !item.payload || typeof item.payload !== 'object' ||
+            !/^[a-f0-9]{64}$/.test(item.sourceId)) throw new Error('private_resource_key_invalid')
+      }
+      const response = await request('batch', { method: 'POST', body: JSON.stringify(items) })
+      if (!response) throw new Error('private_noos_binding_not_found')
+      return response.json()
+    },
     // Bounded owner-only tombstone batches, for the account's own data removal.
     // Every item must be this owner's resource and an explicit deletion.
     async writeBatch(items) {

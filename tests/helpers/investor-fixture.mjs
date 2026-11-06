@@ -35,15 +35,21 @@ export function fixture(customOverlay) {
     }
     throw Error('unexpected_overlay_request')
   } }
-  const getBackend = async owner => ({
-    async readResource(type, id) { assert.equal(type, 'import'); return structuredClone(resources.get(`${owner.ownerId}:${id}`) ?? null) },
-    async writeResource(input) {
+  const applyResource = (owner, input, target) => {
       assert.equal(input.sourceOwnerId, owner.ownerId); assert.equal(input.audience, 'owner')
       assert.ok(Buffer.byteLength(JSON.stringify(input)) <= 65536)
-      const key = `${owner.ownerId}:${input.sourceId}`, old = resources.get(key)
+      const key = `${owner.ownerId}:${input.sourceId}`, old = target.get(key)
       if (old?.deleted || (old?.sourceRevision ?? null) !== input.expectedRevision) throw Error('private_noos_409')
       if (failReceipt && input.payload?.kind === 'investor_csv_v1_row') { failReceipt = false; throw Error('synthetic_receipt_outage') }
-      resources.set(key, structuredClone(input))
+      target.set(key, structuredClone(input))
+  }
+  const getBackend = async owner => ({
+    async readResource(type, id) { assert.equal(type, 'import'); return structuredClone(resources.get(`${owner.ownerId}:${id}`) ?? null) },
+    async writeResource(input) { applyResource(owner, input, resources) },
+    async writeImportBatch(items) {
+      const transaction = new Map(resources)
+      for (const item of items) applyResource(owner, item, transaction)
+      for (const item of items) { const key = `${owner.ownerId}:${item.sourceId}`; resources.set(key, transaction.get(key)) }
     },
     adapter: { async withImport(ownerId, id, work) { assert.equal(ownerId, owner.ownerId); return work({ async putAsset(hash, bytes) { assets.set(`${ownerId}:${hash}`, Buffer.from(bytes)) } }) } },
     async readAsset(hash) { const bytes = assets.get(`${owner.ownerId}:${hash}`); assert.ok(bytes); return bytes },

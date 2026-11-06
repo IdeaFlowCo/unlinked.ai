@@ -844,7 +844,7 @@
     },
     {
       "name": "unlinked_stage_investor_csv",
-      "description": "Stage an uploaded investor/contact CSV in the owner’s private database. Supply exact header names in mapping; map private comments with notes (an array of column names). Retains the original file and fields. Returns importId and validation preview; then call unlinked_resume_investor_import to commit. Same bytes, mapping and list target replay the same import. Name/email never auto-match; exact LinkedIn addresses can match existing private/public personas. Each unmatched source row becomes a separate private person. At most 512 KiB per part: split larger files by complete CSV rows, repeating the header, and use the first resulting listId for subsequent parts. listId appends to an existing private list; otherwise creates a distinct list. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+      "description": "Stage an uploaded investor/contact CSV in the owner’s private database. Supply exact header names in mapping; map private comments with notes (an array of column names). Retains the original file and fields. Returns importId and, for a newly staged import, a validation preview; then call unlinked_resume_investor_import to commit. Same bytes, mapping, listName and list target replay the same import. Name/email never auto-match; exact LinkedIn addresses can match existing private/public personas. Each unmatched source row becomes a separate private person. At most 512 KiB per part: split larger files by complete CSV rows, repeating the header, and use the first resulting listId for subsequent parts. listId appends to an existing private list; otherwise creates a distinct list. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -959,7 +959,7 @@
     },
     {
       "name": "unlinked_get_investor_import",
-      "description": "Read an investor import’s status and private original row fields with outcome receipts. Page with nextOffset until null, at most 20 rows per call. A partial import has rejected rows; inspect reasons. This reads the original outcome, not a guarantee that the owner has not subsequently edited/deleted graph records. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+      "description": "Read an investor import’s status and private original row fields with outcome receipts. Page with nextOffset until null, at most 20 rows per call, fewer when encoded fields are large. Oversized individual rows explicitly report sourceRecovery instead of inline fields. To recover the exact original CSV, set sourceOffset:0, concatenate source.text chunks, and follow source.nextOffset until null (offsets count JavaScript UTF-16 code units; each chunk is at most 32768). A partial import has rejected rows; inspect reasons. This reads the original outcome, not a guarantee that the owner has not subsequently edited/deleted graph records. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -976,6 +976,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 20
+          },
+          "sourceOffset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 524288
           }
         },
         "required": [

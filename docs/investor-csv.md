@@ -63,7 +63,11 @@ bytes, mapping, list name and list target reuses the import and never reapplies 
 rows after the owner changes/deletes them.
 
 The private import catalog is separate from archive discovery, background workers,
-publication and connection indexes. Account export includes the CSVs and receipts;
+publication and connection indexes. Staging publishes the job and catalog entry in
+one atomic owner-private batch after storing the source; interrupted staging does
+not reserve catalog capacity. Atomic import storage is required; no sequential-write
+fallback is used. A source uploaded before failed publication stays owner-private
+and can be reused on retry or removed by account asset cleanup. Account export includes the CSVs and receipts;
 account deletion tombstones these resources and removes original assets through
 the existing owner-asset cleanup. Shared Ideaflow graph entities/notes remain
 subject to the existing explicit shared-overlay retention policy (the account

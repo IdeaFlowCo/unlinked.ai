@@ -25,10 +25,11 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
     if (!resource || resource.deleted || resource.sourceOwnerId !== ownerId || resource.payload?.ownerId !== ownerId || resource.payload?.kind !== kind) throw fail('not_found', 'No private investor import has that id.')
     return resource.payload
   }
+  const resource = (ownerId, value, expectedRevision) => ({ namespace: 'unlinked', type: 'import', sourceId: value.id, sourceOwnerId: ownerId,
+    audience: 'owner', deleted: false, sourceRevision: value.revision, expectedRevision, payload: value })
   const write = async (backend, ownerId, value, expectedRevision) => {
     try {
-      await backend.writeResource({ namespace: 'unlinked', type: 'import', sourceId: value.id, sourceOwnerId: ownerId,
-        audience: 'owner', deleted: false, sourceRevision: value.revision, expectedRevision, payload: value })
+      await backend.writeResource(resource(ownerId, value, expectedRevision))
     } catch (error) {
       if (error?.message === 'private_noos_409') throw fail('import_busy', 'Another request changed this import; read its status and retry.')
       throw error
@@ -44,19 +45,29 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
     const parsed = parseInvestorCsv(bytes, job.mapping)
     return [...parsed.accepted, ...parsed.rejected].sort((a, b) => a.row - b.row)
   }
-  const register = async (backend, ownerId, importId, beforeWrite) => {
+  const catalogFor = async (backend, ownerId, importId) => {
+    const id = investorCatalogId(ownerId), stored = await backend.readResource('import', id)
+    const current = stored ? await read(backend, ownerId, id, `${KIND}_catalog`) : null
+    if (!current?.importIds.includes(importId) && (current?.importIds.length ?? 0) >= 500) throw fail('invalid_input', 'Private CSV import catalog is full (500 imports).')
+    return current
+  }
+  const publish = async (backend, ownerId, job, beforeWrite) => {
     const id = investorCatalogId(ownerId)
     for (let attempt = 0; attempt < 5; attempt++) {
-      const resource = await backend.readResource('import', id)
-      const current = resource ? await read(backend, ownerId, id, `${KIND}_catalog`) : null
-      if (current?.importIds.includes(importId)) return
-      if ((current?.importIds.length ?? 0) >= 500) throw fail('invalid_input', 'Private CSV import catalog is full (500 imports).')
+      if (await backend.readResource('import', job.id)) return { job: await read(backend, ownerId, job.id), created: false }
+      const current = await catalogFor(backend, ownerId, job.id)
+      const catalog = { id, kind: `${KIND}_catalog`, ownerId, revision: (current?.revision ?? 0) + 1,
+        importIds: [...new Set([...(current?.importIds ?? []), job.id])] }
       try {
         await beforeWrite()
-        await write(backend, ownerId, { id, kind: `${KIND}_catalog`, ownerId, revision: (current?.revision ?? 0) + 1,
-          importIds: [...(current?.importIds ?? []), importId] }, current?.revision ?? null)
-        return
-      } catch (error) { if (error.code !== 'import_busy' || attempt === 4) throw error }
+        // Both records become visible in one owner-fenced transaction. Failed
+        // staging cannot reserve catalog capacity or leave an undiscoverable job.
+        await backend.writeImportBatch([resource(ownerId, catalog, current?.revision ?? null), resource(ownerId, job, null)])
+        return { job, created: true }
+      } catch (error) {
+        if (error?.message !== 'private_noos_409') throw error
+        if (attempt === 4) throw fail('import_busy', 'Another request changed this import; read its status and retry.')
+      }
     }
   }
   return {
@@ -76,14 +87,15 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       const backend = await backendFor(grant)
       const existing = await backend.readResource('import', id)
       if (existing) return summary(await read(backend, grant.ownerId, id))
+      if (typeof backend.writeImportBatch !== 'function') throw fail('upstream_unavailable', 'Atomic private import storage is unavailable.')
       // Validate the private graph identity before storing any source.
       await graph.validate(grant, listId)
       const beforeWrite = async () => { signal?.throwIfAborted(); if (revalidate) await revalidate(); signal?.throwIfAborted() }
-      await register(backend, grant.ownerId, id, beforeWrite)
+      await catalogFor(backend, grant.ownerId, id)
       await backend.adapter.withImport(grant.ownerId, id, async store => { await beforeWrite(); await store.putAsset(parsed.sourceDigest, bytes) })
-      await beforeWrite()
-      await write(backend, grant.ownerId, job, null)
-      return { ...summary(job), preview: { valid: parsed.accepted.length, rejected: parsed.rejected.length,
+      const published = await publish(backend, grant.ownerId, job, beforeWrite)
+      if (!published.created) return summary(published.job)
+      return { ...summary(published.job), preview: { valid: parsed.accepted.length, rejected: parsed.rejected.length,
         exactReferences: parsed.accepted.filter(row => row.identity.linkedinRefHash).length,
         separatePeople: parsed.accepted.filter(row => !row.identity.linkedinRefHash).length },
         policy: 'Private only. Exact LinkedIn references may match; names and emails never merge. No connections or public profiles are created. Resume to commit.' }
@@ -176,8 +188,8 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
 }
 
 // Account lifecycle uses a deterministic private catalog: these jobs never
-// enter the archive/connection discovery indexes. A staged catalog entry may
-// precede its job after a crash; missing jobs are safe to skip.
+// enter the archive/connection discovery indexes. New stages publish the job
+// and catalog atomically; defensively skip missing legacy/deleted records.
 export async function investorJobsForAccount(ownerId, backend) {
   const catalog = await backend.readResource('import', investorCatalogId(ownerId))
   if (!catalog || catalog.deleted) return { catalog: null, jobs: [] }

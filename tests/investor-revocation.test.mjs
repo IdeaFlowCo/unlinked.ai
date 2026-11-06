@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { fixture } from './helpers/investor-fixture.mjs'
 import { createAccountToolService, AccountToolError } from '../mcp-server/account-tools.mjs'
 import { accountGrantTools, CURRENT_ACCOUNT_GRANT_VERSION } from '../mcp-server/account-grants.mjs'
+import { investorCatalogId } from '../src/utils/private-import/investor-job.mjs'
 
 const scope = 'owner_network_and_private_notes'
 const owner = { ownerId: 'alice', userId: 'alice', agent: 'revocation-test', scope,
@@ -20,7 +21,7 @@ function revocableFixture() {
       async readResource(type, id) {
         const result = await base.readResource(type, id)
         if (result?.payload?.kind === 'investor_csv_v1') returned('job_read')
-        if (result?.payload?.kind === 'investor_csv_v1_catalog' || !result) returned('catalog_read')
+        if (id === investorCatalogId(owner.ownerId)) returned('catalog_read')
         return result
       },
       async writeResource(value) {
@@ -35,6 +36,7 @@ function revocableFixture() {
         }
         return result
       },
+      async writeImportBatch(items) { writing('publication'); return base.writeImportBatch(items) },
       adapter: { withImport: (ownerId, id, work) => base.adapter.withImport(ownerId, id, store => work({
         async putAsset(...args) { writing('asset'); const result = await store.putAsset(...args); returned('asset_write'); return result },
       })) },
@@ -62,7 +64,7 @@ function revocableFixture() {
   }
 }
 
-for (const phase of ['identity', 'catalog_read', 'catalog_write', 'asset_write']) {
+for (const phase of ['identity', 'catalog_read', 'asset_write']) {
   test(`staging stops new writes when permission is revoked during ${phase}`, async () => {
     const f = revocableFixture(); f.arm(phase)
     await assert.rejects(f.call('unlinked_stage_investor_csv', input), error => error.code === 'grant_revoked')

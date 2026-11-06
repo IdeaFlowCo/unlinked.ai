@@ -13,6 +13,37 @@ const grant = (ownerId = 'alice', privateNotes = true) => ({ ownerId, userId: ow
   scope: privateNotes ? 'owner_network_and_private_notes' : 'owner_network', tools: [...accountGrantTools(CURRENT_ACCOUNT_GRANT_VERSION, privateNotes ? 'owner_network_and_private_notes' : 'owner_network')] })
 const input = { csv: 'Name,LinkedIn,Comment\nMaya,https://www.linkedin.com/in/synthetic-maya,Met last year\nMaya,,Private fundraising notes\nMaya,,A different person\n', mapping: { name: 'Name', linkedinUrl: 'LinkedIn', notes: ['Comment'] }, listName: 'Previous investors' }
 
+test('interrupted staging does not consume catalog capacity', async () => {
+  const f = fixture(), owner = grant(), base = await f.getBackend(owner)
+  const tools = createPrivateNotesTools({ ...f.options, getBackend: async () => ({ ...base,
+    adapter: { withImport: async (_owner, _id, work) => work({ putAsset: async () => { throw Error('synthetic_asset_outage') } }) },
+  }) })
+  for (let i = 0; i < 500; i++) {
+    await assert.rejects(tools.unlinked_stage_investor_csv(owner, { ...input, listName: `Interrupted ${i}` }), /synthetic_asset_outage/)
+  }
+  const staged = await f.tools().unlinked_stage_investor_csv(owner, input)
+  assert.equal(staged.status, 'staged')
+  assert.deepEqual((await base.readResource('import', investorCatalogId(owner.ownerId))).payload.importIds, [staged.importId])
+})
+
+test('atomic staging rolls back conflicts and concurrent publication keeps both jobs discoverable', async () => {
+  const f = fixture(), owner = grant(), base = await f.getBackend(owner)
+  const failing = createPrivateNotesTools({ ...f.options, getBackend: async () => ({ ...base,
+    writeImportBatch: items => base.writeImportBatch([items[0], { ...items[1], expectedRevision: 99 }]),
+  }) })
+  await assert.rejects(failing.unlinked_stage_investor_csv(owner, input), error => error.code === 'import_busy')
+  assert.equal(f.resources.size, 0)
+  const tools = f.tools()
+  const [first, replay, second] = await Promise.all([
+    tools.unlinked_stage_investor_csv(owner, input), tools.unlinked_stage_investor_csv(owner, input),
+    tools.unlinked_stage_investor_csv(owner, { ...input, listName: 'Another list' }),
+  ])
+  assert.equal(first.importId, replay.importId)
+  const ids = (await base.readResource('import', investorCatalogId(owner.ownerId))).payload.importIds
+  assert.deepEqual(new Set(ids), new Set([first.importId, second.importId]))
+  for (const id of ids) assert.equal((await base.readResource('import', id)).payload.status, 'staged')
+})
+
 test('private CSV survives restart and lost receipt, keeps names separate and no connection edges', async () => {
   const f = fixture(), owner = grant(), tools = f.tools()
   const staged = await tools.unlinked_stage_investor_csv(owner, input)
@@ -101,7 +132,7 @@ test('private note chunks preserve Unicode characters at size boundaries', async
 })
 
 test('staging rechecks revocation after graph validation and before each persistent write', async () => {
-  for (const revokeAt of [1, 2, 3]) {
+  for (const revokeAt of [1, 2]) {
     const f = fixture(), owner = grant()
     let validated = false, checks = 0
     const options = { ...f.options, identityFor: async value => { validated = true; return f.options.identityFor(value) } }
@@ -110,8 +141,8 @@ test('staging rechecks revocation after graph validation and before each persist
       assert.equal(validated, true)
       if (++checks === revokeAt) throw new AccountToolError('grant_revoked', 'revoked')
     }), e => e.code === 'grant_revoked')
-    assert.equal(f.resources.size, revokeAt === 1 ? 0 : 1)
-    assert.equal(f.assets.size, revokeAt === 3 ? 1 : 0)
+    assert.equal(f.resources.size, 0)
+    assert.equal(f.assets.size, revokeAt === 2 ? 1 : 0)
     assert.equal([...f.resources.values()].some(value => value.payload.kind === 'investor_csv_v1'), false)
     assert.equal((await tools.unlinked_stage_investor_csv(owner, input)).status, 'staged')
   }
