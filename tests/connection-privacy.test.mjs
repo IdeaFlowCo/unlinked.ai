@@ -56,10 +56,19 @@ test('each audience, viewed by: anonymous, a stranger, a 2nd-degree member, a co
   }
 })
 
-test('"shared" shows only connections the viewer listed too; a private known set never widens it', async () => {
+test('"shared" shows only connections who vouch for the viewer; neither the viewer’s own list nor a private known set widens it', async () => {
   const reader = readerOver(snapshot({ alice: { audience: 'members', scope: 'shared' } }))
-  // eve also has carol; vic is alice's connection himself and so sees himself only.
-  assert.deepEqual(await listOf(reader, 'alice', as('eve')), ['carol'])
+  // eve listed carol herself, but carol never listed eve: not in common.
+  assert.deepEqual(await listOf(reader, 'alice', as('eve')), [])
+  const vouched = snapshot({ alice: { audience: 'members', scope: 'shared' } })
+  vouched.connections.push({ fromId: 'carol', toId: 'eve' })
+  assert.deepEqual(await listOf(readerOver(vouched), 'alice', as('eve')), ['carol'], 'carol listed eve')
+  // A member who uploads a list naming everyone learns nothing more.
+  const probe = snapshot({ alice: { audience: 'members', scope: 'shared' } })
+  probe.profiles.push(person('mallory')); probe.members.push('mallory')
+  probe.connections.push(...['alice', 'bob', 'carol', 'vic', 'dan', 'eve'].map(toId => ({ fromId: 'mallory', toId })))
+  assert.deepEqual(await listOf(readerOver(probe), 'alice', as('mallory')), ['mallory'], 'only her own published link to alice, nothing of alice’s list')
+  // vic is alice's connection himself and so sees himself only.
   assert.deepEqual(await listOf(reader, 'alice', as('vic')), ['vic'])
   assert.deepEqual(await listOf(reader, 'alice', as('stranger')), [])
   assert.deepEqual(await listOf(reader, 'alice', { signedIn: true }, { known: new Set(['bob']) }), [])
@@ -172,4 +181,24 @@ test('import form puts the choice under an Advanced disclosure, preselected; Set
   assert.match(settings, /Anyone can see your connections\./)
   assert.match(settings, /action="\/settings\/connection-privacy"/)
   assert.match(settings, /Saved\./)
+})
+
+test('a legacy-linked member’s choice applies without an import, and a failed lookup fails the build instead of publishing', async () => {
+  const legacy = { state: 'published', complete: true, revision: 'legacy-v1', profiles: [person('legacy-x'), person('friend')], connections: [{ fromId: 'legacy-x', toId: 'friend' }] }
+  const owner = { ownerId: 'legacy-owner', userId: 'legacy-user' }
+  const store = createMemoryConnectionPrivacyStore()
+  await store.set(owner, { audience: 'only_me', scope: 'all' })
+  let fail = false
+  const read = createMemberPublicIndex({ readLegacy: async () => legacy, discover: async () => [], readConnectionPrivacy: () => store.list(),
+    getBackend: async value => { assert.deepEqual(value, owner); if (fail) throw Error('backend down'); return { readLegacyProfile: async () => ({ profileId: 'legacy-x', receiptId: 'r', revision: 1 }) } },
+    publicPeople: { read: async () => null, publish: async () => {} } })
+  const built = await read()
+  assert.deepEqual(built.connectionPrivacy, { 'legacy-x': { audience: 'only_me', scope: 'all' } })
+  assert.deepEqual((await readerOver(built).profile({ id: 'friend' })).profile.connections, [])
+  // A remembered link survives a later outage; with nothing remembered, the build fails closed.
+  fail = true
+  assert.deepEqual((await read()).connectionPrivacy, { 'legacy-x': { audience: 'only_me', scope: 'all' } })
+  const fresh = createMemberPublicIndex({ readLegacy: async () => legacy, discover: async () => [], readConnectionPrivacy: () => store.list(),
+    getBackend: async () => { throw Error('backend down') }, publicPeople: { read: async () => null, publish: async () => {} } })
+  await assert.rejects(fresh(), /backend down/)
 })

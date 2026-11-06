@@ -109,6 +109,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
   if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
   let work = null, kept = null, generation = 0
+  // Account -> recovered legacy profile id (or null), for connection privacy.
+  const legacyLinkCache = new Map()
   const detailCache = new Map()
   // Operator merges and renames apply last, over the complete union.
   // Operator and automatic decisions; the index's own merges come first.
@@ -229,15 +231,29 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const privacy = typeof readConnectionPrivacy === 'function' ? await readConnectionPrivacy() : []
     if (!Array.isArray(privacy) || privacy.length > 10000) throw Error('public_connection_privacy_invalid')
     const privacyByProfile = new Map()
+    // A member linked to a recovered legacy profile may have no import yet;
+    // their legacy connections are theirs too. Looked up through their own
+    // backend, a few at a time, remembered between builds. A failed lookup
+    // with nothing remembered fails the build: a choice must never be dropped
+    // into a public snapshot.
+    const unresolved = privacy.filter(entry => entry?.owner && !profileFor.has(`${entry.owner.ownerId}\u0000${entry.owner.userId}`))
+    const published = new Set(profiles.map(value => value.id))
+    for (let start = 0; start < unresolved.length; start += 8) await Promise.all(unresolved.slice(start, start + 8).map(async entry => {
+      const key = `${entry.owner.ownerId}\u0000${entry.owner.userId}`
+      let linkedId
+      try {
+        const backend = await getBackend(entry.owner)
+        const linked = typeof backend?.readLegacyProfile === 'function' ? await backend.readLegacyProfile() : null
+        linkedId = linked?.profileId ?? null
+        legacyLinkCache.set(key, linkedId)
+      } catch (error) {
+        if (!legacyLinkCache.has(key)) throw error
+        linkedId = legacyLinkCache.get(key)
+      }
+      if (linkedId && published.has(linkedId)) profileFor.set(key, linkedId)
+    }))
     for (const entry of privacy) {
       const key = `${entry?.owner?.ownerId}\u0000${entry?.owner?.userId}`
-      // A member linked to a recovered legacy profile may have no import yet;
-      // their legacy connections are theirs too.
-      if (!profileFor.has(key) && connectionPrivacyValue(entry) && entry.owner) {
-        const backend = await getBackend(entry.owner).catch(() => null)
-        const linked = typeof backend?.readLegacyProfile === 'function' ? await backend.readLegacyProfile().catch(() => null) : null
-        if (linked?.profileId && profiles.some(value => value.id === linked.profileId)) profileFor.set(key, linked.profileId)
-      }
       const choice = connectionPrivacyValue(entry), id = profileFor.get(key)
       if (!choice) throw Error('public_connection_privacy_invalid')
       if (id && !isDefaultConnectionPrivacy(choice)) privacyByProfile.set(id, choice)
@@ -265,6 +281,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     }
     // Replayed source edges are canonicalized without changing their receipts.
     const uniqueConnections = [...new Map(connections.map(edge => [JSON.stringify([edge.fromId, edge.toId]), edge])).values()]
+    if (uniqueConnections.length > PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('shared_public_capacity_limit')
     const finalize = async snapshot => {
       for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
       const decided = await decide(snapshot, ownerMerges, members, verified)

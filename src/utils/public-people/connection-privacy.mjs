@@ -97,13 +97,15 @@ export function createConnectionVisibility({ policies, connected, listedBy, view
     }
   }
   // Whether `owner`'s choice lets this viewer see owner's connection to `other`.
-  // "In common" means `other` is in the viewer's own list (or is the viewer).
+  // "In common" means `other` vouches for the viewer: `other`'s own list names
+  // them (an accepted invitation or request counts). The viewer's own list
+  // never counts, or uploading a list of everyone would reveal everything.
   const allowedBy = (owner, other) => {
     if (owner === self) return true
     const policy = policies.get(owner)
     if (!policy) return true
     if (!audienceAllows(owner, policy)) return false
-    return policy.scope === 'all' || other === self || (Boolean(self) && listedBy(self, other))
+    return policy.scope === 'all' || other === self || (Boolean(self) && listedBy(other, self))
   }
   // Shown on `page`'s profile: page's own choice allows it, and someone who
   // listed the connection allows it. So a private importer's list stays off
