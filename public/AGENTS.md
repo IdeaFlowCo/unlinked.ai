@@ -111,7 +111,7 @@ When operator-enabled, direct REST/MCP responses include a server-generated X-Re
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract `docs/public-people-reader.md` (Historical membership); filter values are published in [OpenAPI](https://www.unlinked.ai/openapi.json).
 
-## Private investor/contact CSV lists
+## Private investor/contact CSV and XLSX lists
 
 With Private people notes & relations permission, an agent can read investor
 CSVs you provide, including contact fields and private notes. Call
@@ -127,3 +127,13 @@ members with `unlinked_get_private_thing(thingId:listId,limit:100)`, following
 nextCursor as after. The shared connector prefixes tools with `unlinked__` and
 requires separately consented `unlinked:private_notes`; connection-write access
 alone is insufficient. Existing graph quotas apply; errors never mean completion.
+
+For XLSX use the same `unlinked_stage_investor_csv` tool with `fileBase64`,
+`filename` and `inspectOnly:true` to discover sheets without retaining anything.
+Select an exact `sheet` and optional physical `headerRow` (default 1), then provide
+`mapping`, `listName` and `retainOriginalConfirmed:true` only after owner
+authorization to retain the **whole original workbook, including hidden and
+unselected tabs**, privately on the server. Only the selected sheet is imported.
+512 KiB original-file limit. Selected-sheet formulas, macros and .xls are rejected;
+use values-only XLSX or CSV. Original XLSX recovery through the status tool returns
+base64 chunks with byte offsets: decode each chunk before concatenating.

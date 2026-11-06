@@ -59,7 +59,8 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
       const receipt = await backend.readResource('import', investorReceiptId(owner.ownerId, job.id, ordinal))
       if (receipt && !receipt.deleted && receipt.sourceOwnerId === owner.ownerId) receipts.push(receipt.payload)
     }
-    investorImports.push({ job, csv: (await backend.readAsset(job.sourceDigest)).toString('utf8'), receipts })
+    const bytes = await backend.readAsset(job.sourceDigest)
+    investorImports.push({ job, ...(job.source?.format === 'xlsx' ? { originalFile: { ...job.source, encoding: 'base64', base64: bytes.toString('base64') } } : { csv: bytes.toString('utf8') }), receipts })
   }
   return { investorImports, format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
     account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy, signupProfile }

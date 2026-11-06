@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { parseInvestorCsv } from './investor-csv.mjs'
+import { investorFileInput, parseInvestorFile, INVESTOR_FILE_BYTES } from './investor-file.mjs'
 import { privateId } from './job.mjs'
 import { isUnicodeBoundary, unicodeChunkEnd } from './unicode-chunk.mjs'
 
-export const INVESTOR_UPLOAD_BYTES = 512 * 1024
+export const INVESTOR_UPLOAD_BYTES = INVESTOR_FILE_BYTES
 export const INVESTOR_JOB_KIND = 'investor_csv_v1'
 const KIND = INVESTOR_JOB_KIND
 export const investorCatalogId = owner => privateId(owner, KIND, 'catalog')
@@ -12,7 +12,7 @@ const sorted = object => Object.fromEntries(Object.entries(object).sort(([a], [b
 export const investorReceiptId = (owner, id, ordinal) => privateId(owner, KIND, id, 'row', ordinal)
 const summary = job => ({ importId: job.id, status: job.status, listId: job.listId, listName: job.listName,
   total: job.total, processed: job.offset, imported: job.imported, rejected: job.rejected,
-  sourceDigest: job.sourceDigest, mapping: job.mapping, visibility: 'owner_private',
+  sourceDigest: job.sourceDigest, ...(job.source ? { sourceFile: job.source } : {}), mapping: job.mapping, visibility: 'owner_private',
   nextAction: job.status === 'complete' || job.status === 'partial' ? null : 'unlinked_resume_investor_import' })
 
 // Only operational owner resources and immutable private assets are used here.
@@ -37,12 +37,12 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
   }
   const sourceFor = async (backend, job) => {
     const bytes = await backend.readAsset(job.sourceDigest)
-    if (sha(bytes) !== job.sourceDigest) throw fail('upstream_unavailable', 'The private CSV source could not be verified.')
+    if (sha(bytes) !== job.sourceDigest) throw fail('upstream_unavailable', 'The private original source could not be verified.')
     return bytes
   }
   const rowsFor = async (backend, job) => {
     const bytes = await sourceFor(backend, job)
-    const parsed = parseInvestorCsv(bytes, job.mapping)
+    const parsed = parseInvestorFile(bytes, job.source, job.mapping)
     return [...parsed.accepted, ...parsed.rejected].sort((a, b) => a.row - b.row)
   }
   const catalogFor = async (backend, ownerId, importId) => {
@@ -71,16 +71,27 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
     }
   }
   return {
-    async stage(grant, { csv, mapping, listName, listId }, signal, revalidate) {
+    async stage(grant, input, signal, revalidate) {
       signal?.throwIfAborted()
-      const bytes = Buffer.from(csv, 'utf8')
-      if (bytes.length > INVESTOR_UPLOAD_BYTES) throw fail('invalid_input', 'CSV exceeds 512 KiB; split it into parts and append each part to the same listId.')
-      let parsed
-      try { parsed = parseInvestorCsv(bytes, mapping) } catch (error) { throw fail('invalid_input', `CSV validation failed (${error.message}).`) }
-      if (!parsed.accepted.length && !parsed.rejected.length) throw fail('invalid_input', 'CSV has no data rows.')
+      const { mapping, listName, listId, inspectOnly = false } = input
+      let parsed, bytes, source
+      try {
+        ;({ bytes, source } = investorFileInput(input))
+        parsed = parseInvestorFile(bytes, source, mapping, { inspectOnly })
+      } catch (error) { throw fail('invalid_input', `File validation failed (${error.message}).`) }
+      const disclosure = 'The entire original workbook, including unselected and hidden sheets, is retained privately on the server. Only the explicitly selected sheet is imported. Requires owner authorization for retaining the whole file.'
+      if (inspectOnly) return source.format === 'xlsx' ? { ...parsed, disclosure, requiredAcknowledgement: 'retainOriginalConfirmed:true' } : parsed
+      if (source.format === 'xlsx' && input.retainOriginalConfirmed !== true) throw fail('invalid_input', `Set retainOriginalConfirmed:true only after owner authorization. ${disclosure}`)
+      if (typeof listName !== 'string' || !listName.trim() || listName.length > 120 || /[\x00-\x1f\x7f]/.test(listName)) throw fail('invalid_input', 'A valid listName is required to stage an import.')
+      if (!parsed.accepted.length && !parsed.rejected.length) throw fail('invalid_input', 'File has no data rows.')
       const canonicalMapping = sorted(mapping)
-      const id = privateId(grant.ownerId, KIND, parsed.sourceDigest, JSON.stringify(canonicalMapping), listName, listId ?? '')
+      const identity = [grant.ownerId, KIND, parsed.sourceDigest, JSON.stringify(canonicalMapping), listName, listId ?? '']
+      if (source.format === 'xlsx') identity.push(source.sheet, source.headerRow, parsed.parserVersion)
+      const id = privateId(...identity)
+      if (parsed.selectedSheet) source.selectedSheet = parsed.selectedSheet
       const job = { kind: KIND, ownerId: grant.ownerId, id, revision: 1, createdAt: now(), sourceDigest: parsed.sourceDigest,
+        source, parserVersion: parsed.parserVersion,
+        ...(source.format === 'xlsx' ? { disclosure: { version: 'investor-workbook-v1', originalWorkbookRetentionConfirmed: true, selectedSheetOnlyImported: true } } : {}),
         mapping: canonicalMapping, listName, listId: listId ?? null, status: 'staged', offset: 0, imported: 0, rejected: 0,
         total: parsed.accepted.length + parsed.rejected.length, lease: null }
       if (Buffer.byteLength(JSON.stringify(job)) > 60000) throw fail('invalid_input', 'CSV column mapping exceeds the import metadata limit.')
@@ -103,7 +114,15 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
     async status(grant, { importId, offset = 0, limit = 20, sourceOffset }, signal) {
       const backend = await backendFor(grant), job = await read(backend, grant.ownerId, importId)
       if (sourceOffset !== undefined) {
-        const csv = (await sourceFor(backend, job)).toString('utf8')
+        const bytes = await sourceFor(backend, job)
+        if (job.source?.format === 'xlsx') {
+          if (!Number.isSafeInteger(sourceOffset) || sourceOffset < 0 || sourceOffset > bytes.length) throw fail('invalid_input', 'Source offset exceeds this import.')
+          signal?.throwIfAborted()
+          const next = Math.min(sourceOffset + 32768, bytes.length)
+          return { ...summary(job), source: { base64: bytes.subarray(sourceOffset, next).toString('base64'), offset: sourceOffset,
+            nextOffset: next < bytes.length ? next : null, offsetUnit: 'bytes', encoding: 'base64' } }
+        }
+        const csv = bytes.toString('utf8')
         if (!Number.isSafeInteger(sourceOffset) || sourceOffset < 0 || sourceOffset > csv.length) throw fail('invalid_input', 'Source offset exceeds this import.')
         if (!isUnicodeBoundary(csv, sourceOffset)) throw fail('invalid_input', 'Source offset splits a Unicode character.')
         signal?.throwIfAborted()
@@ -118,6 +137,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
         const resource = await backend.readResource('import', investorReceiptId(grant.ownerId, importId, i))
         const receipt = resource ? await read(backend, grant.ownerId, investorReceiptId(grant.ownerId, importId, i), `${KIND}_row`) : null
         const entry = { ordinal: i, sourceRow: rows[i].row, rowId: rows[i].rowId, fields: rows[i].fields ?? null,
+          ...(job.source?.selectedSheet ? { sourceSheet: job.source.selectedSheet } : {}),
           ...(rows[i].sourceValues ? { sourceValues: rows[i].sourceValues } : {}),
           result: receipt?.result ?? { status: rows[i].reason ? 'rejected' : 'pending', ...(rows[i].reason ? { reason: rows[i].reason } : {}) } }
         if (Buffer.byteLength(JSON.stringify(entry)) > 512 * 1024) {

@@ -1,6 +1,6 @@
 # Private investor lists through an agent
 
-An agent can take an uploaded CSV of previous investors and store it in the
+An agent can take an uploaded CSV or selected XLSX sheet of previous investors and store it in the
 owner’s private people graph, with original fields, private comments and list
 membership. UI support is not required. This is separate from LinkedIn archive
 imports: it never creates social connections or public profiles and never sends
@@ -45,6 +45,58 @@ REST: `POST /api/agent/v1/private/investor-imports`,
 `POST /api/agent/v1/private/investor-imports/resume`, and
 `GET /api/agent/v1/private/investor-imports/status` take the same fields.
 
+## Multi-tab XLSX and original-file disclosure
+
+The same three tools accept XLSX; their names and private-notes permissions stay
+compatible. Send original bytes as canonical `fileBase64` with `filename` ending
+`.xlsx` (at most 512 KiB before base64). Do not convert a workbook to CSV before
+uploading if its original bytes or sheet provenance must be preserved.
+
+1. Call `unlinked_stage_investor_csv({fileBase64,filename,inspectOnly:true})`.
+   This writes nothing and returns `sourceDigest`, exact sheet names/ids/paths,
+   and visibility (including hidden tabs). Never select a tab silently.
+2. Inspect the chosen sheet with the same input plus `sheet:"Exact tab name"` and
+   optional `headerRow` (one-based physical row, default 1). This returns headers
+   and data-row count. Only this sheet is parsed as a table.
+3. Disclose that **the entire original workbook, including unselected and hidden
+   sheets, will be retained privately on the server**; only the selected sheet is
+   imported into the graph. Stage with `sheet`, `headerRow`, `listName`, `mapping`
+   and `retainOriginalConfirmed:true` only when the owner has authorized that
+   retention. This acknowledgement does not establish who the owner is: the
+   authenticated account and private-notes permission still control every call.
+   Existing explicit authorization is sufficient; do not ask again needlessly.
+   If authorization covers only a tab, have the owner provide a separate file
+   containing that tab instead of retaining unrelated workbook data.
+4. Resume and page receipts exactly as for CSV. Sheet id/path/name, source hash,
+   parser version, header row and original physical row numbers stay attached to
+   the job/receipts. Empty rows do not renumber subsequent source rows. Replay
+   includes the selected sheet/header in its identity; another sheet is a distinct
+   import and can append to the same listId.
+
+For exact XLSX recovery use `sourceOffset:0`. Each response returns `source.base64`
+and `offsetUnit:"bytes"`; decode **each chunk separately**, concatenate the bytes,
+follow `source.nextOffset` until null, and verify `sourceDigest`. Chunk size is at
+most 32,768 bytes. CSV recovery remains `source.text` with UTF-16 offsets. Account
+export returns XLSX as `originalFile:{filename,format,...,encoding:"base64",base64}`.
+Whole-file retention uses the existing owner-private immutable asset store and
+account cleanup; neither the original file nor unselected tabs are published.
+
+The format is deliberately bounded: .xlsx only (not legacy .xls, .xlsm, encrypted
+workbooks, ZIP64 or macro/binary parts), UTF-8 XML, up to 100 sheets, 200,000 cells,
+100,000 shared strings, 256 columns and physical rows up to 100,001. Existing ZIP
+bounds are 8 MiB per expanded part and 40 MiB total; XML is capped at depth 32 and
+1,000,000 elements per part. DTD/entity declarations and external workbook links
+are rejected. No external resources are fetched. Selected-sheet formulas and
+error cells fail explicitly; provide a values-only copy or CSV. Rich text and
+shared/inline strings are read as plain text; number/date values retain stored
+lexical values, not display formatting. Hyperlinks, styles, images and Excel
+comments are not imported: map actual cell text (including URL text and a notes
+column). The original workbook preserves these for owner recovery.
+
+Parsing uses the existing bounded ZIP reader and pinned saxes 6.0.0 (released
+2021-11-07), a strict streaming XML parser; no SheetJS dependency or formula engine.
+See its [upstream documentation](https://github.com/lddubeau/saxes).
+
 ## Identity and retention
 
 Names, firms and emails are never identity keys. Valid canonical LinkedIn
@@ -52,11 +104,11 @@ addresses use the shared `linkedin:in:<slug-hash>` reference. Multiple existing
 entities with conflicting exact refs are rejected for review, never silently
 merged. An invalid or missing URL gets a separate entity per source occurrence,
 so repeated names remain distinct. Valid URLs supplied by the owner are stated
-identity evidence, not an independent verification of the CSV’s accuracy.
+identity evidence, not an independent verification of the source file’s accuracy.
 
 Original bytes are immutable owner-private assets. Durable operational resources
 hold the source digest, mapping, list target, progress and one receipt per source
-row. Notes include the import id and row/field/part; membership receipts keep the
+row. XLSX jobs also retain whole-workbook disclosure acknowledgement and selected-sheet metadata. Notes include the import id and row/field/part; membership receipts keep the
 entity/link/note ids. Different imports retain independent note contributions.
 No existing profile fields or manual notes are overwritten. A replay of identical
 bytes, mapping, list name and list target reuses the import and never reapplies completed
@@ -67,7 +119,7 @@ publication and connection indexes. Staging publishes the job and catalog entry 
 one atomic owner-private batch after storing the source; interrupted staging does
 not reserve catalog capacity. Atomic import storage is required; no sequential-write
 fallback is used. A source uploaded before failed publication stays owner-private
-and can be reused on retry or removed by account asset cleanup. Account export includes the CSVs and receipts;
+and can be reused on retry or removed by account asset cleanup. Account export includes CSV text or exact XLSX base64 originals and receipts;
 account deletion tombstones these resources and removes original assets through
 the existing owner-asset cleanup. Shared Ideaflow graph entities/notes remain
 subject to the existing explicit shared-overlay retention policy (the account
@@ -106,7 +158,7 @@ Legacy private reads without `limit` retain their existing 50-entity/500-link bo
 ## Verification and rollout
 
 Focused behavioral tests: `node --test tests/investor-csv.test.mjs
- tests/investor-workflow.test.mjs` (on one shell line). A cross-repository synthetic
+ tests/investor-workflow.test.mjs tests/investor-xlsx.test.mjs` (on one shell line). A cross-repository synthetic
 integration uses Noos’s disposable harness, never a production database:
 
 ```

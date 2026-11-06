@@ -720,7 +720,7 @@ When operator-enabled, direct REST/MCP responses include a server-generated X-Re
 
 See [agent access](agent-access.md) for public comparisons, Muse custom API setup, explicit signup/consent, and capacity policy. Search budgets and launch-tool compatibility are defined in [Rate limits and latency](#rate-limits-and-latency).
 
-### Private investor CSVs and lists (catalog v9)
+### Private investor CSV/XLSX files and lists (catalog v9)
 
 See [the durable CSV workflow](investor-csv.md) for staging, resumable batches,
 row receipts, exact identity matching and paginated list/member queries. The three
@@ -729,3 +729,11 @@ connection requests. No name/email matching, public publication or connection
 creation occurs. Use `limit` and follow `nextCursor` for complete private graph
 reads; legacy unpaged reads remain bounded. Source CSVs and receipts participate
 in account export/deletion under the documented shared-overlay retention policy.
+
+The same three investor tools also accept XLSX via `fileBase64` and `filename`.
+Use `inspectOnly:true` for a no-write sheet inventory, select an exact `sheet`
+and optional `headerRow`, then stage with mapping/listName and explicit
+`retainOriginalConfirmed:true` after disclosing retention of the entire original
+workbook (including unselected/hidden sheets). Only the chosen sheet is imported.
+Original XLSX recovery returns base64 chunks with byte offsets; see the durable
+workflow for limits, parser refusals and account export/deletion.
