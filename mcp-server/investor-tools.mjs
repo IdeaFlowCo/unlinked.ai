@@ -26,8 +26,10 @@ export function createInvestorTools({ getBackend, who, overlayCall, existingByRe
       const identity = await who(grant)
       if (listId && (await overlayCall(identity, 'GET', `entities/${listId}`)).entity?.kind !== 'list') throw fail('invalid_input', 'listId must name one of the owner’s private lists.')
     },
-    async list(grant, job) {
-      const result = await overlayCall(await who(grant), 'POST', 'entities', { kind: 'list', name: job.listName, createNew: true, clientRequestId: `investor-list:${job.id}` })
+    async list(grant, job, signal, revalidate) {
+      const identity = await who(grant)
+      signal?.throwIfAborted(); if (revalidate) await revalidate()
+      const result = await overlayCall(identity, 'POST', 'entities', { kind: 'list', name: job.listName, createNew: true, clientRequestId: `investor-list:${job.id}` })
       return result.entity.id
     },
     async row(grant, job, row, signal, revalidate) {

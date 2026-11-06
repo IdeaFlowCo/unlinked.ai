@@ -78,7 +78,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       if (existing) return summary(await read(backend, grant.ownerId, id))
       // Validate the private graph identity before storing any source.
       await graph.validate(grant, listId)
-      const beforeWrite = async () => { signal?.throwIfAborted(); if (revalidate) await revalidate() }
+      const beforeWrite = async () => { signal?.throwIfAborted(); if (revalidate) await revalidate(); signal?.throwIfAborted() }
       await register(backend, grant.ownerId, id, beforeWrite)
       await backend.adapter.withImport(grant.ownerId, id, async store => { await beforeWrite(); await store.putAsset(parsed.sourceDigest, bytes) })
       await beforeWrite()
@@ -121,11 +121,13 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
     },
     async resume(grant, { importId, batchSize = 10 }, signal, revalidate) {
       const backend = await backendFor(grant)
+      const beforeWrite = async () => { signal?.throwIfAborted(); if (revalidate) await revalidate(); signal?.throwIfAborted() }
       let job = await read(backend, grant.ownerId, importId)
       if (['complete', 'partial'].includes(job.status)) return summary(job)
       if (job.lease?.until > now()) throw fail('import_busy', 'This import has an active batch; retry after its lease expires.', { retryAfterMs: job.lease.until - now() })
       const token = randomUUID()
       const save = async patch => {
+        await beforeWrite()
         const next = { ...job, ...patch, revision: job.revision + 1 }
         await write(backend, grant.ownerId, next, job.revision)
         job = next
@@ -137,7 +139,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
         if (revalidate) await revalidate()
         // Existing lists must still exist; never recreate a removed list.
         if (job.listId) await graph.validate(grant, job.listId)
-        else await save({ listId: await graph.list(grant, job) })
+        else await save({ listId: await graph.list(grant, job, signal, beforeWrite) })
         const stop = Math.min(job.total, job.offset + batchSize)
         while (job.offset < stop) {
           signal?.throwIfAborted()
@@ -151,9 +153,12 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
           if (existing) result = (await read(backend, grant.ownerId, id, `${KIND}_row`)).result
           else {
             result = row.reason ? { status: 'rejected', reason: row.reason } : await graph.row(grant, job, row, signal, async () => {
-              if (revalidate) await revalidate()
               await save({ lease: { token, until: now() + 300000 } })
+              // The lease write itself can be in flight when access changes.
+              // Recheck after it resolves, before starting the graph write.
+              await beforeWrite()
             })
+            await beforeWrite()
             await write(backend, grant.ownerId, { kind: `${KIND}_row`, ownerId: grant.ownerId, id, revision: 1,
               importId: job.id, ordinal, sourceRow: row.row, rowId: row.rowId, result }, null)
           }
