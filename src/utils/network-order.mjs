@@ -36,6 +36,8 @@ const SHORT_MONTHS = Array.from({ length: 12 }, (_, month) => new Date(Date.UTC(
 const connectionDates = new Map()
 export function connectionDate(value) {
   if (typeof value !== 'string') return undefined
+  // Valid dates are at most 11 characters; longer strings are never cached.
+  if (value.length > 16) return parseConnectionDate(value)
   if (connectionDates.has(value)) return connectionDates.get(value)
   const at = parseConnectionDate(value)
   if (connectionDates.size >= 20000) connectionDates.clear()
