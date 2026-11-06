@@ -164,3 +164,22 @@ test('the operator records who decided and why, keeps the active set valid, and 
   assert.equal((await operateProfileDecisions({ args: ['list'], session })).decisions.length, 1); assert.equal(nodes.length, 2)
   await assert.rejects(operateProfileDecisions({ args: ['revoke', merged.decision.id, 'jacob'], session }), /not_found/)
 })
+
+
+test('large connected suspension preserves unrelated profiles and removal tombstones', () => {
+  const count = 10000
+  const ref = index => index.toString(16).padStart(64, '0')
+  const linked = Array.from({ length: count }, (_, index) => person(`linked-${index}`, `Linked ${index}`))
+  const kept = Array.from({ length: count }, (_, index) => person(`kept-${index}`, `Kept ${index}`))
+  const snapshot = { state: 'published', complete: true, revision: 'large-suspension', profiles: [...linked, ...kept, person('removed', 'Removed'), person('alias', 'Alias')], connections: [] }
+  const decisions = [{ id: 'suspend', kind: 'suspend', profileId: 'linked-0' }, { id: 'remove', kind: 'remove', profileId: 'removed' }, { id: 'merge', kind: 'merge', profileId: 'alias', survivorId: 'removed' }]
+  const result = applyProfileDecisions(snapshot, decisions, { identityRefs: profile => {
+    if (!profile.id.startsWith('linked-')) return []
+    const index = Number(profile.id.slice('linked-'.length))
+    return [ref(index), ref(index + 1)]
+  } })
+  assert.deepEqual(result.profiles.map(profile => profile.id), kept.map(profile => profile.id))
+  assert.deepEqual(new Set(result.suspended), new Set(linked.map(profile => profile.id)))
+  assert.equal(result.suspendedRefs.length, count + 1)
+  assert.deepEqual(new Set(result.removed), new Set(['removed', 'alias']))
+})

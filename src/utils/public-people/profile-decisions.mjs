@@ -139,6 +139,7 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
     const value = survivors.get(profile.id) ?? profile
     return renames.has(profile.id) ? { ...value, name: renames.get(profile.id) } : value
   })
+  const survivingIds = new Set(profiles.map(profile => profile.id))
   const pairs = new Map()
   for (const edge of snapshot.connections) {
     const fromId = point(edge.fromId), toId = point(edge.toId)
@@ -163,7 +164,7 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
     // into them, and every suspension's own id as a tombstone even while that
     // profile is not published, so the account's own pages, photos and
     // owner-private rows stay hidden too. Never published, only named.
-    ...(suspensions.length ? { suspended: [...new Set([...suspended, ...[...merges].filter(([, survivor]) => suspended.has(survivor)).map(([mergedId]) => mergedId), ...suspensions.map(value => value.profileId).filter(value => !merges.has(value) || suspended.has(point(value)))])].filter(value => !profiles.some(profile => profile.id === value)).sort() } : {}),
+    ...(suspensions.length ? { suspended: [...new Set([...suspended, ...[...merges].filter(([, survivor]) => suspended.has(survivor)).map(([mergedId]) => mergedId), ...suspensions.map(value => value.profileId).filter(value => !merges.has(value) || suspended.has(point(value)))])].filter(value => !survivingIds.has(value)).sort() } : {}),
     ...(suspendedRefs.size ? { suspendedRefs: [...suspendedRefs].sort() } : {}),
     // Every id a removal took out (the removed profile, the decision's own id
     // and addresses merged into it). Never published, only named, so an
