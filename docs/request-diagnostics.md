@@ -199,12 +199,14 @@ than a native memory bug. With `init: true` the same abort exits 134.
 
 Set `UNLINKED_STALL_PROFILE_DIR` to an existing directory with mode 700, owned by the runtime user, and the runtime records what blocked its main thread.
 
-- **How it samples.** The runtime runs V8's sampling profiler in-process (`node:inspector` `Session.connect()`), with no port and no external attach, in 60 s windows at 1 ms sampling. A 20 ms ticker notes every main-thread gap of at least 500 ms.
+- **How it samples.** The runtime runs V8's sampling profiler in-process (`node:inspector` `Session.connect()`), with no port and no external attach, at 10 ms sampling. That still gives about 50 samples per 500 ms stall. A 20 ms ticker notes every main-thread gap of at least 500 ms.
+- **When it rotates.** It rotates (stop, summarize, restart) only after a 60 s window that had stalls, or once the running profile is 5 minutes old. Stopping a profile blocks the loop for a time that grows with its samples and nodes. In 0.6.92, which sampled at 1 ms and rotated every minute, that cost about 0.75 s every minute and appeared as a stall with no samples. The profiler's own rotation gap is now reported as `rotation_ms` and `self_stalls`, never as a stall.
 - **What it writes.** At the end of a window that had stalls, only the samples taken during those gaps are summarized. One mode-600 file `stall-YYYYMMDDTHHMMSSZ.json` is written, holding:
   - stall count and lengths;
+  - `app`: inclusive time in our own code (`mcp-server/`, `src/`), so runtime internals such as `runMicrotasks` don't hide the frame that did the work;
   - top self and inclusive frames, as `function file:line` with milliseconds;
   - the heaviest stacks.
 - **Privacy.** Only code locations and numbers are written, never request, owner, argument or value data.
 - **Retention.** The newest 240 files are kept.
-- **Cost.** Overhead is the profiler's sampling, typically a few percent of one core while enabled.
+- **Cost.** Sampling overhead is small at 10 ms. A quiet process pays one profile stop every 5 minutes.
 - **Stopping.** Unset the variable to stop on the next restart.

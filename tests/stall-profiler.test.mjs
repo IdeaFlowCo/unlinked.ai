@@ -50,4 +50,49 @@ test('summaries count only samples inside the stall windows', () => {
   const summary = summarizeStalls(profile, [[100.5, 102.5]], 100)
   assert.equal(summary.sampled_ms, 2)
   assert.deepEqual(summary.self, [['inStall mcp-server/a.mjs:3', 2]])
+  assert.deepEqual(summary.app, [['inStall mcp-server/a.mjs:3', 2]], 'our own frames are ranked separately')
+})
+
+test('a quiet window does not stop the profile; rotation time is never reported as a stall', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'stall-')); await chmod(directory, 0o700)
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  let stops = 0
+  const { Session } = await import('node:inspector/promises')
+  const session = new Session(), post = session.post.bind(session)
+  session.post = (method, params) => { if (method === 'Profiler.stop') stops++; return post(method, params) }
+  const profiler = await startStallProfiler({ directory, stallMs: 300, windowMs: 1000, maxProfileMs: 60000, session })
+  await new Promise(resolve => setTimeout(resolve, 2300))
+  assert.equal(stops, 0, 'no stall, young profile: no stop')
+  await profiler.stop()
+  assert.deepEqual(await readdir(directory), [])
+})
+
+test('the process heap flag is detected wherever it is set', async () => {
+  const { processHeapFlag } = await import('../src/utils/public-people/index-host.mjs')
+  assert.equal(processHeapFlag([], '--max-old-space-size=768'), true)
+  assert.equal(processHeapFlag(['--max-old-space-size', '1024'], ''), true)
+  assert.equal(processHeapFlag(['--inspect=0'], '--enable-source-maps'), false)
+  assert.equal(processHeapFlag([], '--max_old_space_size=896'), true, 'V8 also accepts the underscore form')
+  assert.equal(processHeapFlag([], '--max-old-space-size=0'), false, '0 means the default, so resourceLimits applies')
+})
+
+test('a failed profile stop still closes the rotation, so later stalls are reported', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'stall-')); await chmod(directory, 0o700)
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const { Session } = await import('node:inspector/promises')
+  const session = new Session(), post = session.post.bind(session)
+  let failStop = true
+  session.post = (method, params) => { if (method === 'Profiler.stop' && failStop) { failStop = false; return Promise.reject(Error('stop failed')) } return post(method, params) }
+  const profiler = await startStallProfiler({ directory, stallMs: 300, windowMs: 3600000, session })
+  await profiler.rotate().catch(() => {})          // stop fails: the profile is gone, rotation must close
+  await profiler.rotate()                           // restarts sampling
+  await new Promise(resolve => setTimeout(resolve, 60))
+  busyMainThreadFor(700)
+  await new Promise(resolve => setTimeout(resolve, 60))
+  await profiler.rotate(); await profiler.stop()
+  const files = await readdir(directory)
+  assert.equal(files.length, 1)
+  const row = JSON.parse(await readFile(join(directory, files[0]), 'utf8'))
+  assert.equal(row.stalls, 1, 'the real stall is a stall, not a self stall')
+  assert.ok(row.sampled_ms >= 300)
 })
