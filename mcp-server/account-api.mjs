@@ -29,7 +29,7 @@ function authenticateClient(request, clients) {
 // MCP tools are thin wrappers over these semantics; names map 1:1.
 const ROUTES = Object.freeze({
   'GET /api/agent/v1/whoami': { tool: 'unlinked_whoami', query: [] },
-  'GET /api/agent/v1/people': { tool: 'unlinked_list_people', query: ['q', 'mode', 'presence', 'sort', 'cursor', 'limit'], numbers: ['limit'] },
+  'GET /api/agent/v1/people': { tool: 'unlinked_list_people', query: ['q', 'mode', 'presence', 'enrichmentStatus', 'sort', 'cursor', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/person-targets': { tool: 'unlinked_list_person_targets', query: ['q', 'cursor', 'limit'], numbers: ['limit'] },
   'GET /api/agent/v1/connections': { tool: 'unlinked_list_connections', query: ['degree', 'q', 'sort', 'grouping', 'cursor', 'limit'], numbers: ['degree', 'limit'] },
   'GET /api/agent/v1/connection-requests': { tool: 'unlinked_list_connection_requests', query: ['direction'] },

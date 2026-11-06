@@ -203,3 +203,5 @@ Private CSV/XLSX investor/list imports reuse the three catalog-v9 tools. Explici
 sheet selection, whole-workbook private-retention acknowledgement, bounded
 ZIP/XML parsing, original-byte recovery and provenance: `docs/investor-csv.md`.
 Browser list upload remains CSV-only; XLSX is available through MCP/REST.
+
+MCP profile/list/contact results expose enrichmentStatus independently of presence and detailLevel. Values are enriched (current published enrichment evidence), not_recorded (no such evidence in the composed index), and unknown (source has no status). not_recorded does not prove a person was never enriched. unlinked_list_people accepts presence and enrichmentStatus filters.

@@ -139,3 +139,5 @@ use values-only XLSX or CSV. Original XLSX recovery through the status tool retu
 base64 chunks with byte offsets: decode each chunk before concatenating.
 
 Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence.
+
+MCP profile/list/contact results expose enrichmentStatus independently of presence and detailLevel. Values are enriched (current published enrichment evidence), not_recorded (no such evidence in the composed index), and unknown (source has no status). not_recorded does not prove a person was never enriched. unlinked_list_people accepts presence and enrichmentStatus filters.

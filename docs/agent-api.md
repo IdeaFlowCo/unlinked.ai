@@ -735,3 +735,5 @@ See [agent access](agent-access.md) for public comparisons, Muse custom API setu
 
 See the [investor list workflow](investor-csv.md) for private CSV/XLSX staging,
 sheet selection and retention consent, resumable imports, recovery and list queries.
+
+MCP profile/list/contact results expose enrichmentStatus independently of presence and detailLevel. Values are enriched (current published enrichment evidence), not_recorded (no such evidence in the composed index), and unknown (source has no status). not_recorded does not prove a person was never enriched. unlinked_list_people accepts presence and enrichmentStatus filters.

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { createAccountNetwork, withSearchDeadline } from '../src/utils/private-import/account-network.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
-import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
+import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE, ENRICHMENT_STATUS } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { SEARCH_MODES } from '../src/utils/public-people/text-match.mjs'
 import { UNLINKED_PROFILE_ORIGIN } from '../src/utils/openchat-profile-context.mjs'
@@ -17,6 +17,8 @@ import { linkedinUrl as canonicalLinkedinUrl } from '../src/utils/private-import
 import { CONNECTION_SORTS, PUBLIC_LIST_SORTS, orderNetwork, validTimestamp } from '../src/utils/network-order.mjs'
 import { groupConnectionRows, rowSlug, rowPublicTarget, usableProfileId } from './connection-identity.mjs'
 import { contactFingerprint } from './contact-enrichment.mjs'
+
+const profileStatus = profile => ({ presence: profile?.presence ?? 'unknown', enrichmentStatus: profile?.enrichmentStatus ?? 'unknown', detailLevel: profile?.detailLevel ?? 'unknown' })
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const LINKEDIN_PROFILE = /^https:\/\/www\.linkedin\.com\/in\/[\w%-]+$/
@@ -65,7 +67,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   unlinked_whoami: {},
   unlinked_list_person_targets: { q: z.string().max(100).optional(), cursor: z.string().max(4096).optional(), limit: z.number().int().min(1).max(50).optional() },
   unlinked_list_people: {
-    q: z.string().max(200).optional(), mode: z.enum(SEARCH_MODES).optional(), presence: z.enum(PRESENCE).optional(),
+    q: z.string().max(200).optional(), mode: z.enum(SEARCH_MODES).optional(), presence: z.enum(PRESENCE).optional(), enrichmentStatus: z.enum(ENRICHMENT_STATUS).optional(),
     sort: z.enum(PUBLIC_LIST_SORTS).optional(),
     cursor: z.string().max(2048).optional(), limit: z.number().int().min(1).max(50).optional(),
   },
@@ -101,7 +103,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_list_person_targets: 'Read-only current owner-network members with proven active Ideaflow identity, for cross-app person targets. Exact published-profile ownership only; no names/email guesses, contact details, messages, relationship assertions, account creation or sends. Connected does not mean chatted. Cursor pages the current own network, including imported connections.',
   unlinked_whoami: 'Return the authenticated grant owner: the stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy-profile anchor if any. Linkage is the grant itself — never email matching. No contact email/phone is returned.',
-  unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=legacy keeps recovered accounts awaiting claim, presence=shadow keeps imported profiles without a recovered account. sort: best (default: relevance with q, else stored name order), name (A–Z by first letter or number, ignoring leading emoji/punctuation, accents and case), name-desc, raw (Unicode code-point order of the name as written). Paginated with an opaque cursor bound to the query and sort, at most 50 per page, with total and snapshot revision. Public fields only.',
+  unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=legacy keeps recovered accounts awaiting claim, presence=shadow keeps imported profiles without a recovered account. enrichmentStatus filters enriched, not_recorded (no current published enrichment evidence; not proof of never enriched), or unknown. Enrichment is independent of detailLevel and membership. sort: best (default: relevance with q, else stored name order), name (A–Z by first letter or number, ignoring leading emoji/punctuation, accents and case), name-desc, raw (Unicode code-point order of the name as written). Paginated with an opaque cursor bound to the query and sort, at most 50 per page, with total and snapshot revision. Public fields only.',
   unlinked_list_connections: 'Deterministically list the owner’s connections. degree 1 includes owner-imported contacts (no legacy anchor required) plus recorded public first-degree paths when anchored; degree 2 returns only recorded public paths — never inferred — and fails typed degree_unproven without a confirmed anchor. Degree 1 groups one entry per person (grouping "person", default) when records share exact identity evidence — the same published profile (merges followed) or the same LinkedIn address, never a name — with sources[] listing every underlying record (provenance, visibility) and top-level fields from the owner import; total counts people. grouping "none" returns one row per source record. sort: name (default; A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case — names are shown exactly as written), raw (Unicode code-point order), name-desc, connected (most recently connected first), imported (most recently imported first), company. Paginated, at most 50 per page; the cursor is bound to q, sort and grouping.',
   unlinked_get_profile: 'Read one published public profile by id (or a profile handle) with its public connections page. Profiles with a readable address include their handle and public url. Returns typed not_found when no published profile has that id.',
   unlinked_list_connection_requests: 'Read-only: list the owner’s open member-to-member connection requests. direction "received" (default) lists requests waiting for the owner’s answer; "sent" lists requests the owner sent that are still pending. Names, public profile ids, optional notes and times only. Grants with the opt-in connections scope can answer and send requests with the connection-request write tools.',
@@ -110,7 +112,7 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_accept_connection_request: 'Opt-in write tool. Accept a connection request the owner received (id from unlinked_list_connection_requests direction received). Connects both accounts.',
   unlinked_ignore_connection_request: 'Opt-in write tool. Ignore a connection request the owner received. Private: the sender is not told and still sees it as pending.',
   unlinked_withdraw_connection_request: 'Opt-in write tool. Withdraw a still-open connection request the owner sent (id from unlinked_list_connection_requests direction sent). The recipient’s notification is removed; asking the same person again waits 21 days.',
-  unlinked_lookup_contact: 'Read-only, owner-scoped: resolve one of the owner’s own contacts without paging. Give exactly one of connectionId (an id from unlinked_list_connections), linkedinUrl (a linkedin.com/in/ address), profileId (a published profile id) or refHashes (up to 100 linkedinRefHash values). Returns name, headline, company, the owner connectionId when the owner imported the person, linkedinRefHash (SHA-256 of the canonical LinkedIn slug, the private-graph key `linkedin:in:<hash>`) and publishedProfileId when the same person has a published Unlinked profile. Never returns another owner’s imports; typed not_found when nothing matches.',
+  unlinked_lookup_contact: 'Read-only, owner-scoped: resolve one of the owner’s own contacts without paging. Give exactly one of connectionId (an id from unlinked_list_connections), linkedinUrl (a linkedin.com/in/ address), profileId (a published profile id) or refHashes (up to 100 linkedinRefHash values). Returns name, headline, company, the owner connectionId when the owner imported the person, linkedinRefHash (SHA-256 of the canonical LinkedIn slug, the private-graph key `linkedin:in:<hash>`) and publishedProfileId when the same person has a published Unlinked profile. Also returns presence, enrichmentStatus and detailLevel, each unknown if public evidence is unavailable. Never returns another owner’s imports; typed not_found when nothing matches.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and give short conversational reasons stating unknown sector focus. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
   ...PRIVATE_NOTES_DESCRIPTIONS,
   ...INVESTOR_DESCRIPTIONS,
@@ -334,10 +336,10 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         publicIndexAvailable: typeof readPublishedSnapshot === 'function' }
     },
     // Members' public addresses use their handle (docs/profile-handles.md).
-    async unlinked_list_people(grant, { q = '', mode = 'best', presence, sort = 'best', cursor, limit = 50 }, signal) {
+    async unlinked_list_people(grant, { q = '', mode = 'best', presence, enrichmentStatus, sort = 'best', cursor, limit = 50 }, signal) {
       const { reader, captured } = publicReader(limit)
       let result
-      try { result = await reader.list({ query: q, mode, presence, sort, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
+      try { result = await reader.list({ query: q, mode, presence, enrichmentStatus, sort, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
       return { kind: 'unlinked_list_people', revision: captured.revision, ...(sort !== 'best' ? { sort } : {}), total: result.total ?? captured.total ?? result.profiles.length,
         ...(result.match ? { match: result.match } : {}), profiles: result.profiles.map(withHandle),
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), visibility: 'public' }
@@ -481,7 +483,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
           try { publicRef = await reader.linkedinRef({ id: summary.id, signal }) }
           catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
         }
-        return { connectionId: candidate.entry.id, name: candidate.entry.name,
+        return { ...profileStatus(summary), connectionId: candidate.entry.id, name: candidate.entry.name,
           ...(candidate.entry.headline ? { headline: candidate.entry.headline } : {}), ...(candidate.entry.company ? { company: candidate.entry.company } : {}),
           linkedinRefHash: publicRef ?? sourceRef, ...(sourceRef && publicRef && sourceRef !== publicRef ? { sourceLinkedinRefHash: sourceRef } : {}),
           publishedProfileId: summary?.id ?? null, provenance: candidate.entry.provenance }
@@ -560,7 +562,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         const publishedProfileIds = [...publicIds].filter(id => id !== contact.publishedProfileId)
         return { kind: 'unlinked_lookup_contact', publicReconciliationComplete: Boolean(reader), contact: { ...contact, ...(sourceLinkedinRefHashes.length ? { sourceLinkedinRefHashes } : {}), ...(publishedProfileIds.length ? { publishedProfileIds } : {}) }, visibility: 'owner_private' }
       }
-      return { kind: 'unlinked_lookup_contact', publicReconciliationComplete: true, contact: { connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: targetRef, publishedProfileId: published.id, ...([...publicIds].some(id => id !== published.id) ? { publishedProfileIds: [...publicIds].filter(id => id !== published.id) } : {}) }, visibility: 'public' }
+      return { kind: 'unlinked_lookup_contact', publicReconciliationComplete: true, contact: { ...profileStatus(published), connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: targetRef, publishedProfileId: published.id, ...([...publicIds].some(id => id !== published.id) ? { publishedProfileIds: [...publicIds].filter(id => id !== published.id) } : {}) }, visibility: 'public' }
     },
     async unlinked_ai_search(grant, { query, scope, timeoutMs = 40000 }, signal) {
       // Default to the widest scope the grant actually covers, so the natural

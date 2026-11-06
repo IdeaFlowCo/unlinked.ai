@@ -98,6 +98,8 @@ export function applyProfileDecisions(snapshot, stored, { limit = PROFILE_DECISI
     const result = { ...survivor }
     for (const key of ['headline', 'location', 'about', 'company', 'industry', 'linkedinUrl', 'website']) if (result[key] === undefined && merged[key] !== undefined) result[key] = merged[key]
     for (const key of ['positions', 'education', 'skills']) if (!result[key]?.length && merged[key]?.length) result[key] = merged[key]
+    // Carry enrichment evidence only when this merge actually contributes content.
+    if (merged.enrichmentStatus === 'enriched' && Object.keys(result).some(key => result[key] !== survivor[key])) result.enrichmentStatus = 'enriched'
     return result
   }
   // A merge marked `fill: false` (a member absorbing an imported copy of

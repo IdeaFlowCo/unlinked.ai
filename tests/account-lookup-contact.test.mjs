@@ -52,7 +52,7 @@ test('the ref hash is SHA-256 of the canonical (decoded, lowercased) slug', () =
 test('by connection id: the owner contact with its ref hash and published profile', async () => {
   const found = await lookup({ connectionId: ada.id })
   assert.equal(found.visibility, 'owner_private')
-  assert.deepEqual(found.contact, { connectionId: ada.id, name: 'Ada Lovelace', headline: 'Engineer', company: 'Synthetic Co',
+  assert.deepEqual(found.contact, { presence: 'unknown', enrichmentStatus: 'unknown', detailLevel: 'basic', connectionId: ada.id, name: 'Ada Lovelace', headline: 'Engineer', company: 'Synthetic Co',
     linkedinRefHash: sha('synthetic-ada'), publishedProfileId: 'pub-ada', provenance: { type: 'owner_import', importId: ada.importId, rowId: ada.rowId } })
   const plain = await lookup({ connectionId: grace.id })
   assert.equal(plain.contact.linkedinRefHash, sha('synthetic-gracé'))
@@ -68,7 +68,7 @@ test('by LinkedIn address, with or without scheme, trailing slash or case', asyn
     assert.equal((await lookup({ linkedinUrl })).contact.connectionId, ada.id)
   // Not imported, but a published profile has that address: public data only.
   const published = await lookup({ linkedinUrl: 'https://www.linkedin.com/in/someone-public' })
-  assert.deepEqual(published, { kind: 'unlinked_lookup_contact', publicReconciliationComplete: true, contact: { connectionId: null, name: 'Published pub-stranger', headline: 'Public headline', linkedinRefHash: sha('someone-public'), publishedProfileId: 'pub-stranger' }, visibility: 'public' })
+  assert.deepEqual(published, { kind: 'unlinked_lookup_contact', publicReconciliationComplete: true, contact: { presence: 'unknown', enrichmentStatus: 'unknown', detailLevel: 'basic', connectionId: null, name: 'Published pub-stranger', headline: 'Public headline', linkedinRefHash: sha('someone-public'), publishedProfileId: 'pub-stranger' }, visibility: 'public' })
   await refused({ linkedinUrl: 'https://www.linkedin.com/in/nobody-here' }, 'not_found')
   await refused({ linkedinUrl: 'https://example.com/in/synthetic-ada' }, 'invalid_input')
 })

@@ -23,7 +23,7 @@ test('public union uses only active exact-owner sources and drops retained cache
  getBackend:async owner=>{assert.deepEqual(owner,items[0].owner);reads++;return{readResource:async()=>({sourceId:id,sourceOwnerId:'bound-owner',sourceRevision:4,payload:job})}},
  publicPeople:{read:async dataset=>{if(ENRICHMENT_DATASETS.includes(dataset))return null;assert.equal(dataset,'public-import-'+id);return cached},publish:async()=>{throw Error('immutable cache must replay without write')}},})
  const before=await read();assert.equal(before.profiles.length,3);assert.equal(reads,1)
- items=[];const after=await read();assert.deepEqual(after.profiles,legacy.profiles);assert.notEqual(before.revision,after.revision)
+ items=[];const after=await read();assert.deepEqual(after.profiles,legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'})));assert.notEqual(before.revision,after.revision)
 })
 
 test('delayed source removal fails the final shared publication read fence',async()=>{
@@ -63,7 +63,7 @@ test('legacy upgrade during final asynchronous reads rejects the retired signup 
       release()
       await rejected
       const rebuilt = await read()
-      assert.deepEqual(rebuilt.profiles, legacy.profiles)
+      assert.deepEqual(rebuilt.profiles, legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'})))
       assert.ok(!rebuilt.profiles.some(row => row.id === signupSource.profile.id))
       if (stage !== 'decisions-without-members') assert.deepEqual(rebuilt.members, ['legacy'])
       assert.equal(signupSource.receiptId, 'signup-receipt')
@@ -87,7 +87,7 @@ test('curated enrichment refreshes legacy rows by id, never adds people, and a l
  const read=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[],getBackend:async()=>{throw Error('unused')},publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?enrichment:null}})
  const value=await read()
  assert.equal(value.profiles.length,2)
- assert.deepEqual(value.profiles.find(p=>p.id==='legacy'),fresh)
+ assert.deepEqual(value.profiles.find(p=>p.id==='legacy'),{...fresh,enrichmentStatus:'enriched'})
  assert.equal(value.profiles.find(p=>p.id==='bare').name,'Bare Person')
  assert.ok(!value.profiles.some(p=>p.id==='unknown'))
  enrichment=null;const without=await read();assert.equal(without.profiles.find(p=>p.id==='legacy').headline,'Stale headline');assert.notEqual(value.revision,without.revision)
@@ -138,7 +138,7 @@ test('a fresh index serves page views without re-reading sources; expiry, revoca
   // Expiry makes the revocation visible on the next read.
   clock = 20000
   const rebuilt = await read()
-  assert.deepEqual(rebuilt.profiles, legacy.profiles); assert.equal(discovers, 4)
+  assert.deepEqual(rebuilt.profiles, legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'}))); assert.equal(discovers, 4)
   // An empty build is not kept, and it drops the kept one: a revoked legacy
   // publication never serves from the window.
   clock = 40000
@@ -173,11 +173,11 @@ test('inside the stale window the kept index answers while one refresh runs behi
   assert.equal(discovers, 4)
   // The refresh result serves the next read without another build.
   const refreshed = await read()
-  assert.deepEqual(refreshed.profiles, legacy.profiles); assert.equal(discovers, 4)
+  assert.deepEqual(refreshed.profiles, legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'}))); assert.equal(discovers, 4)
   // Past the stale window a read waits for the rebuild.
   clock = 20000
   const blocked = await read()
-  assert.deepEqual(blocked.profiles, legacy.profiles); assert.equal(discovers, 6)
+  assert.deepEqual(blocked.profiles, legacy.profiles.map(p=>({...p,enrichmentStatus:'not_recorded'}))); assert.equal(discovers, 6)
   // A failed refresh serves the kept build once, then fails closed.
   clock = 26000
   failRefresh = true
@@ -220,11 +220,11 @@ test('enrichment shards fill legacy rows and the primary enrichment dataset wins
   [ENRICHMENT_DATASET]:{state:'published',complete:true,revision:ENRICHMENT_DATASET+':'+'3'.repeat(64),profiles:[primaryA],connections:[]}}
  const index=()=>createMemberPublicIndex({enrichmentDatasets:ENRICHMENT_DATASETS,readLegacy:async()=>recovered,discover:async()=>[],getBackend:async()=>{throw Error('unused')},publicPeople:{read:async dataset=>{assert.ok(ENRICHMENT_DATASETS.includes(dataset),dataset);return data[dataset]??null}}})
  const value=await index()()
- assert.deepEqual(value.profiles.find(p=>p.id==='a'),primaryA)
- assert.deepEqual(value.profiles.find(p=>p.id==='b'),shardB)
+ assert.deepEqual(value.profiles.find(p=>p.id==='a'),{...primaryA,enrichmentStatus:'enriched'})
+ assert.deepEqual(value.profiles.find(p=>p.id==='b'),{...shardB,enrichmentStatus:'enriched'})
  const withoutPrimary={...data};delete withoutPrimary[ENRICHMENT_DATASET];data=withoutPrimary
  const shardsOnly=await index()()
- assert.deepEqual(shardsOnly.profiles.find(p=>p.id==='a'),shardA)
+ assert.deepEqual(shardsOnly.profiles.find(p=>p.id==='a'),{...shardA,enrichmentStatus:'enriched'})
  assert.notEqual(shardsOnly.revision,value.revision)
  data={[first]:{...withoutPrimary[first],revision:ENRICHMENT_DATASET+':'+'1'.repeat(64)}}
  await assert.rejects(index()(),/public_enrichment_invalid/)

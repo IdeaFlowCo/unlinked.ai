@@ -137,7 +137,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const items = await discover()
     const identity = value => JSON.stringify(value.map(item => [item.id,item.owner.ownerId,item.owner.userId,item.revision]))
     if (!Array.isArray(items) || items.length > 1000) throw Error('public_member_import_limit')
-    const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision, ...(includeDetails ? ['profile-details-v1', hash(JSON.stringify(legacy.profiles))] : [])], linkedChecks = [], overlays = new Map(), members = new Set(), ownerImports = new Map()
+    const profiles = [...legacy.profiles], connections = [...legacy.connections], revisions = [legacy.revision, 'enrichment-status-v1', ...(includeDetails ? ['profile-details-v1', hash(JSON.stringify(legacy.profiles))] : [])], linkedChecks = [], overlays = new Map(), members = new Set(), ownerImports = new Map()
     // Members whose LinkedIn address comes from their own uploaded archive or a
     // confirmed recovered account, never from a URL typed at signup.
     const verified = new Set()
@@ -151,7 +151,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         if (index !== undefined) {
           const supplemental = {}
           for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profiles[index][key]) supplemental[key] = profiles[index][key]
-          profiles[index] = { ...row, ...supplemental }
+          profiles[index] = { ...row, ...supplemental, enrichmentStatus: 'enriched' }
         }
       }
       revisions.push(enrichment.revision)
@@ -331,7 +331,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       // publication cannot push the reader past its text budget.
       const own = new Set([...(decided.members ?? members), ...(decided.legacyMembers ?? [])])
       let budget = linkedinEnrichmentTextBudget
-      const result = byLinkedin.size ? { ...decided, profiles: decided.profiles.map(profile => {
+      let result = byLinkedin.size ? { ...decided, profiles: decided.profiles.map(profile => {
         if (own.has(profile.id) || budget <= 0) return profile
         const ref = profileLinkedinRef(profile), row = ref ? byLinkedin.get(ref) : undefined
         if (!row) return profile
@@ -341,9 +341,10 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
           if (added > budget) return profile
           budget -= Math.max(0, added)
         }
-        return value
+        return value === profile ? profile : { ...value, enrichmentStatus: 'enriched' }
       }) } : decided
       if (typeof readSignupProfiles === 'function' && signupIdentity(await readSignupProfiles()) !== signupIdentity(signupSources)) throw Error('public_member_source_changed')
+      result = { ...result, profiles: result.profiles.map(profile => ({ ...profile, enrichmentStatus: profile.enrichmentStatus === 'enriched' ? 'enriched' : 'not_recorded' })) }
       // Member photos for the photo route: resolved profile id -> owner + blob.
       // Kept on the server side only; never part of the public snapshot.
       if (typeof onMemberPhotos === 'function') {
