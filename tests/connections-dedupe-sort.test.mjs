@@ -223,3 +223,19 @@ test('connection status follows published identity in both grouping modes and fa
     for (const entry of unavailable.connections) { assert.equal(entry.presence, 'unknown'); assert.equal(entry.enrichmentStatus, 'unknown') }
   }
 })
+
+
+test('connection status resolves a different published import by exact address', async () => {
+  let reads = 0
+  const source = async () => { reads++; return { ...(await snapshot()), members: ['public-other-import'], profiles: [...(await snapshot()).profiles, profile('public-other-import', 'Public Sam', { linkedinUrl: 'https://www.linkedin.com/in/sam-lee-1', enrichmentStatus: 'enriched' })] } }
+  const localService = createAccountToolService({ getBackend: async () => backend(), readPublishedSnapshot: source, lookupSlug: async () => null })
+  for (const grouping of ['person', 'none']) {
+    reads = 0
+    const result = (await localService.call({ grant, name: 'unlinked_list_connections', input: { grouping, q: 'Sam Lee' } })).result
+    const match = result.connections.find(entry => entry.id === samOne.id)
+    assert.equal(match.presence, 'member'); assert.equal(match.enrichmentStatus, 'enriched')
+    const other = result.connections.find(entry => entry.id === samTwo.id)
+    assert.equal(other.presence, 'unknown'); assert.equal(other.enrichmentStatus, 'unknown')
+    assert.equal(reads, 1)
+  }
+})

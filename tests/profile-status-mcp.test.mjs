@@ -94,8 +94,26 @@ test('every linked owner upload contributes evidence even when only the newest s
 
 test('historical member words survive a merge into a curated shadow', async () => {
  const profiles=[person('historical',{name:'Member name',headline:'Member headline',about:'Member about',skills:['Member skill']}),person('shadow',{headline:'Shadow headline'})]
- const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readLegacyMembers:async()=>['historical'],readDecisions:async()=>[{id:'merge',kind:'merge',profileId:'historical',survivorId:'shadow'}],publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('shadow',{headline:'Curated headline',about:'Curated about'})],connections:[]})}})
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>[],readLegacyMembers:async()=>['historical'],readDecisions:async()=>[{id:'merge',kind:'merge',profileId:'historical',survivorId:'shadow'}],publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('shadow',{headline:'Curated headline',about:'Curated about'})],connections:[]})}})
  const result=await read(), survivor=result.profiles.find(p=>p.id==='shadow')
  assert.equal(survivor.name,'Member name'); assert.equal(survivor.headline,'Member headline'); assert.equal(survivor.about,'Member about'); assert.deepEqual(survivor.skills,['Member skill']); assert.equal(survivor.enrichmentStatus,'enriched')
  assert.deepEqual(result.legacyMembers,['shadow']); assert.equal(result.aliases.historical,'shadow')
+})
+
+
+test('curated identity participates in member merges without replacing member words', async () => {
+ const address='https://www.linkedin.com/in/verified-member'
+ const profiles=[person('member',{name:'Member name',headline:'Member words',linkedinUrl:address}),person('shadow',{name:'Old shadow'})]
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>['member'],readLegacyMembers:async()=>['member'],mergeSameLinkedin:true,publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('shadow',{name:'Curated name',headline:'Curated words',linkedinUrl:address})],connections:[]})}})
+ const result=await read(), member=result.profiles.find(p=>p.id==='member')
+ assert.equal(result.aliases.shadow,'member'); assert.equal(result.profiles.length,1)
+ assert.equal(member.name,'Member name'); assert.equal(member.headline,'Member words'); assert.equal(member.enrichmentStatus,'enriched')
+})
+
+test('curated shadow names yield to explicit operator renames', async () => {
+ const profiles=[person('shadow',{name:'Original'}),person('renamed',{name:'Before rename'})]
+ const read=createMemberPublicIndex({readLegacy:async()=>({...legacy,profiles}),discover:async()=>[],readMembers:async()=>[],readDecisions:async()=>[{id:'rename',kind:'rename',profileId:'renamed',name:'Operator name'}],publicPeople:{read:async()=>({state:'published',complete:true,revision:ENRICHMENT_DATASET+':1',profiles:[person('shadow',{name:'Corrected name'}),person('renamed',{name:'Curated name'})],connections:[]})}})
+ const result=await read()
+ assert.equal(result.profiles.find(p=>p.id==='shadow').name,'Corrected name')
+ assert.equal(result.profiles.find(p=>p.id==='renamed').name,'Operator name')
 })

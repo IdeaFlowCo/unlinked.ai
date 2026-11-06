@@ -3,7 +3,7 @@ import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limit
 import { PUBLIC_UPLOAD_CONSENT } from '../private-import/consent.mjs'
 import { createScopedImportReader } from '../private-import/noos-adapter.mjs'
 import { publicLinkedinUrl } from './profile-links.mjs'
-import { applyProfileDecisions } from './profile-decisions.mjs'
+import { applyProfileDecisions, usableProfileDecisions } from './profile-decisions.mjs'
 import { linkedinIdentityMerges, linkedinRefHash } from './url-identity.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { CONNECTION_AUDIENCES, connectionPrivacyValue, isDefaultConnectionPrivacy } from './connection-privacy.mjs'
@@ -125,11 +125,15 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   // Operator merges and renames apply last, over the complete union.
   // Operator and automatic decisions; the index's own merges come first.
   // Same-address merges come last: explicit and earlier automatic decisions win.
-  const decide = async (snapshot, own = [], members = new Set(), verified = new Set()) => {
+  const decide = async (snapshot, own = [], members = new Set(), verified = new Set(), curated = new Map()) => {
     const stored = [...own, ...(typeof readDecisions === 'function' ? await readDecisions() : [])]
-    if (!mergeSameLinkedin) return applyProfileDecisions(snapshot, stored)
-    const identity = linkedinIdentityMerges({ profiles: snapshot.profiles, members: [...members], absorbers: [...verified], decisions: stored, refFor: profileLinkedinRef, prefer: preferSurvivor })
-    return applyProfileDecisions(snapshot, [...identity.decisions, ...identity.merges], { limit: PUBLIC_INDEX_MAX_PROFILES })
+    const protectedIds = new Set([...members, ...(snapshot.legacyMembers ?? [])])
+    const refFor = profile => protectedIds.has(profile.id) ? profileLinkedinRef(profile) : profileLinkedinRef(curated.get(profile.id)) ?? profileLinkedinRef(profile)
+    const identity = mergeSameLinkedin ? linkedinIdentityMerges({ profiles: snapshot.profiles, members: [...members], absorbers: [...verified], decisions: stored, refFor, prefer: preferSurvivor }) : null
+    const decisions = identity ? [...identity.decisions, ...identity.merges] : stored
+    const limit = identity ? PUBLIC_INDEX_MAX_PROFILES : undefined
+    const renamed = new Set(usableProfileDecisions(decisions, limit === undefined ? {} : { limit }).filter(value => value.kind === 'rename').map(value => value.profileId))
+    return { result: applyProfileDecisions(snapshot, decisions, limit === undefined ? {} : { limit }), renamed }
   }
   const build = async () => {
     const legacy = await readLegacy()
@@ -328,7 +332,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const finalize = async snapshot => {
       for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
       for (const profile of snapshot.profiles) if (byLinkedin.has(profileLinkedinRef(profile))) evidence.add(profile.id)
-      const decided = await decide(snapshot, ownerMerges, members, verified)
+      const { result: decided, renamed } = await decide(snapshot, ownerMerges, members, verified, curated)
       const enriched = new Set([...evidence].map(id => decided.aliases?.[id] ?? id))
       // Enrichment fills the profiles shown, after every merge and removal, and
       // never members' or historical members' own words. Bounded, so a large
@@ -344,7 +348,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
         if (!row || own.has(profile.id)) return profile
         const supplemental = {}
         for (const key of ['linkedinUrl', 'website', 'industry']) if (!row[key] && profile[key]) supplemental[key] = profile[key]
-        return { ...row, ...supplemental, id: profile.id, name: profile.name }
+        return { ...row, ...supplemental, id: profile.id, ...(renamed.has(profile.id) ? { name: profile.name } : {}) }
       })
       const curatedResult = { ...decided, profiles: enrichedProfiles }
       let budget = linkedinEnrichmentTextBudget

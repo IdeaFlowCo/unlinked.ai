@@ -416,8 +416,21 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       catch { throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
       const normalized = q.normalize('NFKC').trim().toLowerCase()
       const rows = network.assertions.filter(row => row.category === 'connections'), entries = rows.map(connectionEntry)
-      const identityReader = typeof readPublishedSnapshot === 'function' ? createPublicPeopleReader({ readPublishedSnapshot }) : null
-      const { groups, published } = await groupConnectionRows(rows, entries, { lookupSlug: typeof lookupSlug === 'function' ? lookupSlug : null, lookup: identityReader ? ids => identityReader.lookup({ ids, signal }) : null })
+      const identityReader = typeof readPublishedSnapshot === 'function' ? createPublicPeopleReader({ readPublishedSnapshot, reuse: true }) : null
+      const addressLookups = new Map()
+      const publishedSlug = slug => {
+        if (!addressLookups.has(slug)) addressLookups.set(slug, (async () => {
+          if (identityReader) {
+            try {
+              const match = await identityReader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(slug)}`, signal })
+              if (match) return match.id
+            } catch {}
+          }
+          return typeof lookupSlug === 'function' ? lookupSlug(slug) : null
+        })())
+        return addressLookups.get(slug)
+      }
+      const { groups, published } = await groupConnectionRows(rows, entries, { lookupSlug: publishedSlug, lookup: identityReader ? ids => identityReader.lookup({ ids, signal }) : null })
       let listed
       if (grouping === 'none') listed = entries.map((entry, index) => ({ id: entry.id, entry: { ...entry, ...profileStatus(published[index]) }, searchable: [entry], connectedAt: validTimestamp(rows[index].connectedAt), importedAt: validTimestamp(rows[index].importedAt) }))
       else {
