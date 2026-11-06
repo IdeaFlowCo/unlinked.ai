@@ -80,3 +80,8 @@ Roll it back with `UnlinkedPublicPeopleStore.revoke(<dataset>, <revision>)`.
 Imported profiles without a legacy id are enriched by LinkedIn address instead, from
 the LinkedIn-keyed datasets, filling empty fields only; see
 [imported profile enrichment](imported-profile-enrichment.md).
+
+## Cold-start warm-up (2026-11-06)
+
+On 2026-11-06 the People index was unavailable for about 7 minutes after a restart (People pages returned 503 from 10:16:02Z to 10:23:13Z). The startup warm-up gives up after 8 s and the build continues in the background, so the claim above that the first request never pays the rebuild holds only once a build exists. The main cold cost is re-reading every import's assertions: the detail cache lives in memory. `createMemberPublicIndex` now prefetches missing import details four imports at a time (`IMPORT_PREFETCH`) before its sequential loop. The loop still re-validates every source and is the only thing that uses the results, so a source that changed is still rejected. On a synthetic test this made the cold build about 2.8× faster. Two smaller fixes: overlay lookups use an id → position map, and edge de-duplication keys use string concatenation instead of `JSON.stringify`. Still open: the per-revision compile and per-build loops run on the main thread and stall every request while they run. Moving them to a worker thread is the next step.
+

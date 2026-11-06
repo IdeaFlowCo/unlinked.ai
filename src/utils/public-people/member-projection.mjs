@@ -108,6 +108,10 @@ const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.
 // `mergeSameLinkedin` folds published profiles that share one LinkedIn address
 // into one (linkedinIdentityMerges); `preferSurvivor(ids)` names the copy that
 // already holds the person's address so the survivor stays stable.
+// Imports whose details are fetched at once on a cold build (see build()).
+const IMPORT_PREFETCH = 4
+const detailKey = item => JSON.stringify([item.id, item.owner.ownerId, item.owner.userId, item.revision])
+const sourceValid = (resource, item) => Boolean(resource) && !resource.deleted && resource.sourceOwnerId === item.owner.ownerId && resource.sourceRevision === item.revision && resource.payload?.ownerId === item.owner.ownerId && resource.payload.id === item.id && permitted(resource.payload)
 export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, readConnectionPrivacy, onMemberPhotos, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!validEnrichmentDatasets(enrichmentDatasets)) throw Error('public_enrichment_datasets_invalid')
   if (!Array.isArray(linkedinEnrichmentDatasets) || !linkedinEnrichmentDatasets.every((value, index) => LINKEDIN_ENRICHMENT_DATASETS.includes(value) && linkedinEnrichmentDatasets.indexOf(value) === index) || typeof mergeSameLinkedin !== 'boolean' || typeof preferSurvivor !== 'function') throw Error('public_enrichment_datasets_invalid')
@@ -174,9 +178,30 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     // Which published profile stands for each account, for connection privacy.
     const profileFor = new Map(signupByOwner)
     const photoCandidates = new Map()
+    // After a restart the detail cache is empty and every import's assertions
+    // must be read again. Fetch them a few imports at a time first, instead of
+    // strictly one after another (the cold-start warm-up took ~7 minutes on
+    // 2026-11-06). Only a validated entry under the same key is stored; the
+    // loop below still re-checks every source and owns every failure.
+    if (includeDetails) {
+      const pending = items.filter(item => !detailCache.has(detailKey(item)))
+      let next = 0
+      await Promise.all(Array.from({ length: Math.min(IMPORT_PREFETCH, pending.length) }, async () => {
+        while (next < pending.length) {
+          const item = pending[next++]
+          try {
+            const backend = await getBackend(item.owner), resource = await backend.readResource('import', item.id)
+            if (!sourceValid(resource, item)) continue
+            const read = createScopedImportReader({readResource:backend.readResource,readAsset:backend.readAsset,grant:{ownerId:item.owner.ownerId,importIds:[item.id]}})
+            const imported = await read(item.id)
+            detailCache.set(detailKey(item), projectPublicMemberImport({job:resource.payload,assertions:imported.assertions,includeDetails:true}))
+          } catch { /* the loop below reads it again and reports the failure */ }
+        }
+      }))
+    }
     for (const item of items) {
       const backend = await getBackend(item.owner), resource = await backend.readResource('import',item.id)
-      if (!resource || resource.deleted || resource.sourceOwnerId !== item.owner.ownerId || resource.sourceRevision !== item.revision || resource.payload?.ownerId !== item.owner.ownerId || resource.payload.id !== item.id || !permitted(resource.payload)) throw Error('public_member_source_changed')
+      if (!sourceValid(resource, item)) throw Error('public_member_source_changed')
       const dataset = 'public-import-' + item.id
       let snapshot = await publicPeople.read(dataset)
       if (!snapshot) {
@@ -190,7 +215,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       // owner-scoped reader. Cache only the professional DTO, not raw assertions.
       // Every reuse remains behind the live owner/revision checks above/below.
       if (includeDetails) {
-        const key = JSON.stringify([item.id, item.owner.ownerId, item.owner.userId, item.revision])
+        const key = detailKey(item)
         if (!detailCache.has(key)) {
           const read = createScopedImportReader({readResource:backend.readResource,readAsset:backend.readAsset,grant:{ownerId:item.owner.ownerId,importIds:[item.id]}})
           const imported = await read(item.id)
@@ -283,7 +308,8 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       for (const older of ordered.slice(1)) { members.delete(older.id); ownerMerges.push({ id: `owner:${older.id}`, kind: 'merge', profileId: older.id, survivorId: ordered[0].id }) }
     }
     for (const check of linkedChecks) await check()
-    for (const [id, value] of overlays) { const index = profiles.findIndex(profile => profile.id === id); const previous = profiles[index]; profiles[index] = { ...value.profile, ...(!value.profile.linkedinUrl && previous.linkedinUrl ? {linkedinUrl:previous.linkedinUrl} : {}) }; if (value.profile.linkedinUrl) verified.add(id) }
+    const positionOf = overlays.size ? new Map(profiles.map((profile, index) => [profile.id, index])) : null
+    for (const [id, value] of overlays) { const index = positionOf.get(id) ?? -1; const previous = profiles[index]; profiles[index] = { ...value.profile, ...(!value.profile.linkedinUrl && previous.linkedinUrl ? {linkedinUrl:previous.linkedinUrl} : {}) }; if (value.profile.linkedinUrl) verified.add(id) }
     if (typeof readInviteEdges === 'function') {
       const known = new Set(profiles.map(value => value.id)), edges = (await readInviteEdges()).filter(edge => known.has(edge.fromId) && known.has(edge.toId))
       // An accepted invitation is a connection both people chose, so it counts
@@ -293,7 +319,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       revisions.push('invites:' + hash(JSON.stringify(edges.map(edge => [edge.fromId, edge.toId]).sort())))
     }
     // Replayed source edges are canonicalized without changing their receipts.
-    const uniqueConnections = [...new Map(connections.map(edge => [JSON.stringify([edge.fromId, edge.toId]), edge])).values()]
+    const uniqueConnections = [...new Map(connections.map(edge => [`${edge.fromId}\u0000${edge.toId}`, edge])).values()]
     if (uniqueConnections.length > PUBLIC_INDEX_MAX_CONNECTIONS) throw Error('shared_public_capacity_limit')
     const finalize = async snapshot => {
       for (const id of snapshot.legacyMembers ?? []) if (members.has(id)) verified.add(id)
