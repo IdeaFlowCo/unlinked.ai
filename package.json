@@ -1,6 +1,6 @@
 {
   "name": "aili3",
-  "version": "0.6.89",
+  "version": "0.6.90",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "test": "node --test tests/*.test.mjs",
+    "test:index-worker": "node --import ./tests/helpers/with-index-worker.mjs --test --test-skip-pattern=\"suggestions reuse a recent verified index\" tests/public-people-reader.test.mjs tests/public-people-cache.test.mjs tests/public-people-errors.test.mjs tests/profile-connections.test.mjs tests/company-pages.test.mjs tests/connection-privacy.test.mjs tests/profile-mutuals.test.mjs tests/people-filters.test.mjs tests/directory-presence.test.mjs tests/ios-app-directory.test.mjs tests/imported-profile-addresses.test.mjs tests/linkedin-person-lookup.test.mjs tests/omni-search.test.mjs tests/public-people-warmup.test.mjs tests/removal-requests.test.mjs tests/profile-decisions.test.mjs tests/internal-links.test.mjs tests/network-controls.test.mjs tests/legacy-membership.test.mjs tests/public-index-worker.test.mjs",
     "embed-profiles": "ts-node --esm src/scripts/embedProfilesScript.ts"
   },
   "dependencies": {
