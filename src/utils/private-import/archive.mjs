@@ -154,7 +154,8 @@ function* csvRecords(text) {
 export function parseSource(source, budget = { remaining: LIMITS.rows }, limitError = 'csv_row_limit') {
   const filename = source.path.split('/').pop().toLowerCase()
   // A CSV uploaded on its own is often renamed ("Connections (1).csv",
-  // "Connections_sans_email.csv"); ZIP entries keep LinkedIn's exact names.
+  // "Connections_sans_email.csv"); ZIP entries keep LinkedIn's names, plus
+  // numbered Connections parts (see categoryKey).
   const key = categoryKey(filename, { direct: source.direct })
   const spec = key ? categories[key] : undefined
   const base = { path: source.path, sha256: digest(source.bytes), bytes: source.bytes.length, category: spec?.category ?? 'unsupported', accepted: [], rejected: [], skipped: !spec }
