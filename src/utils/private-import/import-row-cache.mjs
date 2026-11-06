@@ -10,31 +10,42 @@
 // tombstoned or republished import is never served from here.
 //
 // Rows are only tombstoned individually while the owner's whole account data
-// is erased (account-data.mjs), which calls forgetOwner first; the generation
-// counter stops a fill that started before that from re-inserting its rows.
+// is erased (account-data.mjs), which wraps the erase in beginErase/endErase:
+// while an owner is erasing the cache is bypassed entirely (reads go to the
+// live store), and the generation counter discards any fill that started
+// before. Any future path that tombstones individual rows must do the same.
 export const IMPORT_ROW_CACHE_MAX_ROWS = 60000
+// Rows can be large (asset-backed observations), so bytes are capped too.
+export const IMPORT_ROW_CACHE_MAX_BYTES = 64 * 1024 * 1024
 export const IMPORT_ROW_CACHE_TTL_MS = 30 * 60 * 1000
 const FILL_TIMEOUT_MS = 180000
 
-export function createImportRowCache({ maxRows = IMPORT_ROW_CACHE_MAX_ROWS, ttlMs = IMPORT_ROW_CACHE_TTL_MS, now = () => Date.now() } = {}) {
-  if (!Number.isSafeInteger(maxRows) || maxRows < 0 || !Number.isSafeInteger(ttlMs) || ttlMs < 1) throw new Error('import_row_cache_configuration_invalid')
+export function createImportRowCache({ maxRows = IMPORT_ROW_CACHE_MAX_ROWS, maxBytes = IMPORT_ROW_CACHE_MAX_BYTES, ttlMs = IMPORT_ROW_CACHE_TTL_MS, now = () => Date.now() } = {}) {
+  if (!Number.isSafeInteger(maxRows) || maxRows < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 0 || !Number.isSafeInteger(ttlMs) || ttlMs < 1) throw new Error('import_row_cache_configuration_invalid')
   const entries = new Map() // key -> { ownerId, ids, rows, at }; Map order is LRU order
   const inflight = new Map() // key -> Promise<{ ids, rows }>
   const generations = new Map() // ownerId -> integer
-  let total = 0
+  const erasing = new Map() // ownerId -> active erase count
+  let total = 0, totalBytes = 0
   const keyOf = (ownerId, importId, revision) => `${ownerId}\0${importId}\0${revision}`
   const generation = ownerId => generations.get(ownerId) ?? 0
-  const drop = key => { const entry = entries.get(key); if (entry) { total -= entry.rows.length; entries.delete(key) } }
+  const drop = key => { const entry = entries.get(key); if (entry) { total -= entry.rows.length; totalBytes -= entry.bytes; entries.delete(key) } }
   const store = (key, ownerId, value) => {
-    if (value.rows.length > maxRows) return
+    if (erasing.get(ownerId) || value.rows.length > maxRows) return
+    let bytes = 0
+    try { bytes = Buffer.byteLength(JSON.stringify(value.rows)) } catch { return }
+    if (bytes > maxBytes) return
     drop(key)
-    entries.set(key, { ownerId, ids: value.ids, rows: value.rows, at: now() })
-    total += value.rows.length
-    for (const oldest of entries.keys()) { if (total <= maxRows) break; drop(oldest) }
+    const at = now()
+    for (const [old, entry] of entries) if (at - entry.at > ttlMs) drop(old)
+    entries.set(key, { ownerId, ids: value.ids, rows: value.rows, bytes, at })
+    total += value.rows.length; totalBytes += bytes
+    for (const oldest of entries.keys()) { if (total <= maxRows && totalBytes <= maxBytes) break; drop(oldest) }
   }
   return {
     // Returns { ids, rows } for this exact owner/import/revision, or null.
     get(ownerId, importId, revision) {
+      if (erasing.get(ownerId)) return null
       const key = keyOf(ownerId, importId, revision), entry = entries.get(key)
       if (!entry) return null
       if (now() - entry.at > ttlMs) { drop(key); return null }
@@ -46,6 +57,8 @@ export function createImportRowCache({ maxRows = IMPORT_ROW_CACHE_MAX_ROWS, ttlM
     // The caller's own signal bounds only its wait.
     async load(ownerId, importId, revision, fill, signal) {
       signal?.throwIfAborted()
+      // Mid-erase: read live, exactly like an uncached reader, and keep nothing.
+      if (erasing.get(ownerId)) return fill(signal)
       const key = keyOf(ownerId, importId, revision)
       let pending = inflight.get(key)
       if (!pending) {
@@ -69,7 +82,13 @@ export function createImportRowCache({ maxRows = IMPORT_ROW_CACHE_MAX_ROWS, ttlM
       for (const [key, entry] of entries) if (entry.ownerId === ownerId) drop(key)
       for (const key of inflight.keys()) if (key.startsWith(`${ownerId}\0`)) inflight.delete(key)
     },
-    stats: () => ({ entries: entries.size, rows: total, inflight: inflight.size }),
+    beginErase(ownerId) { erasing.set(ownerId, (erasing.get(ownerId) ?? 0) + 1); this.forgetOwner(ownerId) },
+    endErase(ownerId) {
+      this.forgetOwner(ownerId)
+      const left = (erasing.get(ownerId) ?? 1) - 1
+      if (left > 0) erasing.set(ownerId, left); else erasing.delete(ownerId)
+    },
+    stats: () => ({ entries: entries.size, rows: total, bytes: totalBytes, inflight: inflight.size }),
   }
 }
 

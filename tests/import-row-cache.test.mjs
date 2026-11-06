@@ -83,8 +83,10 @@ test('account erase drops cached rows, and an in-flight fill cannot re-insert th
   await filling
   assert.equal(cache.stats().rows, 0, 'the fill that raced the erase was discarded')
   await network(f, cache).readNetwork()
-  await deleteAccountData({ owner, backend: f.backend, jobs: [{ id: f.importId, assertionIds: f.ids, sources: [], revision: 0 }], rowCache: cache })
+  await deleteAccountData({ owner, backend: f.backend, jobs: [{ ...structuredClone(f.resources.get(f.importId)), sourceId: f.importId }], rowCache: cache })
   assert.equal(cache.stats().rows, 0)
+  assert.ok(f.resources.get(f.ids[0]).deleted, 'the erase really tombstoned rows')
+  await assert.rejects(network(f, cache).readNetwork(), /private_import_not_found/)
 })
 
 test('a caller that hits its deadline still leaves a warm cache for the retry', async () => {
@@ -132,7 +134,7 @@ test('the cache is bounded by total rows (LRU) and by age', async () => {
   const cache = createImportRowCache({ maxRows: 100, ttlMs: 1000, now: () => clock })
   const one = fixture({ rows: 60, importSeed: 'one' }), two = fixture({ rows: 60, importSeed: 'two' })
   await network(one, cache).readNetwork(); await network(two, cache).readNetwork()
-  assert.deepEqual(cache.stats(), { entries: 1, rows: 60, inflight: 0 })
+  assert.equal(cache.stats().entries, 1); assert.equal(cache.stats().rows, 60)
   await network(one, cache).readNetwork()
   assert.equal(one.reads.assertion, 120, 'least recently used was evicted and re-read')
   await network(one, cache).readNetwork()
@@ -146,4 +148,45 @@ test('the per-caller row limit still applies to cached rows', async () => {
   const f = fixture({ rows: 30 }), cache = createImportRowCache()
   await network(f, cache).readNetwork()
   await assert.rejects(createAccountNetwork({ owner, getBackend: async () => f.backend, rowCache: cache, observationLimit: 10 }).readNetwork(), /account_observation_limit/)
+})
+
+test('while an owner is erasing, reads bypass the cache and nothing is stored', async () => {
+  const f = fixture({ rows: 12 }), cache = createImportRowCache()
+  await network(f, cache).readNetwork()
+  cache.beginErase(owner.ownerId)
+  assert.equal(cache.stats().rows, 0)
+  const before = f.reads.assertion
+  await network(f, cache).readNetwork()
+  assert.equal(f.reads.assertion - before, 12, 'mid-erase reads are live')
+  assert.equal(cache.stats().rows, 0, 'and are not cached')
+  // A row tombstoned mid-erase is refused exactly like an uncached read.
+  f.resources.set(f.ids[0], { ...f.resources.get(f.ids[0]), deleted: true, payload: null })
+  await assert.rejects(network(f, cache).readNetwork(), /private_publication_incomplete/)
+  cache.endErase(owner.ownerId)
+  f.resources.set(f.importId, { ...f.resources.get(f.importId), deleted: true, payload: null })
+  await assert.rejects(network(f, cache).readNetwork(), /private_import_not_found/)
+  assert.equal(cache.stats().rows, 0)
+})
+
+test('deleteAccountData bypasses the cache for its whole run', async () => {
+  const f = fixture({ rows: 8 }), cache = createImportRowCache()
+  await network(f, cache).readNetwork()
+  const write = f.backend.writeBatch
+  let midEraseRead = null
+  f.backend.writeBatch = async items => { if (!midEraseRead) midEraseRead = await network(f, cache).readNetwork().then(() => 'served', error => error.message); return write(items) }
+  await deleteAccountData({ owner, backend: f.backend, jobs: [{ ...structuredClone(f.resources.get(f.importId)), sourceId: f.importId }], rowCache: cache })
+  assert.equal(cache.stats().rows, 0)
+  assert.equal(cache.stats().entries, 0)
+  assert.ok(midEraseRead, 'a read happened during the erase')
+  await assert.rejects(network(f, cache).readNetwork())
+})
+
+test('the cache is bounded by bytes as well as rows', async () => {
+  const cache = createImportRowCache({ maxBytes: 4000 })
+  const small = fixture({ rows: 10, importSeed: 'small' }), big = fixture({ rows: 200, importSeed: 'big' })
+  await network(big, cache).readNetwork()
+  assert.equal(cache.stats().entries, 0, 'an import larger than the byte cap is not stored')
+  await network(small, cache).readNetwork()
+  assert.equal(cache.stats().entries, 1)
+  assert.ok(cache.stats().bytes > 0 && cache.stats().bytes <= 4000)
 })

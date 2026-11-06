@@ -55,10 +55,10 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
 // Content is erased first and each job last, so an interrupted run stays
 // discoverable through the job listing and can simply be run again.
 export async function deleteAccountData({ rowCache = sharedImportRowCache, ...input }) {
-  // Rows are tombstoned before their import, so cached rows are dropped before
-  // erasing and again after, discarding any fill that raced the erase.
-  rowCache?.forgetOwner(input.owner.ownerId)
-  try { return await eraseAccountData(input) } finally { rowCache?.forgetOwner(input.owner.ownerId) }
+  // Rows are tombstoned before their import: the owner's cache is bypassed
+  // for the whole erase and emptied before and after it.
+  rowCache?.beginErase(input.owner.ownerId)
+  try { return await eraseAccountData(input) } finally { rowCache?.endErase(input.owner.ownerId) }
 }
 
 async function eraseAccountData({ owner, backend, jobs, grantIds = [], signupLookup, signal }) {
