@@ -68,3 +68,48 @@ test('public identity comes only from the readable canonical URL; forged hash ID
   profiles = []; revision++
   assert.equal(await reader.linkedinRef({ id: profile.id }), null)
 })
+
+test('current public identity and owner source refs are reconciled without joining conflicts', async () => {
+  const f = fixture(), alice = grant('alice'), bob = grant('bob')
+  let profiles = [profile], writes = 0, rows = []
+  const oldSlug = 'old-source-address', oldRef = sha(oldSlug)
+  const readPublishedSnapshot = async () => ({ state: 'published', complete: true, revision: 'current', profiles, connections: [] })
+  const overlay = { request: async (identity, method, path, body) => {
+    if (method !== 'GET' && path !== 'lookup') writes++
+    return f.options.overlay.request(identity, method, path, body)
+  } }
+  const service = createAccountToolService({ ...f.options, overlay, readPublishedSnapshot,
+    lookupSlug: async value => value === oldSlug ? profile.id : null,
+    getBackend: async who => ({ ...await f.getBackend(who), listImportIds: async () => [],
+      readMemberConnections: async () => who.ownerId === 'alice' ? [{ requestId: 'accepted', name: 'Person', publicProfileId: profile.id }] : [],
+      readLegacyObservations: async () => ({ assertions: who.ownerId === 'alice' ? rows : [] }) }) })
+  const call = (name, input, who = alice) => service.call({ grant: who, name, input }).then(value => value.result)
+  const identity = await f.options.identityFor(alice)
+  const publicEntity = (await overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'Private', refs: [`linkedin:in:${ref}`] })).body.entity
+  const before = writes
+  for (const subject of [profile.id, `https://linkedin.com/in/${slug}`]) {
+    assert.deepEqual((await call('unlinked_get_person_private', { profileId: subject })).entities.map(e => e.id), [publicEntity.id])
+    assert.deepEqual((await call('unlinked_get_person_private', { profileId: subject }, bob)).entities, [])
+  }
+  const context = createPrivateContext({ identityFor: f.options.identityFor, lookupContact: (who, input) => call('unlinked_lookup_contact', input, who),
+    overlay: { lookup: async (who, value) => (await overlay.request(who, 'POST', 'lookup', { ref: value })).body?.entity ?? null } })
+  assert.equal((await context.forProfile(alice, profile.id)).entities[0].id, publicEntity.id)
+  assert.equal(writes, before)
+  // An explicit source target can carry a different owner-import identity.
+  rows = [{ id: 'source-row', category: 'connections', fields: { 'first name': 'Source', url: `https://linkedin.com/in/${oldSlug}` }, provenance: { source: 'recovered-legacy-public-v1', toId: profile.id } }]
+  const sourceEntity = (await overlay.request(identity, 'POST', 'entities', { kind: 'person', name: 'Other', refs: [`linkedin:in:${oldRef}`] })).body.entity
+  const sourceLookup = await call('unlinked_lookup_contact', { connectionId: 'source-row' })
+  assert.equal(sourceLookup.contact.linkedinRefHash, ref)
+  assert.equal(sourceLookup.contact.sourceLinkedinRefHash, oldRef)
+  assert.deepEqual(new Set((await call('unlinked_get_person_private', { profileId: 'source-row' })).entities.map(e => e.id)), new Set([sourceEntity.id, publicEntity.id]))
+  const beforeConflict = writes
+  for (const subjectId of ['source-row', profile.id, `https://linkedin.com/in/${slug}`]) await assert.rejects(call('unlinked_add_private_note', { subjectKind: 'unlinked', subjectId, text: 'Ambiguous' }), e => e.code === 'identity_conflict')
+  assert.equal(writes, beforeConflict)
+  rows = []
+  for (const linkedinUrl of [`https://linkedin.com/in/${oldSlug}`, `https://linkedin.com/in/${slug}`]) {
+    profiles = [{ ...profile, linkedinUrl: undefined }]
+    await assert.rejects(call('unlinked_get_person_private', { profileId: linkedinUrl }), e => e.code === 'not_found')
+  }
+  profiles = [{ ...profile, linkedinUrl: 'https://linkedin.com/in/changed-address' }]
+  await assert.rejects(call('unlinked_get_person_private', { profileId: `https://linkedin.com/in/${slug}` }), e => e.code === 'not_found')
+})
