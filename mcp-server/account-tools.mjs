@@ -1,7 +1,7 @@
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
+import { createAccountNetwork, withSearchDeadline } from '../src/utils/private-import/account-network.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE } from '../src/utils/public-people/reader.mjs'
 import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
@@ -506,12 +506,11 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       // single-argument call works on every grant that includes the tool.
       scope ??= scopeCoversPublic(grant.scope) ? 'everyone' : 'mine'
       if (typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'AI ranking is not configured.')
-      const combined = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)])
       if (scope === 'mine') {
         let result
-        try { result = await createAccountNetwork({ owner: { ownerId: grant.ownerId, userId: grant.userId }, getBackend, complete }).search({ query, signal: combined }) }
-        catch (error) { throw askFailure(error, combined) }
-        return { kind: 'unlinked_ai_search', scope: 'mine', mode: result.mode, considered: result.considered, indexed: result.indexed,
+        try { result = await createAccountNetwork({ owner: { ownerId: grant.ownerId, userId: grant.userId }, getBackend, complete }).askNetwork({ query, signal, budgetMs: timeoutMs }) }
+        catch (error) { throw askFailure(error, signal) }
+        return { kind: 'unlinked_ai_search', scope: 'mine', mode: result.mode, considered: result.considered, indexed: result.indexed, ...(result.partial ? { partial: true } : {}),
           matches: result.matches.map(match => ({ assertionId: match.assertionId, sourceId: match.sourceId, rowId: match.rowId,
             name: [match.fields?.['first name'], match.fields?.['last name']].filter(Boolean).join(' ').slice(0, 256),
             ...(match.fields?.position ? { headline: match.fields.position } : {}), ...(match.fields?.company ? { company: match.fields.company } : {}),
@@ -520,8 +519,8 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       if (!scopeCoversPublic(grant.scope)) throw new AccountToolError('scope_not_granted', 'This grant covers only the owner network; asking about everyone requires a public-scope grant.')
       if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
       let result
-      try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: combined }) }
-      catch (error) { throw askFailure(error, combined) }
+      try { result = await withSearchDeadline({ signal, budgetMs: timeoutMs, label: 'ai_search' }, ({ deadline }) => createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: deadline })) }
+      catch (error) { throw askFailure(error, signal) }
       return { kind: 'unlinked_ai_search', scope: 'everyone', mode: result.mode, revision: result.revision, considered: result.considered,
         lexicalMatches: result.lexicalMatches, modelCandidates: result.modelCandidates, matches: result.matches, visibility: 'public' }
     },
