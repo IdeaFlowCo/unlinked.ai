@@ -10,6 +10,7 @@ import { SEARCH_MODES, companyPageName, createQueryMatcher, rankMatches, words }
 import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-index.mjs'
 import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
 import { connectionPolicies, createConnectionVisibility } from './connection-privacy.mjs'
+import { activePublicIndexHost } from './index-host.mjs'
 
 export class PublicPeopleReaderError extends Error {
   constructor(status, code) { super(code); this.name = 'PublicPeopleReaderError'; this.status = status; this.code = code }
@@ -108,7 +109,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   // off the request path, so no keystroke waits for it.
   const hold = value => {
     latest = { data: value, at: now() }
-    if (suggestStaleMs > 0 && !suggestIndexes.has(value)) setImmediate(() => { try { suggestIndexFor(value) } catch { /* built on demand instead */ } })
+    if (suggestStaleMs > 0 && !value.remote && !suggestIndexes.has(value)) setImmediate(() => { try { suggestIndexFor(value) } catch { /* built on demand instead */ } })
   }
   const age = () => latest ? now() - latest.at : Infinity
   const refresh = () => { if (!inflight) snapshot().catch(() => {}) }
@@ -138,6 +139,14 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const source = typeof readPublishedSnapshot.compiledSource === 'function' ? readPublishedSnapshot.compiledSource : readPublishedSnapshot
       const cacheable = viewer === null && source.revisionIdentifiesContent === true && plain(value) && revisionValid(value.revision)
       const cacheKey = cacheable ? [value.revision, maxProfiles, maxConnections, maxTextBytes].join('\u0000') : null
+      // With an index host (index-host.mjs) a worker compiles and keeps the
+      // index; this reader keeps only a descriptor and sends it each call.
+      const host = cacheable ? activePublicIndexHost() : null
+      if (host?.available()) {
+        const sourceKey = host.sourceKey(source)
+        await host.ensure(sourceKey, cacheKey, value, { maxProfiles, maxConnections, maxTextBytes })
+        return { remote: { host, sourceKey, cacheKey }, revision: value.revision }
+      }
       if (cacheable && compiled.get(source)?.key === cacheKey) return compiled.get(source).data
       let textBytes = 0
       const text = (input, required = false, nonempty = false) => {
@@ -311,6 +320,56 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     const nextCursor = offset + pageSize < rows.length ? Buffer.from(JSON.stringify({ v: 1, scope: hash(scope), revision, offset: offset + pageSize })).toString('base64url') : undefined
     return { profiles, ...(nextCursor ? { nextCursor } : {}) }
   }
+  // Rows that carry a photo, per method, so photos stay resolved on this side
+  // (their publication is live and not part of the index revision).
+  // Rows arrive as fresh copies; frozen like compiled rows, so a caller can no
+  // more change one than it could an in-process index row.
+  const out = row => withPhoto(deepFreeze(row))
+  const withPhotos = (method, result) => {
+    if (result === null || result === undefined) return result
+    switch (method) {
+      case 'suggest': return { ...result, people: result.people.map(out) }
+      case 'list': return { ...result, profiles: result.profiles.map(out) }
+      case 'company': return { ...result, people: result.people.map(out) }
+      case 'neighbors': return result.map(out)
+      case 'lookupLinkedin': return out(result)
+      case 'lookup': return new Map([...result].map(([key, row]) => [key, out(row)]))
+      case 'card': { if (!result.card) return result; const { mutual, ...summary } = result.card; return { card: { ...out(summary), ...(mutual === undefined ? {} : { mutual }) } } }
+      case 'profile': {
+        if (!result.profile) return result
+        const { connectionCount, connectionsTotal, connectionFacets, mutual, connections, nextConnectionsCursor, ...detail } = result.profile
+        return { profile: { ...out(detail), connectionCount, connectionsTotal, connectionFacets, ...(mutual ? { mutual: { ...mutual, preview: mutual.preview.map(out) } } : {}), connections: connections.map(out), ...(nextConnectionsCursor ? { nextConnectionsCursor } : {}) } }
+      }
+      default: return result
+    }
+  }
+  const asReaderError = error => error instanceof PublicPeopleReaderError ? error : new PublicPeopleReaderError(error?.status === 400 ? 400 : 503, error?.status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable')
+  // Run `method` in the index worker against the snapshot descriptor `data`.
+  // A worker that no longer holds that index (restarted, or the revision
+  // aged out) answers `stale`: read and install once more, then retry once.
+  async function remote(method, request, data, retried = false) {
+    const { signal, ...rest } = request
+    const { host, sourceKey, cacheKey } = data.remote
+    const call = host.call(sourceKey, cacheKey, { pageSize, limits: { maxProfiles, maxConnections, maxTextBytes } }, method, rest)
+    let result
+    try {
+      result = await (signal ? new Promise((resolve, reject) => {
+        const abort = () => reject(new PublicPeopleReaderError(503, 'public_people_unavailable'))
+        if (signal.aborted) { abort(); return }
+        signal.addEventListener('abort', abort, { once: true })
+        call.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+      }) : call)
+    } catch (error) {
+      if (error?.stale && !retried) {
+        if (kept === data) kept = null
+        if (latest?.data === data) latest = null
+        const fresh = method === 'suggest' ? await recent(signal) : await snapshot(signal)
+        if (fresh.remote) return remote(method, request, fresh, true)
+      }
+      throw asReaderError(error)
+    }
+    return withPhotos(method, result)
+  }
   return {
     // Start loading the index (e.g. when the search field gains focus) so the
     // first keystroke finds it ready. Never waits and never returns data.
@@ -323,7 +382,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const groups = groupsValue(unlistedGroups)
       const search = queryValue(query)
       if (search.length < 2 || !words(search).length) return { people: [], companies: [] }
-      const data = await recent(signal), index = suggestIndexFor(data)
+      const data = await recent(signal)
+      if (data.remote) return remote('suggest', request, data)
+      const index = suggestIndexFor(data)
       return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known, listed: listedFor(data.unlisted, groups) }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
     },
     async list(request = {}) {
@@ -340,10 +401,12 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // The presence filter and exclusions are part of the cursor scope, so a page never mixes filters.
       const filter = `${enrichmentStatus ? `enrichment=${enrichmentStatus}:` : ''}${presence ? `${presence}:` : ''}${sort === 'best' ? '' : `sort=${sort}:`}${groupScope(groups)}${Object.keys(filters).length ? `filters=${hash(JSON.stringify(filters))}:` : ''}${networkSeeds ? `network=${hash(JSON.stringify([networkSelf, [...networkSeeds].sort(), viewerScope(viewer)]))}:` : ''}`
       const data0 = exclude.length ? await snapshot(signal) : null
+      if (data0?.remote) return remote('list', request, data0)
       const excluded = data0 ? new Set(exclude.map(id => data0.aliases.get(id) ?? id)) : null
       const without = excluded?.size ? `x=${hash([...excluded].sort().join('\n'))}:` : ''
       const scope = matcher ? `list:${filter}${without}${mode}:${normalizedQuery}` : `list:${filter}${without}`
       const decodedCursor = cursorValue(cursor, scope), data = data0 ?? await snapshot(signal)
+      if (data.remote) return remote('list', request, data)
       // A snapshot that does not name its members has no presence, so it matches no filter.
       const listed = listedFor(data.unlisted, groups)
       const degrees = networkSeeds ? connectionDegrees({ seeds: networkSeeds.map(id => data.aliases.get(id) ?? id), self: data.aliases.get(networkSelf) ?? networkSelf, connected: data.connected, visible: visibilityFor(data, viewer).visible }) : null
@@ -368,6 +431,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const scope = `connections:${id}${sort === 'name' && !search && !show ? '' : `:${sort}:${search}${narrowed}`}${viewerScope(viewer)}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
       if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
+      if (data.remote) return remote('profile', request, data)
       if (data.aliases.has(id)) return { moved: data.aliases.get(id) }
       if (!data.details.has(id)) return null
       const visibility = visibilityFor(data, viewer)
@@ -394,6 +458,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { id, signal, known } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id) || (known !== undefined && !(known instanceof Set))) invalid()
       const data = await snapshot(signal)
+      if (data.remote) return remote('card', request, data)
       const resolved = data.aliases.get(id) ?? id, visibility = visibilityFor(data, viewer)
       const summary = data.summaries.get(resolved)
       if (!summary) return null
@@ -407,6 +472,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { id, signal } = requestValue(request)
       if (!idValid(id)) invalid()
       const data = await snapshot(signal)
+      if (data.remote) return remote('unlistedGroup', request, data)
       const resolved = data.aliases.get(id) ?? id
       return data.unlisted.has(resolved) ? data.unlisted.get(resolved) : undefined
     },
@@ -414,12 +480,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     async suspended(request = {}) {
       const { id, signal } = requestValue(request)
       if (!idValid(id)) invalid()
-      return (await snapshot(signal)).suspended.has(id)
+      const data = await snapshot(signal)
+      if (data.remote) return remote('suspended', request, data)
+      return data.suspended.has(id)
     },
     // Every suspended id and LinkedIn reference, as fresh sets.
     async suspensions(request = {}) {
       const { signal } = requestValue(request)
       const data = await snapshot(signal)
+      if (data.remote) return remote('suspensions', request, data)
       return { ids: new Set(data.suspended), refs: new Set(data.suspendedRefs) }
     },
     // What an address registry needs (docs/profile-handles.md): every
@@ -428,6 +497,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     async addresses(request = {}) {
       const { signal } = requestValue(request)
       const data = await snapshot(signal)
+      if (data.remote) return remote('addresses', request, data)
       return {
         revision: data.revision,
         profiles: data.ordered.map(summary => { const url = data.details.get(summary.id).linkedinUrl; return { id: summary.id, name: summary.name, presence: summary.presence ?? 'shadow', ...(url ? { linkedinUrl: url } : {}) } }),
@@ -440,13 +510,16 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { address, signal } = requestValue(request), parsed = parseLinkedinProfileUrl(address)
       if (!parsed) invalid()
       const data = await snapshot(signal)
+      if (data.remote) return remote('lookupLinkedin', request, data)
       const match = data.linkedinProfiles.get(parsed.slug)
       return match ? withPhoto(data.summaries.get(match.id)) : null
     },
     async linkedinProfileIds(request = {}) {
       const { id, signal } = requestValue(request)
       if (!idValid(id)) invalid()
-      const data = await snapshot(signal), resolved = data.aliases.get(id) ?? id
+      const data = await snapshot(signal)
+      if (data.remote) return remote('linkedinProfileIds', request, data)
+      const resolved = data.aliases.get(id) ?? id
       const detail = data.details.get(resolved)
       if (!detail) return []
       const parsed = parseLinkedinProfileUrl(detail.linkedinUrl)
@@ -458,7 +531,9 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     async linkedinRef(request = {}) {
       const { id, signal } = requestValue(request)
       if (!idValid(id)) invalid()
-      const data = await snapshot(signal), resolved = data.aliases.get(id) ?? id
+      const data = await snapshot(signal)
+      if (data.remote) return remote('linkedinRef', request, data)
+      const resolved = data.aliases.get(id) ?? id
       const parsed = parseLinkedinProfileUrl(data.details.get(resolved)?.linkedinUrl)
       return parsed ? hash(parsed.slug) : null
     },
@@ -468,6 +543,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { ids, signal, filters = {}, details = false, listedOnly = false } = requestValue(request)
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(idValid)) invalid()
       const data = await snapshot(signal)
+      if (data.remote) return remote('lookup', request, data)
       const resolved = id => data.aliases.get(id) ?? id
       const parsed = peopleFilters(filters), listed = listedFor(data.unlisted, new Set())
       return new Map(ids.filter(id => data.summaries.has(resolved(id)) && (!listedOnly || listed(resolved(id))) && matchesPeopleFilters(data.details.get(resolved(id)), parsed)).map(id => [id, withPhoto((details ? data.details : data.summaries).get(resolved(id)))]))
@@ -479,6 +555,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { fromId, toId, signal } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(fromId) || !idValid(toId)) invalid()
       const data = await snapshot(signal)
+      if (data.remote) return remote('linked', request, data)
       const from = data.aliases.get(fromId) ?? fromId, to = data.aliases.get(toId) ?? toId
       return from !== to && Boolean(data.connected.get(from)?.has(to)) && visibilityFor(data, viewer).visible(from, to)
     },
@@ -488,6 +565,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const { id, signal } = requestValue(request), viewer = viewerValue(request.viewer)
       if (!idValid(id)) invalid()
       const data = await snapshot(signal)
+      if (data.remote) return remote('neighbors', request, data)
       const from = data.aliases.get(id) ?? id
       const connected = data.connected.get(from), visibility = visibilityFor(data, viewer)
       return connected ? data.ordered.filter(person => connected.has(person.id) && visibility.visible(from, person.id)).map(withPhoto) : []
@@ -508,6 +586,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       }
       const scope = `company:${groupScope(groups)}${phrase.join(' ')}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
+      if (data.remote) return remote('company', request, data)
       const listed = listedFor(data.unlisted, groups)
       const rows = data.ordered.filter(person => listed(person.id) && data.tokens.get(person.id).companies.some(contains))
       const people = page(rows, decodedCursor, scope, data.revision)

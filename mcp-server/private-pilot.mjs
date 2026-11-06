@@ -17,6 +17,7 @@ import { createAccountToolService } from './account-tools.mjs'
 import { createOAuthServer } from './oauth-server.mjs'
 import { createPrivateContext } from './private-context.mjs'
 import { warmPublicPeopleIndex } from './public-people-warmup.mjs'
+import { createPublicIndexHost, installPublicIndexHost } from '../src/utils/public-people/index-host.mjs'
 
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
@@ -87,11 +88,16 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   server.requestTimeout = 120000
   server.headersTimeout = 15000
   server.maxHeadersCount = 32
+  // The public People index compiles and answers in a worker thread, off this
+  // event loop and heap (docs/public-people-reader.md). UNLINKED_PUBLIC_INDEX_WORKER=off
+  // compiles in-process as before; UNLINKED_PUBLIC_INDEX_WORKER_HEAP_MB caps the worker's heap.
+  const workerHeapMb = Number(process.env.UNLINKED_PUBLIC_INDEX_WORKER_HEAP_MB)
+  const indexHost = process.env.UNLINKED_PUBLIC_INDEX_WORKER === 'off' ? null : installPublicIndexHost(createPublicIndexHost({ ...(Number.isSafeInteger(workerHeapMb) && workerHeapMb >= 256 ? { resourceLimits: { maxOldGenerationSizeMb: workerHeapMb } } : {}) }))
   // Started before the cold build so warm-up heap and GC pauses are recorded.
-  const health = requestDiagnostics?.startRuntimeHealth?.() ?? null
+  const health = requestDiagnostics?.startRuntimeHealth?.({ extra: () => { if (!indexHost) return {}; const stats = indexHost.stats(); return { index_worker_heap_used_mb: stats.workerHeapUsedMb ?? undefined, index_worker_heap_limit_mb: stats.workerHeapLimitMb ?? undefined, index_worker_restarts: Math.max(0, stats.spawned - 1), index_worker_installs: stats.installs } } }) ?? null
   // Finish the cold public index build before accepting the first visitor.
   // Best effort: publication failure leaves account routes available.
   await warmPublicPeopleIndex({ readPublishedSnapshot })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve) })
-  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { health?.stop(); return new Promise(resolve => server.close(resolve)) } }
+  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { health?.stop(); if (indexHost) { installPublicIndexHost(null); void indexHost.close() } return new Promise(resolve => server.close(resolve)) } }
 }
