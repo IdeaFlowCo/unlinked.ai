@@ -34,10 +34,11 @@ export function createIdeaflowConnectorHandler({ secret, resolveOwner, getBacken
   const verify = createAssertionVerifier(secret), authenticated = new WeakMap()
   const authenticateGrant = async request => {
     const state = authenticated.get(request)
-    if (!state) return null
+    if (!state || state.identity.exp <= Math.floor(Date.now() / 1000)) return null
     const owner = await resolveOwner({ issuer: state.identity.identity_issuer, subject: state.identity.sub })
     if (!owner || owner.ownerId !== state.grant.ownerId || owner.userId !== state.grant.userId) return null
     await getBackend(owner) // live owner authorization; never trust assertion fields as local ids
+    if (state.identity.exp <= Math.floor(Date.now() / 1000)) return null
     return state.grant
   }
   const hosted = createAccountHostedHandler({ authenticateGrant, getBackend, complete, readPublishedSnapshot, origin, service })
