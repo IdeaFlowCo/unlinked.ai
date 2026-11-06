@@ -1,3 +1,4 @@
+import { createPrivateLists, PRIVATE_LIST_READ_TOOLS } from './private-lists.mjs'
 import { createPrivateListImports, LIST_TOOLS } from './private-list-imports.mjs'
 import { diagnosticTransport, requestDiagnostic } from './request-diagnostics.mjs'
 import { createIdeaflowConnectorHandler } from './ideaflow-connector.mjs'
@@ -51,7 +52,9 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   // owner through an in-process grant limited to those three tools.
   const privateListImports = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateListImports({
     call: async (owner, name, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: composeAccountScope({ privateNotes: true }), tools: [...LIST_TOOLS], agent: 'Unlinked import page', app: true }, name, input })).result }) : null
-  const browser = createPrivateBrowserHandler({ privateListImports, ideaflowProfiles, recordPublicAdmission: requestDiagnostics?.publicAdmission, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, savedSearchLists, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, getBackend, complete, readPublishedSnapshot,
+  const privateLists = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateLists({
+    call: async (owner, name, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: composeAccountScope({ privateNotes: true }), tools: [...PRIVATE_LIST_READ_TOOLS], agent: 'Unlinked lists page', app: true }, name, input })).result }) : null
+  const browser = createPrivateBrowserHandler({ privateLists, privateListImports, ideaflowProfiles, recordPublicAdmission: requestDiagnostics?.publicAdmission, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, savedSearchLists, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, getBackend, complete, readPublishedSnapshot,
     issueAccountGrant: accountGrants?.issueGrant, ensureAccountGrant: accountGrants?.ensureGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
     issueGrant: grants.issueGrant, mcpEndpoint: new URL('/mcp', base).href, dataMode, backgroundImports, audit,
     oauth: oauth ?? undefined, listAccountGrants: accountGrants?.listGrants, accountKeys: accountGrants, ...(lookupCompanyFacts ? { lookupCompanyFacts } : {}), profilePhotos, autoSignIn, privateContext })
