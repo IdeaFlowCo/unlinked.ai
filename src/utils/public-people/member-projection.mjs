@@ -308,7 +308,9 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
       for (const older of ordered.slice(1)) { members.delete(older.id); ownerMerges.push({ id: `owner:${older.id}`, kind: 'merge', profileId: older.id, survivorId: ordered[0].id }) }
     }
     for (const check of linkedChecks) await check()
-    const positionOf = overlays.size ? new Map(profiles.map((profile, index) => [profile.id, index])) : null
+    // First index per id, exactly as findIndex returned.
+    const positionOf = new Map()
+    if (overlays.size) profiles.forEach((profile, index) => { if (!positionOf.has(profile.id)) positionOf.set(profile.id, index) })
     for (const [id, value] of overlays) { const index = positionOf.get(id) ?? -1; const previous = profiles[index]; profiles[index] = { ...value.profile, ...(!value.profile.linkedinUrl && previous.linkedinUrl ? {linkedinUrl:previous.linkedinUrl} : {}) }; if (value.profile.linkedinUrl) verified.add(id) }
     if (typeof readInviteEdges === 'function') {
       const known = new Set(profiles.map(value => value.id)), edges = (await readInviteEdges()).filter(edge => known.has(edge.fromId) && known.has(edge.toId))
