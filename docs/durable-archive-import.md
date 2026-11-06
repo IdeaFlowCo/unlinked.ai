@@ -56,3 +56,29 @@ grant authority or block a valid callback.
 
 Parser `linkedin-archive-v7` added numbered Connections parts and headerless continuation parts. Receipts staged by v6 still run after an upgrade; they keep `parserVersion` and record `parsedWith`.
 
+## Worker observability
+
+The import worker reports to the private audit file (`audit/browser-events.jsonl`) and, as one JSON line
+under the `unlinkedImportWorker` key, to the runtime container log. Events carry a timestamp, the opaque
+import id when applicable, fixed lower-case codes and numbers; never names, emails, filenames or rows.
+
+| Event | When |
+|---|---|
+| `import_job_finished` | A run ends terminal: `status`, `phase`, `durationMs`, `accepted`, `rejected`, `indexed`, `failedFiles`, `sources` (and `attemptsBeforeSuccess` after failures). Once per job per process. |
+| `import_job_running_long` | A single run is still going after 10 minutes (`elapsedMs`), once per run. |
+| `import_worker_retry` | A run threw: `reason` (fixed code or `unknown`), `attempt`, `failingForMs`. Reported at attempts 1, 2, 4, 8, ... |
+| `import_worker_stuck` | The same job failed a fifth time in a row. Reported once. |
+| `import_job_not_runnable` | A pending job has an unsupported `backgroundVersion`; reported once per job per process. |
+| `import_worker_discovery_failed` | Listing pending jobs failed: `reason`, `attempt`, same 1, 2, 4, 8 throttle. |
+
+When the audit file would pass 8 MiB it is renamed to `browser-events.1.jsonl` (one previous file kept)
+and `private_audit_rotated` is logged. A single runtime process must own this audit file; it serializes
+all appends and rotations through one in-process queue with an inode check. Do not share the audit
+directory between runtime processes. The queue is limited to 64 writes, and each caller waits at most
+five seconds; timeouts and dropped writes are counted in rate-limited `private_audit_dropped` logs. Worker event delivery never waits for
+the audit write, and worker events remain available in the container log.
+
+Operator triage for a slow import: `docker logs <runtime> 2>&1 | grep unlinkedImportWorker | grep <import id>`.
+Absence of these events does not establish that a job was never picked up: it may still be running
+within the 10-minute threshold, deferred, or have started in a previous process. Discovery failures
+have no import id, so inspect the unfiltered worker log too.

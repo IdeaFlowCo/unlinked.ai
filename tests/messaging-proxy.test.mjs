@@ -254,9 +254,15 @@ test('typing is relayed only into a room OpenChat confirmed joining', async t =>
   const sockets = []
   const h = await harness(t, { sockets, upstream: { 'GET /api/chat/messages/since': () => [200, { messages: [] }] } })
   const response = await h.get('/messages/api/stream')
+  // readEvents cancels its stream once 'ready' arrives; with lingerMs 10 the
+  // link (and its joined rooms) would then close mid-test. A second stream,
+  // held open until the end, keeps the link alive.
+  const held = await h.get('/messages/api/stream')
+  t.after(() => held.body.cancel().catch(() => {}))
   const events = readEvents(response, list => list.some(event => event.event === 'ready'), 1000)
   for (let i = 0; i < 50 && !sockets.length; i++) await new Promise(resolve => setTimeout(resolve, 20))
   const socket = sockets[0]
+  assert.equal(sockets.length, 1, 'both streams share one upstream socket')
   assert.deepEqual(await (await h.post(`/messages/api/conversations/${CONV}/typing`, { active: true })).json(), { relayed: false })
   await h.post(`/messages/api/conversations/${CONV}/focus`, {})
   const sent = () => socket.emitted.filter(([event]) => event !== 'heartbeat').map(([event, id]) => `${event} ${id}`)

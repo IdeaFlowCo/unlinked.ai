@@ -635,3 +635,128 @@ test('the import form saves who can see your connections before staging; Setting
   assert.deepEqual(await privacy.get(owner), { audience: 'only_me', scope: 'all' })
   assert.match(await page('/settings?privacy=saved'), /Saved\.[\s\S]*Only you can see your connections\./)
 })
+
+test('worker reports a repeatedly failing job with a fixed reason, throttled, and flags it stuck once', async () => {
+  const events = []
+  let clock = 1000
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-1', owner: { ownerId: 'owner-a', userId: 'a' } }],
+    getBackend: async () => { throw new Error('private_noos_timeout') }, onError: event => { events.push(event) }, now: () => clock })
+  for (let i = 0; i < 9; i++) { await worker.tick(); clock += 2000 }
+  await worker.stop()
+  const retries = events.filter(e => e.event === 'import_worker_retry')
+  assert.deepEqual(retries.map(e => e.attempt), [1, 2, 4, 8])
+  assert.ok(retries.every(e => e.reason === 'private_noos_timeout' && e.importId === 'job-1'))
+  assert.equal(retries[3].failingForMs, 14000)
+  const stuck = events.filter(e => e.event === 'import_worker_stuck')
+  assert.equal(stuck.length, 1); assert.equal(stuck[0].attempt, 5)
+})
+
+test('worker never reports a free-text error message', async () => {
+  const events = []
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-1', owner: { ownerId: 'owner-a', userId: 'a' } }],
+    getBackend: async () => { throw new Error('shan') }, onError: event => { events.push(event) } })
+  await worker.tick(); await worker.stop()
+  assert.equal(events[0].reason, 'unknown')
+  assert.ok(!JSON.stringify(events).includes('shan'))
+})
+
+test('worker throttles discovery failures and reports a finished job with counts only', async t => {
+  const events = []
+  const failing = createArchiveWorker({ listPendingImports: async () => { throw new Error('private_noos_timeout') }, getBackend: async () => ({}), onError: event => { events.push(event) } })
+  for (let i = 0; i < 5; i++) await failing.tick()
+  await failing.stop()
+  assert.deepEqual(events.filter(e => e.event === 'import_worker_discovery_failed').map(e => [e.attempt, e.reason]), [[1, 'private_noos_timeout'], [2, 'private_noos_timeout'], [4, 'private_noos_timeout']])
+
+  const f = await fixture(t), a = f.backend('owner-a'), bytes = await fullArchive(3)
+  const job = await stageArchive({ ownerId: 'owner-a', filename: 'small.zip', bytes, adapter: a.adapter, consent: COMBINED_UPLOAD_CONSENT })
+  const done = []
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: job.id, owner: { ownerId: 'owner-a', userId: 'a' } }], getBackend: async () => a, onError: event => { done.push(event) } })
+  await worker.tick(); await worker.tick(); await worker.stop()
+  const finished = done.filter(e => e.event === 'import_job_finished')
+  assert.equal(finished.length, 1)
+  assert.equal(finished[0].status, 'indexed'); assert.equal(finished[0].indexed, 5)
+  assert.ok(Number.isInteger(finished[0].durationMs))
+  assert.deepEqual(Object.keys(finished[0]).sort(), ['accepted', 'durationMs', 'event', 'failedFiles', 'importId', 'indexed', 'phase', 'rejected', 'sources', 'status'])
+})
+
+
+test('unsupported jobs report once', async () => {
+  const events = [], item = { id: 'job', owner: { ownerId: 'owner-a' } }
+  const worker = createArchiveWorker({ listPendingImports: async () => [item], getBackend: async () => ({ adapter: {
+    withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ status: 'uploaded', backgroundVersion: 'unsupported' }) })
+  } }), onError: event => events.push(event) })
+  await worker.tick(); await worker.tick(); await worker.stop()
+  assert.equal(events.filter(event => event.event === 'import_job_not_runnable').length, 1)
+})
+
+test('a single slow run reports once and stops reporting after completion', async () => {
+  const events = []
+  let release
+  const blocked = new Promise(resolve => { release = resolve })
+  const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-slow', owner: { ownerId: 'owner-a' } }],
+    getBackend: async () => { await blocked; return { adapter: { withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ status: 'indexed', phase: 'private_observation_index_ready' }) }) } } },
+    slowAfterMs: 20, onError: event => events.push(event) })
+  const run = worker.tick()
+  await new Promise(resolve => setTimeout(resolve, 70))
+  release(); await run; await worker.stop()
+  const slow = events.filter(event => event.event === 'import_job_running_long')
+  assert.equal(slow.length, 1)
+  assert.equal(slow[0].importId, 'job-slow')
+  assert.ok(slow[0].elapsedMs >= 20)
+})
+
+
+test('lease-held returns do not reset consecutive failures', async () => {
+  const events = [], item = { id: 'job', owner: { ownerId: 'owner-a' } }
+  let leaseHeld = false
+  const worker = createArchiveWorker({ listPendingImports: async () => [item], getBackend: async () => {
+    if (!leaseHeld) throw new Error('private_noos_timeout')
+    return { adapter: { withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ ownerId: 'owner-a', status: 'parsing',
+      backgroundVersion: 'profile-first-v1', parserVersion: 'linkedin-archive-v7', lease: { id: 'other', expiresAt: Infinity } }) }) } }
+  }, onError: event => events.push(event) })
+  for (let i = 0; i < 5; i++) { leaseHeld = false; await worker.tick(); leaseHeld = true; await worker.tick() }
+  await worker.stop()
+  assert.deepEqual(events.filter(event => event.event === 'import_worker_retry').map(event => event.attempt), [1, 2, 4])
+  assert.equal(events.filter(event => event.event === 'import_worker_stuck').length, 1)
+})
+
+
+test('hanging event delivery does not hold the worker or owner coordination', async () => {
+  const jobs = [{ id: 'first', owner: { ownerId: 'owner-a' } }, { id: 'second', owner: { ownerId: 'owner-a' } }]
+  const handled = [], events = []
+  let held = 0
+  const worker = createArchiveWorker({ listPendingImports: async () => jobs,
+    coordination: { tryAcquireShared: () => { held++; return () => { held-- } } },
+    getBackend: async () => ({ adapter: { withImport: async (_owner, id, fn) => {
+      handled.push(id)
+      return fn({ getJob: async () => ({ status: 'indexed', phase: 'private_observation_index_ready' }) })
+    } } }), onError: event => { events.push(event); return new Promise(() => {}) } })
+  let timer
+  try {
+    await Promise.race([worker.tick(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('worker blocked on event delivery')), 1000) })])
+    await worker.stop()
+    assert.deepEqual(handled, ['first', 'second'])
+    assert.equal(held, 0)
+    assert.equal(events.length, 2)
+  } finally { clearTimeout(timer) }
+})
+
+
+test('failed imports report parsed source counts without changing saved receipts', async t => {
+  for (const unsupported of [false, true]) {
+    const f = await fixture(t), backend = f.backend('owner-a')
+    const bytes = unsupported ? await fullArchive(1) : Buffer.from('First Name,Last Name,URL\n,,\n')
+    const job = await stageArchive({ ownerId: 'owner-a', filename: unsupported ? 'input.zip' : 'Connections.csv', bytes, adapter: backend.adapter, consent: COMBINED_UPLOAD_CONSENT })
+    const adapter = unsupported ? { withImport: (owner, id, fn) => backend.adapter.withImport(owner, id, store =>
+      fn({ ...store, validatePublication: () => 'private_publication_support_limit' })) } : backend.adapter
+    const events = []
+    const worker = createArchiveWorker({ listPendingImports: async () => [{ id: job.id, owner: { ownerId: 'owner-a' } }],
+      getBackend: async () => ({ ...backend, adapter }), onError: event => events.push(event) })
+    await worker.tick(); await worker.stop()
+    const finished = events.find(event => event.event === 'import_job_finished')
+    assert.equal(finished.phase, unsupported ? 'unsupported_private_publication' : 'no_accepted_rows')
+    assert.equal(finished.sources, unsupported ? 3 : 1)
+    const saved = await backend.adapter.withImport('owner-a', job.id, store => store.getJob(job.id))
+    assert.deepEqual(saved.sources, [])
+  }
+})
