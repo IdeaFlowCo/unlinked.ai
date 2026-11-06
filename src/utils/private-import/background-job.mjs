@@ -8,7 +8,13 @@ const ownCategories = new Set(['profile', 'positions', 'education', 'skills'])
 const counts = () => ({ accepted: 0, rejected: 0, skippedFiles: 0, failedFiles: 0, indexed: 0 })
 const LEASE_MS = 180000
 // Only fixed lower-case codes leave the worker; never messages with data in them.
-const safeCode = value => typeof value === 'string' && /^[a-z0-9_]{1,64}$/.test(value) ? value : 'unknown'
+const codes = new Set(['private_worker_stopped', 'private_import_owner_invalid', 'private_archive_recovery_invalid', 'private_worker_discovery_limit',
+  'private_upload_consent_required', 'tombstone_conflict', 'verified_owner_required', 'private_import_deleted', 'private_import_not_found',
+  'private_noos_binding_not_found', 'private_noos_timeout', 'private_owner_mismatch', 'private_publication_incomplete',
+  'private_publication_support_limit', 'private_resource_key_invalid', 'private_asset_key_invalid', 'private_asset_invalid',
+  'private_observation_recovery_unavailable', ...Array.from({ length: 500 }, (_, i) => `private_noos_${i + 100}`)])
+const phases = new Set(['uploaded', 'parsing', 'failed', 'unsupported_private_publication', 'no_accepted_rows', 'staging_private_observations', 'private_observation_index_ready'])
+const safeCode = value => codes.has(value) ? value : 'unknown'
 const jobNumbers = job => ({ accepted: job.counts?.accepted ?? 0, rejected: job.counts?.rejected ?? 0, indexed: job.counts?.indexed ?? 0,
   failedFiles: job.counts?.failedFiles ?? 0, sources: Array.isArray(job.sources) ? job.sources.length : 0 })
 
@@ -45,7 +51,7 @@ export async function stageArchive({ ownerId, filename, bytes, adapter, consent,
 
 // CAS on every lease/progress receipt fences delayed publishers. Immutable
 // chunks may survive a crash, but search/MCP require the final job publication.
-export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Date.now, leaseId = randomUUID(), stopped = () => false }) {
+export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Date.now, leaseId = randomUUID(), stopped = () => false, onProgress = () => {} }) {
   return adapter.withImport(ownerId, id, async store => {
     let current = await store.getJob(id)
     if (!current || terminal(current) || current.backgroundVersion !== 'profile-first-v1') return current
@@ -58,6 +64,7 @@ export async function runArchiveJob({ ownerId, id, adapter, readAsset, now = Dat
         lease: { id: leaseId, expiresAt: now() + LEASE_MS } }
       await store.saveJob(next)
       current = next
+      onProgress()
     }
     await save({ status: 'parsing', phase: 'parsing', ...(current.parserVersion !== PARSER_VERSION ? { parsedWith: PARSER_VERSION } : {}) })
     const bytes = await readAsset(current.archiveSha256)
@@ -114,7 +121,7 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
   const scheduled = new Map(), ownerTails = new Map(), waiters = []
   // Per-job failure history, so a job that keeps failing is visible (reason,
   // attempt, first failure) instead of retrying silently every interval.
-  const failures = new Map(), finished = new Set()
+  const failures = new Map(), finished = new Set(), notRunnable = new Set()
   const notify = async event => { try { await onError(event) } catch {} }
   const slot = () => new Promise(resolve => {
     const enter = () => { active++; resolve(() => { active--; waiters.shift()?.() }) }
@@ -137,16 +144,16 @@ export function createArchiveWorker({ listPendingImports, getBackend, coordinati
         slow.unref?.()
         try {
           const backend = await getBackend(item.owner)
-          const result = await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed })
+          let progressed = false
+          const result = await runArchiveJob({ ownerId, id: item.id, adapter: backend.adapter, readAsset: backend.readAsset, now, stopped: () => closed, onProgress: () => { progressed = true } })
           const history = failures.get(key)
-          failures.delete(key)
+          if (progressed || (result && terminal(result))) failures.delete(key)
           if (result && terminal(result) && !finished.has(key)) {
-            if (finished.size > 5000) finished.clear()
             finished.add(key)
-            await notify({ event: 'import_job_finished', importId: item.id, status: result.status, phase: safeCode(result.phase),
+            await notify({ event: 'import_job_finished', importId: item.id, status: result.status, phase: phases.has(result.phase) ? result.phase : 'unknown',
               durationMs: now() - startedAt, ...jobNumbers(result), ...(history ? { attemptsBeforeSuccess: history.attempt } : {}) })
-          } else if (result && !terminal(result) && result.backgroundVersion !== 'profile-first-v1') {
-            // listPendingImports keeps returning a job this worker never runs.
+          } else if (result && !terminal(result) && result.backgroundVersion !== 'profile-first-v1' && !notRunnable.has(key)) {
+            notRunnable.add(key)
             await notify({ event: 'import_job_not_runnable', importId: item.id, reason: 'background_version_unsupported' })
           }
         } finally { clearTimeout(slow); release() }

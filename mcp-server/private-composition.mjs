@@ -262,7 +262,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await safetyReportStore?.initialize()
     const safetyReports = safetyReportStore ? createSafetyReports({ store: safetyReportStore, origin: base.origin,
       ...(emailSettings?.enabled ? { transport: emailTransportFactory({ apiKey: emailSettings.apiKey }), from: memberEmail?.from ?? null } : {}),
-      onError: importEvent }) : undefined
+      onError: event => audit({ ...event, at: new Date().toISOString() }) }) : undefined
     const sessionStore = typeof dependencies.createSessionStore === 'function' ? dependencies.createSessionStore(driver, 'neo4j') : null
     await sessionStore?.initialize()
     // Member blocks (docs/report-and-block.md): refuse connection requests either way.
@@ -455,10 +455,38 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           // dropping every later event, and say so in the container log. The
           // inode check stops a concurrent writer rotating the fresh file away.
           await descriptor.close(); descriptor = null
-          const live = join(directory, 'browser-events.jsonl'), current = await lstat(live).catch(() => null)
-          if (current && current.ino === stat.ino) {
-            await rename(live, join(directory, 'browser-events.1.jsonl'))
-            console.error(JSON.stringify({ event: 'private_audit_rotated', at: new Date().toISOString() }))
+          const live = join(directory, 'browser-events.jsonl'), lockPath = join(directory, 'browser-events.rotate.lock')
+          let lock
+          try {
+            lock = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
+            await lock.writeFile(String(process.pid))
+          } catch (error) {
+            if (error.code !== 'EEXIST') throw error
+            const reaperPath = lockPath + '.reaper'
+            let reaper
+            try {
+              reaper = await open(reaperPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
+              const info = await lstat(lockPath).catch(() => null)
+              if (info?.isFile() && Date.now() - info.mtimeMs > 60000) {
+                const pid = Number(await readFile(lockPath, 'utf8').catch(() => ''))
+                let alive = Number.isSafeInteger(pid) && pid > 0
+                if (alive) try { process.kill(pid, 0) } catch (probe) { if (probe.code === 'ESRCH') alive = false }
+                if (!alive) await rm(lockPath, { force: true })
+              }
+            } catch (reapError) { if (reapError.code !== 'EEXIST' && reapError.code !== 'ENOENT') throw reapError }
+            finally { if (reaper) { await reaper.close(); await rm(reaperPath, { force: true }) } }
+            await new Promise(resolve => setTimeout(resolve, 20))
+            return audit(event)
+          }
+          try {
+            const current = await lstat(live).catch(() => null)
+            if (current && current.dev === stat.dev && current.ino === stat.ino) {
+              await rename(live, join(directory, 'browser-events.1.jsonl'))
+              console.error(JSON.stringify({ event: 'private_audit_rotated', at: new Date().toISOString() }))
+            }
+          } finally {
+            await lock.close()
+            await rm(lockPath, { force: true })
           }
           return audit(event)
         }

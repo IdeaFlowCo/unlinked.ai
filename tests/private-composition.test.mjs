@@ -374,3 +374,26 @@ test('production dispatcher keeps profile recipient resolution separate from car
   assert.deepEqual(await profile.json(), { status: 'unclaimed', name: 'Public profile' })
   assert.equal(cardCalls, 1); assert.equal(profileCalls, 1)
 })
+
+
+test('composition initializes with a safety report store', async t => {
+  const { options } = await fixture(t)
+  options.modules.createSafetyReportStore = () => ({ initialize: async () => {} })
+  const dependencies = await createPrivatePilotDependencies(options)
+  t.after(dependencies.close)
+  assert.ok(dependencies)
+})
+
+
+test('concurrent audit rotations retain newly written events', async t => {
+  const { options } = await fixture(t)
+  const dependencies = await createPrivatePilotDependencies(options)
+  t.after(dependencies.close)
+  const directory = join(options.root, 'audit')
+  await dependencies.audit({ event: 'initial' })
+  await writeFile(join(directory, 'browser-events.jsonl'), 'x'.repeat(8 * 1024 * 1024), { mode: 0o600 })
+  await Promise.all(Array.from({ length: 12 }, (_, id) => dependencies.audit({ id })))
+  const live = await readFile(join(directory, 'browser-events.jsonl'), 'utf8')
+  assert.deepEqual(live.trim().split('\n').map(line => JSON.parse(line).id).sort((a, b) => a - b), Array.from({ length: 12 }, (_, id) => id))
+  assert.equal((await readFile(join(directory, 'browser-events.1.jsonl'))).length, 8 * 1024 * 1024)
+})
