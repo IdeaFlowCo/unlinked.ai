@@ -22,7 +22,8 @@ inside an already enabled private-notes permission.
    mapping, for example `{name:"Investor",linkedinUrl:"LinkedIn",company:"Firm",
    notes:["Comments"]}`. `firstName`, `lastName`, `email` and `title` are also
    supported. A names-only, single-column CSV is valid; malformed quoting is
-   rejected. The response includes a validation preview and `importId`.
+   rejected. The response includes an `importId`; a newly staged import also
+   includes a validation preview.
 2. Call `unlinked_resume_investor_import` with that `importId`. Each call commits
    10 rows by default (1–25 configurable). Repeat until `complete` or `partial`.
    When creating a list, the first successful resume returns its `listId`.
@@ -58,7 +59,7 @@ hold the source digest, mapping, list target, progress and one receipt per sourc
 row. Notes include the import id and row/field/part; membership receipts keep the
 entity/link/note ids. Different imports retain independent note contributions.
 No existing profile fields or manual notes are overwritten. A replay of identical
-bytes, mapping and list target reuses the import and never reapplies completed
+bytes, mapping, list name and list target reuses the import and never reapplies completed
 rows after the owner changes/deletes them.
 
 The private import catalog is separate from archive discovery, background workers,

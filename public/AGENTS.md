@@ -113,7 +113,8 @@ Public People presence and the historical-account reclaim boundary are owned by 
 
 ## Private investor/contact CSV lists
 
-With Private people notes & relations permission, call
+With Private people notes & relations permission, an agent can read investor
+CSVs you provide, including contact fields and private notes. Call
 `unlinked_stage_investor_csv(csv,listName,mapping,listId?)`, then repeat
 `unlinked_resume_investor_import(importId,batchSize?)` until complete or partial.
 Read original fields and outcomes with `unlinked_get_investor_import`, paging with
