@@ -47,6 +47,12 @@ jobs:
           fi
       - name: Run executable web and private OIDC/grant tests
         run: npm test
+      - name: Run reader suites through the public index worker
+        # The same reader tests with every cacheable reader served by the worker
+        # (docs/public-people-reader.md). One suggestion test is skipped: it lets a
+        # background refresh run for a single event-loop turn, and an install
+        # into the worker takes a few message round trips.
+        run: npm run test:index-worker
       - name: Compile MCP server
         working-directory: mcp-server
         run: npm run build

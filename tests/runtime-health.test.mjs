@@ -82,3 +82,17 @@ test('expired owner-network reads are dropped; fresh and in-flight ones stay', a
   dropExpiredNetworks(cache, 15000, 20000)
   assert.deepEqual([...cache.keys()], ['fresh', 'loading'])
 })
+
+test('optional index worker numbers join the row; anything else is dropped', () => {
+  const rows = []
+  const health = startRuntimeHealth({ emit: row => rows.push(row), intervalMs: 3600000, observeGc: false, loopDelay: null, extra: () => ({ index_worker_heap_used_mb: 640, index_worker_restarts: 1, index_worker_installs: 3, index_worker_heap_limit_mb: undefined, owner: 'x', index_worker_bogus: 5, index_worker_heap_limit_mb_text: 'no' }) })
+  const row = health.sample(); health.stop()
+  assert.equal(row.index_worker_heap_used_mb, 640)
+  assert.equal(row.index_worker_restarts, 1)
+  assert.equal(row.index_worker_installs, 3)
+  for (const key of ['owner', 'index_worker_bogus', 'index_worker_heap_limit_mb', 'index_worker_heap_limit_mb_text']) assert.equal(Object.hasOwn(row, key), false, key)
+  assert.equal(safeDiagnosticRecord(row).index_worker_heap_used_mb, 640)
+  // A throwing source never breaks the row.
+  const broken = startRuntimeHealth({ emit: () => {}, intervalMs: 3600000, observeGc: false, loopDelay: null, extra: () => { throw Error('x') } })
+  assert.equal(broken.sample().event, 'runtime_health'); broken.stop()
+})
