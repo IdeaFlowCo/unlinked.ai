@@ -852,7 +852,7 @@ export function renderPeople({ filters: structuredFilters = {}, savedListsAvaila
     const ref = value.id ? `public:${value.id}` : value.sourceRowId ? `contact:${value.sourceRowId}` : null
     const selection = savedListsAvailable && csrf && ref ? `<label class="result-select"><input type="checkbox" form="save-results" name="refs" value="${html(ref)}" checked> Save <span class="sr-only">${html(value.name)}</span></label>` : ''
     const degree = value.connectionDegree ? `<span class="small"> · ${value.connectionDegree === 1 ? '1st' : value.connectionDegree === 2 ? '2nd' : '3rd'}</span>` : ''
-    return render(value).replace('</h3>', `${degree}</h3>`).replace('<article ', `<article ${typeof value.sourceRowId === 'string' ? `data-network-row="${html(value.sourceRowId)}" ` : ''}`).replace('</div></article>', `${selection}${dateLabel}${controls(value)}</div></article>`)
+    return (value.id ? render : person)(value).replace('</h3>', `${degree}</h3>`).replace('<article ', `<article ${typeof value.sourceRowId === 'string' ? `data-network-row="${html(value.sourceRowId)}" ` : ''}`).replace('</div></article>', `${selection}${dateLabel}${controls(value)}</div></article>`)
   }
   const filters = [extraQuery, kept ? `presence=${kept}` : '', connectedView ? 'connected=1' : '', sort !== 'best' ? `sort=${sort}` : ''].filter(Boolean).join('&')
   const searched = `q=${encodeURIComponent(raw(query))}${filters ? `&${filters}` : ''}`

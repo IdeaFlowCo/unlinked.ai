@@ -2617,9 +2617,9 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // failed read costs the filter, never the page.
         let mine = null
         if (publicProfessionalSearch) { try { mine = await connectedProfiles(session.owner, network, reader) } catch { mine = null } }
-        const connectedCounts = mine ? { all: mine.length, member: mine.filter(value => value.presence === 'member').length, shadow: mine.filter(value => value.presence === 'shadow').length } : undefined
+        const cards = await personCards(connections, reader), privateCards = cards.filter(card => !card.id)
+        const connectedCounts = mine ? { all: mine.length + privateCards.length, member: mine.filter(value => value.presence === 'member').length, shadow: mine.filter(value => value.presence === 'shadow').length } : undefined
         if (connectedOnly) {
-          const privateCards = (await personCards(connections, reader)).filter(card => !card.id)
           const kept = await filterCards([...(mine ?? []), ...privateCards].filter(value => !presence || value.presence === presence), filters, reader)
           const ranked = matcher ? rankMatches(kept, matcher, value => ({ name: words(value.name), text: words([value.name, value.headline, value.location].filter(Boolean).join(' ')) })) : { rows: kept, match: 'none' }
           const ordered = orderNetwork(ranked.rows, sort)
@@ -2633,7 +2633,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // already shown under "People you know", so the sections never repeat
         // a person and the count is the number of cards (unlinked-tto.4).
         const ownShown = !filters.degree && Boolean(network.imports.length || network.legacyProfileId)
-        const eligibleContacts = filters.degree ? [] : await filterCards((await personCards(connections, reader)).filter(value => !presence || value.presence === presence), filters, reader)
+        const eligibleContacts = filters.degree ? [] : await filterCards(cards.filter(value => !presence || value.presence === presence), filters, reader)
         const ownMatches = matcher ? rankMatches(eligibleContacts, matcher, cardTokens) : { rows: eligibleContacts, match: 'none' }
         let match = 'none'
         if (ownMatches.match === 'all' || ownMatches.match === 'some') match = ownMatches.match

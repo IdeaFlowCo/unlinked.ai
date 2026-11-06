@@ -27,3 +27,12 @@ test('degree traversal honors private connection policy',async()=>{
  const reader=createPublicPeopleReader({readPublishedSnapshot:async()=>data})
  assert.deepEqual((await reader.list({filters:{degree:'2'},networkSeeds:['first'],networkSelf:'self',viewer:{signedIn:true,id:'self'}})).profiles,[])
 })
+
+test('first-degree private contacts retain owner-only contact links and save identities', async () => {
+ const {renderPeople}=await import('../mcp-server/private-onboarding-views.mjs')
+ const id='a'.repeat(64)
+ const view=renderPeople({csrf:'fixture',filters:{degree:'1'},savedListsAvailable:true,connectedView:{total:1,rows:[{name:'Private direct contact',sourceRowId:id,contactHref:'/network/contacts/'+id}]}})
+ assert.match(view.content,new RegExp('href="/network/contacts/'+id+'"'))
+ assert.match(view.content,new RegExp('value="contact:'+id+'"'))
+ assert.doesNotMatch(view.content,/href="\/people\/"/)
+})
