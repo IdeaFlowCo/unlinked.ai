@@ -1,3 +1,4 @@
+import { browserPerformanceScript } from './browser-performance.mjs'
 import { PEOPLE_FILTER_KEYS, peopleFilters, matchesPeopleFilters } from '../src/utils/public-people/search-filters.mjs'
 import { readRequestBody, bufferRequestBody } from './request-body.mjs'
 import { ideaflowProfileSection, IDEAFLOW_PROFILE_VISIBILITY } from './ideaflow-profile.mjs'
@@ -177,7 +178,7 @@ export function notificationTargetFor(item, { messaging = false } = {}) {
 // Default-off standalone controller. The operator must supply the reviewed
 // immutable identity mapping, private backend and independent grant issuer.
 // It cannot create/rebind owners from profile URLs, email or upload parameters.
-export function createPrivateBrowserHandler({ privateListImports, savedSearchLists, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ privateListImports, savedSearchLists, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -526,6 +527,7 @@ export function createPrivateBrowserHandler({ privateListImports, savedSearchLis
     return cards.filter(card => matchesPeopleFilters({ ...card, ...profiles.get(card.id) }, filters))
   }
   const publicAdmission = createPublicReadAdmission({ record: recordPublicAdmission })
+  let performanceRequests = 0, performanceWindow = Date.now()
   let suggestRequests = 0, suggestWindow = Date.now(), suggestBusy = 0
   let cardRequests = 0, cardWindow = Date.now(), cardBusy = 0
   // The published people each signed-in member is connected to, for "You
@@ -716,7 +718,7 @@ export function createPrivateBrowserHandler({ privateListImports, savedSearchLis
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? feedbackWidgetTag(nonce, { iosApp: iosResponses.get(response) || 'unknown' }) : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
+    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${recordBrowserPerformance && !iosResponses.has(response) ? browserPerformanceScript(status) : ''}${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="/public-assets/jsqr.js"></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? feedbackWidgetTag(nonce, { iosApp: iosResponses.get(response) || 'unknown' }) : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   // `silentBack` (automatic sign-in) returns to the original page without
@@ -1163,6 +1165,16 @@ export function createPrivateBrowserHandler({ privateListImports, savedSearchLis
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      if (url.pathname === '/api/browser-performance') {
+        response.setHeader('Cache-Control','no-store')
+        if (!recordBrowserPerformance || iosApp(request)) { response.writeHead(404).end();return }
+        if (request.method !== 'POST') { response.writeHead(405).end();return }
+        if (Date.now()-performanceWindow >= 60000) { performanceWindow=Date.now();performanceRequests=0 }
+        if (++performanceRequests > 600) { response.writeHead(429).end();return }
+        if (url.search || request.headers['content-type']?.split(';')[0] !== 'application/json') { response.writeHead(400).end();return }
+        try { recordBrowserPerformance(JSON.parse((await body(request,2048)).toString('utf8'))) } catch { response.writeHead(400).end();return }
+        response.writeHead(204).end();return
+      }
       purge(sessions)
       const sid = cookies(request)['__Host-ul-session']
       let current = sid ? sessions.get(sid) : null
@@ -1357,7 +1369,7 @@ export function createPrivateBrowserHandler({ privateListImports, savedSearchLis
       }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline } : {}
       const discoveryChrome = viewer && isPublicDiscoveryPath(url.pathname) ? { ...chrome, ...((await settleAlerts(response)) ? { alerts: responseAlerts.get(response) } : {}) } : chrome
-      if (await servePublicDiscovery(request, response, url.pathname, discoveryChrome, { signInOrigin: authorizationOrigin })) return
+      if (await servePublicDiscovery(request, response, url.pathname, discoveryChrome, { signInOrigin: authorizationOrigin, performance: Boolean(recordBrowserPerformance) })) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
         if (Date.now() - invitationWindow >= 60000) { invitationWindow = Date.now(); invitationRequests = 0 }

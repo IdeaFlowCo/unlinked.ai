@@ -4,7 +4,8 @@ The standalone runtime can record bounded request metadata for direct REST
 (`/api/agent/...`), direct MCP (`/mcp`), and the shared gateway's signed downstream
 adapter (`/api/connector/mcp`). Public directory reads produce only the
 [admission aggregates](#public-directory-admission-aggregates) described below,
-not per-request browser records. OAuth sign-in/consent, messaging, and the
+not per-request browser records. Browser click-to-content timing has a separate
+[collector and private report](browser-performance.md), enabled independently. OAuth sign-in/consent, messaging, and the
 historical Next.js APIs are not instrumented.
 
 This is **off by default**. Building, merging, deploying, and enabling diagnostics
