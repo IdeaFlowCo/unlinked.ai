@@ -54,11 +54,13 @@ export async function startStallProfiler({ directory, stallMs = 500, windowMs = 
   const info = await lstat(directory)
   if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o700 || info.uid !== process.getuid()) throw new Error('stall_profiler_directory_not_private')
   session.connect()
-  await session.post('Profiler.enable')
-  await session.post('Profiler.setSamplingInterval', { interval: samplingUs })
-  let windows = [], perfAtStart = 0, stopped = false, last = performance.now()
-  const begin = async () => { await session.post('Profiler.start'); perfAtStart = performance.now() }
-  await begin()
+  let windows = [], perfAtStart = 0, stopped = false, running = false, warned = false, last = performance.now()
+  const begin = async () => { await session.post('Profiler.start'); running = true; perfAtStart = performance.now() }
+  try {
+    await session.post('Profiler.enable')
+    await session.post('Profiler.setSamplingInterval', { interval: samplingUs })
+    await begin()
+  } catch (error) { try { session.disconnect() } catch {} throw error }
   const ticker = setInterval(() => { const at = performance.now(); if (at - last - 20 >= stallMs) windows.push([last, at]); last = at }, 20)
   ticker.unref()
   const prune = async () => {
@@ -69,8 +71,11 @@ export async function startStallProfiler({ directory, stallMs = 500, windowMs = 
     if (stopped) return
     const seen = windows; windows = []
     const startedAt = perfAtStart
+    // A failed restart is retried on the next window instead of stopping profiling for good.
+    if (!running) { await begin(); return }
+    running = false
     const { profile } = await session.post('Profiler.stop')
-    await begin()
+    try { await begin() } catch { if (!warned) { warned = true; process.stderr.write('unlinked_stall_profiler_restart_failed\n') } }
     if (!seen.length) return
     const summary = summarizeStalls(profile, seen, startedAt)
     const at = now()
@@ -85,6 +90,6 @@ export async function startStallProfiler({ directory, stallMs = 500, windowMs = 
   timer.unref()
   return {
     rotate: () => (chain = chain.then(rotate)),
-    async stop() { stopped = true; clearInterval(timer); clearInterval(ticker); await chain.catch(() => {}); await session.post('Profiler.stop').catch(() => {}); session.disconnect() },
+    async stop() { stopped = true; clearInterval(timer); clearInterval(ticker); await chain.catch(() => {}); if (running) await session.post('Profiler.stop').catch(() => {}); running = false; session.disconnect() },
   }
 }

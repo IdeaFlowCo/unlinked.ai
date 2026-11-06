@@ -16,7 +16,7 @@ const KEEP_OLD_BELOW = typeof workerData?.keepOldBelow === 'number' ? workerData
 const METHODS = new Set(['suggest', 'list', 'profile', 'card', 'unlistedGroup', 'suspended', 'suspensions', 'addresses', 'lookupLinkedin', 'linkedinProfileIds', 'linkedinRef', 'lookup', 'linked', 'neighbors', 'company'])
 const sources = new Map() // sourceKey -> { current, previous, timer }
 const transfers = new Map() // transfer id -> { sourceKey, cacheKey, snapshot }
-let nextTransfer = 1, released = 0
+let nextTransfer = 1, released = 0, begun = 0
 // The configured cap (from the host) wins over V8's report, which shows the
 // process flag instead of resourceLimits when --max-old-space-size is set.
 const configuredLimit = Number.isSafeInteger(workerData?.heapLimitMb) ? workerData.heapLimitMb * 1048576 : Infinity
@@ -46,14 +46,14 @@ async function handle(message) {
     const slot = sources.get(message.sourceKey)
     if (slot && slot.current?.cacheKey !== message.cacheKey) {
       const stats = heapNow()
-      if (stats.used > KEEP_OLD_BELOW * stats.limit) { clearTimeout(slot.timer); slot.previous = null; slot.current = null; released++ }
+      if (stats.used > KEEP_OLD_BELOW * stats.limit && (slot.current || slot.previous)) { clearTimeout(slot.timer); slot.previous = null; slot.current = null; released++ }
     }
     const id = nextTransfer++
     const snapshot = { ...message.meta }
     for (const [field, length] of Object.entries(message.lengths)) { snapshot[field] = []; snapshot[field].expected = length }
     // An install the main thread abandoned (it timed out or lost us) is dropped.
     const timer = setTimeout(() => transfers.delete(id), 300000); timer.unref?.()
-    transfers.set(id, { sourceKey: message.sourceKey, cacheKey: message.cacheKey, snapshot, timer })
+    transfers.set(id, { sourceKey: message.sourceKey, cacheKey: message.cacheKey, snapshot, timer, seq: ++begun })
     return id
   }
   if (message.type === 'chunk') {
@@ -68,7 +68,7 @@ async function handle(message) {
     transfers.delete(message.transfer)
     if (!transfer) throw { status: 503, code: 'public_people_unavailable' }
     clearTimeout(transfer.timer)
-    const { sourceKey, cacheKey, snapshot } = transfer
+    const { sourceKey, cacheKey, snapshot, seq } = transfer
     for (const field of Object.keys(snapshot)) if (Array.isArray(snapshot[field]) && 'expected' in snapshot[field]) {
       if (snapshot[field].length !== snapshot[field].expected) throw { status: 503, code: 'public_people_unavailable' }
       delete snapshot[field].expected
@@ -76,7 +76,7 @@ async function handle(message) {
     let served = snapshot
     const source = async () => served
     source.revisionIdentifiesContent = true
-    const entry = { cacheKey, source, readers: new Map() }
+    const entry = { cacheKey, source, readers: new Map(), seq }
     // Compile now, off the main thread, so the first call finds it ready.
     await readerFor(entry, 50, message.limits).suspensions({})
     // Every later read finds the compiled index by revision and limits (the
@@ -84,7 +84,11 @@ async function handle(message) {
     // stub of the same revision and let them be collected.
     served = { state: snapshot.state, complete: snapshot.complete, revision: snapshot.revision, profiles: [], connections: [] }
     const slot = sources.get(sourceKey) ?? {}
-    if (slot.current?.cacheKey !== cacheKey) {
+    if (slot.current?.cacheKey !== cacheKey && (slot.current?.seq ?? 0) > seq) {
+      // An install that began earlier finished later: it is the previous one.
+      clearTimeout(slot.timer); slot.previous = entry
+      slot.timer = setTimeout(() => { slot.previous = null }, PREVIOUS_GRACE_MS); slot.timer.unref?.()
+    } else if (slot.current?.cacheKey !== cacheKey) {
       clearTimeout(slot.timer)
       slot.previous = slot.current ?? null
       slot.current = entry
