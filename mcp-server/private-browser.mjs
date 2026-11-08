@@ -548,6 +548,8 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     if (!(found instanceof Map)) return false
     const profile = found.values().next().value
     const handle = profile ? profileHandles?.handleFor(profile.id) ?? null : null
+    // A handle that no longer names a profile: the ordinary path decides.
+    if (named && !handle) return false
     const preview = profile ? personPreview(profile, handle ? `/people/${encodeURIComponent(handle)}` : profilePath(profile.id)) : null
     const content = previewDocument(preview, base.origin)
     response.writeHead(preview ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(content), 'Cache-Control': 'no-store', Vary: 'User-Agent', 'Content-Security-Policy': "default-src 'none'; base-uri 'none'; frame-ancestors 'none'" })
