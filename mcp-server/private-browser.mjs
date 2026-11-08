@@ -4,6 +4,7 @@ import { readRequestBody, bufferRequestBody } from './request-body.mjs'
 import { ideaflowProfileSection, IDEAFLOW_PROFILE_VISIBILITY } from './ideaflow-profile.mjs'
 import { createPublicReadAdmission } from './public-read-admission.mjs'
 import { declaredAutomation, visitorKey } from './client-address.mjs'
+import { createLinkPreviewAdmission, linkUnfurler, personPreview, previewDocument, previewMeta } from './link-preview.mjs'
 import { recentContact, contactName } from './contact-enrichment.mjs'
 import { MESSAGES_CLIENT_SOURCE, messagesConfig } from './messages-client.mjs'
 import { createMessagingProxy, messagingBodyLimit, validMessagingAttachmentHeaders, validId as validMessagingId, REACTION_EMOJI } from './messaging-proxy.mjs'
@@ -533,6 +534,28 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     return cards.filter(card => matchesPeopleFilters({ ...card, ...profiles.get(card.id) }, filters))
   }
   const publicAdmission = createPublicReadAdmission({ record: recordPublicAdmission })
+  // Link unfurlers (iMessage, Slack, WhatsApp, …) get a small lane of their own
+  // and a meta-only page, so a shared profile link previews while SEO crawlers
+  // hold the shared fuse (docs/link-previews.md). Over budget, they fall back to
+  // the ordinary path below.
+  const linkPreviewAdmission = createLinkPreviewAdmission({ record: recordPublicAdmission })
+  const serveProfilePreview = async (request, response, requested) => {
+    let id
+    try { id = decodeURIComponent(requested) } catch { return false }
+    const named = profileHandles?.resolve(id) ?? null
+    const found = await bounded(() => publicReader.lookup({ ids: [named?.profileId ?? id], details: true }), null)
+    // Unreadable or slow: let the ordinary path answer.
+    if (!(found instanceof Map)) return false
+    const profile = found.values().next().value
+    const handle = profile ? profileHandles?.handleFor(profile.id) ?? null : null
+    // A handle that no longer names a profile: the ordinary path decides.
+    if (named && !handle) return false
+    const preview = profile ? personPreview(profile, handle ? `/people/${encodeURIComponent(handle)}` : profilePath(profile.id)) : null
+    const content = previewDocument(preview, base.origin)
+    response.writeHead(preview ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(content), 'Cache-Control': 'no-store', Vary: 'User-Agent', 'Content-Security-Policy': "default-src 'none'; base-uri 'none'; frame-ancestors 'none'" })
+    response.end(request.method === 'HEAD' ? undefined : content)
+    return true
+  }
   let performanceRequests = 0, performanceWindow = Date.now()
   let suggestRequests = 0, suggestWindow = Date.now(), suggestBusy = 0
   let cardRequests = 0, cardWindow = Date.now(), cardBusy = 0
@@ -728,7 +751,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${recordBrowserPerformance && !iosResponses.has(response) ? browserPerformanceScript(status) : ''}${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="${JSQR_SRC}" defer></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? feedbackWidgetTag(nonce, { iosApp: iosResponses.get(response) || 'unknown' }) : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
+    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title>${previewMeta(view.preview, base.origin)}<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${recordBrowserPerformance && !iosResponses.has(response) ? browserPerformanceScript(status) : ''}${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="${JSQR_SRC}" defer></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? feedbackWidgetTag(nonce, { iosApp: iosResponses.get(response) || 'unknown' }) : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   // `silentBack` (automatic sign-in) returns to the original page without
@@ -1379,7 +1402,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline } : {}
       const discoveryChrome = viewer && isPublicDiscoveryPath(url.pathname) ? { ...chrome, ...((await settleAlerts(response)) ? { alerts: responseAlerts.get(response) } : {}) } : chrome
-      if (await servePublicDiscovery(request, response, url.pathname, discoveryChrome, { signInOrigin: authorizationOrigin, performance: Boolean(recordBrowserPerformance) })) return
+      if (await servePublicDiscovery(request, response, url.pathname, discoveryChrome, { signInOrigin: authorizationOrigin, performance: Boolean(recordBrowserPerformance), origin: base.origin })) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
         if (Date.now() - invitationWindow >= 60000) { invitationWindow = Date.now(); invitationRequests = 0 }
@@ -1574,6 +1597,12 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
           }
           return journey(response, renderPeopleError({ ...chrome, status, kind: publicCompany ? 'company' : 'profile', retryAfter, retry: `${url.pathname}${url.search}` }), null, '', status)
         }
+        if (!viewer && publicProfile && !publicProfile[2] && linkUnfurler(request)) {
+          const lane = linkPreviewAdmission.acquire({ visitor: visitorKey(request) })
+          if (lane.release) {
+            try { if (await serveProfilePreview(request, response, publicProfile[1])) return } finally { lane.release() }
+          }
+        }
         const controller = new AbortController()
         const closed = () => { if (!response.writableFinished) controller.abort() }
         response.once('close', closed)
@@ -1604,7 +1633,9 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
             // A name nobody lists and we know nothing about is not a page.
             if (!result.total && !facts) { if (publicCompany) await directoryError(404); else response.writeHead(404).end(); return }
             if (publicCompanyApi) { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ company: { ...result, ...(facts ? { facts } : {}) } })); return }
-            journey(response, renderCompany({ ...chrome, ...result, name, facts })); return
+            const companyView = renderCompany({ ...chrome, ...result, name, facts })
+            if (!viewer) companyView.preview = { title: name, description: `People at ${name} on Unlinked.`, url: `/companies/${encodeURIComponent(name)}` }
+            journey(response, companyView); return
           }
           if (publicDetail || publicProfile) {
             let id, requested
@@ -1681,7 +1712,10 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
                 ideaflowCard = ideaflowProfileSection(found, { self, csrf: self ? viewer?.csrf : '' })
               }
             }
-            journey(response, renderPerson({ ...chrome, ideaflowCard, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim }), null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
+            const personView = renderPerson({ ...chrome, ideaflowCard, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim })
+            // Signed out, the page is the published profile: its preview may name them.
+            if (!viewer && !publicProfile?.[2]) personView.preview = personPreview(profile, handle ? `/people/${encodeURIComponent(handle)}` : profilePath(profile.id))
+            journey(response, personView, null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
           }
           let filters
           try { filters = peopleFilters(['/network','/people'].includes(url.pathname) ? url.searchParams : {}) } catch { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
@@ -1855,7 +1889,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       if (request.method === 'GET' && url.pathname === '/while-you-wait') { redirect(response, '/'); return }
       const session = sessionFor(request)
       if (!session) {
-        if (request.method === 'GET' && url.pathname === '/') journey(response, renderLanding({ inApp: inAppBrowser(request.headers['user-agent']) }))
+        if (request.method === 'GET' && url.pathname === '/') journey(response, { ...renderLanding({ inApp: inAppBrowser(request.headers['user-agent']) }), preview: { title: 'Unlinked: your professional profile and network', description: 'Bring your profile and connections from LinkedIn. Explore who knows whom. Ask your AI agent who you need.', url: '/' } })
         else if (request.method === 'GET' && url.pathname === '/join') journey(response, renderJoin())
         else if (request.method === 'GET' && url.pathname === '/scan') journey(response, renderScan({ tab: url.searchParams.get('tab') }))
         else if (request.method === 'GET') journey(response, renderSignInRequired({ next: returnPath(['/messages', '/network'].includes(url.pathname) && url.search ? url.pathname + url.search : url.pathname) }), null, '', 401)

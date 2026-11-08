@@ -9,6 +9,7 @@ import { iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
 import { FEEDBACK_UPLOAD_ORIGIN, FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, feedbackWidgetTag, iosAppVersion } from './feedback-widget.mjs'
 import { ANALYTICS_ORIGIN, analyticsTag } from './ideaflow-analytics.mjs'
+import { previewMeta } from './link-preview.mjs'
 
 const root = new URL('../', import.meta.url)
 const requireFromRoot = createRequire(new URL('package.json', root))
@@ -53,6 +54,14 @@ const assets = new Map([
   ['/.well-known/mcp/server-card.json', ['public/.well-known/mcp/server-card.json', 'application/json']],
 ])
 const pages = new Set(['/agents', '/meet', '/import-linkedin', '/support', '/data-liberation'])
+// Link-preview descriptions for these fixed public pages (docs/link-previews.md).
+const PAGE_DESCRIPTIONS = new Map([
+  ['/agents', 'Connect an AI agent to search the people you know on Unlinked.'],
+  ['/meet', 'Scan an Unlinked, LinkedIn profile or OpenChat card to meet someone.'],
+  ['/import-linkedin', 'Request your LinkedIn data export and bring your profile and connections to Unlinked.'],
+  ['/support', 'Help and support for Unlinked.'],
+  ['/data-liberation', 'Take your professional network with you: export your LinkedIn data.'],
+])
 // Policy addresses people and reviewers type by hand. Unlinked follows the
 // Ideaflow policies, so these redirect there (docs/support-and-legal.md).
 const redirects = new Map([['/privacy', PRIVACY_URL], ['/privacy-policy', PRIVACY_URL], ['/terms', TERMS_URL], ['/terms-of-service', TERMS_URL], ['/contact', '/support'], ['/help', '/support'], ['/export-your-data', '/data-liberation'], ['/data-export', '/data-liberation']])
@@ -64,7 +73,7 @@ const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '
 // Every page carries the header's Me-menu script under its own nonce.
 // Header counts (`alerts`) are display-only, like the rest of `chrome`.
 // In the iOS app (`UnlinkediOS/`), pages get iosAppView, the menu-launched feedback widget labelled with the app version, and no analytics.
-const document = (view, { headline, nonce, alerts, ios = false, performance = false }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${performance && !ios ? browserPerformanceScript() : ''}${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? feedbackWidgetTag(nonce, { iosApp: ios }) : feedbackWidgetTag(nonce) + analyticsTag(nonce)}<!--/email_off--></html>`
+const document = (view, { headline, nonce, alerts, ios = false, performance = false, origin = 'https://www.unlinked.ai', path = null }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title>${previewMeta({ title: view.title, description: PAGE_DESCRIPTIONS.get(path), url: path }, origin)}<link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${performance && !ios ? browserPerformanceScript() : ''}${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? feedbackWidgetTag(nonce, { iosApp: ios }) : feedbackWidgetTag(nonce) + analyticsTag(nonce)}<!--/email_off--></html>`
 const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
 
 // Exact, source-controlled anonymous discovery only. Never resolves an owner,
@@ -72,7 +81,7 @@ const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; fo
 // `chrome` is display-only navigation state for a signed-in reader; it grants nothing.
 // `signInOrigin` is the runtime's configured Ideaflow ID origin: the Me menu's
 // Switch account form redirects there, so it is the one extra form-action.
-export async function servePublicDiscovery(request, response, pathname, chrome = {}, { signInOrigin = null, performance = false } = {}) {
+export async function servePublicDiscovery(request, response, pathname, chrome = {}, { signInOrigin = null, performance = false, origin } = {}) {
   if (!['GET', 'HEAD'].includes(request.method) || !isPublicDiscoveryPath(pathname)) return false
   let type, content
   if (redirects.has(pathname)) { response.writeHead(302, { Location: redirects.get(pathname) }); response.end(); return true }
@@ -96,7 +105,7 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
   } else if (pathname === '/public-assets/jsqr-module.mjs') { type = 'text/javascript'; content = 'export default globalThis.jsQR;' }
   else {
     type = 'text/html; charset=utf-8'
-    const nonce = randomBytes(24).toString('base64url'), page = { performance, headline: chrome.headline, nonce, alerts: chrome.alerts, ios: iosAppUserAgent(request.headers['user-agent']) ? iosAppVersion(request.headers['user-agent']) || 'unknown' : false }
+    const nonce = randomBytes(24).toString('base64url'), page = { performance, origin, path: pathname, headline: chrome.headline, nonce, alerts: chrome.alerts, ios: iosAppUserAgent(request.headers['user-agent']) ? iosAppVersion(request.headers['user-agent']) || 'unknown' : false }
     const formAction = `form-action 'self'${typeof signInOrigin === 'string' && /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/.test(signInOrigin) ? ` ${signInOrigin}` : ''}`
     response.setHeader('Content-Security-Policy', `default-src 'none'; ${FONT_SOURCES}; script-src 'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; ${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     // The copy button works under this page's nonce; the text stays selectable without it.

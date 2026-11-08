@@ -235,7 +235,9 @@ function messagesClient(config) {
     // Before the dock has loaded anything, the server-rendered counts stay as they are.
     if (docked && !state.me) return
     const total = [...state.conversations.values()].reduce((sum, conversation) => sum + (conversation.id === state.open && document.visibilityState === 'visible' ? 0 : unreadOf(conversation)), 0)
-    if (!docked) document.title = `${total ? `(${total > 99 ? '99+' : total}) ` : ''}Messages · Unlinked`
+    // The open conversation names the tab: "(3) Ada Lovelace · Messages · Unlinked".
+    const open = state.open ? state.conversations.get(state.open) : null
+    if (!docked) document.title = `${total ? `(${total > 99 ? '99+' : total}) ` : ''}${open ? `${titleOf(open)} · ` : ''}Messages · Unlinked`
     const bar = $('msg-dock-count')
     if (bar) { bar.textContent = total ? (total > 99 ? '99+' : String(total)) : ''; bar.hidden = !total }
     const nav = document.querySelector('[data-nav-messages]')
@@ -281,6 +283,7 @@ function messagesClient(config) {
     const conversation = state.conversations.get(id)
     threadShell()
     renderThreadHeader()
+    updateUnread()
     if (!conversation && state.me) { $('msg-log').replaceChildren(h('p', { class: 'msg-loading' }, 'This conversation is not available.')); return }
     api(`/conversations/${encodeURIComponent(id)}/focus`, {}).catch(() => {})
     try {

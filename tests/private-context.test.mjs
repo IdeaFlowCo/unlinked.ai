@@ -181,7 +181,8 @@ async function site(t, { privateContext, complete }) {
   }
   return { request, signIn, baseUrl }
 }
-const stripNonce = text => text.replace(/nonce-[A-Za-z0-9_-]+/g, 'nonce').replace(/nonce="[^"]+"/g, 'nonce=""')
+// Two test servers differ in nonce and in the origin their link-preview tags name.
+const stripNonce = text => text.replace(/nonce-[A-Za-z0-9_-]+/g, 'nonce').replace(/nonce="[^"]+"/g, 'nonce=""').replace(/https:\/\/127\.0\.0\.1:\d+/g, 'https://origin')
 
 test('owner-only in the browser: anonymous and other accounts see nothing; public pages, APIs and AI search never carry it', async t => {
   const prompts = []
