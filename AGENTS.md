@@ -138,6 +138,8 @@ The immutable private legacy Storage recovery, owner confirmation/download bound
 
 Shared browser/agent connection authorization is in `mcp-server/connection-actions.mjs`; opt-in writes and grant update hints are documented in `docs/agent-api.md`.
 
+Tab titles name the open thing; link previews (Open Graph) are neutral unless a public view opts in, and link unfurlers get a small meta-only profile lane off the shared fuse: [docs/link-previews.md](docs/link-previews.md) (`mcp-server/link-preview.mjs`).
+
 Public Help & support (`/support`, the App Store support URL), the `/privacy` and `/terms` redirects to the Ideaflow policies, and where policy links must appear are owned by [docs/support-and-legal.md](docs/support-and-legal.md).
 
 The iOS app (user agent `UnlinkediOS/`) lists only members; imported profiles stay out of its directory while a member still sees their own imported people: [docs/ios-app-directory.md](docs/ios-app-directory.md). Removal requests for imported profiles, the `UnlinkedSafetyReport` store, support-inbox email and the operator review/`remove` decision flow: [docs/removal-requests.md](docs/removal-requests.md).
