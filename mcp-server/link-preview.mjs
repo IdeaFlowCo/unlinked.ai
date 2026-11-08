@@ -107,7 +107,7 @@ export function createLinkPreviewAdmission({ now = Date.now, perMinute = 60, vis
 
 // The whole page an unfurler receives: the preview head and a plain summary.
 export function previewDocument(preview, origin) {
-  const title = text(preview?.title, 120) || SITE_PREVIEW.title
+  const specific = text(preview?.title, 120), title = specific || SITE_PREVIEW.title
   const url = absolute(origin, localPath(preview?.url))
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Unlinked</title>${previewMeta(preview, origin)}</head><body><h1>${escape(title)}</h1>${preview?.description ? `<p>${escape(text(preview.description, 300))}</p>` : ''}${url ? `<p><a href="${escape(url)}">View on Unlinked</a></p>` : ''}</body></html>`
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${specific ? `${escape(title)} · Unlinked` : 'Unlinked'}</title>${previewMeta(preview, origin)}</head><body><h1>${escape(title)}</h1>${preview?.description ? `<p>${escape(text(preview.description, 300))}</p>` : ''}${url ? `<p><a href="${escape(url)}">View on Unlinked</a></p>` : ''}</body></html>`
 }

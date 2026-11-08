@@ -132,7 +132,9 @@ test('link unfurlers preview a profile while crawlers hold the shared fuse; craw
   assert.equal(await head.text(), '')
   const unknown = await request('/people/nobody-here', { headers: { 'user-agent': 'Twitterbot/1.0', 'cf-connecting-ip': '198.51.100.11' } })
   assert.equal(unknown.status, 404)
-  assert.equal(meta(await unknown.text(), 'og:title'), SITE_PREVIEW.title)
+  const unknownPage = await unknown.text()
+  assert.equal(meta(unknownPage, 'og:title'), SITE_PREVIEW.title)
+  assert.match(unknownPage, /<title>Unlinked<\/title>/)
   // Connections pages are not on the lane.
   const connections = await request(`/people/${PERSON}/connections`, { headers: { 'user-agent': IMESSAGE, 'cf-connecting-ip': '198.51.100.12' } })
   assert.equal(connections.status, 429)
