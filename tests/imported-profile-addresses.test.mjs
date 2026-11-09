@@ -117,7 +117,7 @@ test('one unreadable LinkedIn dataset is skipped; the others still apply and the
   assert.deepEqual(lines, [{ event: 'public_enrichment_dataset_unreadable', datasets: [{ dataset: LI1, code: 'public_snapshot_invalid' }], degraded: false }])
   // Only a store error code reaches the log, never message content.
   const leaky = createMemberPublicIndex({ log: line => lines.push(JSON.parse(line)), readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => null, linkedinEnrichmentDatasets: [LI1],
-    publicPeople: { read: async () => { throw new Error('Ada Fictional ada@example.invalid') } } })
+    publicPeople: { read: async dataset => { if (dataset === LI1) throw new Error('Ada Fictional ada@example.invalid'); return null } } })
   await leaky()
   assert.deepEqual(lines.at(-1).datasets, [{ dataset: LI1, code: 'read_failed' }])
   assert.deepEqual(leaky.enrichmentHealth(), { unreadable: 1, degraded: true })
