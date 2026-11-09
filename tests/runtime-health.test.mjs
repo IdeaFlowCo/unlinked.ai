@@ -92,6 +92,12 @@ test('optional index worker numbers join the row; anything else is dropped', () 
   assert.equal(row.index_worker_installs, 3)
   for (const key of ['owner', 'index_worker_bogus', 'index_worker_heap_limit_mb', 'index_worker_heap_limit_mb_text']) assert.equal(Object.hasOwn(row, key), false, key)
   assert.equal(safeDiagnosticRecord(row).index_worker_heap_used_mb, 640)
+  // Skipped enrichment datasets join the row as whole numbers and pass the allowlist.
+  const enrichment = startRuntimeHealth({ emit: () => {}, intervalMs: 3600000, observeGc: false, loopDelay: null, extra: () => ({ index_enrichment_unreadable: 2, index_enrichment_degraded: 1, index_enrichment_bogus: 9 }) })
+  const flagged = enrichment.sample(); enrichment.stop()
+  assert.equal(flagged.index_enrichment_unreadable, 2); assert.equal(flagged.index_enrichment_degraded, 1); assert.equal(Object.hasOwn(flagged, 'index_enrichment_bogus'), false)
+  assert.equal(safeDiagnosticRecord(flagged).index_enrichment_unreadable, 2)
+  assert.deepEqual(summarizeRuntimeHealth([{ ...flagged, at: '2026-11-09T10:00:00.000Z' }]).enrichment, { latest_at: '2026-11-09T10:00:00.000Z', latest_unreadable: 2, latest_degraded: true, max_unreadable: 2 })
   // A throwing source never breaks the row.
   const broken = startRuntimeHealth({ emit: () => {}, intervalMs: 3600000, observeGc: false, loopDelay: null, extra: () => { throw Error('x') } })
   assert.equal(broken.sample().event, 'runtime_health'); broken.stop()

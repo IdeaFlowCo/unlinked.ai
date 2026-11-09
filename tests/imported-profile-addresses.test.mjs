@@ -91,13 +91,40 @@ test('removed and suspended profiles stay gone after enrichment', async () => {
   assert.equal(await reader.profile({ id: 'public-b' }), null)
 })
 
-test('a malformed LinkedIn enrichment dataset fails the index closed', async () => {
+test('a malformed LinkedIn enrichment dataset is skipped, never applied, and reported', async () => {
   const profiles = [person('public-a', 'Ada', { linkedinUrl: li('ada-fictional') })]
-  for (const broken of [{ ...liData([liRow('ada-fictional')]), revision: 'curated-enrichment-v1:' + 'f'.repeat(64) }, { ...liData([{ ...liRow('ada-fictional'), id: 'public-a' }]) }, { ...liData([liRow('ada-fictional')]), connections: [{ fromId: 'a', toId: 'b' }] }]) {
-    const read = createMemberPublicIndex({ readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => null, linkedinEnrichmentDatasets: [LI1], publicPeople: { read: async dataset => dataset === LI1 ? broken : null } })
-    await assert.rejects(read(), /public_enrichment_invalid/)
+  for (const broken of [{ ...liData([liRow('ada-fictional', { about: 'Wrong' })]), revision: 'curated-enrichment-v1:' + 'f'.repeat(64) }, { ...liData([{ ...liRow('ada-fictional', { about: 'Wrong' }), id: 'public-a' }]) }, { ...liData([liRow('ada-fictional', { about: 'Wrong' })]), connections: [{ fromId: 'a', toId: 'b' }] }]) {
+    const lines = []
+    const read = createMemberPublicIndex({ log: line => lines.push(JSON.parse(line)), readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => null, linkedinEnrichmentDatasets: [LI1], publicPeople: { read: async dataset => dataset === LI1 ? broken : null } })
+    const value = await read()
+    assert.equal(value.profiles.find(profile => profile.id === 'public-a').about, undefined, 'a malformed dataset is never applied')
+    assert.deepEqual(read.enrichmentHealth(), { unreadable: 1, degraded: true }, 'every LinkedIn dataset unreadable = degraded')
+    assert.deepEqual(lines, [{ event: 'public_enrichment_dataset_unreadable', datasets: [{ dataset: LI1, code: 'public_enrichment_invalid' }], degraded: true }])
   }
   for (const linkedinEnrichmentDatasets of [['curated-enrichment-v1'], [LI1, LI1], 'nope']) assert.throws(() => createMemberPublicIndex({ linkedinEnrichmentDatasets, readLegacy: async () => null, discover: async () => [], getBackend: async () => null, publicPeople: { read: async () => null } }), /public_enrichment_datasets_invalid/)
+})
+
+test('one unreadable LinkedIn dataset is skipped; the others still apply and the index stays up', async () => {
+  const [, LI2] = LINKEDIN_ENRICHMENT_DATASETS
+  const profiles = [person('public-a', 'Ada', { linkedinUrl: li('ada-fictional') }), person('public-b', 'Bo', { linkedinUrl: li('bo-fictional') })]
+  const lines = [], data = { [LI2]: { state: 'published', complete: true, revision: LI2 + ':' + sha('two'), profiles: [liRow('bo-fictional', { about: 'Bo about', website: 'https://bo.example/' })], connections: [] } }
+  const read = createMemberPublicIndex({ log: line => lines.push(JSON.parse(line)), readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => null, linkedinEnrichmentDatasets: [LI1, LI2],
+    publicPeople: { read: async dataset => { if (dataset === LI1) throw new Error('public_snapshot_invalid'); return data[dataset] ?? null } } })
+  const value = await read(), by = id => value.profiles.find(profile => profile.id === id)
+  assert.equal(by('public-b').about, 'Bo about'); assert.equal(by('public-b').website, 'https://bo.example/')
+  assert.equal(by('public-a').about, undefined)
+  assert.deepEqual(read.enrichmentHealth(), { unreadable: 1, degraded: false }, 'one of two unreadable is reported, not degraded')
+  assert.deepEqual(lines, [{ event: 'public_enrichment_dataset_unreadable', datasets: [{ dataset: LI1, code: 'public_snapshot_invalid' }], degraded: false }])
+  // Only a store error code reaches the log, never message content.
+  const leaky = createMemberPublicIndex({ log: line => lines.push(JSON.parse(line)), readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => null, linkedinEnrichmentDatasets: [LI1],
+    publicPeople: { read: async () => { throw new Error('Ada Fictional ada@example.invalid') } } })
+  await leaky()
+  assert.deepEqual(lines.at(-1).datasets, [{ dataset: LI1, code: 'read_failed' }])
+  assert.deepEqual(leaky.enrichmentHealth(), { unreadable: 1, degraded: true })
+  // A healthy build reports nothing.
+  const healthy = createMemberPublicIndex({ log: line => lines.push(line), readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => null, linkedinEnrichmentDatasets: [LI2], publicPeople: { read: async dataset => data[dataset] ?? null } })
+  const count = lines.length; await healthy()
+  assert.deepEqual(healthy.enrichmentHealth(), { unreadable: 0, degraded: false }); assert.equal(lines.length, count)
 })
 
 const ref = profile => profileLinkedinRef(profile)

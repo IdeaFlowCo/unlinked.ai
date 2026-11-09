@@ -13,7 +13,7 @@ const mb = value => Number.isFinite(value) && value >= 0 ? Math.round(value / MB
 const LOOP_RESOLUTION_MS = 20
 const ms = value => Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), 3_600_000) : undefined
 
-export const RUNTIME_HEALTH_FIELDS = Object.freeze(['index_worker_heap_used_mb', 'index_worker_heap_limit_mb', 'index_worker_restarts', 'index_worker_installs', 'uptime_s', 'interval_ms', 'rss_mb', 'heap_used_mb', 'heap_total_mb', 'heap_limit_mb', 'external_mb', 'array_buffers_mb', 'gc_major_count', 'gc_major_ms', 'gc_major_max_ms', 'gc_minor_count', 'gc_minor_ms', 'gc_incremental_count', 'gc_incremental_ms', 'loop_delay_p50_ms', 'loop_delay_p99_ms', 'loop_delay_max_ms', 'cpu_user_ms', 'cpu_system_ms'])
+export const RUNTIME_HEALTH_FIELDS = Object.freeze(['index_enrichment_unreadable', 'index_enrichment_degraded', 'index_worker_heap_used_mb', 'index_worker_heap_limit_mb', 'index_worker_restarts', 'index_worker_installs', 'uptime_s', 'interval_ms', 'rss_mb', 'heap_used_mb', 'heap_total_mb', 'heap_limit_mb', 'external_mb', 'array_buffers_mb', 'gc_major_count', 'gc_major_ms', 'gc_major_max_ms', 'gc_minor_count', 'gc_minor_ms', 'gc_incremental_count', 'gc_incremental_ms', 'loop_delay_p50_ms', 'loop_delay_p99_ms', 'loop_delay_max_ms', 'cpu_user_ms', 'cpu_system_ms'])
 
 export function startRuntimeHealth({ emit, intervalMs = 60000, now = () => new Date(), memoryUsage = () => process.memoryUsage(), heapStatistics = getHeapStatistics, cpuUsage = previous => process.cpuUsage(previous), uptime = () => process.uptime(), observeGc = true, loopDelay = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS }), extra = () => ({}) } = {}) {
   if (typeof emit !== 'function' || !Number.isSafeInteger(intervalMs) || intervalMs < 1000 || intervalMs > 3600000) throw new Error('runtime_health_configuration_invalid')
@@ -46,9 +46,10 @@ export function startRuntimeHealth({ emit, intervalMs = 60000, now = () => new D
       ...(delay ? { loop_delay_p50_ms: ms(delay.p50), loop_delay_p99_ms: ms(delay.p99), loop_delay_max_ms: ms(delay.max) } : {}),
       cpu_user_ms: ms(used.user / 1000), cpu_system_ms: ms(used.system / 1000),
     }
-    // Optional numbers from other parts of the process (the index worker);
+    // Optional numbers from other parts of the process (the index worker, and
+    // enrichment datasets the last public index build had to skip);
     // only allowlisted whole-number fields are kept.
-    try { for (const [key, value] of Object.entries(extra() ?? {})) if (key.startsWith('index_worker_') && RUNTIME_HEALTH_FIELDS.includes(key) && Number.isSafeInteger(value) && value >= 0) row[key] = value } catch {}
+    try { for (const [key, value] of Object.entries(extra() ?? {})) if ((key.startsWith('index_worker_') || key.startsWith('index_enrichment_')) && RUNTIME_HEALTH_FIELDS.includes(key) && Number.isSafeInteger(value) && value >= 0) row[key] = value } catch {}
     last = tick
     Object.assign(gc, { major: 0, majorMs: 0, majorMax: 0, minor: 0, minorMs: 0, incremental: 0, incrementalMs: 0 })
     loopDelay?.reset?.()

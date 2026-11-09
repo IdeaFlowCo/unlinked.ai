@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { prepareEnrichmentSnapshot, publishEnrichmentPeople } from '../mcp-server/publish-enrichment-people.mjs'
+import { checkStoreValidation, prepareEnrichmentSnapshot, publishEnrichmentPeople } from '../mcp-server/publish-enrichment-people.mjs'
 import { ENRICHMENT_DATASET, ENRICHMENT_SHARD_DATASETS, LINKEDIN_ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 
 const row = { id: 'ccd7f8ae-d1fe-4875-a754-bb52da449a0a', name: 'Jake Perlman-Garr', headline: 'Games Investing @ Alignment Growth', location: 'Los Angeles', company: 'Alignment Growth', positions: [{ title: 'Managing Director', company: 'Alignment Growth', startDate: 'Apr 2025' }], education: [{ institution: 'University of Pennsylvania', degree: 'BA Economics' }], skills: ['Strategy'] }
@@ -42,4 +42,14 @@ test('a homepage travels only on LinkedIn-keyed rows, and only as a canonical cr
   assert.throws(() => prepareEnrichmentSnapshot(bytes([{ ...row, website: 'https://ada.example/' }]), ENRICHMENT_SHARD_DATASETS[0]), /enrichment_rows_invalid/, 'not on id-keyed shards')
   for (const website of ['http://ada.example/', 'https://ada.example', 'https://u:p@ada.example/', 'HTTPS://ADA.example/', 'not a url', ''])
     assert.throws(() => prepareEnrichmentSnapshot(bytes([{ ...li, website }]), dataset), /enrichment_rows_invalid/, website)
+})
+
+test('the plan runs the store\'s own snapshot validator, so a plan cannot pass when execute would fail', () => {
+  const li = { id: 'li-' + 'a'.repeat(64), name: 'Ada Fictional', website: 'https://ada.example/', positions: [], education: [], skills: [] }
+  const { snapshot } = prepareEnrichmentSnapshot(bytes([li]), LINKEDIN_ENRICHMENT_DATASETS.at(-1))
+  // An older store that does not know `website` (the 2026-11-09 failure) rejects the plan.
+  const older = value => { if (value.profiles.some(profile => Object.hasOwn(profile, 'website'))) throw new Error('public_snapshot_invalid'); return value }
+  assert.throws(() => checkStoreValidation(snapshot, older), /public_snapshot_invalid/)
+  assert.equal(checkStoreValidation(snapshot, value => value), true)
+  assert.throws(() => checkStoreValidation(snapshot, undefined), /enrichment_store_validator_missing/)
 })
