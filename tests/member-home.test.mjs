@@ -265,3 +265,15 @@ test('the isolated pilot forwards the home preference store to the browser', asy
   assert.equal(hidden.status, 303)
   assert.equal((await preferences.get(owner)).importReminder, 'dismissed')
 })
+
+
+test('Home surfaces owner private lists and distinguishes empty from unavailable', async () => {
+  const { renderMemberHome } = await import('../mcp-server/private-onboarding-views.mjs')
+  const view = homeLists => renderMemberHome({ csrf: 'test', summary: { state: 'none' }, homeLists }).content
+  const populated = view({ lists: [{ id: 'event-1', name: 'Met at <Summit>' }] })
+  assert.match(populated, /href="\/lists\/private\/event-1"><b>Met at &lt;Summit&gt;<\/b>/)
+  assert.match(populated, /id="home-lists">Your lists/)
+  assert.match(view({ lists: [] }), /No private lists yet/)
+  assert.doesNotMatch(view(null), /No private lists yet/)
+  assert.match(view(null), /Open Lists/)
+})

@@ -380,6 +380,12 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .phead .hl{margin:0 24px 4px;font-size:17px}
 .unlinked-onboarding .phead>.small{margin:0 24px;display:block}
 .unlinked-onboarding .phead>.profile-links{margin-top:8px}
+.unlinked-onboarding .phead>.small + .small{margin-top:10px}
+.unlinked-onboarding .phead>.profile-relationship{margin-top:12px;margin-bottom:8px;color:var(--brand-d);line-height:1.6}
+.unlinked-onboarding .phead>.profile-dates{display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:12px;line-height:1.6}
+.unlinked-onboarding .phead>.depth-note,.unlinked-onboarding .phead>.shadow-note{line-height:1.6}
+.unlinked-onboarding .profile .removal-link{margin:24px 4px 8px;line-height:1.6}
+
 .unlinked-onboarding .profile-links a{display:inline-block;padding:5px 0}
 .unlinked-onboarding .phead .actions{margin:16px 24px 0}
 .unlinked-onboarding .phead .notice{margin:16px 24px 0}
