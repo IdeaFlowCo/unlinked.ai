@@ -136,3 +136,26 @@ test('over HTTP the mutual line comes from the viewer’s own people; the app na
   assert.match(header(ios), /Avery Lee is a mutual connection/)
   assert.doesNotMatch(ios, /Morgan Singh|Sasha Baptiste/)
 })
+
+
+test('profile relationship context is viewer-only, with earliest import date and no invented connection date', async t => {
+  const app = await site(t), cookie = await app.signIn()
+  const page = await (await app.go('/people/morgan', { cookie })).text()
+  assert.match(header(page), /1st · Your connection/)
+  assert.match(header(page), /Date added <time datetime="2026-01-05">2026-01-05<\/time>/)
+  assert.doesNotMatch(header(page), /Connected on <time/)
+  const stranger = await (await app.go('/people/sasha', { cookie })).text()
+  assert.doesNotMatch(header(stranger), /1st · Your connection|Date added/)
+  const anonymous = await (await app.go('/people/morgan')).text()
+  assert.doesNotMatch(header(anonymous), /1st · Your connection|Date added/)
+  const api = await (await app.go('/api/people/morgan', { cookie })).text()
+  assert.doesNotMatch(api, /viewerConnection|importedAt|2026-01-05/)
+})
+
+test('accepted Unlinked connections need no import; self and blocked views suppress relationship context', () => {
+  const profile = { ...base, presence: 'member' }
+  assert.match(header(renderPerson({ ...signedIn, profile, connect: { state: 'connected' } }).content), /1st · Your connection.*Connected on Unlinked/)
+  for (const extra of [{ connect: { state: 'self' } }, { blocked: { id: 'block' } }, { csrf: undefined }]) {
+    assert.doesNotMatch(header(renderPerson({ ...signedIn, profile, viewerConnection: { importedAt: Date.UTC(2026, 0, 5) }, ...extra }).content), /1st · Your connection|Date added/)
+  }
+})

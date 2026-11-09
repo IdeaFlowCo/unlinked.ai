@@ -56,3 +56,5 @@ rechecks current public listing: removed, suspended and unlisted profiles drop
 out. Turning off sharing invalidates the link; creating another rotates it.
 Shared pages are no-store, noindex and no-referrer. No list is shared by saving it.
 These browser routes do not add agent tools or expand existing agent grants.
+
+Profile headers also show **1st · Your connection** to the signed-in viewer when the same exact-identity network read recognizes the person, or an accepted Unlinked connection exists without an import. **Date added** is the earliest known import date; **Connected on** stays separate and is omitted when unknown. These are private viewer context, never public API fields. The existing bounded owner cache supplies the header; if unavailable, no relationship is inferred. Self and blocked profiles suppress this context. Metadata rows have vertical spacing; removal stays available in More and below profile content.

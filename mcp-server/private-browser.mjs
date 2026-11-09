@@ -569,8 +569,8 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     const entry = knownCache.get(owner.ownerId)
     if ((!entry || Date.now() - entry.at >= KNOWN_FRESH_MS) && !entry?.pending) {
       const held = entry ?? { ids: null, at: 0 }
-      held.pending = (async () => new Set((await connectedProfiles(owner, await accountNetwork(owner), publicReader)).map(person => person.id)))()
-        .then(ids => { knownCache.delete(owner.ownerId); knownCache.set(owner.ownerId, { ids, at: Date.now(), pending: null }); while (knownCache.size > KNOWN_CAPACITY) knownCache.delete(knownCache.keys().next().value) },
+      held.pending = (async () => connectedProfiles(owner, await accountNetwork(owner), publicReader))()
+        .then(people => { if (knownCache.get(owner.ownerId) !== held) return; const ids = new Set(people.map(person => person.id)); knownCache.delete(owner.ownerId); knownCache.set(owner.ownerId, { ids, people, at: Date.now(), pending: null }); while (knownCache.size > KNOWN_CAPACITY) knownCache.delete(knownCache.keys().next().value) },
           () => { held.pending = null })
       if (!entry) knownCache.set(owner.ownerId, held)
     }
@@ -643,7 +643,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     const network = await accountNetwork(owner)
     return network.assertions.some(row => row.category === 'connections' && row.id === id) ? contactPathFor(id) : null
   }
-  const dropAccountNetwork = owner => { if (owner?.ownerId) networkCache.delete(`${owner.ownerId}\u0000${owner.userId}`) }
+  const dropAccountNetwork = owner => { if (owner?.ownerId) { networkCache.delete(`${owner.ownerId}\u0000${owner.userId}`); knownCache.delete(owner.ownerId) } }
   const linkedinPersonDestination = async (owner, address, reader = publicReader) => {
     const published = await reader.lookupLinkedin({ address })
     if (published) return profilePath(published.id)
@@ -1712,7 +1712,14 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
                 ideaflowCard = ideaflowProfileSection(found, { self, csrf: self ? viewer?.csrf : '' })
               }
             }
-            const personView = renderPerson({ ...chrome, ideaflowCard, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim })
+            // Private viewer context uses the same exact identities and earliest
+            // dates as My connections; never attach it to the public API result.
+            let viewerConnection = null
+            if (viewer && !publicProfile?.[2] && !blocked && connect?.state !== 'self') {
+              await knownPeopleReady(viewer.owner)
+              viewerConnection = knownCache.get(viewer.owner.ownerId)?.people?.find(person => person.id === profile.id) ?? null
+            }
+            const personView = renderPerson({ ...chrome, viewerConnection, ideaflowCard, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim })
             // Signed out, the page is the published profile: its preview may name them.
             if (!viewer && !publicProfile?.[2]) personView.preview = personPreview(profile, handle ? `/people/${encodeURIComponent(handle)}` : profilePath(profile.id))
             journey(response, personView, null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
@@ -2177,8 +2184,8 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
           const preference = homePreferences ? await bounded(() => homePreferences.get(session.owner), null) : null
           const dismissed = preference?.importReminder === 'dismissed'
           if (summary.state === 'none' && !dismissed) { archive(homePreferences ? { reminder: 'dismissible' } : {}); return }
-          const [network, alerts] = await Promise.all([homeNetwork(), settleAlerts(response)])
-          journey(response, renderMemberHome({ ...props, summary, recent: network?.recent, networkSize: network?.size, alerts, reminderDismissed: dismissed, reminderControl: Boolean(homePreferences) }), props.importJob)
+          const [network, alerts, homeLists] = await Promise.all([homeNetwork(), settleAlerts(response), privateLists ? bounded(() => privateLists.list(session.owner), null) : Promise.resolve(null)])
+          journey(response, renderMemberHome({ ...props, summary, recent: network?.recent, networkSize: network?.size, homeLists, alerts, reminderDismissed: dismissed, reminderControl: Boolean(homePreferences) }), props.importJob)
           return
         }
         const ids = signup ? await backend.listImportIds() : []
