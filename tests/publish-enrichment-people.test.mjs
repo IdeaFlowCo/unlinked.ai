@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { prepareEnrichmentSnapshot, publishEnrichmentPeople } from '../mcp-server/publish-enrichment-people.mjs'
-import { ENRICHMENT_DATASET, ENRICHMENT_SHARD_DATASETS } from '../src/utils/public-people/member-projection.mjs'
+import { ENRICHMENT_DATASET, ENRICHMENT_SHARD_DATASETS, LINKEDIN_ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
 
 const row = { id: 'ccd7f8ae-d1fe-4875-a754-bb52da449a0a', name: 'Jake Perlman-Garr', headline: 'Games Investing @ Alignment Growth', location: 'Los Angeles', company: 'Alignment Growth', positions: [{ title: 'Managing Director', company: 'Alignment Growth', startDate: 'Apr 2025' }], education: [{ institution: 'University of Pennsylvania', degree: 'BA Economics' }], skills: ['Strategy'] }
 const bytes = value => Buffer.from(JSON.stringify(value))
@@ -32,4 +32,14 @@ test('prepareEnrichmentSnapshot targets a named shard dataset and refuses unknow
   assert.ok(shard.snapshot.revision.startsWith(ENRICHMENT_SHARD_DATASETS[0] + ':'))
   assert.equal(shard.snapshot.revision.split(':')[1], prepareEnrichmentSnapshot(bytes([row])).snapshot.revision.split(':')[1])
   for (const dataset of ['public-import-x', 'curated-enrichment-exa-9', 'recovered-legacy-public-v1', '']) assert.throws(() => prepareEnrichmentSnapshot(bytes([row]), dataset), /enrichment_dataset_unknown/)
+})
+
+test('a homepage travels only on LinkedIn-keyed rows, and only as a canonical credential-free HTTPS address', () => {
+  const li = { id: 'li-' + 'a'.repeat(64), name: 'Ada Fictional', positions: [], education: [], skills: [] }
+  const dataset = LINKEDIN_ENRICHMENT_DATASETS.at(-1)
+  assert.equal(prepareEnrichmentSnapshot(bytes([{ ...li, website: 'https://ada.example/' }]), dataset).snapshot.profiles[0].website, 'https://ada.example/')
+  assert.throws(() => prepareEnrichmentSnapshot(bytes([{ ...row, website: 'https://ada.example/' }])), /enrichment_rows_invalid/, 'not on id-keyed datasets')
+  assert.throws(() => prepareEnrichmentSnapshot(bytes([{ ...row, website: 'https://ada.example/' }]), ENRICHMENT_SHARD_DATASETS[0]), /enrichment_rows_invalid/, 'not on id-keyed shards')
+  for (const website of ['http://ada.example/', 'https://ada.example', 'https://u:p@ada.example/', 'HTTPS://ADA.example/', 'not a url', ''])
+    assert.throws(() => prepareEnrichmentSnapshot(bytes([{ ...li, website }]), dataset), /enrichment_rows_invalid/, website)
 })

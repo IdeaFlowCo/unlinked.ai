@@ -5,6 +5,7 @@ import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ENRICHMENT_DATASET, ENRICHMENT_DATASETS, LINKEDIN_ENRICHMENT_DATASETS, LINKEDIN_ENRICHMENT_ID } from '../src/utils/public-people/member-projection.mjs'
 import { operatorBoltUrl } from './operator-bolt-url.mjs'
+import { publicWebsite } from '../src/utils/public-people/profile-links.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const text = (value, required = false) => (required ? typeof value === 'string' && value.length > 0 : value === undefined || typeof value === 'string') && (value === undefined || value.length <= 20000)
@@ -23,10 +24,12 @@ export function prepareEnrichmentSnapshot(bytes, dataset = ENRICHMENT_DATASET) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 5000) throw new Error('enrichment_rows_invalid')
   const ids = new Set()
   for (const row of rows) {
-    if (row === null || typeof row !== 'object' || Object.getPrototypeOf(row) !== Object.prototype || Object.keys(row).some(key => !['id','name','headline','location','about','company','positions','education','skills'].includes(key)) || ids.has(row.id)) throw new Error('enrichment_rows_invalid')
+    if (row === null || typeof row !== 'object' || Object.getPrototypeOf(row) !== Object.prototype || Object.keys(row).some(key => !['id','name','headline','location','about','company','website','positions','education','skills'].includes(key)) || ids.has(row.id)) throw new Error('enrichment_rows_invalid')
     const { positions, education, skills, ...scalars } = row
-    if (!allow(scalars, ['id','name','headline','location','about','company'], ['id','name'])) throw new Error('enrichment_rows_invalid')
+    if (!allow(scalars, ['id','name','headline','location','about','company','website'], ['id','name'])) throw new Error('enrichment_rows_invalid')
     if (linkedinKeyed(dataset) !== LINKEDIN_ENRICHMENT_ID.test(row.id)) throw new Error('enrichment_rows_invalid')
+    // A homepage travels only on LinkedIn-keyed rows, and only as a credential-free HTTPS address.
+    if ('website' in row && (!linkedinKeyed(dataset) || publicWebsite(row.website) !== row.website)) throw new Error('enrichment_rows_invalid')
     ids.add(row.id)
     if (!Array.isArray(row.positions) || row.positions.length > 100 || !row.positions.every(value => allow(value, ['title','company','startDate','endDate','description'], ['title','company']))) throw new Error('enrichment_rows_invalid')
     if (!Array.isArray(row.education) || row.education.length > 100 || !row.education.every(value => allow(value, ['institution','degree','startDate','endDate'], ['institution']))) throw new Error('enrichment_rows_invalid')

@@ -40,6 +40,14 @@ test('enrichment fills gaps only: anything a profile already shows wins', () => 
   assert.deepEqual(fillFromLinkedinEnrichment(person('p', 'P', { about: '   ' }), { about: 'Real' }).about, 'Real', 'blank text is a gap')
 })
 
+test('enrichment fills a missing homepage with a safe HTTPS address only', () => {
+  assert.equal(fillFromLinkedinEnrichment(person('p', 'P'), { website: 'https://ada.example/' }).website, 'https://ada.example/')
+  assert.equal(fillFromLinkedinEnrichment(person('p', 'P', { website: 'https://own.example/' }), { website: 'https://ada.example/' }).website, 'https://own.example/', 'the profile\'s own website wins')
+  const plain = person('p', 'P')
+  assert.equal(fillFromLinkedinEnrichment(plain, { website: 'http://ada.example/' }), plain, 'plain http is ignored')
+  assert.equal(fillFromLinkedinEnrichment(plain, { website: 'https://u:p@ada.example/' }), plain, 'credentials are ignored')
+})
+
 const legacyOf = profiles => ({ state: 'published', complete: true, revision: 'legacy-public-v1:' + 'e'.repeat(64), profiles, connections: [] })
 const liData = rows => ({ state: 'published', complete: true, revision: LI1 + ':' + sha(JSON.stringify(rows)), profiles: rows, connections: [] })
 const liRow = (slug, extra) => ({ id: linkedinEnrichmentId(slug), name: 'Row Name', positions: [], education: [], skills: [], ...extra })

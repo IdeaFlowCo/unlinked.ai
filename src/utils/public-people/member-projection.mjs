@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { PUBLIC_UPLOAD_CONSENT } from '../private-import/consent.mjs'
 import { createScopedImportReader } from '../private-import/noos-adapter.mjs'
-import { publicLinkedinUrl } from './profile-links.mjs'
+import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { applyProfileDecisionsAsync } from './profile-decisions.mjs'
 import { linkedinIdentityMergesAsync, linkedinRefHash } from './url-identity.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
@@ -87,6 +87,8 @@ export function fillFromLinkedinEnrichment(profile, row) {
   for (const key of ['headline', 'location', 'about', 'company', 'positions', 'education', 'skills']) {
     if (!filled(profile[key]) && filled(row?.[key])) (result ??= { ...profile })[key] = row[key]
   }
+  // The person's own homepage (found on their own site or self-published profile).
+  if (!filled(profile.website) && filled(row?.website) && publicWebsite(row.website)) (result ??= { ...profile }).website = publicWebsite(row.website)
   return result ?? profile
 }
 const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.length > 0 && datasets.every((value, index) => ENRICHMENT_DATASETS.includes(value) && datasets.indexOf(value) === index) && datasets.at(-1) === ENRICHMENT_DATASET
