@@ -27,7 +27,9 @@ export function parseLinkedinProfileUrl(value) {
       const match = /^\/+in\/+([^/]+)(?:\/.*)?$/i.exec(url.pathname)
       if (!match) return null
       const slug = decodeURIComponent(match[1].replace(/;.*$/, '')).replace(invisible, '').trim().toLowerCase()
-      if (!/^[\p{L}\p{N}_.-]{1,120}$/u.test(slug)) return null
+      // Exported slugs may include tilde, registered signs and emoji. Other
+      // symbols (including URL delimiters) remain outside the allowlist.
+      if (!/^[\p{L}\p{N}\p{So}_.~-]{1,120}$/u.test(slug)) return null
       return { slug, url: 'https://www.linkedin.com/in/' + encodeURIComponent(slug) }
     } catch { return null }
   }
