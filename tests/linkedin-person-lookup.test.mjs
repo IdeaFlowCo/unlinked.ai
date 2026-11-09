@@ -26,6 +26,27 @@ test('LinkedIn QR and pasted URLs share strict normalization without following f
   }
 })
 
+test('exported tilde and symbol slugs preserve exact identity across encoded URLs and serialized parsing', () => {
+  const revived = new Function(`return (${parseLinkedinProfileUrl.toString()})`)()
+  for (const slug of ['~synthetic', 'synthetic-cfp\u00ae', 'synthetic-\u{1f538}-person']) {
+    const canonical = 'https://www.linkedin.com/in/' + encodeURIComponent(slug)
+    for (const input of [canonical, 'https://linkedin.com/in/' + slug + '/?trk=export']) {
+      assert.deepEqual(parseLinkedinProfileUrl(input), { slug, url: canonical })
+      assert.deepEqual(revived(input), { slug, url: canonical })
+      assert.equal(classifyMeetCode(input)?.kind, 'linkedin')
+    }
+  }
+  for (const slug of ['a%2Fb', 'a%5Cb', 'a%3Fb', 'a%23b', 'a%40b', 'a%3Ab', 'a%3Cb', 'a%3Eb', 'a%00b', 'a%0Ab', 'a%252Fb']) {
+    assert.equal(parseLinkedinProfileUrl('https://linkedin.com/in/' + slug), null, slug)
+  }
+  for (const input of [
+    'https://linkedin.com.evil.test/in/~synthetic',
+    'https://evil.test/?next=https://linkedin.com/in/~synthetic',
+    'https://user@linkedin.com/in/~synthetic',
+    'https://linkedin.com:9999/in/~synthetic',
+  ]) assert.equal(parseLinkedinProfileUrl(input), null, input)
+})
+
 test('pasted LinkedIn profile URLs survive whatever junk ends up around them', () => {
   const junk = [
     'https://www.linkedin.com/in/synthetic-person/details/experience/',
