@@ -79,6 +79,24 @@ test('known URLs enrich automatically; local exact names avoid a paid name searc
   assert.equal(recentContact({ ...row, connectedAt: undefined, importedAt: time - 100 }, time), true)
 })
 
+test('known exported symbol URLs enrich under their exact canonical address without name search', async () => {
+  for (const slug of ['~synthetic', 'synthetic-cfp\u00ae', 'synthetic-\u{1f538}']) {
+    const address = 'https://www.linkedin.com/in/' + encodeURIComponent(slug)
+    let lookups = 0
+    const f = fixture({ lookup: {
+      lookup: async args => { lookups++; assert.equal(args.address, address); return { status: 'found', address, profile: { name: 'Synthetic Person', headline: 'Engineer' } } },
+      search: async () => { assert.fail('known URLs must never fall back to name search') },
+    } })
+    const addressed = { ...row, fields: { ...row.fields, url: 'https://linkedin.com/in/' + slug } }
+    f.setRows([addressed])
+    await f.service.review(owner, addressed, { action: 'retry' })
+    const saved = await f.service.inspect(owner, addressed)
+    assert.equal(saved.status, 'enriched')
+    assert.equal(lookups, 1)
+    assert.equal((await f.service.inspect(other, addressed)).status, 'not_started')
+  }
+})
+
 test('removed sources, pauses and concurrent dismissals beat late provider responses', async () => {
   for (const change of ['remove', 'pause', 'dismiss', 'source']) {
     let finish, started
