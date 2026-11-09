@@ -30,6 +30,8 @@ export function summarizeRuntimeHealth(records, { stallMs = 1000 } = {}) {
   }
   return {
     samples: rows.length, first_at: rows[0]?.at ?? null, last_at: rows.at(-1)?.at ?? null, restarts,
+    // Enrichment datasets the public index had to skip (latest row and worst seen).
+    enrichment: (() => { const seen = rows.filter(row => row.index_enrichment_unreadable !== undefined); const last = seen.at(-1); return last ? { latest_at: last.at, latest_unreadable: last.index_enrichment_unreadable, latest_degraded: last.index_enrichment_degraded === 1, max_unreadable: Math.max(...seen.map(row => row.index_enrichment_unreadable)) } : null })(),
     hours: [...hours.values()].map(h => ({ hour: h.hour, samples: h.samples, heap_used_max_mb: max(h.heap), heap_headroom_min_mb: h.headroom.length ? Math.min(...h.headroom) : null, gc_major_count: h.gcMajorCount, gc_major_ms: h.gcMajorMs, gc_major_max_ms: h.gcMajorMax, loop_delay_p99_p50_ms: percentile(h.loopP99, 0.5), loop_delay_max_ms: max(h.loopMax), minutes_with_stall: h.stalls, cpu_percent: h.intervalMs ? Math.round(100 * h.cpuMs / h.intervalMs) : null })),
   }
 }

@@ -39,6 +39,14 @@ export function prepareEnrichmentSnapshot(bytes, dataset = ENRICHMENT_DATASET) {
   return { snapshot: { state: 'published', complete: true, revision: dataset + ':' + hash(JSON.stringify(profiles)), profiles, connections: [] }, sourceSha256: hash(bytes) }
 }
 
+// The vendored store's own snapshot validator (runtime/noos), applied to the
+// prepared snapshot. Missing validator = an incompatible store: refuse.
+export function checkStoreValidation(snapshot, validatePublicSnapshot) {
+  if (typeof validatePublicSnapshot !== 'function') throw new Error('enrichment_store_validator_missing')
+  validatePublicSnapshot(snapshot)
+  return true
+}
+
 // A provenance record travels into the private receipt only (never the
 // public dataset): where the rows came from and when they were fetched.
 export function readProvenance(bytes) {
@@ -64,10 +72,14 @@ export async function publishEnrichmentPeople({ rowsPath, root, execute = false,
   const { snapshot, sourceSha256 } = prepareEnrichmentSnapshot(bytes, dataset)
   const provenance = provenancePath ? readProvenance(await readFile(provenancePath)) : undefined
   const receipt = { kind: 'curated-enrichment-publication', dataset, keyedBy: linkedinKeyed(dataset) ? 'linkedin' : 'profile-id', rowsPath, sourceSha256, revision: snapshot.revision, profiles: snapshot.profiles.length, snapshotSha256: hash(JSON.stringify(snapshot)), ...(provenance ? { provenance } : {}) }
-  if (!execute) return { ...receipt, status: 'PLANNED_NO_WRITES' }
+  // The store validates every publication (and every read) itself. Run the
+  // same validator now, so a plan can never pass when execute would fail.
+  const require = createRequire(join(root, 'runtime/noos/package.json'))
+  const { UnlinkedPublicPeopleStore, validatePublicSnapshot } = require(join(root, 'runtime/noos/dist/operational/public-people.js'))
+  checkStoreValidation(snapshot, validatePublicSnapshot)
+  if (!execute) return { ...receipt, status: 'PLANNED_NO_WRITES', storeValidated: true }
   if (!process.env.NOOS_PRIVATE_PASSWORD) throw new Error('private_graph_configuration_required')
-  const require = createRequire(join(root, 'runtime/noos/package.json')), neo4j = require('neo4j-driver')
-  const { UnlinkedPublicPeopleStore } = require(join(root, 'runtime/noos/dist/operational/public-people.js'))
+  const neo4j = require('neo4j-driver')
   const driver = neo4j.driver(operatorBoltUrl(), neo4j.auth.basic('neo4j', process.env.NOOS_PRIVATE_PASSWORD), { connectionTimeout: 5000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
   try {
     const store = new UnlinkedPublicPeopleStore(driver, 'neo4j'); await store.initialize()

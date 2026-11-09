@@ -100,8 +100,10 @@ test('curated enrichment refreshes legacy rows by id, never adds people, and a l
  enrichment=null;assert.equal((await linked()).profiles.find(p=>p.id==='legacy').enrichmentStatus,'not_recorded')
  enrichment={state:'published',complete:true,revision:ENRICHMENT_DATASET+':'+'f'.repeat(64),profiles:[fresh],connections:[]}
  for(const broken of [{...enrichment,connections:[{fromId:'legacy',toId:'legacy'}]},{...enrichment,revision:'other-dataset-v1:'+'f'.repeat(64)},{...enrichment,state:'staging'}]) {
-  const bad=createMemberPublicIndex({readLegacy:async()=>recovered,discover:async()=>[],getBackend:async()=>{throw Error('unused')},publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?broken:null}})
-  await assert.rejects(bad(),/public_enrichment_invalid/)
+  // A malformed curated dataset is skipped (never applied) and reported; the index stays up.
+  const lines=[],bad=createMemberPublicIndex({log:line=>lines.push(JSON.parse(line)),readLegacy:async()=>recovered,discover:async()=>[],getBackend:async()=>{throw Error('unused')},publicPeople:{read:async dataset=>dataset===ENRICHMENT_DATASET?broken:null}})
+  const value=await bad();assert.equal(value.profiles.find(p=>p.id==='legacy').enrichmentStatus,'not_recorded')
+  assert.deepEqual(bad.enrichmentHealth(),{unreadable:1,degraded:false});assert.deepEqual(lines,[{event:'public_enrichment_dataset_unreadable',datasets:[{dataset:ENRICHMENT_DATASET,code:'public_enrichment_invalid'}],degraded:false}])
  }
 })
 
@@ -232,6 +234,7 @@ test('enrichment shards fill legacy rows and the primary enrichment dataset wins
  assert.deepEqual(shardsOnly.profiles.find(p=>p.id==='a'),{...shardA,enrichmentStatus:'enriched'})
  assert.notEqual(shardsOnly.revision,value.revision)
  data={[first]:{...withoutPrimary[first],revision:ENRICHMENT_DATASET+':'+'1'.repeat(64)}}
- await assert.rejects(index()(),/public_enrichment_invalid/)
+ // A shard carrying another dataset's revision is skipped, never applied.
+ const mislabelled=index(),skipped=await mislabelled();assert.equal(skipped.profiles.find(p=>p.id==='a').enrichmentStatus,'not_recorded');assert.deepEqual(mislabelled.enrichmentHealth(),{unreadable:1,degraded:false})
  for (const enrichmentDatasets of [[], [ENRICHMENT_DATASET, ENRICHMENT_DATASET], [ENRICHMENT_DATASET, first], ['public-import-x', ENRICHMENT_DATASET]]) assert.throws(()=>createMemberPublicIndex({enrichmentDatasets,readLegacy:async()=>recovered,discover:async()=>[],getBackend:async()=>null,publicPeople:{read:async()=>null}}),/public_enrichment_datasets_invalid/)
 })

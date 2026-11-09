@@ -82,6 +82,8 @@ export function profileLinkedinRef(profile) {
 const filled = value => typeof value === 'string' ? Boolean(value.trim()) : Array.isArray(value) && value.length > 0
 // Gaps only: a field the profile already shows (from its own source, an
 // operator read or a member) always wins over the enrichment row.
+// Only a store error code (never message content) reaches the log line.
+const errorCode = error => typeof error?.message === 'string' && /^[a-z0-9_]{1,64}$/.test(error.message) ? error.message : 'read_failed'
 export function fillFromLinkedinEnrichment(profile, row) {
   let result = null
   for (const key of ['headline', 'location', 'about', 'company', 'positions', 'education', 'skills']) {
@@ -114,13 +116,15 @@ const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.
 const IMPORT_PREFETCH = 4
 const detailKey = item => JSON.stringify([item.id, item.owner.ownerId, item.owner.userId, item.revision])
 const sourceValid = (resource, item) => Boolean(resource) && !resource.deleted && resource.sourceOwnerId === item.owner.ownerId && resource.sourceRevision === item.revision && resource.payload?.ownerId === item.owner.ownerId && resource.payload.id === item.id && permitted(resource.payload)
-export function createMemberPublicIndex({ discover, getBackend, publicPeople, readLegacy, readLegacyRevision, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, readConnectionPrivacy, onMemberPhotos, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
+export function createMemberPublicIndex({ log = line => console.error(line), discover, getBackend, publicPeople, readLegacy, readLegacyRevision, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, readConnectionPrivacy, onMemberPhotos, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!validEnrichmentDatasets(enrichmentDatasets)) throw Error('public_enrichment_datasets_invalid')
   if (!Array.isArray(linkedinEnrichmentDatasets) || !linkedinEnrichmentDatasets.every((value, index) => LINKEDIN_ENRICHMENT_DATASETS.includes(value) && linkedinEnrichmentDatasets.indexOf(value) === index) || typeof mergeSameLinkedin !== 'boolean' || typeof preferSurvivor !== 'function') throw Error('public_enrichment_datasets_invalid')
   if (!Number.isSafeInteger(linkedinEnrichmentTextBudget) || linkedinEnrichmentTextBudget < 0 || linkedinEnrichmentTextBudget > LINKEDIN_ENRICHMENT_TEXT_BUDGET) throw Error('public_enrichment_text_budget_invalid')
   if (!Number.isSafeInteger(freshMs) || freshMs < 0 || freshMs > 300000 || typeof now !== 'function') throw new TypeError('public_member_index_freshness_invalid')
   if (!Number.isSafeInteger(staleMs) || staleMs < 0 || staleMs > 600000 || (staleMs > 0 && staleMs < freshMs)) throw new TypeError('public_member_index_freshness_invalid')
   let work = null, kept = null, generation = 0
+  // Enrichment datasets skipped by the most recent build (runtime health).
+  let enrichmentHealth = { unreadable: 0, degraded: false }
   // Account -> recovered legacy profile id (or null), for connection privacy.
   const legacyLinkCache = new Map()
   const detailCache = new Map()
@@ -179,10 +183,21 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     const evidence = new Set(), curated = new Map()
     const positions = new Map()
     for (const [index, value] of profiles.entries()) { positions.set(value.id, index); if (index % 4096 === 4095) await turn() }
+    // One unreadable or malformed enrichment dataset is skipped (never applied),
+    // recorded, and reported through runtime health; it must not take the whole
+    // public index down. The legacy base above stays fatal.
+    const unreadable = [], liPresent = { count: 0 }
+    const readEnrichment = async (dataset, valid, linkedin) => {
+      let enrichment
+      try { enrichment = await publicPeople.read(dataset) } catch (error) { if (linkedin) liPresent.count++; unreadable.push({ dataset, linkedin, code: errorCode(error) }); return null }
+      if (!enrichment) return null
+      if (linkedin) liPresent.count++
+      if (!valid(enrichment)) { unreadable.push({ dataset, linkedin, code: 'public_enrichment_invalid' }); return null }
+      return enrichment
+    }
     for (const dataset of enrichmentDatasets) {
-      const enrichment = await publicPeople.read(dataset)
+      const enrichment = await readEnrichment(dataset, enrichment => !(enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(dataset + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length), false)
       if (!enrichment) continue
-      if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(dataset + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length) throw Error('public_enrichment_invalid')
       for (const row of enrichment.profiles) {
         const index = positions.get(row.id)
         if (index !== undefined) {
@@ -194,12 +209,14 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
     }
     const byLinkedin = new Map()
     for (const dataset of linkedinEnrichmentDatasets) {
-      const enrichment = await publicPeople.read(dataset)
+      const enrichment = await readEnrichment(dataset, enrichment => !(enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(dataset + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length || !enrichment.profiles.every(row => LINKEDIN_ENRICHMENT_ID.test(row?.id))), true)
       if (!enrichment) continue
-      if (enrichment.state !== 'published' || enrichment.complete !== true || !String(enrichment.revision).startsWith(dataset + ':') || !Array.isArray(enrichment.profiles) || enrichment.connections?.length || !enrichment.profiles.every(row => LINKEDIN_ENRICHMENT_ID.test(row?.id))) throw Error('public_enrichment_invalid')
       for (const row of enrichment.profiles) if (!byLinkedin.has(row.id.slice(3))) byLinkedin.set(row.id.slice(3), row)
       revisions.push(enrichment.revision)
     }
+    const liUnreadable = unreadable.filter(entry => entry.linkedin).length
+    enrichmentHealth = { unreadable: unreadable.length, degraded: unreadable.length > 0 && liPresent.count > 0 && liUnreadable === liPresent.count }
+    if (unreadable.length) { try { log(JSON.stringify({ event: 'public_enrichment_dataset_unreadable', datasets: unreadable.map(({ dataset, code }) => ({ dataset, code })), degraded: enrichmentHealth.degraded })) } catch {} }
     const signupSources = typeof readSignupProfiles === 'function' ? await readSignupProfiles() : []
     const signupIdentity = rows => JSON.stringify(rows.map(row => [row.profile.id, row.receiptId, row.owner.ownerId, row.owner.userId]))
     if (!Array.isArray(signupSources) || signupSources.length > 1000) throw Error('public_signup_profile_limit')
@@ -501,6 +518,7 @@ export function createMemberPublicIndex({ discover, getBackend, publicPeople, re
   // a build already running cannot store its older result, and the next read
   // waits for a fresh one instead of serving the stale window.
   read.invalidate = () => { generation++; kept = null; work = null }
+  read.enrichmentHealth = () => ({ ...enrichmentHealth })
   return read
 }
 
