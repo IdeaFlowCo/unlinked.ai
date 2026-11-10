@@ -18,12 +18,21 @@ import { renderPerson } from '../mcp-server/private-onboarding-views.mjs'
 const NOOS = process.env.UNLINKED_NOOS_DIR
 const li = slug => `https://www.linkedin.com/in/${slug}`
 const person = (id, name, extra = {}) => ({ id, name, positions: [], education: [], skills: [], ...extra })
-const LI8 = LINKEDIN_ENRICHMENT_DATASETS.at(-1)
+const LI9 = LINKEDIN_ENRICHMENT_DATASETS.at(-1)
 const MEMBER = 'member-signup-' + 'c'.repeat(64)
 
 test('a homepage passes the real store validator and renders on the imported profile only', { skip: NOOS ? false : 'UNLINKED_NOOS_DIR is not set: Unlinked CI cannot fetch private Noos; the rollout packet runs this against the staged vendored module' }, async () => {
-  const { validatePublicSnapshot } = createRequire(join(NOOS, 'package.json'))(join(NOOS, 'dist/operational/public-people.js'))
+  const { validatePublicSnapshot, UnlinkedPublicPeopleStore } = createRequire(join(NOOS, 'package.json'))(join(NOOS, 'dist/operational/public-people.js'))
   assert.equal(typeof validatePublicSnapshot, 'function')
+  assert.equal(LI9, 'curated-enrichment-li-9')
+  // The real store accepts the li-9 dataset name and snapshot: publish() checks the
+  // dataset identifier and validates the snapshot before it opens any session, so a
+  // driver that refuses sessions shows exactly how far publication got.
+  const real = new UnlinkedPublicPeopleStore({ session: () => { throw new Error('reached_driver') } }, 'neo4j')
+  real.ready = true
+  const sample = prepareEnrichmentSnapshot(Buffer.from(JSON.stringify([{ id: linkedinEnrichmentId('ada-fictional'), name: 'Row Name', website: 'https://ada.example/', positions: [], education: [], skills: [] }])), LI9)
+  await assert.rejects(real.publish(LI9, sample.snapshot, sample.sourceSha256, null), /reached_driver/)
+  await assert.rejects(real.publish('curated enrichment li 9', sample.snapshot, sample.sourceSha256, null), /public_publication_invalid/)
   // The store's publish and read, minus Neo4j: validate on the way in, keep JSON, validate again on the way out.
   const stored = new Map()
   const store = {
@@ -32,10 +41,10 @@ test('a homepage passes the real store validator and renders on the imported pro
   }
   const row = slug => ({ id: linkedinEnrichmentId(slug), name: 'Row Name', positions: [], education: [], skills: [] })
   const rows = [{ ...row('ada-fictional'), website: 'https://ada.example/' }, { ...row('cy-member'), website: 'https://cy.example/' }]
-  const { snapshot } = prepareEnrichmentSnapshot(Buffer.from(JSON.stringify(rows)), LI8)
-  store.publish(LI8, snapshot)
+  const { snapshot } = prepareEnrichmentSnapshot(Buffer.from(JSON.stringify(rows)), LI9)
+  store.publish(LI9, snapshot)
   for (const website of ['https://ada.example', 'http://ada.example/', 'https://u:p@ada.example/'])
-    assert.throws(() => store.publish(LI8, { ...snapshot, profiles: [{ ...rows[0], website }] }), /public_snapshot_invalid/, website)
+    assert.throws(() => store.publish(LI9, { ...snapshot, profiles: [{ ...rows[0], website }] }), /public_snapshot_invalid/, website)
 
   const profiles = [person('public-a', 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person(MEMBER, 'Cy Member', { linkedinUrl: li('cy-member') })]
   const read = createMemberPublicIndex({ log: () => {}, readLegacy: async () => ({ state: 'published', complete: true, revision: 'legacy-public-v1:' + 'e'.repeat(64), profiles, connections: [] }),

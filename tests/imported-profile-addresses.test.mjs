@@ -211,6 +211,23 @@ test('a row cannot overrun the remaining enrichment budget or prevent a smaller 
   assert.throws(() => index({ profiles, linkedinEnrichmentTextBudget: -1 }), /public_enrichment_text_budget_invalid/)
 })
 
+test('li-9 is the homepage slot: read last, publishable, filling only addresses li-1..8 do not carry', async () => {
+  assert.equal(LINKEDIN_ENRICHMENT_DATASETS.length, 9)
+  assert.deepEqual(LINKEDIN_ENRICHMENT_DATASETS.slice(-2), ['curated-enrichment-li-8', 'curated-enrichment-li-9'])
+  const LI8 = 'curated-enrichment-li-8', LI9 = 'curated-enrichment-li-9'
+  const homepage = prepareEnrichmentSnapshot(Buffer.from(JSON.stringify([liRow('ada-fictional', { website: 'https://ada.example/' }), liRow('bo-fictional', { website: 'https://bo-homepage.example/' })])), LI9).snapshot
+  assert.ok(homepage.revision.startsWith(LI9 + ':'))
+  const exa = prepareEnrichmentSnapshot(Buffer.from(JSON.stringify([liRow('bo-fictional', { about: 'Bo from the li-8 cohort' })])), LI8).snapshot
+  const profiles = [person('public-a', 'Ada Fictional', { linkedinUrl: li('ada-fictional') }), person('public-b', 'Bo Fictional', { linkedinUrl: li('bo-fictional') })]
+  const read = createMemberPublicIndex({ log: () => {}, readLegacy: async () => legacyOf(profiles), discover: async () => [], getBackend: async () => null, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS],
+    publicPeople: { read: async dataset => ({ [LI8]: exa, [LI9]: homepage })[dataset] ?? null } })
+  const value = await read(), by = id => value.profiles.find(profile => profile.id === id)
+  assert.equal(by('public-a').website, 'https://ada.example/', 'a li-9 homepage fills an address no earlier slot carries')
+  assert.equal(by('public-b').about, 'Bo from the li-8 cohort')
+  assert.equal(by('public-b').website, undefined, 'first row per address wins: li-8 owns Bo, so li-9 does not apply')
+  assert.deepEqual(read.enrichmentHealth(), { unreadable: 0, degraded: false })
+})
+
 test('a cohort across seven shards stays enriched and readable beyond the old index text cap', async () => {
   const profiles = Array.from({ length: 1000 }, (_, n) => person(`public-${n}`, `Fictional Person ${n}`, { linkedinUrl: li(`fictional-${n}`) }))
   const datasets = LINKEDIN_ENRICHMENT_DATASETS.slice(0, 7)
