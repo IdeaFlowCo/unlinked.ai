@@ -549,10 +549,14 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
         if (!reader || !candidates.length) return candidates.map(() => [])
         try {
           await reader.lookup({ ids: [], signal })
+          // One row whose id or address the index refuses as malformed (e.g. a
+          // LinkedIn export slug it cannot parse) has no published evidence; it
+          // must not fail every lookup for the owner (outage of 2026-11-10).
+          const evidence = async read => { try { return await read() } catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) return null; throw error } }
           return await Promise.all(candidates.map(async candidate => {
             const target = usableProfileId(rowPublicTarget(candidate.row))
-            const explicit = target ? (await reader.lookup({ ids: [target], signal })).get(target) : null
-            const byAddress = candidate.slug ? await reader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(candidate.slug)}`, signal }) : null
+            const explicit = target ? await evidence(async () => (await reader.lookup({ ids: [target], signal })).get(target)) : null
+            const byAddress = candidate.slug ? await evidence(() => reader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(candidate.slug)}`, signal })) : null
             return [...new Map([explicit, byAddress].filter(Boolean).map(summary => [summary.id, summary])).values()]
           }))
         } catch (error) { throw indexFailure('index_published_lookup', error) }
