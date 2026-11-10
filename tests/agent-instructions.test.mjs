@@ -35,7 +35,7 @@ test('the copied instructions stand alone: URL, per-client steps, first calls, a
   assert.ok(text.includes(`Unlinked MCP server URL: ${UNLINKED_MCP_URL}`))
   assert.match(text, /Claude \(claude\.ai, Claude Desktop or mobile\): you cannot add a connector from inside a chat/)
   assert.ok(text.includes(`claude mcp add --transport http unlinked ${UNLINKED_MCP_URL}`))
-  assert.match(text, /ChatGPT: in Settings turn on Developer mode/)
+  assert.match(text, /ChatGPT: open https:\/\/chatgpt.com\/plugins/)
   assert.match(text, /Cursor or another client with an MCP config file/)
   assert.match(text, /whoami/)
   assert.match(text, /never ask me for my password/)
