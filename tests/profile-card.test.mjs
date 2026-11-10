@@ -229,7 +229,9 @@ test('the search bar QR button opens a scan sheet: Scan for visitors, My card fi
     const nonce = response.headers.get('content-security-policy').match(/'nonce-([^']+)'/)[1]
     const body = await response.text()
     assert.match(body, /<details class="me">/, path)
-    assert.ok(body.includes(`<script nonce="${nonce}">(()=>{const me=document.querySelector('details.me')`), path)
+    const scripts = [...body.matchAll(/<script nonce="([^"]+)">([\s\S]*?)<\/script>/g)]
+    assert.ok(scripts.some(([, value, source]) => value === nonce && source.includes("const me=document.querySelector('details.me')")), path)
+    assert.ok(scripts.some(([, value, source]) => value === nonce && source.includes("new EventSource('/api/runtime-events')")), path)
     assert.ok(!body.includes('<!--me-headline-->'), path)
   }
   // The card page's own scan link now leads to the scan sheet.
