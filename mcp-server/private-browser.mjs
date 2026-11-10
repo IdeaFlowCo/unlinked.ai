@@ -1198,6 +1198,12 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      // The empty guide is static: reserve public-read capacity for actual queries.
+      if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/search-public' && !url.search) {
+        const content = publicSearchDocument({}, { landing: true })
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(content), 'Cache-Control': 'no-store' })
+        response.end(request.method === 'HEAD' ? undefined : content); return
+      }
       if (url.pathname === '/api/browser-performance') {
         response.setHeader('Cache-Control','no-store')
         if (!recordBrowserPerformance || iosApp(request)) { response.writeHead(404).end();return }
@@ -1590,7 +1596,12 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         const directoryError = (status, retryAfter) => {
           if (retryAfter) response.setHeader('Retry-After', String(retryAfter))
           // The connector-free search transport never carries member chrome or scripts.
-          if (api || url.pathname === '/search-public') {
+          if (url.pathname === '/search-public') {
+            const content = publicSearchDocument({}, { query: (url.searchParams.get('q') ?? '').slice(0, 200), status, retryAfter })
+            response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(content), 'Cache-Control': 'no-store' })
+            response.end(request.method === 'HEAD' ? undefined : content); return
+          }
+          if (api) {
             const error = status === 429 ? 'public_people_rate_limited' : status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable'
             response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
             response.end(JSON.stringify({ error, ...(status === 429 ? { retryAfter, setup: '/agents', guidance: 'Honor Retry-After. Use a consented MCP or API connection for repeated searches.' } : {}) })); return
