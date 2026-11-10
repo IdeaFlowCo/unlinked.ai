@@ -66,11 +66,11 @@ test('invalid public input and unavailable or revoked publications fail closed',
   }
   let published = snapshot()
   const revocable = await runtime(t, async () => published)
-  assert.equal((await revocable('/search-public')).status, 200)
+  assert.equal((await revocable('/search-public?q=Example')).status, 200)
   published = { ...published, state: 'revoked' }
-  assert.equal((await revocable('/search-public')).status, 503)
+  assert.equal((await revocable('/search-public?q=Example')).status, 503)
   const unavailable = await runtime(t, async () => { throw Error('unavailable') })
-  assert.equal((await unavailable('/search-public')).status, 503)
+  assert.equal((await unavailable('/search-public?q=Example')).status, 503)
 })
 
 test('small fetch bursts share a snapshot read and remain bounded', async t => {
@@ -85,9 +85,18 @@ test('small fetch bursts share a snapshot read and remain bounded', async t => {
   // All earlier requests are admitted or rejected before the ninth response.
   const ninth = await request('/search-public?q=Example')
   try {
+    assert.equal((await request('/search-public')).status, 200, 'the static landing needs no query slot')
     assert.equal(ninth.status, 429)
     assert.equal(ninth.headers.get('retry-after'), '10')
-    assert.deepEqual(await ninth.json(), { error: 'public_people_rate_limited', retryAfter: 10, setup: '/agents', guidance: 'Honor Retry-After. Use a consented MCP or API connection for repeated searches.' })
+    assert.match(ninth.headers.get('content-type'), /text\/html/)
+    const busyPage = await ninth.text()
+    assert.match(busyPage, /Retry-After.*10 seconds/)
+    assert.match(busyPage, /retry once/)
+    assert.match(busyPage, /Optional: sign in/)
+    assert.doesNotMatch(busyPage, /private@example|private-owner/)
+    const api = await request('/api/people?q=Example')
+    assert.equal(api.status, 429)
+    assert.equal((await api.json()).error, 'public_people_rate_limited')
     const browser = await request('/people/p0')
     assert.equal(browser.status, 429)
     assert.equal(browser.headers.get('retry-after'), '10')
@@ -96,4 +105,23 @@ test('small fetch bursts share a snapshot read and remain bounded', async t => {
   } finally { release() }
   assert.deepEqual((await Promise.all(burst)).map(response => response.status), Array(6).fill(200))
   assert.equal(reads, 1)
+})
+
+
+test('the empty public guide skips identity, the index and query admission even while queries are busy', async t => {
+  let reads = 0
+  const request = await runtime(t, async () => { reads++; throw Error('index unavailable') })
+  for (let i = 0; i < 12; i++) {
+    const response = await request('/search-public')
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('set-cookie'), null)
+    const page = await response.text()
+    assert.match(page, /gaming%20investor/)
+    assert.match(page, /Optional: sign in/)
+    assert.doesNotMatch(page, /0 matching|No matching public profiles|private@example/)
+  }
+  assert.equal(reads, 0)
+  const head = await request('/search-public', { method: 'HEAD' })
+  assert.equal(head.status, 200)
+  assert.equal(await head.text(), '')
 })

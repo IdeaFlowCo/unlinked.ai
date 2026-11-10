@@ -3,7 +3,7 @@
   "info": {
     "title": "Unlinked canonical beta",
     "version": "1.0.0",
-    "description": "Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository. Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository). Public profile comparisons require no account. For unlisted hosts supporting custom APIs (including Muse), use this description with a named account key in the host credential store. Muse OAuth is unverified. Never request passwords or silently create accounts; honor Retry-After and use indexed queries instead of crawling profiles. Setup: https://www.unlinked.ai/agents. Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence."
+    "description": "Start public investor shortlists without sign-in at https://www.unlinked.ai/search-public?q=gaming%20investor or GET /api/people?q=gaming%20investor; return source profile links and label partial coverage. MCP tools still require OAuth; web/HTTP-enabled hosts can use the public route before optional account setup. Current authenticated REST API at /api/agent/v1/ and scoped MCP. Manual API key setup: https://www.unlinked.ai/agents. Lifecycle and release contract: docs/agent-key-settings.md in the repository. Manual-key controls and connector choice: docs/agent-key-settings.md. Historical-grant normalization, tool refresh and OAuth permission consent: docs/agent-api.md (repository). Public profile comparisons require no account. For unlisted hosts supporting custom APIs (including Muse), use this description with a named account key in the host credential store. Muse OAuth is unverified. Never request passwords or silently create accounts; honor Retry-After and use indexed queries instead of crawling profiles. Setup: https://www.unlinked.ai/agents. Private notes can attach to a public profile that appears later through its exact published LinkedIn URL. Reads stay owner-only and do not create profiles, publish notes, or create connections; names, emails and profile-ID spelling are not identity evidence."
   },
   "servers": [
     {
@@ -1380,13 +1380,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Public-only HTML, up to 50 summaries and next-page link"
+            "description": "Public-only HTML: static no-query guide, or up to 50 summaries and next-page link for a query"
           },
           "400": {
             "description": "Invalid public search input"
           },
           "429": {
-            "description": "Public request capacity exceeded; Retry-After supplied"
+            "description": "Public request capacity exceeded; escaped HTML recovery guide with Retry-After supplied; optional sign-in is not required to retry"
           },
           "503": {
             "description": "Published People unavailable"

@@ -1,5 +1,14 @@
 # Unlinked agent guide
 
+## Start with a public shortlist, before sign-in
+
+For “Make me a list of investors in the gaming space for my company. (ask unlinked.ai)”, start with https://www.unlinked.ai/search-public?q=gaming%20investor or the anonymous JSON equivalent https://www.unlinked.ai/api/people?q=gaming%20investor. This applies to web-enabled chat assistants, Claude Code and Codex with HTTP access. No account, import or connector installation is needed for this bounded public lookup. MCP itself still requires OAuth; if no connection exists, use the public web/HTTP route first rather than starting OAuth just to get a public shortlist. A host without web/HTTP access cannot use this fallback; say so and offer the public search link or optional connection setup.
+
+Return a small partial shortlist from actual published profiles, with a source profile link and supplied role/company evidence for each candidate. “Some words” matches are broader suggestions: do not call a person a gaming investor without evidence in their profile. Ask for missing company sector, fundraising stage and geography to refine fit; do not pretend to know the company or imply interest, investment activity, warm introductions or complete coverage. If there are no supported candidates, say so. Guests cannot read private imports, notes or the full private network.
+
+Show the useful public results before a brief optional CTA: “Sign in to connect your agent and search your own network.” Do not claim higher rate limits or faster results. Honor Retry-After, make at most one delayed retry for a busy response, and report temporary unavailability if it persists. A shared web-reader proxy may hit a public limit on a first visible user request; a 429 is not a sign-in requirement. Never switch addresses, identities or transports to evade a denial.
+
+
 ## Choose public browsing or an account connection
 
 A few public profile comparisons need no account: use `/search-public?q=...`, `/people/<handle>` and its `/connections` page. Published professional details can be richer than a Connections.csv row. Available depth varies by person. Never interpret a 429 or fetch failure as evidence that a password is required. Honor `Retry-After`, retry with backoff, and report temporary unavailability if it persists.

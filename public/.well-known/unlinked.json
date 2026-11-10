@@ -234,5 +234,12 @@
     "unlistedClients": "Custom API connector with OpenAPI and a named account key when supported; Muse OAuth unverified.",
     "accountConsent": "Use verified user identity and explicit delegated consent; no silent agent-created accounts or quota evasion."
   },
-  "profileStatus": "MCP profile/list/contact results expose enrichmentStatus independently of presence and detailLevel. Values are enriched (current published enrichment evidence), not_recorded (no such evidence in the composed index), and unknown (source has no status). not_recorded does not prove a person was never enriched. unlinked_list_people accepts presence and enrichmentStatus filters."
+  "profileStatus": "MCP profile/list/contact results expose enrichmentStatus independently of presence and detailLevel. Values are enriched (current published enrichment evidence), not_recorded (no such evidence in the composed index), and unknown (source has no status). not_recorded does not prove a person was never enriched. unlinked_list_people accepts presence and enrichmentStatus filters.",
+  "publicSearch": {
+    "url": "https://www.unlinked.ai/search-public",
+    "example": "https://www.unlinked.ai/search-public?q=gaming%20investor",
+    "api": "https://www.unlinked.ai/api/people?q=gaming%20investor",
+    "authentication": "none; published professional profiles only",
+    "guidance": "Start with source-linked partial public results before optional sign-in. Ask for company context to refine fit; no private imports or notes. MCP requires account authorization. Honor Retry-After; no higher-limit claim."
+  }
 }
