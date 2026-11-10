@@ -104,7 +104,7 @@ The isolated private Noos adapter, bounded publication journal, OIDC browser con
 ### Public network entry
 
 See [Import LinkedIn archive](#import-linkedin-archive) for the export-first entry, navigation and private availability. `/login` starts the current Ideaflow ID path in the standalone runtime; the Next.js `/auth/login` and `/auth/signup` pages remain local/historical source routes.
-The standalone runtime includes durable profile-first archive processing, owner-wide multi-import browsing/search, browser-only recovered-original downloads and account-scoped MCP grants. The Next.js app still retains historical/public source routes rather than hosting that runtime.
+The standalone runtime includes durable profile-first archive processing, owner-wide multi-import browsing/search, browser-only recovered-original downloads and account-scoped MCP grants. The Next.js app still retains historical/public source routes rather than hosting that runtime. For private groups and selected list sharing, see [Collective network](docs/collective-network.md).
 
 The canonical landing page gives “Start my LinkedIn export” the same prominence
 as “Create my profile.” Opening LinkedIn changes the export link to a quieter
