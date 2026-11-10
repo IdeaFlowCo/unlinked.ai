@@ -163,6 +163,10 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 // `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
 // people overlay client (private-context.mjs) and the owner identity bridge.
+// lookup_contact failures name the step that failed and the index's fixed
+// reason (request diagnostics failure_stage / index_failure); no message or data.
+const stageOf = (error, stage) => Object.assign(error, { stage })
+const indexFailure = (stage, error) => Object.assign(new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.'), { stage, ...(typeof error?.reason === 'string' ? { indexReason: error.reason } : {}) })
 export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
@@ -460,18 +464,18 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       if (mode === 'profileId') {
         if (!reader) throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
         try { published = (await reader.lookup({ ids: [input.profileId], signal })).get(input.profileId) ?? null }
-        catch (error) { throw error instanceof PublicPeopleReaderError && error.status === 400 ? new AccountToolError('not_found', 'No published public profile has that id.') : new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+        catch (error) { throw error instanceof PublicPeopleReaderError && error.status === 400 ? new AccountToolError('not_found', 'No published public profile has that id.') : indexFailure('index_profile_lookup', error) }
         if (!published) throw new AccountToolError('not_found', 'No published public profile has that id.')
       }
       // The owner's own connection rows; never anyone else's.
       let rows
       try { rows = (await createAccountNetwork({ owner: owner(grant), getBackend }).readNetwork(undefined, { signal })).assertions.filter(row => row.category === 'connections') }
-      catch { throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
+      catch { throw stageOf(new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.'), 'owner_network') }
       // A row without its own LinkedIn address uses the one the owner attached
       // to that contact privately (contact enrichment), so the owner's private
       // card can be keyed linkedin:in:<hash>. Only the hash leaves this tool.
       let attached = new Map()
-      if (typeof contactAddresses === 'function') { try { attached = await contactAddresses(owner(grant)) } catch { throw new AccountToolError('upstream_unavailable', 'The owner contact addresses are unavailable right now.') } }
+      if (typeof contactAddresses === 'function') { try { attached = await contactAddresses(owner(grant)) } catch { throw stageOf(new AccountToolError('upstream_unavailable', 'The owner contact addresses are unavailable right now.'), 'contact_addresses') } }
       const privateSlug = row => { const value = attached.get(row.id); return value && value.fingerprint === contactFingerprint(row) ? rowSlug({ fields: { url: value.address } }) : null }
       const ordered = rows.map(row => ({ row, entry: connectionEntry(row), slug: rowSlug(row) ?? privateSlug(row) }))
         .sort((a, b) => a.entry.name.localeCompare(b.entry.name) || a.entry.id.localeCompare(b.entry.id))
@@ -486,14 +490,14 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
             const byAddress = candidate.slug ? await reader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(candidate.slug)}`, signal }) : null
             return [...new Map([explicit, byAddress].filter(Boolean).map(summary => [summary.id, summary])).values()]
           }))
-        } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+        } catch (error) { throw indexFailure('index_published_lookup', error) }
       }
       const contactOf = async (candidate, summary) => {
         const sourceRef = linkedinRefHash(candidate.slug)
         let publicRef = null
         if (summary) {
           try { publicRef = await reader.linkedinRef({ id: summary.id, signal }) }
-          catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+          catch (error) { throw indexFailure('index_linkedin_ref', error) }
         }
         return { ...profileStatus(summary), connectionId: candidate.entry.id, name: candidate.entry.name,
           ...(candidate.entry.headline ? { headline: candidate.entry.headline } : {}), ...(candidate.entry.company ? { company: candidate.entry.company } : {}),
@@ -519,7 +523,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
       let candidate = null
       if (mode === 'linkedinUrl' && reader) {
         try { published = await reader.lookupLinkedin({ address: input.linkedinUrl, signal }) }
-        catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+        catch (error) { throw indexFailure('index_refhash_lookup', error) }
       }
       if (mode === 'connectionId') candidate = ordered.find(value => value.entry.id === input.connectionId) ?? null
       else if (mode === 'linkedinUrl' && !published) candidate = ordered.find(value => value.slug === wantedSlug) ?? null
