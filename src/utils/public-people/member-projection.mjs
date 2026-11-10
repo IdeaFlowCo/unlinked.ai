@@ -62,7 +62,10 @@ export const ENRICHMENT_DATASETS = Object.freeze([...ENRICHMENT_SHARD_DATASETS, 
 // member imports mint (`public-<row>`), including imports made later. It only
 // fills fields a profile leaves empty, never touches members or historical
 // members, and never adds people or edges.
-export const LINKEDIN_ENRICHMENT_DATASETS = Object.freeze(Array.from({ length: 8 }, (_, index) => `curated-enrichment-li-${index + 1}`))
+// li-1..li-8 carry Exa profile enrichment (li-8: the 2026-11-06 cohort);
+// li-9 carries people's own homepages (`website`) only. Read in order, first
+// row per address wins, so a li-9 row fills only addresses absent from li-1..8.
+export const LINKEDIN_ENRICHMENT_DATASETS = Object.freeze(Array.from({ length: 9 }, (_, index) => `curated-enrichment-li-${index + 1}`))
 export const LINKEDIN_ENRICHMENT_ID = /^li-[a-f0-9]{64}$/
 // Bounded below the reader's 96 MiB whole-index cap, leaving room for the
 // recovered and member-authored profiles. Each Noos shard remains <= 8 MiB.

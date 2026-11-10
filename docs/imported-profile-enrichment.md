@@ -9,7 +9,7 @@ person's LinkedIn profile: headline, location, about, experience and education
 
 ## LinkedIn-keyed datasets
 
-`curated-enrichment-li-1` through `-li-8` (`LINKEDIN_ENRICHMENT_DATASETS` in
+`curated-enrichment-li-1` through `-li-9` (`LINKEDIN_ENRICHMENT_DATASETS` in
 `src/utils/public-people/member-projection.mjs`) are Noos public datasets like
 the id-keyed `curated-enrichment-*` sets (docs/public-people-reader.md), except
 that a row's id names a LinkedIn address, not a profile:
@@ -73,3 +73,10 @@ private data sources, not in this repository.
 - The publisher's plan runs the vendored store's own `validatePublicSnapshot`. A plan can no longer pass when execute would fail (the 2026-11-09 li-8 failure). The plan therefore needs `runtime/noos` (the vendored module) under the root, and runs only on the runtime host or inside the runtime container, not on a machine without it.
 - One unreadable or malformed enrichment dataset no longer fails the whole public index. It is skipped, never applied, and logged once per build as `public_enrichment_dataset_unreadable` (dataset and store error code only). Runtime health reports `index_enrichment_unreadable` (count) and `index_enrichment_degraded`, which is 1 when every published LinkedIn-keyed dataset is unreadable. The legacy base dataset stays fatal.
 - `tests/website-enrichment-integration.test.mjs` runs only with `UNLINKED_NOOS_DIR`, because CI cannot fetch private Noos. The runtime rollout runs it against the staged module.
+
+### Dataset slots (2026-11-09)
+
+- li-1 to li-7 hold the 2026-10-24 Exa cohorts. li-8 holds the 2026-11-06 Exa cohort; its owner is the Paseo agent f0ca4874 enrichment workstream.
+- li-9 holds people's own homepages (`website`) only, from the friends' homepages workstream.
+- The datasets are read in order and the first row for an address wins. A li-9 row therefore fills only addresses that li-1 to li-8 do not carry; the homepage rows were built with zero overlap.
+- Before publishing into any slot, check the host's `audit/curated-enrichment-*.json` receipts and the live pointer, and never reuse another workstream's slot.
