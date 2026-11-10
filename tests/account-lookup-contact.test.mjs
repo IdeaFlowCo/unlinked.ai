@@ -176,3 +176,12 @@ test('lookups share one owner network read while fresh, and a caller that gives 
   await live.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: ada.id } })
   assert.equal(reads, 2, 'networkFreshMs 0 reads live every time')
 })
+
+test('one connection with an address the index refuses does not fail lookups of the others', async () => {
+  // rowSlug decodes %21 to '!', which the published-index address parser refuses (input_invalid).
+  const odd = row(sha('odd'), 'Odd', 'Slug', 'https://www.linkedin.com/in/synthetic%21odd')
+  const service = createAccountToolService({ getBackend: async who => ({ ...backendFor(who), readLegacyObservations: async () => (who.ownerId === owner.ownerId ? { assertions: [ada, grace, nameOnly, odd] } : null) }), readPublishedSnapshot: snapshot, lookupSlug: slug => slugs.get(slug) ?? null })
+  const call = input => service.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input }).then(value => value.result)
+  assert.equal((await call({ connectionId: ada.id })).contact.connectionId, ada.id)
+  assert.equal((await call({ connectionId: odd.id })).contact.connectionId, odd.id)
+})
