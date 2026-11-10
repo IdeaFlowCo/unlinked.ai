@@ -22,7 +22,7 @@ Muse product capability checked against [Meta's connector documentation](https:/
 
 ## Instructions to paste into an agent (unlinked-40dg)
 
-`/agents` (public) and Settings → Your agent start with **Paste this into your agent**: plain text from `agentInstructionsText()` in `mcp-server/private-onboarding-views.mjs`. It is complete on its own: the MCP URL, sign-in setup for Claude, Claude Code, ChatGPT and config-file clients, and the first calls (whoami, then a small search). It says the agent does not need to open any page, and it contains no key or token, so it is safe in chat. Before this, the only copy was the raw JSON with a Bearer key ("Copy agent setup"). An agent given that, or a link, asked to read the web page first.
+`/agents` (public) leads with **Help me connect** for the shared Ideaflow connection and host-specific steps. Settings → Your agent and the direct Unlinked fallback retain **Paste this into your agent**: plain text from `agentInstructionsText()` in `mcp-server/private-onboarding-views.mjs`. It is complete on its own: the MCP URL, sign-in setup for Claude, Claude Code, ChatGPT and config-file clients, and the first calls (whoami, then a small search). It says the agent does not need to open any page, and it contains no key or token, so it is safe in chat. Before this, the only copy was the raw JSON with a Bearer key ("Copy agent setup"). An agent given that, or a link, asked to read the web page first.
 
 
 ## Host setup verification
