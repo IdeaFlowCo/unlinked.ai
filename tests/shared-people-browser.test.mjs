@@ -37,6 +37,12 @@ test('anonymous People reads only public professional snapshot; no-import member
   const callback = await request('/auth/callback/ideaflow?code=test&state=state',{headers:{Cookie:loginCookie}})
   assert.equal(callback.status,303)
   const session = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
+  // Public shortlists remain the same safe projection even with a real session.
+  const publicGuest = await (await request('/search-public?q=Last')).text()
+  const publicMember = await (await request('/search-public?q=Last', { headers: { Cookie: session } })).text()
+  assert.equal(publicMember, publicGuest)
+  assert.match(publicGuest, /Z Last/)
+  assert.doesNotMatch(publicMember, /test-owner|test-user|Verified Person|test@example|name="csrf"/)
   const ownProfile = await request('/profile',{headers:{Cookie:session}}); assert.equal(ownProfile.status,200); assert.match(await ownProfile.text(), /Verified Person/)
   const people = await request('/network',{headers:{Cookie:session}}); assert.equal(people.status,200)
   const page = await people.text(), csrf = page.match(/name="csrf" value="([^"]+)"/)[1]
