@@ -36,7 +36,7 @@ export function createRestartNotice({ origin, maxClients = 2000, graceMs = 5000 
 export function restartNoticeClient() {
   if (!globalThis.EventSource || globalThis.__unlinkedRestartNotice) return
   globalThis.__unlinkedRestartNotice = true
-  let stream, instance, restarting = false, banner, recoveryTimer
+  let stream, instance, restarting = false, banner, recoveryTimer, retryTimer, active = true
   const show = message => {
     if (!banner) {
       banner = document.createElement('div')
@@ -48,9 +48,18 @@ export function restartNoticeClient() {
     banner.textContent = message
   }
   const connect = () => {
-    if (stream) return
-    stream = new EventSource('/api/runtime-events')
-    stream.onmessage = event => {
+    if (stream || !active) return
+    const source = new EventSource('/api/runtime-events')
+    stream = source
+    // A proxy can return 502/503 while the process starts. Some browsers close
+    // EventSource permanently for those responses, so explicitly retry as well.
+    source.onerror = () => {
+      if (stream !== source) return
+      source.close(); stream = null
+      clearTimeout(retryTimer)
+      if (active) retryTimer = setTimeout(connect, 2000 + Math.random() * 1000)
+    }
+    source.onmessage = event => {
       let state
       try { state = JSON.parse(event.data) } catch { return }
       if (typeof state.instance !== 'string') return
@@ -65,8 +74,8 @@ export function restartNoticeClient() {
       instance = state.instance
     }
   }
-  addEventListener('pagehide', () => { stream?.close(); stream = null })
-  addEventListener('pageshow', connect)
+  addEventListener('pagehide', () => { active = false; clearTimeout(retryTimer); stream?.close(); stream = null })
+  addEventListener('pageshow', () => { active = true; connect() })
   connect()
 }
 export const RESTART_NOTICE_SCRIPT = `;(${restartNoticeClient.toString()})();`
