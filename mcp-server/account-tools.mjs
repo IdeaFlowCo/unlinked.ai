@@ -1,5 +1,6 @@
 import { EXPORT_FIELDS } from './bulk-export-format.mjs'
 export const INTERNAL_BULK_READ = Symbol('unlinked-internal-bulk-read')
+import { reportIndexError } from '../src/utils/public-people/error-report.mjs'
 import { INVESTOR_TOOLS, INVESTOR_MUTATING, INVESTOR_SCHEMAS, INVESTOR_DESCRIPTIONS } from './investor-tools.mjs'
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash } from 'node:crypto'
@@ -170,7 +171,14 @@ const cursorOffset = (cursor, binding, length) => {
 // lookup_contact failures name the step that failed and the index's fixed
 // reason (request diagnostics failure_stage / index_failure); no message or data.
 const stageOf = (error, stage) => Object.assign(error, { stage })
-const indexFailure = (stage, error) => Object.assign(new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.'), { stage, ...(typeof error?.reason === 'string' ? { indexReason: error.reason } : {}) })
+const indexReasonOf = (stage, error) => {
+  if (typeof error?.reason === 'string') return error.reason
+  if (error instanceof PublicPeopleReaderError) return error.status === 400 ? 'input_invalid' : 'reader_refused'
+  // Not from the reader at all: this tool's own candidate code threw.
+  reportIndexError('tool', stage, error)
+  return 'tool_exception'
+}
+const indexFailure = (stage, error) => Object.assign(new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.'), { stage, indexReason: indexReasonOf(stage, error) })
 export function createAccountToolService({ exportManifest, isVerified = async () => false, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits

@@ -11,7 +11,7 @@ const TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list
   'unlinked_stage_investor_csv', 'unlinked_resume_investor_import', 'unlinked_get_investor_import'])
 // Fixed failure steps and public-index reasons a tool error may carry (account-tools lookup_contact, public-people reader).
 const STAGES = ['owner_network', 'contact_addresses', 'index_profile_lookup', 'index_published_lookup', 'index_linkedin_ref', 'index_refhash_lookup']
-const INDEX_REASONS = ['build_timeout', 'aborted', 'stale', 'worker_timeout', 'worker_unavailable', 'worker_refused', 'clone_failed', 'exception', 'reader_exception', 'snapshot_invalid', 'install_timeout']
+const INDEX_REASONS = ['build_timeout', 'aborted', 'stale', 'worker_timeout', 'worker_unavailable', 'worker_refused', 'clone_failed', 'exception', 'reader_exception', 'snapshot_invalid', 'install_timeout', 'input_invalid', 'reader_refused', 'tool_exception']
 const ERRORS = new Set(['not_linked', 'grant_revoked', 'invalid_input', 'cursor_invalid', 'client_unauthorized', 'scope_not_granted', 'not_found', 'degree_unproven', 'result_too_large', 'rate_limited', 'upstream_unavailable', 'not_a_member', 'already_connected', 'request_pending', 'request_unavailable', 'cooldown_active', 'account_link_required', 'protocol_error', 'internal_error'])
 const METHODS = new Set(['initialize', 'notifications/initialized', 'tools/list', 'tools/call', 'ping'])
 const count = value => Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000_000) : undefined
