@@ -53,10 +53,13 @@ test('a homepage passes the real store validator and renders on the imported pro
 
   const ada = (await reader.profile({ id: 'public-a' })).profile
   assert.equal(ada.website, 'https://ada.example/')
-  assert.match(renderPerson({ profile: ada }), /<a href="https:\/\/ada\.example\/" target="_blank" rel="noopener noreferrer nofollow">Website ↗<\/a>/)
+  // renderPerson returns { title, active, content }; the request handler sends `content` (private-browser.mjs journey()).
+  const adaPage = renderPerson({ profile: ada })
+  assert.equal(typeof adaPage.content, 'string')
+  assert.match(adaPage.content, /<a href="https:\/\/ada\.example\/" target="_blank" rel="noopener noreferrer nofollow">Website ↗<\/a>/)
   // Members' own words are never filled, so no website on a member.
   const cy = (await reader.profile({ id: MEMBER })).profile
   assert.equal(cy.website, undefined)
-  assert.doesNotMatch(renderPerson({ profile: cy }), /cy\.example/)
+  assert.doesNotMatch(renderPerson({ profile: cy }).content, /cy\.example|Website ↗/)
   assert.deepEqual(read.enrichmentHealth(), { unreadable: 0, degraded: false })
 })
