@@ -68,3 +68,42 @@ test('durable lists survive store recreation, isolate owners and retire public l
  await fresh.share(owner,row.id,[]);assert.equal(await store.shared(second.shareToken),null)
  await fresh.removeOwner(owner);assert.deepEqual(await store.list(owner),[])
 })
+
+// Run alongside the durable saved-search test in hosted graph CI. This
+// exercises the group ACL and its existing list source in the same graph.
+test('durable group ACL shares a saved result and serializes competing accepts', { skip: !graphEnabled }, async t => {
+ const { createRequire } = await import('node:module'), { randomUUID } = await import('node:crypto')
+ const { createNeo4jSavedSearchLists } = await import('../mcp-server/saved-search-lists.mjs')
+ const { createNeo4jCollectiveGroupsStore } = await import('../mcp-server/collective-groups-store.mjs')
+ const { createCollectiveGroups } = await import('../mcp-server/collective-groups.mjs')
+ const { createCollectiveListProjection } = await import('../mcp-server/collective-group-lists.mjs')
+ const neo = createRequire(import.meta.url)(process.env.UNLINKED_TEST_NEO4J_DRIVER)
+ const driver = neo.driver(uri, neo.auth.basic('neo4j', process.env.UNLINKED_TEST_NEO4J_PASSWORD))
+ t.after(() => driver.close())
+ const listStore = createNeo4jSavedSearchLists(driver), groupStore = createNeo4jCollectiveGroupsStore(driver)
+ await listStore.initialize()
+ await groupStore.initialize()
+ const fixture = () => ({ ownerId: 'group-fixture-' + randomUUID(), userId: 'group-fixture-user' })
+ const organizer = fixture(), invitee = fixture()
+ const create = () => createCollectiveGroups({ store: createNeo4jCollectiveGroupsStore(driver), active: () => true })
+ const a = create(), b = create(), group = await a.create(organizer, 'Durable group')
+ const projection = createCollectiveListProjection({ savedSearchLists: listStore,
+   lookup: async ids => new Map(ids.map(id => [id, { id, name: 'Public person' }])) })
+ try {
+   const invite = await a.invite(organizer, group.id, invitee, { id: 'public-fixture-member', name: 'Fixture member' })
+   assert.equal((await b.directory(invitee)).invites[0].id, invite)
+   const results = await Promise.allSettled([a.respond(invitee, group.id, invite, 'accept'), b.respond(invitee, group.id, invite, 'accept')])
+   assert.deepEqual(results.map(result => result.status).sort(), ['fulfilled', 'rejected'])
+   assert.equal(results.find(result => result.status === 'rejected').reason.code, 'not_found')
+   assert.equal((await a.detail(organizer, group.id)).members.length, 1)
+   const list = await listStore.create(organizer, { name: 'One list', queryUrl: '/network?q=private', refs: ['public:fixture-profile', 'contact:private'] })
+   const selection = await projection.preview(organizer, group.id, 'saved:' + list.id)
+   const share = await a.share(organizer, group.id, selection)
+   assert.deepEqual((await b.readShare(invitee, group.id, share.id, projection.project)).profiles.map(profile => profile.id), ['fixture-profile'])
+   await a.revoke(organizer, group.id, 'member', invite)
+   await assert.rejects(b.readShare(invitee, group.id, share.id, projection.project), { code: 'not_found' })
+ } finally {
+   await a.removeOwner(organizer)
+   await listStore.removeOwner(organizer)
+ }
+})
