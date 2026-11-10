@@ -147,3 +147,12 @@ test('a LinkedIn address the owner attached privately keys a profile-less contac
   const broken = createAccountToolService({ getBackend: async who => backend(who), readPublishedSnapshot: snapshot, contactAddresses: async () => { throw Error('store down') } })
   await assert.rejects(broken.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: id } }), error => error.code === 'upstream_unavailable')
 })
+
+test('an unavailable public index names the failing lookup step and a fixed reason, never the error text', async () => {
+  const down = createAccountToolService({ getBackend: async who => backendFor(who), readPublishedSnapshot: async () => { throw new Error('private detail must not travel') } })
+  const call = input => down.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input })
+  await assert.rejects(call({ profileId: 'pub-ada' }), error => error.code === 'upstream_unavailable' && error.stage === 'index_profile_lookup' && !String(error.indexReason ?? '').includes('private'))
+  await assert.rejects(call({ connectionId: ada.id }), error => error.code === 'upstream_unavailable' && error.stage === 'index_published_lookup')
+  const slow = createAccountToolService({ getBackend: async who => backendFor(who), readPublishedSnapshot: async () => { throw new Error('x') }, contactAddresses: async () => { throw new Error('store down') } })
+  await assert.rejects(slow.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: ada.id } }), error => error.stage === 'contact_addresses')
+})

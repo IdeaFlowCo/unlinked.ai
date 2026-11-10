@@ -11,9 +11,11 @@ import { buildSuggestIndex, suggestCompanies, suggestPeople } from './suggest-in
 import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
 import { connectionPolicies, createConnectionVisibility } from './connection-privacy.mjs'
 import { activePublicIndexHost } from './index-host.mjs'
+import { reportIndexError } from './error-report.mjs'
 
 export class PublicPeopleReaderError extends Error {
-  constructor(status, code) { super(code); this.name = 'PublicPeopleReaderError'; this.status = status; this.code = code }
+  // `reason` (optional) is a fixed diagnostic value, e.g. build_timeout, aborted, stale, worker_timeout.
+  constructor(status, code, reason) { super(code); this.name = 'PublicPeopleReaderError'; this.status = status; this.code = code; if (reason) this.reason = reason }
 }
 const unavailable = () => { throw new PublicPeopleReaderError(503, 'public_people_unavailable') }
 const invalid = () => { throw new PublicPeopleReaderError(400, 'public_people_input_invalid') }
@@ -138,7 +140,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     let timer, abortHandler
     try {
       const interruption = new Promise((_, reject) => {
-        abortHandler = () => reject(new PublicPeopleReaderError(503, 'public_people_unavailable'))
+        abortHandler = () => reject(new PublicPeopleReaderError(503, 'public_people_unavailable', controller.signal.aborted && !signal?.aborted ? 'build_timeout' : 'aborted'))
         combined.addEventListener('abort', abortHandler, { once: true })
         timer = setTimeout(() => controller.abort(), timeoutMs)
         if (combined.aborted) abortHandler()
@@ -272,8 +274,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // Shared across requests, so no caller can change what another one sees.
       if (cacheable) { for (const row of [...summaries.values(), ...details.values()]) deepFreeze(row); compiled.set(source, { key: cacheKey, data }) }
       return data
-    } catch {
-      unavailable()
+    } catch (error) {
+      // Keep why the build failed as a fixed reason: the deadline or caller
+      // abort, a worker install/transfer failure, or a snapshot that failed
+      // validation (typed refusals without a reason). Never the error text.
+      // Always the generic 503: a provider's own status/code never passes through.
+      if (error instanceof PublicPeopleReaderError) throw new PublicPeopleReaderError(503, 'public_people_unavailable', ['build_timeout', 'aborted'].includes(error.reason) ? error.reason : 'snapshot_invalid')
+      if (typeof error?.reason === 'string') throw new PublicPeopleReaderError(503, 'public_people_unavailable', error.reason === 'worker_timeout' ? 'install_timeout' : error.reason)
+      reportIndexError('reader', 'build', error)
+      throw new PublicPeopleReaderError(503, 'public_people_unavailable', 'reader_exception')
     } finally {
       clearTimeout(timer)
       if (abortHandler) combined.removeEventListener('abort', abortHandler)
@@ -354,7 +363,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       default: return result
     }
   }
-  const asReaderError = error => error instanceof PublicPeopleReaderError ? error : new PublicPeopleReaderError(error?.status === 400 ? 400 : 503, error?.status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable')
+  // Keeps the fixed failure reason across the worker boundary; an untyped
+  // exception here also writes one fixed stderr line (class and location only).
+  const asReaderError = error => {
+    if (error instanceof PublicPeopleReaderError) return error
+    const typedFailure = Number.isSafeInteger(error?.status)
+    if (!typedFailure) reportIndexError('reader', 'any', error)
+    const reason = typeof error?.reason === 'string' ? error.reason : error?.stale ? 'stale' : typedFailure ? undefined : 'reader_exception'
+    return new PublicPeopleReaderError(error?.status === 400 ? 400 : 503, error?.status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable', reason)
+  }
   // Run `method` in the index worker against the snapshot descriptor `data`.
   // A worker that no longer holds that index (restarted, or the revision
   // aged out) answers `stale`: read and install once more, then retry once.
@@ -367,7 +384,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     let result
     try {
       result = await (signal ? new Promise((resolve, reject) => {
-        const abort = () => reject(new PublicPeopleReaderError(503, 'public_people_unavailable'))
+        const abort = () => reject(new PublicPeopleReaderError(503, 'public_people_unavailable', 'aborted'))
         if (signal.aborted) { abort(); return }
         signal.addEventListener('abort', abort, { once: true })
         call.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
