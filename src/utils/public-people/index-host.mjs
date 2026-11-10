@@ -32,9 +32,11 @@ const CHUNKED = ['profiles', 'connections', 'members', 'legacyMembers', 'suspend
 const yieldLoop = () => new Promise(resolve => setImmediate(resolve))
 
 export class PublicIndexHostError extends Error {
-  constructor(status, code, stale = false) { super(code); this.name = 'PublicIndexHostError'; this.status = status; this.code = code; this.stale = stale }
+  constructor(status, code, stale = false, reason) { super(code); this.name = 'PublicIndexHostError'; this.status = status; this.code = code; this.stale = stale; if (reason) this.reason = reason }
 }
-const unavailable = () => new PublicIndexHostError(503, 'public_people_unavailable')
+// `reason` is a fixed value for diagnostics: worker_timeout, worker_unavailable or the worker's own.
+const REASONS = new Set(['exception'])
+const unavailable = (reason = 'worker_unavailable') => new PublicIndexHostError(503, 'public_people_unavailable', false, reason)
 
 let active = null
 // The host cacheable readers use, or null (compile in-process, as before).
@@ -84,7 +86,7 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
       const entry = pending.get(message?.id)
       if (!entry) return
       pending.delete(message.id); clearTimeout(entry.timer); settle()
-      if (message.error) entry.reject(new PublicIndexHostError(message.error.status ?? 503, message.error.code ?? 'public_people_unavailable', message.error.stale === true))
+      if (message.error) entry.reject(new PublicIndexHostError(message.error.status ?? 503, message.error.code ?? 'public_people_unavailable', message.error.stale === true, REASONS.has(message.error.reason) ? message.error.reason : (message.error.stale === true ? 'stale' : 'worker_refused')))
       else entry.resolve(message.result)
     })
     const lost = () => {
@@ -105,11 +107,11 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
     let target
     try { target = spawn() } catch (error) { reject(error); return }
     const id = nextId++
-    const timer = setTimeout(() => { if (pending.delete(id)) { settle(); reject(unavailable()) } }, timeoutMs)
+    const timer = setTimeout(() => { if (pending.delete(id)) { settle(); reject(unavailable('worker_timeout')) } }, timeoutMs)
     timer.unref?.()
     pending.set(id, { resolve, reject, timer })
     target.ref?.()
-    try { target.postMessage({ ...message, id }) } catch { pending.delete(id); clearTimeout(timer); settle(); reject(unavailable()) }
+    try { target.postMessage({ ...message, id }) } catch { pending.delete(id); clearTimeout(timer); settle(); reject(unavailable('clone_failed')) }
   })
 
   // Install `snapshot` under (sourceKey, cacheKey) unless the current worker has it.
