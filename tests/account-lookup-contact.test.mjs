@@ -156,3 +156,23 @@ test('an unavailable public index names the failing lookup step and a fixed reas
   const slow = createAccountToolService({ getBackend: async who => backendFor(who), readPublishedSnapshot: async () => { throw new Error('x') }, contactAddresses: async () => { throw new Error('store down') } })
   await assert.rejects(slow.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: ada.id } }), error => error.stage === 'contact_addresses')
 })
+
+test('lookups share one owner network read while fresh, and a caller that gives up still warms the next', async () => {
+  let reads = 0
+  const counted = who => ({ ...backendFor(who), readLegacyObservations: async () => { reads++; await new Promise(resolve => setTimeout(resolve, 30)); return who.ownerId === owner.ownerId ? { assertions: [ada, grace, nameOnly] } : null } })
+  const shared = createAccountToolService({ getBackend: async who => counted(who), readPublishedSnapshot: snapshot, lookupSlug: slug => slugs.get(slug) ?? null })
+  const call = (input, signal) => shared.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input, signal })
+  const impatient = new AbortController()
+  const abandoned = call({ connectionId: ada.id }, impatient.signal)
+  impatient.abort()
+  await assert.rejects(abandoned)
+  await new Promise(resolve => setTimeout(resolve, 60))
+  const first = (await call({ connectionId: ada.id })).result, second = (await call({ connectionId: grace.id })).result
+  assert.equal(first.contact.connectionId, ada.id); assert.equal(second.contact.connectionId, grace.id)
+  assert.equal(reads, 1, 'the abandoned read finished and served both later lookups')
+  const live = createAccountToolService({ getBackend: async who => counted(who), readPublishedSnapshot: snapshot, limits: { networkFreshMs: 0 } })
+  reads = 0
+  await live.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: ada.id } })
+  await live.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: ada.id } })
+  assert.equal(reads, 2, 'networkFreshMs 0 reads live every time')
+})
