@@ -1,3 +1,4 @@
+import { createRestartNotice } from './restart-notice.mjs'
 import { createPrivateLists, PRIVATE_LIST_READ_TOOLS } from './private-lists.mjs'
 import { createPrivateListImports, LIST_TOOLS } from './private-list-imports.mjs'
 import { diagnosticTransport, requestDiagnostic } from './request-diagnostics.mjs'
@@ -74,9 +75,11 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin, provisioning }) : null
   const connector = accountGrants ? createIdeaflowConnectorHandler({ secret: ideaflowConnectorSecret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService, coordination: coordinatorFor(sessionStore) }) : null
   const messaging = createMessagingHandler({ origin: base.origin, secret: messagingSecret, resolveRecipient: resolveMessagingRecipient })
+  const restartNotice = createRestartNotice({ origin: base.origin })
   const server = createServer((request, response) => {
     let pathname
     try { pathname = new URL(request.url, base).pathname } catch { response.writeHead(400).end(); return }
+    if (pathname === '/api/runtime-events') { restartNotice.handle(request, response); return }
     const handle = () => (pathname === '/api/connector/mcp' && connector ? connector(request, response) : pathname === MESSAGING_PATH ? messaging(request, response) : pathname === '/mcp' ? mcp(request, response) : oauth?.isEndpoint(pathname) ? oauth.handle(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(error => {
       requestDiagnostic().failure(error)
       if (!response.headersSent) response.writeHead(503).end()
@@ -103,5 +106,5 @@ export async function startPrivatePilot({ ideaflowConnectorSecret, connectionIde
   // Best effort: publication failure leaves account routes available.
   await warmPublicPeopleIndex({ readPublishedSnapshot })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve) })
-  return { server, revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { health?.stop(); void stallProfiler?.stop(); if (indexHost) { if (activePublicIndexHost() === indexHost) installPublicIndexHost(null); void indexHost.close() } return new Promise(resolve => server.close(resolve)) } }
+  return { server, announceRestart: () => restartNotice.announce(), revokeGrant: accountGrants?.revoke ?? grants.revoke, stop: () => { restartNotice.close(); health?.stop(); void stallProfiler?.stop(); if (indexHost) { if (activePublicIndexHost() === indexHost) installPublicIndexHost(null); void indexHost.close() } return new Promise(resolve => server.close(resolve)) } }
 }
