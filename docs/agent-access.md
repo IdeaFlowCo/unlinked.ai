@@ -24,3 +24,9 @@ Muse product capability checked against [Meta's connector documentation](https:/
 
 `/agents` (public) and Settings → Your agent start with **Paste this into your agent**: plain text from `agentInstructionsText()` in `mcp-server/private-onboarding-views.mjs`. It is complete on its own: the MCP URL, sign-in setup for Claude, Claude Code, ChatGPT and config-file clients, and the first calls (whoami, then a small search). It says the agent does not need to open any page, and it contains no key or token, so it is safe in chat. Before this, the only copy was the raw JSON with a Bearer key ("Copy agent setup"). An agent given that, or a link, asked to read the web page first.
 
+
+## Host setup verification
+
+The `/agents` page provides a short Help me connect prompt and separate Claude, ChatGPT plugin, Claude Code and Codex steps. The shared URL is `https://id.ideaflow.app/mcp`; direct Unlinked remains `https://www.unlinked.ai/mcp`. Users add the connection, sign in and consent themselves. Verify account identity and a read-only Unlinked search before reporting success. Shared connector OAuth, discovery and account read were verified in Claude on November 9, 2026; an Unlinked query in that host and end-to-end ChatGPT/Claude Code/Codex acceptance remain unverified.
+
+Host references checked November 10, 2026: [ChatGPT custom MCP plugins](https://developers.openai.com/plugins/deploy/connect-chatgpt), [Codex MCP](https://developers.openai.com/codex/mcp), [Claude Code MCP](https://code.claude.com/docs/en/mcp). Account/workspace policies may restrict custom connections.
