@@ -5,7 +5,13 @@ import { createHash, randomUUID } from 'node:crypto'
 
 // This is an allowlist projection, never a request/error/body logger.
 const context = new AsyncLocalStorage()
-const TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_search_network', 'unlinked_search_everyone', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request', 'unlinked_read_import', 'unlinked_search_import'])
+const TOOLS = new Set(['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_search_network', 'unlinked_search_everyone', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request', 'unlinked_read_import', 'unlinked_search_import', 'unlinked_lookup_contact', 'unlinked_list_person_targets',
+  'unlinked_get_person_private', 'unlinked_get_private_thing', 'unlinked_list_private_things', 'unlinked_search_private', 'unlinked_get_neighbourhood',
+  'unlinked_save_private_thing', 'unlinked_add_private_note', 'unlinked_delete_private_note', 'unlinked_add_private_link', 'unlinked_update_private_link', 'unlinked_delete_private_link', 'unlinked_delete_private_thing',
+  'unlinked_stage_investor_csv', 'unlinked_resume_investor_import', 'unlinked_get_investor_import'])
+// Fixed failure steps and public-index reasons a tool error may carry (account-tools lookup_contact, public-people reader).
+const STAGES = ['owner_network', 'contact_addresses', 'index_profile_lookup', 'index_published_lookup', 'index_linkedin_ref', 'index_refhash_lookup']
+const INDEX_REASONS = ['build_timeout', 'aborted', 'stale', 'worker_timeout', 'worker_unavailable', 'worker_refused', 'clone_failed', 'exception', 'reader_exception', 'snapshot_invalid', 'install_timeout', 'input_invalid', 'reader_refused', 'tool_exception']
 const ERRORS = new Set(['not_linked', 'grant_revoked', 'invalid_input', 'cursor_invalid', 'client_unauthorized', 'scope_not_granted', 'not_found', 'degree_unproven', 'result_too_large', 'rate_limited', 'upstream_unavailable', 'not_a_member', 'already_connected', 'request_pending', 'request_unavailable', 'cooldown_active', 'account_link_required', 'protocol_error', 'internal_error'])
 const METHODS = new Set(['initialize', 'notifications/initialized', 'tools/list', 'tools/call', 'ping'])
 const count = value => Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000_000) : undefined
@@ -80,6 +86,8 @@ export function createRequestDiagnostics({ emit, now = () => new Date(), monoton
           if (error?.message === 'private_search_provider_http_429') row.failure_stage = 'provider_rate_limit'
           else if (/^private_search_provider_http_[45]\d\d$/.test(error?.message ?? '')) row.failure_stage = 'provider_http'
           else if (['private_search_context_limit', 'shared_search_context_limit'].includes(error?.message)) row.failure_stage = 'model_input_limit'
+          if (STAGES.includes(error?.stage)) row.failure_stage = error.stage
+          if (INDEX_REASONS.includes(error?.indexReason)) row.index_failure = error.indexReason
         },
         rpc(message) {
           row.rpc_method = METHODS.has(message?.method) ? message.method : 'other'
@@ -153,7 +161,7 @@ export function safeDiagnosticRecord(value) {
   if (!value || value.schema !== 1 || value.event !== 'agent_request' || typeof value.request_id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.request_id ?? '')) return null
   const result = { schema: 1, event: 'agent_request', request_id: value.request_id }
   for (const key of ['at', 'completed_at']) if (typeof value[key] === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value[key]) && Number.isFinite(Date.parse(value[key]))) result[key] = value[key]
-  const choices = { transport: ['rest', 'direct_mcp', 'gateway_mcp'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'DELETE', 'PUT', 'PATCH', 'other'], auth_type: ['gateway_assertion', 'account_bearer', 'private_bearer', 'provisioning_client'], auth_outcome: ['not_evaluated', 'accepted', 'rejected', 'unavailable'], rpc_method: [...METHODS, 'other'], tool: [...TOOLS, 'unknown'], error_class: [...ERRORS], failure_stage: ['provider_rate_limit', 'provider_http', 'model_input_limit'] }
+  const choices = { transport: ['rest', 'direct_mcp', 'gateway_mcp'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'DELETE', 'PUT', 'PATCH', 'other'], auth_type: ['gateway_assertion', 'account_bearer', 'private_bearer', 'provisioning_client'], auth_outcome: ['not_evaluated', 'accepted', 'rejected', 'unavailable'], rpc_method: [...METHODS, 'other'], tool: [...TOOLS, 'unknown'], error_class: [...ERRORS], failure_stage: ['provider_rate_limit', 'provider_http', 'model_input_limit', ...STAGES], index_failure: INDEX_REASONS }
   for (const [key, allowed] of Object.entries(choices)) if (allowed.includes(value[key])) result[key] = value[key]
   if (typeof value.route === 'string' && /^(?:\/mcp|\/api\/connector\/mcp|\/api\/agent\/unknown|\/api\/agent\/v1\/(?:whoami|people|people\/\{id\}|connections|connection-requests(?:\/(?:send|accept|ignore|withdraw))?|notifications|ai-search|search-network|search-everyone|provision-grant))$/.test(value.route ?? '')) result.route = value.route
   if (value.auth_outcome === 'accepted' && typeof value.account_id === 'string' && /^[a-f0-9]{64}$/.test(value.account_id ?? '')) result.account_id = value.account_id
