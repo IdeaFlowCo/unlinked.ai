@@ -24,6 +24,7 @@ async function browser(t) {
   let now = 1000
   const active = actor => registered.has(actor.ownerId) && actor.userId === account(actor.ownerId).userId
   const collectiveGroups = createCollectiveGroups({ store, now: () => now, active })
+  let exchanges = 0
   const options = { collectiveGroups, savedSearchLists, networkFreshMs: 0,
     privateLists: {
       list: async owner => ({ lists: owner.ownerId === 'alice' ? [{ id: 'fixture-graph-list', name: 'Founder introductions' }] : [] }),
@@ -32,7 +33,7 @@ async function browser(t) {
         return { list: { name: 'Founder introductions', description: secret }, members: [{ profileId: 'public-a', name: secret }, { name: secret }] }
       },
     },
-    login: { begin: async () => ({ location: 'https://identity.invalid', transaction: { state: 'test' } }), finish: async url => ({ issuer: 'https://identity.invalid', subject: url.searchParams.get('code') }) },
+    login: { begin: async () => ({ location: 'https://identity.invalid', transaction: { state: 'test' } }), finish: async url => { exchanges++; return { issuer: 'https://identity.invalid', subject: url.searchParams.get('code') } } },
     resolveOwner: async identity => registered.has(identity.subject) ? account(identity.subject) : null,
     signup: async identity => { registered.add(identity.subject); return account(identity.subject) },
     issueAccountGrant: async () => ({}), revokeAccountGrant: async () => {},
@@ -58,7 +59,10 @@ async function browser(t) {
     const csrf = token(await (await get('/groups', cookie)).text())
     return { cookie, csrf, destination: callback.headers.get('location') }
   }
-  return { get, post, login, saved, foreign, store, expire: () => { now += GROUP_LIMITS.inviteMs } }
+  return { get, post, login, saved, foreign, store, expire: () => { now += GROUP_LIMITS.inviteMs },
+    restart: () => { handler = createPrivateBrowserHandler({ ...options, baseUrl }) },
+    exchanges: () => exchanges,
+  }
 }
 const token = html => html.match(/name="csrf" value="([^"]+)"/)?.[1]
 const proof = html => html.match(/name="proof" value="([^"]+)"/)?.[1]
@@ -271,4 +275,39 @@ test('flyer capacity and organizer approval are applied before a seat grants acc
   location(await b.post(remove, organizer.cookie, { csrf: organizer.csrf }))
   assert.equal((await apply(first)).status, 404)
   assert.equal((await b.get(group, first.cookie)).status, 404)
+})
+
+test('capacity reservations apply to direct acceptance as well as flyer approval', async () => {
+  const groups = createCollectiveGroups({ store: createMemoryCollectiveGroupsStore(), active: () => true })
+  const group = await groups.create(alice, 'YC Fall 2026 collective network')
+  const invite = await groups.invite(alice, group.id, bob, recipient)
+  const flyer = await groups.createFlyer(alice, group.id, { capacity: 2, approval: true })
+  await groups.joinFlyer(carol, group.id, flyer.id, { name: 'Carol', profileId: null, source: {} })
+  await assert.rejects(groups.respond(bob, group.id, invite, 'accept'), { code: 'group_full' })
+  const before = await groups.detail(alice, group.id)
+  assert.equal(before.members.length, 0)
+  assert.equal(before.flyer.requests.length, 1)
+  await groups.decideFlyerRequest(alice, group.id, flyer.id, before.flyer.requests[0].id, 'approve')
+  assert.equal((await groups.detail(alice, group.id)).members.length, 1)
+})
+
+test('an interrupted signup restarts verified sign-in with the retained flyer context and zero memberships', async t => {
+  const b = await browser(t)
+  const organizer = await b.login('alice')
+  const { group, path } = await startFlyer(b, organizer, 'join')
+  const next = path + '?utm_source=flyer&utm_content=yc_fall_2026_collective_v2'
+  const start = await b.get('/login?next=' + encodeURIComponent(next))
+  const jar = start.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+  assert.match(jar, /__Host-ul-group-return=/)
+  const before = b.exchanges()
+  b.restart()
+  const callback = await b.get('/auth/callback/ideaflow?state=test&code=new-account', jar)
+  assert.equal(location(callback), '/login?next=' + encodeURIComponent(next))
+  assert.equal(b.exchanges(), before)
+  assert.equal((await b.store.get(group.split('/').at(-1))).members.length, 0)
+  const resumed = await b.login('new-account', next)
+  assert.equal(resumed.destination, next)
+  assert.equal((await b.store.get(group.split('/').at(-1))).members.length, 0)
+  const unsafe = '__Host-ul-group-return=' + Buffer.from('https://evil.invalid').toString('base64url')
+  assert.equal((await b.get('/auth/callback/ideaflow?state=test&code=x', unsafe)).status, 400)
 })
