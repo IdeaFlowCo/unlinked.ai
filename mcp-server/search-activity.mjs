@@ -90,8 +90,8 @@ export function createSearchLog({ emit, now = () => new Date(), monotonic = () =
           row.surface = name
           trace.input(input)
         },
-        result(result) {
-          if (!result || finished) return
+        result(result, source) {
+          if (!result || finished || source && source !== row.surface) return
           for (const key of ['matches', 'profiles', 'people', 'connections', 'items', 'rows', 'entities']) if (Array.isArray(result[key])) { row.result_count = result[key].length; break }
           if (integer(result.total) !== undefined) row.total = result.total
           if (typeof result.truncated === 'boolean') row.truncated = result.truncated
