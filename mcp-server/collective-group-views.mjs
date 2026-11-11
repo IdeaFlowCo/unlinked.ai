@@ -19,7 +19,7 @@ const style = `<style>
     --brand:#5961d6;--brand-d:#b2b9ff;--tint:#282e50;--page:#11141d;--surface:#1b202c;
     --fg:#edf0f7;--muted:#a5afc2;--line:#ffffff1a;--line2:#505a70;
   }
-  html:not([data-appearance]) .unlinked-onboarding:has(.collective-groups) :is(.card,.panel,.list-rows>li,.quiet,.button.sec,input[type=text],.header-search,.omni-panel,.me-panel,.me>summary){
+  html:not([data-appearance]) .unlinked-onboarding:has(.collective-groups) :is(.card,.panel,.list-rows>li,.quiet,.button.sec,input[type=text],.header-search input[type=search],.omni-panel,.me-panel,.me>summary){
     background:var(--surface);
   }
   html:not([data-appearance]) .unlinked-onboarding:has(.collective-groups) .notice.error{color:#ffb4b0;background:#402629;border-color:#ae615f}
