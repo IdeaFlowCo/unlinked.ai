@@ -1,3 +1,4 @@
+import { searchActivity } from './search-activity.mjs'
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { AccountToolError } from './account-tools.mjs'
@@ -207,6 +208,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       }
       const grant = detailed.grant
       requestDiagnostic().authenticated(grant.ownerId, 'account_bearer')
+      searchActivity().authenticated(grant.ownerId)
       const input = {}
       if (route.body) {
         const body = await readJsonBody(request, route.limit)
@@ -231,6 +233,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
         }
       }
       requestDiagnostic().input(input)
+      searchActivity().tool(route.tool, input)
       const controller = new AbortController()
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)])
       response.once('close', () => { if (!response.writableFinished) controller.abort() })
@@ -242,6 +245,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       }
       const { text, result } = await service.call({ grant, name: route.tool, input, signal, revalidate })
       requestDiagnostic().result(result)
+      searchActivity().result(result)
       if (response.headersSent) { response.end(); return }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       response.end(text)

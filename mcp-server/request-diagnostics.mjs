@@ -1,3 +1,4 @@
+import { searchActivity } from './search-activity.mjs'
 import { safeBrowserPerformance } from './browser-performance.mjs'
 import { RUNTIME_HEALTH_FIELDS, startRuntimeHealth } from './runtime-health.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -78,6 +79,7 @@ export function createRequestDiagnostics({ emit, now = () => new Date(), monoton
           for (const [key, field] of [['considered', 'considered'], ['indexed', 'indexed'], ['lexicalMatches', 'lexical_matches'], ['modelCandidates', 'model_candidates']]) if (count(result[key]) !== undefined) row[field] = count(result[key])
         },
         failure(error, signal) {
+          searchActivity().failure(error)
           if (ERRORS.has(error?.code)) row.error_class = error.code
           else if (!row.error_class) row.error_class = 'internal_error'
           if (error?.name === 'TimeoutError' || signal?.aborted && signal.reason?.name === 'TimeoutError') row.timed_out = true
@@ -135,9 +137,9 @@ export function createRequestDiagnostics({ emit, now = () => new Date(), monoton
 }
 
 export function instrumentMcpTransport(transport) {
-  const trace = requestDiagnostic(), receive = transport.onmessage, send = transport.send
-  transport.onmessage = (message, ...args) => { trace.rpc(message); return context.run(trace, () => receive?.(message, ...args)) }
-  transport.send = function (message, ...args) { trace.rpcResult(message); return send.call(this, message, ...args) }
+  const trace = requestDiagnostic(), search = searchActivity(), receive = transport.onmessage, send = transport.send
+  transport.onmessage = (message, ...args) => { trace.rpc(message); search.rpc(message); return search.run(() => context.run(trace, () => receive?.(message, ...args))) }
+  transport.send = function (message, ...args) { trace.rpcResult(message); search.rpcResult(message); return send.call(this, message, ...args) }
 }
 
 // Defense in depth for persistence and the operator reader: even accidental

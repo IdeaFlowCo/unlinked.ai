@@ -1,3 +1,4 @@
+import { searchActivity } from './search-activity.mjs'
 import { requestDiagnostic, instrumentMcpTransport } from './request-diagnostics.mjs'
 import { requireCombinedUploadConsent } from '../src/utils/private-import/consent.mjs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -24,6 +25,7 @@ export function createPrivateHostedHandler({ authenticateGrant, readResource, re
     const availableTools = ['unlinked_read_import', ...(typeof complete === 'function' ? ['unlinked_search_import'] : [])]
     if (!grant || !Number.isFinite(grant.expiresAt) || grant.expiresAt <= Date.now() || typeof grant.ownerId !== 'string' || !Array.isArray(grant.importIds) || grant.importIds.length > 32 || grant.importIds.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || !Array.isArray(grant.tools) || !grant.tools.length || grant.tools.some(tool => !availableTools.includes(tool))) { requestDiagnostic().denied('not_linked'); res.writeHead(401).end(); return }
     requestDiagnostic().authenticated(grant.ownerId, 'private_bearer')
+    searchActivity().authenticated(grant.ownerId)
     const snapshot = { ownerId: grant.ownerId, importIds: [...grant.importIds] }
     const readImport = createScopedImportReader({ grant: snapshot, readResource: (type, id) => readResource(grant, type, id), ...(readAsset ? { readAsset: sha256 => readAsset(grant, sha256) } : {}) })
     const server = new McpServer({ name: 'unlinked-private-staging', version: '0.1.0' })

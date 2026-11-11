@@ -190,6 +190,8 @@ Settings manual-key setup, lifecycle, compatibility and release/rollback constra
 
 ## Request diagnostics
 
+Private server-side search query history (browser, public API, REST, MCP and signed connector) is on by default in the standalone composition; `UNLINKED_SEARCH_LOG=off` disables it. Private storage, bounded text, seven-date retention and the operator reader: [docs/search-query-log.md](docs/search-query-log.md). Query text must remain separate from metadata diagnostics and public analytics.
+
 Default-off standalone REST/MCP diagnostics, trust/redaction boundaries, private retention and the operator reader are documented in [docs/request-diagnostics.md](docs/request-diagnostics.md). Never enable broad access logging or log request bodies/credentials to diagnose an agent. Enabling collection requires the normal scoped runtime release gate.
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract [Historical membership](docs/public-people-reader.md#historical-membership).

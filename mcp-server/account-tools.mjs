@@ -2,6 +2,7 @@ import { EXPORT_FIELDS } from './bulk-export-format.mjs'
 export const INTERNAL_BULK_READ = Symbol('unlinked-internal-bulk-read')
 import { reportIndexError } from '../src/utils/public-people/error-report.mjs'
 import { INVESTOR_TOOLS, INVESTOR_MUTATING, INVESTOR_SCHEMAS, INVESTOR_DESCRIPTIONS } from './investor-tools.mjs'
+import { searchActivity } from './search-activity.mjs'
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
@@ -742,6 +743,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
     if (WRITE_TOOLS.has(name) && !scopeAllowsConnectionActions(grant.scope)) throw new AccountToolError('scope_not_granted', 'Connection actions require an explicit opt-in grant.')
     if (PRIVATE_NOTES_TOOL_SET.has(name) && !scopeAllowsPrivateNotes(grant.scope)) throw new AccountToolError('scope_not_granted', 'Private people notes & relations are switched off for this key (Settings) or not consented for this app.')
+    searchActivity().tool(name, input)
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
     const release = admission === INTERNAL_BULK_READ && DETERMINISTIC_TOOLS.has(name) || await isVerified(grant) ? null : DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
@@ -756,6 +758,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
         const current = await revalidate()
         if (name === 'unlinked_whoami' && current) result.grant = { ...result.grant, scope: current.scope, version: current.version, tools: [...current.tools] }
       }
+      searchActivity().result(result, name)
       const text = JSON.stringify(result)
       if (Buffer.byteLength(text) > 1024 * 1024) throw new AccountToolError('result_too_large', 'The result exceeded 1 MiB; narrow the query or lower the page size.')
       return { result, text }
