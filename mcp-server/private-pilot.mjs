@@ -26,7 +26,7 @@ import { activePublicIndexHost, createPublicIndexHost, installPublicIndexHost } 
 // Explicitly invoked isolated runtime. Never imported by the production app.
 // getBackend must revalidate the immutable ownerId/userId binding for every
 // invocation; no operational credential or provider token is sent to clients.
-export async function startPrivatePilot({ isVerified, ideaflowConnectorSecret, connectionIdentityForOwner, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, messagingSecret, resolveMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, savedSearchLists, collectiveGroups, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, requestDiagnostics, recordBrowserPerformance, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos, autoSignIn = false, overlay, overlayIdentity, ideaflowProfiles }) {
+export async function startPrivatePilot({ isVerified, ideaflowConnectorSecret, connectionIdentityForOwner, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, messagingSecret, resolveMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, savedSearchLists, collectiveGroups, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, lookupCompanyFacts, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, accountGrantKey, getBackend, complete, readPublishedSnapshot, revokeLegacyLink, removeOwnerAssets, provisionAgentClients = [], backgroundImports = false, audit, requestDiagnostics, searchLog, recordBrowserPerformance, port, host = '127.0.0.1', networkMode = 'loopback', dataMode = 'synthetic', profilePhotos, autoSignIn = false, overlay, overlayIdentity, ideaflowProfiles }) {
   const base = new URL(baseUrl)
   const privateHost = networkMode === 'loopback' ? host === '127.0.0.1' : ['isolated-container', 'shared-noos'].includes(networkMode) && host === '0.0.0.0' && ['https://private.unlinked.ai', 'https://www.unlinked.ai'].includes(base.origin) && port === 9367
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !Number.isSafeInteger(port) || port < 7000 || port > 9999 || !privateHost || typeof complete !== 'function') throw new Error('explicit_isolated_pilot_configuration_required')
@@ -92,8 +92,9 @@ export async function startPrivatePilot({ isVerified, ideaflowConnectorSecret, c
       else response.end()
     })
     const transport = diagnosticTransport(pathname)
-    if (requestDiagnostics && transport) void requestDiagnostics.run(request, response, transport, handle)
-    else void handle()
+    const work = () => requestDiagnostics && transport ? requestDiagnostics.run(request, response, transport, handle) : handle()
+    if (searchLog) void searchLog.run(request, response, base, work)
+    else void work()
   })
   server.requestTimeout = 120000
   server.headersTimeout = 15000
