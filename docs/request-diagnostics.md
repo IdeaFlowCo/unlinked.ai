@@ -1,5 +1,7 @@
 # Private agent request diagnostics
 
+Query text is stored separately by the [private search query history](search-query-log.md), enabled independently. The content-free diagnostics contract below is unchanged.
+
 The standalone runtime can record bounded request metadata for direct REST
 (`/api/agent/...`), direct MCP (`/mcp`), and the shared gateway's signed downstream
 adapter (`/api/connector/mcp`). Public directory reads produce only the

@@ -1,3 +1,4 @@
+import { searchActivity } from './search-activity.mjs'
 import { INVESTOR_TOOLS } from './investor-tools.mjs'
 import { requestDiagnostic, instrumentMcpTransport } from './request-diagnostics.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
@@ -63,6 +64,7 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       response.writeHead(401, typeof challenge === 'function' ? { 'WWW-Authenticate': challenge({ invalidToken: typeof request.headers.authorization === 'string' }) } : {}).end(); return
     }
     requestDiagnostic().authenticated(grant.ownerId)
+    searchActivity().authenticated(grant.ownerId)
     if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return }
     const revalidate = async name => {
       const current = await authenticateGrant(request)
