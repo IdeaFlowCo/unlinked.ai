@@ -60,7 +60,7 @@ test('private-list bulk paging skips repeated rate admission while keeping the n
  await assert.rejects(tool.call({grant:{...grant,tools:[]},name:'unlinked_list_notifications',admission:INTERNAL_BULK_READ}),{code:'scope_not_granted'})
 })
 test('download input rejects duplicate parameters, unsupported formats and unknown fields',()=>{
- for(const value of [new URLSearchParams('scope=mine&scope=all'),{scope:'admin'},{format:'xlsx'},{fields:['password']},{ownerId:'another'}])assert.throws(()=>bulkExportInput(value))
+ for(const value of [new URLSearchParams('scope=mine&scope=all'),{scope:'admin'},{format:'xlsx'},{fields:['password']},{ownerId:'another'},{scope:'list',listId:'private:list',degree:'2'}])assert.throws(()=>bulkExportInput(value))
 })
 
 test('inline queries return every matching row in one call when it fits, and declare real size overflow explicitly',async()=>{
@@ -95,4 +95,11 @@ test('an inline private-list export cannot finish after its private permission i
  const original={...owner,scope:'owner_network_and_private_notes',tools:['unlinked_export_network']};let checks=0
  const tool=createAccountToolService({getBackend,exportManifest:async(_grant,_input,_signal,authorize)=>{await authorize();return {private:'must not be returned'}}})
  await assert.rejects(tool.call({grant:original,name:'unlinked_export_network',input:{scope:'list',listId:'private:list',inline:true},revalidate:async()=>++checks===1?original:{...original,scope:'owner_network'}}),{code:'scope_not_granted'})
+})
+
+
+test('list exports apply presence filters to the complete selection',async()=>{
+ const instance=createBulkExports({getBackend,readPublishedSnapshot:async()=>({...source(),members:['person-0']}),savedSearchLists:{get:async()=>({name:'Saved',refs:['public:person-0','public:person-1']})}})
+ const res=await run(instance,{scope:'list',listId:'saved:11111111-1111-1111-1111-111111111111',presence:'member',format:'json'})
+ const result=JSON.parse(res.text());assert.equal(result.count,1);assert.equal(result.rows[0].name,'Person 000')
 })
