@@ -144,7 +144,7 @@ const invalid = () => new MessagingError(400, 'invalid_input')
 // `blockedUsers(session)` (optional) returns the OpenChat user ids this member
 // blocked (member-blocks.mjs): their direct conversations are hidden, their
 // messages are not delivered, and no message is sent to them from here.
-export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, profilePathFor = null, blockedUsers = null, participantBlocked = null, resolveOwnerRecipient = null } = {}) {
+export function createMessagingProxy({ isVerified = async () => false, createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, profilePathFor = null, blockedUsers = null, participantBlocked = null, resolveOwnerRecipient = null } = {}) {
   const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map(), blockCache = new Map(), peers = new Map()
   // The member's blocked OpenChat users, read at most every 30 seconds (and again after a change).
   async function blockedFor(session) {
@@ -222,7 +222,8 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
 
   // Per member and minute: reads, writes, and typing pings are counted separately.
-  function spend(session, kind) {
+  async function spend(session, kind) {
+    if (await isVerified(session.owner)) return
     const key = `${ownerKey(session)}:${kind}`, limit = { read: 300, write: 60, typing: 40, file: 600, upload: 20 }[kind]
     const budget = budgets.get(key)
     if (!budget || now() - budget.at >= 60000) { budgets.set(key, { at: now(), used: 1 }); trim(budgets, 20000); return }
@@ -424,7 +425,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
    * conversation. Never sends a message.
    */
   async function openProfile(session, profile) {
-    spend(session, 'write')
+    await spend(session, 'write')
     const { value } = await upstream(session, 'POST', '/api/unlinked/recipient', { profile })
     if (value?.status === 'unclaimed') return { status: 'unclaimed', name: text(value.name, 160) }
     if (value?.status !== 'ready' || !validId(value?.recipient?.id)) return { status: 'unavailable' }
@@ -438,7 +439,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   // Only the browser handler's live card lookup may supply this owner. Never
   // accept an owner/identity from browser fields, a name or an imported email.
   async function openOwner(session, owner, name) {
-    spend(session, 'write')
+    await spend(session, 'write')
     if (typeof resolveOwnerRecipient !== 'function') return { status: 'unavailable' }
     const recipient = await resolveOwnerRecipient(owner, name)
     if (!validId(recipient?.id)) return { status: 'unavailable' }
@@ -634,8 +635,8 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     let match
     if (request.method === 'GET') {
       // Attachment bytes have their own budget, so a thread full of images never starves reads.
-      if (path === '/file') { spend(session, 'file'); await serveFile(request, response, url); return null }
-      spend(session, 'read')
+      if (path === '/file') { await spend(session, 'file'); await serveFile(request, response, url); return null }
+      await spend(session, 'read')
       if (path === '/stream') { if (keys.some(key => key !== 'since')) throw invalid(); openStream(request, response, session, url); return null }
       if (path === '/conversations' && !keys.length) return [200, await listConversations(session)]
       if (path === '/unread' && !keys.length) return [200, { unreadTotal: await unreadTotal(session) }]
@@ -651,21 +652,21 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
     // Same origin is already enforced for every POST; JSON writes also carry the session's CSRF token.
     if (typeof session.csrf !== 'string' || !session.csrf || request.headers['x-unlinked-csrf'] !== session.csrf) throw new MessagingError(403, 'csrf_required')
     if (keys.length) throw invalid()
-    if (path === '/attachments') { spend(session, 'upload'); return [201, await uploadAttachment(request, session)] }
+    if (path === '/attachments') { await spend(session, 'upload'); return [201, await uploadAttachment(request, session)] }
     const input = await readJson(request)
     if ((match = /^\/conversations\/([^/]+)\/(messages|read|unread|mute|typing|focus)$/.exec(path)) && validId(match[1])) {
       const [, id, action] = match
-      if (action === 'typing') { spend(session, 'typing'); only(input, ['active']); if (typeof input.active !== 'boolean') throw invalid(); return [200, typing(session, id, input.active)] }
-      if (action === 'focus') { spend(session, 'read'); only(input, []); return [200, focus(session, id)] }
-      if (action === 'read') { spend(session, 'read'); only(input, []); return [200, await markRead(session, id)] }
-      if (action === 'unread') { spend(session, 'write'); only(input, []); return [200, await markUnread(session, id)] }
-      spend(session, 'write')
+      if (action === 'typing') { await spend(session, 'typing'); only(input, ['active']); if (typeof input.active !== 'boolean') throw invalid(); return [200, typing(session, id, input.active)] }
+      if (action === 'focus') { await spend(session, 'read'); only(input, []); return [200, focus(session, id)] }
+      if (action === 'read') { await spend(session, 'read'); only(input, []); return [200, await markRead(session, id)] }
+      if (action === 'unread') { await spend(session, 'write'); only(input, []); return [200, await markUnread(session, id)] }
+      await spend(session, 'write')
       if (action === 'messages') return [201, await send(session, id, only(input, ['content', 'clientId', 'replyToId', 'attachments']))]
       only(input, ['mutedUntil']); if (!Object.hasOwn(input, 'mutedUntil')) throw invalid()
       return [200, await setMute(session, id, input.mutedUntil)]
     }
     if ((match = /^\/messages\/([^/]+)\/(edit|delete|reactions)$/.exec(path)) && validId(match[1])) {
-      spend(session, 'write')
+      await spend(session, 'write')
       const [, id, action] = match
       if (action === 'edit') return [200, await edit(session, id, only(input, ['content']))]
       if (action === 'delete') { only(input, []); return [200, await remove(session, id)] }
@@ -706,7 +707,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   // Read only the caller's current, nonblocked conversations. No identity inference
   // or public profile creation: OpenChat-only participants stay conversation scoped.
   async function participantProfile(session, conversationId, userId) {
-    spend(session, 'read')
+    await spend(session, 'read')
     if (!validId(conversationId) || !validId(userId)) throw invalid()
     const { me, conversations, blocked } = await listConversations(session, { freshBlocks: true })
     const conversation = conversations.find(item => item.id === conversationId)
@@ -727,7 +728,7 @@ export function createMessagingProxy({ createMessagingSession, apiOrigin = OPENC
   }
   async function blockUser(session, userId, active = true) {
     if (!validId(userId)) throw invalid()
-    spend(session, 'write')
+    await spend(session, 'write')
     try { await upstream(session, active ? 'POST' : 'DELETE', `/api/chat/users/${encodeURIComponent(userId)}/block`); return true }
     finally { invalidateBlocks(session) }
   }

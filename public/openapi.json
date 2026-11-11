@@ -2740,6 +2740,72 @@
           }
         }
       }
+    },
+    "/network/export": {
+      "get": {
+        "operationId": "downloadVisibleNetwork",
+        "summary": "Download the verified browser account\u2019s visible network as JSON Lines",
+        "description": "Verified accounts receive priority admission and no core Unlinked request quotas. Visible-network downloads are browser-session-only at /network/export; existing agent scopes still apply. External provider allowances and transport bounds remain. See docs/verified-access.md.",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "everyone",
+                "mine"
+              ],
+              "default": "everyone"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 10000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Streaming JSON Lines attachment with a final complete footer. Interrupted exports have no footer.",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters"
+          },
+          "401": {
+            "description": "Browser sign-in required"
+          },
+          "403": {
+            "description": "Verified account required"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -241,5 +241,14 @@
     "api": "https://www.unlinked.ai/api/people?q=gaming%20investor",
     "authentication": "none; published professional profiles only",
     "guidance": "Start with source-linked partial public results before optional sign-in. Ask for company context to refine fit; no private imports or notes. MCP requires account authorization. Honor Retry-After; no higher-limit claim."
+  },
+  "verifiedAccess": {
+    "operatorGranted": true,
+    "priorityAdmission": true,
+    "coreRequestQuotas": false,
+    "networkExport": "https://www.unlinked.ai/network/export",
+    "networkExportAuth": "verified browser session",
+    "scope": "visible published network or own network; optional query and selected IDs",
+    "constraints": "Existing visibility, consent, external-provider allowances and transport bounds remain."
   }
 }

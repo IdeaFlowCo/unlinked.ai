@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 // This is an intentionally bounded migration, not an arbitrary graph importer.
 export const LABELS = Object.freeze([
   'OperationalResource', 'OperationalBindingLock', 'OperationalIdentity', 'OperationalOwner', 'OperationalInvitation',
-  'UnlinkedPublicChunk', 'UnlinkedProfileDecision', 'UnlinkedLegacyAccount', 'UnlinkedSession',
+  'UnlinkedPublicChunk', 'UnlinkedProfileDecision', 'UnlinkedVerificationEvent', 'UnlinkedLegacyAccount', 'UnlinkedSession',
   'UnlinkedPublicRevision', 'UnlinkedCompanyChunk', 'UnlinkedEmailRecipient', 'UnlinkedPublicDataset',
   'UnlinkedNotification', 'UnlinkedSignupLookup', 'UnlinkedSignupCache', 'UnlinkedCompanyRevision',
   'UnlinkedSignupProfile', 'UnlinkedContactCard', 'UnlinkedConnectionRequest', 'UnlinkedLegacyManifest',
