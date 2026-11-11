@@ -1,7 +1,7 @@
 import { renderPageShell } from './private-onboarding-views.mjs'
 import { profilePath } from '../src/utils/public-people/profile-handles.mjs'
 import { openChatProfileMessageUrl, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
-import { groupInvitePath } from './collective-groups.mjs'
+import { flyerInvitePath, FLYER_LIMITS, groupInvitePath } from './collective-groups.mjs'
 
 const h = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch])
 const field = (name, value) => `<input type="hidden" name="${h(name)}" value="${h(value)}">`
@@ -35,6 +35,36 @@ const chat = (id, label) => {
 }
 const profiles = rows => rows.length ? `<ul class="list-rows">${rows.map(row => `<li><b>${profileLink(row.id, row.name)}</b>${row.headline ? `<p class="small">${h(row.headline)}</p>` : ''}</li>`).join('')}</ul>` : '<p>No listed public profiles are available.</p>'
 const card = (heading, content) => `<section class="card sec"><h2>${h(heading)}</h2>${content}</section>`
+const approvalFields = '<label>Join policy<select name="mode"><option value="join">Join after confirmation</option><option value="approval">Organizer approval</option></select></label>'
+
+function renderFlyerManagement(group, csrf, origin) {
+  const base = pathFor(group.id) + '/flyer'
+  const flyer = group.flyer
+  if (!flyer?.active) {
+    const capacity = `<label>Group capacity (including you)<input name="capacity" type="number" min="${Math.max(2, group.members.length + 1)}" max="${FLYER_LIMITS.seats}" value="${Math.max(group.capacity ?? 0, 100)}" required></label>`
+    return card('Flyer invitation', '<p class="small">Create a reusable link for your cohort. It expires after 180 days and can be revoked.</p>' +
+      form(base, csrf, 'Create flyer link', capacity + approvalFields))
+  }
+  const url = new URL(flyerInvitePath(group.id, flyer.id), origin).href
+  const pending = flyer.requests.map(request => {
+    const action = `${base}/${flyer.id}/requests/${request.id}`
+    return `<article><h3>${profileLink(request.profileId, request.name)}</h3><div class="connection-actions">${form(action, csrf, 'Approve', field('decision', 'approve'))}${form(action, csrf, 'Decline', field('decision', 'decline'), 'quiet')}</div></article>`
+  }).join('')
+  return card('Flyer invitation', `<p class="small">Expires ${date(flyer.expiresAt)} · ${group.members.length + 1} of ${group.capacity} seats used · ${flyer.approval ? 'Organizer approval' : 'Join after confirmation'}</p><label>Flyer join link<input type="text" readonly value="${h(url)}"></label>` +
+    form(base + '/' + flyer.id + '/revoke', csrf, 'Revoke flyer link', '', 'quiet') + (pending ? `<h3>Join requests</h3><div class="panel list">${pending}</div>` : ''))
+}
+
+export function renderFlyerInvitation(chrome, invitation, path, state = null, memberPath) {
+  let content
+  if (state === 'member') content = `<p role="status">You’re a member of this collective network.</p><a class="button" href="${h(memberPath)}">Open group</a>`
+  else if (state === 'pending') content = '<p role="status">Request sent. The organizer will decide whether to admit you.</p>'
+  else content = chrome.csrf
+    ? '<p>Joining gives you access to the group and the lists its organizer has chosen to share. Your lists and imported contacts stay private.</p>' +
+      form(path, chrome.csrf, 'Join this group', field('decision', 'join'))
+    : `<p>Sign in or create an Unlinked account to decide whether to join.</p><a class="button" href="/login?next=${encodeURIComponent(path)}">Continue with Ideaflow</a>`
+  return renderPageShell(invitation.title, `${style}<section class="narrow collective-groups">${title(invitation.title, 'Collective network invitation')}${card('Join the group', content)}</section>`,
+    { ...chrome, active: 'lists', signInInBody: true })
+}
 
 export function renderGroups(chrome, { groups, invites }) {
   const pending = invites.map(invite => `<article><h3><a href="${groupInvitePath(invite.group.id, invite.id)}">${h(invite.group.name)}</a></h3><p class="small">Review invitation · Expires ${date(invite.expiresAt)}</p></article>`).join('')
@@ -58,7 +88,7 @@ export function renderGroup(chrome, group, origin) {
   }).join('') : ''
   const members = group.organizer ? group.members.map(member => `<article><h3>${profileLink(member.profileId, member.name)}</h3>${form(`${base}/members/${member.id}/remove`, csrf, 'Remove member', '', 'quiet')}</article>`).join('') : ''
   return shell(chrome, group.name, back('/groups', 'Collective network') + title(group.name, 'Private group · ' + (group.organizer ? 'Organizer' : 'Member')) +
-    list + (group.organizer ? card('Members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
+    list + (group.organizer ? renderFlyerManagement(group, csrf, origin) + card('Members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
     card('Invite a member', '<p class="small">Use the profile link of an existing Unlinked member. Creating an invitation sends nothing. To share the link, copy it into an OpenChat conversation.</p>' + inviteForm +
       (invites ? `<div class="panel list">${invites}</div>` : '')) : `<p>${chat(group.organizerProfileId, 'Message the organizer')}</p>`))
 }

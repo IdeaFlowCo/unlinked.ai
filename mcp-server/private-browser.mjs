@@ -1,4 +1,4 @@
-import { createGroupBrowser, groupReturnPath, isGroupPath } from './collective-group-browser.mjs'
+import { createGroupBrowser, flyerJoinTarget, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
 import { browserPerformanceScript } from './browser-performance.mjs'
 import { PEOPLE_FILTER_KEYS, peopleFilters, matchesPeopleFilters } from '../src/utils/public-people/search-filters.mjs'
 import { readRequestBody, bufferRequestBody } from './request-body.mjs'
@@ -830,8 +830,9 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     }
     // An invitation link someone signed in to answer comes first; its page then
     // continues to the old-account or find-me step when there is one.
-    const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
-    redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
+    const destination = returnPath(next)
+    const invitation = destination?.startsWith('/i/') || destination?.startsWith('/oauth/authorize?') || flyerJoinTarget(destination) ? destination : null
+    redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : destination ?? '/'))
     return 'signed_in'
     })
     })
@@ -1409,7 +1410,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       if (isGroupPath(url.pathname)) {
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         if (!groupBrowser) { await journey(response, { ...renderNotFound(chrome), privateGroup: true }, null, '', 404); return }
-        if (!viewer) {
+        if (!viewer && !isFlyerJoinPath(url.pathname)) {
           if (request.method === 'GET') await journey(response, { ...renderSignInRequired({ next: returnPath(url.pathname) }), privateGroup: true }, null, '', 401)
           else response.writeHead(401).end()
           return

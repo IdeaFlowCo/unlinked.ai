@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { renderListsDirectory } from '../mcp-server/private-onboarding-views.mjs'
 import { ONBOARDING_FONT_HREF } from '../mcp-server/private-onboarding-style.mjs'
 import { groupInvitePath } from '../mcp-server/collective-groups.mjs'
-import { renderGroup, renderGroups, renderGroupInvitation, renderGroupSharedList, renderGroupSharePreview } from '../mcp-server/collective-group-views.mjs'
+import { renderGroup, renderGroups, renderGroupInvitation, renderGroupSharedList, renderGroupSharePreview, renderFlyerInvitation } from '../mcp-server/collective-group-views.mjs'
 
 if (!process.argv[2]) throw Error('Usage: node scripts/preview-collective-network.mjs <output-directory>')
 const output = resolve(process.argv[2])
@@ -29,6 +29,8 @@ const pages = {
   invitation: renderGroupInvitation(bob, { group, expiresAt: invite.expiresAt }, groupInvitePath(group.id, invite.id)),
   review: renderGroupSharePreview(alice, group, { name: share.name, profiles: rows, source: 'private:fixture-list', proof: 'fictional-review' }),
   shared: renderGroupSharedList(bob, { group, share, profiles: rows }),
+  flyer: renderFlyerInvitation({}, { title: 'YC Fall 2026 collective network' }, `/groups/${uuid(1)}/join/${uuid(2)}?utm_content=yc_fall_2026_collective_v2`),
+  'flyer-confirm': renderFlyerInvitation(bob, { title: 'YC Fall 2026 collective network' }, `/groups/${uuid(1)}/join/${uuid(2)}?utm_content=yc_fall_2026_collective_v2`),
 }
 for (const [name, view] of Object.entries(pages)) {
   await writeFile(resolve(output, name + '.html'), `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unlinked · Fictional preview</title><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${view.content}</html>`)

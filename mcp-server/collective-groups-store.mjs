@@ -3,7 +3,13 @@
 import { createHash } from 'node:crypto'
 
 export const groupActorKey = actor => createHash('sha256').update(JSON.stringify([actor.ownerId, actor.userId])).digest('hex')
-const actorsOf = group => [group.organizer, ...group.members.map(row => row.actor), ...group.invites.map(row => row.actor)].map(groupActorKey)
+const actorsOf = group => [...new Set([
+  groupActorKey(group.organizer),
+  ...group.members.map(row => groupActorKey(row.actor)),
+  ...group.invites.map(row => groupActorKey(row.actor)),
+  ...(group.flyer?.requests.map(row => groupActorKey(row.actor)) ?? []),
+  ...(group.flyer?.accepted ?? []),
+])]
 
 export function createMemoryCollectiveGroupsStore() {
   const rows = new Map()

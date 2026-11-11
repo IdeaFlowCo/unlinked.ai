@@ -8,13 +8,32 @@ the existing OpenChat composer for that profile; creating or opening the
 invitation sends no message. The recipient can also find it on their own
 Collective network page.
 
-Opening a link displays a review page only to the signed-in intended recipient.
+Opening a direct invitation displays a review page only to the signed-in intended recipient.
 They must choose **Accept invitation** to join, or **Decline** to retire the
 invitation. Links expire after seven days and cannot be reused after acceptance,
 decline, cancellation or member removal. The organizer can cancel a pending
 invitation and remove an accepted member. Groups have one organizer and up to 32
-additional members. Invite links cannot onboard a new account or replace the
-existing Unlinked account invitation.
+additional members by default.
+
+For a printed flyer, the organizer creates a separate **Flyer invitation** on
+the group page. The reusable link expires after 180 days. The organizer chooses
+group capacity from 2 to 500, including their own seat, and either explicit
+joining or organizer approval. Creating again while the link is usable returns
+the existing link. The organizer can revoke it and issue a fresh link.
+
+Visitors can see the group title at
+`/groups/<groupId>/join/<inviteId>`. Sign-in and new-account creation return to
+that invitation. Membership requires the signed-in person's affirmative
+**Join this group** POST with the browser's CSRF token. If approval is enabled,
+the organizer must approve the request before membership is granted. Group
+capacity includes pending requests. Repeated submissions by one account retain
+one seat. Revoking the link rejects subsequent join requests and clears pending
+requests. Existing accepted members retain their membership until removed.
+
+The group page shows membership after joining. The flyer landing also shows
+membership or pending-request state when reopened by the signed-in applicant.
+An account removed after joining through that flyer cannot reuse the same
+link. Flyer membership retains the group's existing selected-list ACL boundary.
 
 To give a group access to a list, the organizer chooses a specific existing
 private list or saved search, reviews the list name and listed public profiles,
@@ -41,14 +60,20 @@ invitations; exports include the owner's own selections and participation.
 
 ## Attribution interface
 
-Attribution may point to the canonical
-`/groups/<groupId>/invites/<inviteId>` destination, or associate the two opaque
-UUIDs with a source in its own store. Treat that association as descriptive
-metadata. Do not use it to identify the recipient, check membership, mint an
-invite, or record a conversion merely because a redirect or GET occurred.
-Group GET and sign-in return paths use the canonical route without campaign
-query fields. The ACL neither reads nor writes attribution. A future conversion
-event would require a separately reviewed hook after a committed acceptance.
+The flyer destination is `/groups/<groupId>/join/<inviteId>`. Direct invitations
+retain `/groups/<groupId>/invites/<inviteId>`. Attribution can associate those
+opaque UUIDs with a source in its own store. Flyer destinations accept one each
+of `src`, `utm_source`, `utm_medium`, `utm_campaign`, `utm_content` and
+`utm_term`, using 1–120 URL-safe identifier characters per value. The canonical
+invitation and query travel in the existing OIDC transaction's validated
+`next` value. The affirmative join records those source fields on the accepted
+seat or pending request. The fields provide descriptive provenance.
+
+The current YC flyer uses `utm_content=yc_fall_2026_collective_v2`.
+The attribution worker owns mapping its homepage campaign URL to the verified
+flyer destination. That mapping should preserve the source query. Redirects and
+GET previews create zero seats. A future conversion event requires a reviewed
+hook after committed acceptance.
 
 ## Local review
 

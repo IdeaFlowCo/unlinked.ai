@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto'
+import { groupActorKey } from './collective-groups-store.mjs'
 
 export const GROUP_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 export const groupInvitePath = (groupId, inviteId) => `/groups/${groupId}/invites/${inviteId}`
+export const flyerInvitePath = (groupId, inviteId) => `/groups/${groupId}/join/${inviteId}`
 export const GROUP_LIMITS = Object.freeze({ seats: 32, invites: 32, shares: 20, profiles: 200, inviteMs: 7 * 24 * 60 * 60 * 1000 })
+export const FLYER_LIMITS = Object.freeze({ seats: 500, days: 180 })
 
 export class GroupError extends Error {
   constructor(code) { super(code); this.code = code }
@@ -15,6 +18,9 @@ const access = (group, actor) => group && (same(group.organizer, actor) ? 'organ
 const cleanName = name => typeof name === 'string' && name.trim().length <= 100 ? name.trim() : ''
 const summary = ({ id, name }) => ({ id, name })
 const person = ({ id, name, profileId }) => ({ id, name, profileId })
+const seatLimit = group => group.capacity ?? GROUP_LIMITS.seats + 1
+const memberCount = group => group.members.length + 1
+const publicFlyer = ({ id, expiresAt, approval }) => ({ id, expiresAt, approval })
 
 export function createCollectiveGroups({ store, active, blocked = async () => false, now = Date.now }) {
   const live = async actor => Boolean(actor?.ownerId && actor.userId && await active(binding(actor)))
@@ -45,6 +51,18 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
     if (!invite) fail()
     return { group: latest, invite }
   }
+  const currentFlyer = (group, inviteId) => {
+    const flyer = group?.flyer
+    if (!flyer || flyer.id !== inviteId || flyer.revoked || flyer.expiresAt <= now()) fail()
+    return flyer
+  }
+  const addFlyerMember = (group, flyer, member) => {
+    if (memberCount(group) >= seatLimit(group)) fail('group_full')
+    group.members.push(member)
+    group.invites = pending(group).filter(row => !same(row.actor, member.actor))
+    flyer.requests = flyer.requests.filter(row => !same(row.actor, member.actor))
+    flyer.accepted.push(groupActorKey(member.actor))
+  }
   return {
     async create(actor, name, organizerProfileId) {
       await requireLive(actor)
@@ -69,7 +87,11 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       const organizer = role === 'organizer'
       return { ...summary(group), organizer, organizerProfileId: group.organizerProfileId,
         shares: group.shares.map(summary),
-        ...(organizer ? { members: group.members.map(person), invites: pending(group).map(row => ({ ...person(row), expiresAt: row.expiresAt })) } : {}),
+        ...(organizer ? { members: group.members.map(person), invites: pending(group).map(row => ({ ...person(row), expiresAt: row.expiresAt })),
+          capacity: seatLimit(group), flyer: group.flyer && {
+            ...publicFlyer(group.flyer), active: !group.flyer.revoked && group.flyer.expiresAt > now(),
+            requests: group.flyer.requests.map(person),
+          } } : {}),
       }
     },
     async invite(actor, id, recipient, profile) {
@@ -81,7 +103,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
         group.invites = pending(group)
         if (seat(group, recipient)) fail('already_member')
         if (group.invites.some(row => same(row.actor, recipient))) fail('already_invited')
-        if (group.invites.length >= GROUP_LIMITS.invites || group.members.length >= GROUP_LIMITS.seats) fail('group_full')
+        if (group.invites.length >= GROUP_LIMITS.invites || memberCount(group) >= seatLimit(group)) fail('group_full')
         group.invites.push(invite)
         return group
       })
@@ -98,10 +120,86 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
         const invite = availableInvite(group, inviteId, actor)
         if (!invite) fail()
         if (decision === 'accept') {
-          if (group.members.length >= GROUP_LIMITS.seats) fail('group_full')
+          if (memberCount(group) >= seatLimit(group)) fail('group_full')
+          if (seat(group, actor)) fail('already_member')
           group.members.push({ ...person(invite), actor: invite.actor })
+          if (group.flyer) group.flyer.requests = group.flyer.requests.filter(row => !same(row.actor, actor))
         }
         group.invites = pending(group).filter(row => row.id !== invite.id)
+        return group
+      })
+    },
+    async createFlyer(actor, id, { capacity, approval }) {
+      await authorized(actor, id, true)
+      if (!Number.isSafeInteger(capacity) || capacity < 2 || capacity > FLYER_LIMITS.seats || typeof approval !== 'boolean') fail('invalid_capacity')
+      const flyer = { id: randomUUID(), expiresAt: now() + FLYER_LIMITS.days * 86400000, approval, revoked: false, accepted: [], requests: [] }
+      const group = await update(id, group => {
+        own(actor, group)
+        // Organizer retries return the existing printable URL.
+        if (group.flyer && !group.flyer.revoked && group.flyer.expiresAt > now()) return group
+        if (memberCount(group) > capacity) fail('invalid_capacity')
+        return { ...group, capacity, flyer }
+      })
+      return publicFlyer(group.flyer)
+    },
+    async previewFlyer(id, inviteId) {
+      const group = await store.get(id)
+      currentFlyer(group, inviteId)
+      if (!await live(group.organizer)) fail()
+      const latest = await store.get(id)
+      currentFlyer(latest, inviteId)
+      return { title: latest.name }
+    },
+    async flyerStatus(actor, id, inviteId) {
+      await requireLive(actor)
+      const group = await store.get(id)
+      currentFlyer(group, inviteId)
+      if (!await live(group.organizer) || !await canMeet(group.organizer, actor)) fail()
+      const latest = await store.get(id)
+      const flyer = currentFlyer(latest, inviteId)
+      if (access(latest, actor)) return 'member'
+      return flyer.requests.some(row => same(row.actor, actor)) ? 'pending' : null
+    },
+    async joinFlyer(actor, id, inviteId, { profileId, name, source }) {
+      await requireLive(actor)
+      const group = await store.get(id)
+      currentFlyer(group, inviteId)
+      if (!await live(group.organizer) || !await canMeet(group.organizer, actor)) fail()
+      const member = { id: randomUUID(), actor: binding(actor), name, profileId, flyer: { inviteId, source } }
+      const next = await update(id, group => {
+        const flyer = currentFlyer(group, inviteId)
+        if (access(group, actor) || flyer.requests.some(row => same(row.actor, actor))) return group
+        if (flyer.accepted.includes(groupActorKey(actor))) fail()
+        if (memberCount(group) + flyer.requests.length >= seatLimit(group) || flyer.accepted.length + flyer.requests.length >= seatLimit(group) - 1) fail('group_full')
+        if (flyer.approval) flyer.requests.push(member)
+        else addFlyerMember(group, flyer, member)
+        return group
+      })
+      return access(next, actor) ? 'member' : 'pending'
+    },
+    async revokeFlyer(actor, id, inviteId) {
+      await authorized(actor, id, true)
+      await update(id, group => {
+        own(actor, group)
+        if (group.flyer?.id !== inviteId) fail()
+        group.flyer.revoked = true
+        group.flyer.requests = []
+        return group
+      })
+    },
+    async decideFlyerRequest(actor, id, inviteId, requestId, decision) {
+      const { group } = await authorized(actor, id, true)
+      if (!['approve', 'decline'].includes(decision)) fail('invalid_input')
+      const request = currentFlyer(group, inviteId).requests.find(row => row.id === requestId)
+      if (!request) fail()
+      if (decision === 'approve' && (!await live(request.actor) || !await canMeet(actor, request.actor))) fail()
+      await update(id, group => {
+        own(actor, group)
+        const flyer = currentFlyer(group, inviteId)
+        const member = flyer.requests.find(row => row.id === requestId)
+        if (!member) fail()
+        if (decision === 'approve' && !access(group, member.actor)) addFlyerMember(group, flyer, member)
+        else flyer.requests = flyer.requests.filter(row => row.id !== requestId)
         return group
       })
     },
@@ -147,9 +245,13 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       const groups = await store.forActor(actor)
       // Include the organizer's own share selections. A member's export has
       // only their participation; it is never another route to read a list.
-      return groups.map(group => same(group.organizer, actor)
-        ? { ...summary(group), role: 'organizer', shares: group.shares.map(({ id, name, source, ids }) => ({ id, name, source, ids })) }
-        : { groupId: group.id, role: access(group, actor) ? 'member' : 'invitee' })
+      return groups.flatMap(group => {
+        if (same(group.organizer, actor)) return [{ ...summary(group), role: 'organizer', shares: group.shares.map(({ id, name, source, ids }) => ({ id, name, source, ids })) }]
+        if (seat(group, actor)) return [{ groupId: group.id, role: 'member' }]
+        if (group.flyer?.requests.some(row => same(row.actor, actor))) return [{ groupId: group.id, role: 'requested' }]
+        if (pending(group).some(row => same(row.actor, actor))) return [{ groupId: group.id, role: 'invitee' }]
+        return []
+      })
     },
     async removeOwner(actor) {
       for (const row of await store.forActor(actor)) {
@@ -157,6 +259,10 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
           if (same(group.organizer, actor)) return null
           group.members = group.members.filter(member => !same(member.actor, actor))
           group.invites = group.invites.filter(invite => !same(invite.actor, actor))
+          if (group.flyer) {
+            group.flyer.requests = group.flyer.requests.filter(row => !same(row.actor, actor))
+            group.flyer.accepted = group.flyer.accepted.filter(key => key !== groupActorKey(actor))
+          }
           return group
         })
       }

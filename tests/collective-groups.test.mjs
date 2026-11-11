@@ -16,12 +16,13 @@ const secret = 'Private fixture contact and query'
 
 async function browser(t) {
   const store = createMemoryCollectiveGroupsStore()
+  const registered = new Set(['alice', 'bob', 'carol'])
   const savedSearchLists = createMemorySavedSearchLists()
   const saved = await savedSearchLists.create(alice, { name: 'Reviewed set', queryUrl: '/network?q=private-query', refs: ['public:public-a', 'contact:private-contact'] })
   await savedSearchLists.create(alice, { name: 'Unselected set', queryUrl: '/network?q=unselected', refs: ['public:public-b'] })
   const foreign = await savedSearchLists.create(carol, { name: 'Carol private list', queryUrl: '/network', refs: ['public:public-b'] })
   let now = 1000
-  const active = actor => actor.userId === account(actor.ownerId).userId
+  const active = actor => registered.has(actor.ownerId) && actor.userId === account(actor.ownerId).userId
   const collectiveGroups = createCollectiveGroups({ store, now: () => now, active })
   const options = { collectiveGroups, savedSearchLists, networkFreshMs: 0,
     privateLists: {
@@ -32,7 +33,10 @@ async function browser(t) {
       },
     },
     login: { begin: async () => ({ location: 'https://identity.invalid', transaction: { state: 'test' } }), finish: async url => ({ issuer: 'https://identity.invalid', subject: url.searchParams.get('code') }) },
-    resolveOwner: async identity => account(identity.subject), signup: async () => alice, issueAccountGrant: async () => ({}), revokeAccountGrant: async () => {},
+    resolveOwner: async identity => registered.has(identity.subject) ? account(identity.subject) : null,
+    signup: async identity => { registered.add(identity.subject); return account(identity.subject) },
+    issueAccountGrant: async () => ({}), revokeAccountGrant: async () => {},
+    selfClaims: { lookupSlug: async () => null, lookupName: async () => null, claimable: async () => null, claim: async () => null },
     readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'v1', profiles, connections: [] }),
     ownProfileId: async owner => owner.ownerId,
     accountForProfile: async id => ['alice', 'bob', 'carol'].includes(id) ? account(id) : null,
@@ -46,15 +50,15 @@ async function browser(t) {
   handler = createPrivateBrowserHandler({ ...options, baseUrl })
   const get = (path, cookie) => fetch(endpoint + path, { redirect: 'manual', headers: cookie ? { Cookie: cookie } : {} })
   const post = (path, cookie, fields, origin = baseUrl) => fetch(endpoint + path, { method: 'POST', redirect: 'manual', headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(fields) })
-  const login = async who => {
-    const start = await get('/login')
+  const login = async (who, next) => {
+    const start = await get(next ? '/login?next=' + encodeURIComponent(next) : '/login')
     const loginCookie = start.headers.getSetCookie()[0].split(';')[0]
     const callback = await get('/auth/callback/ideaflow?state=test&code=' + who, loginCookie)
     const cookie = callback.headers.getSetCookie().find(c => c.startsWith('__Host-ul-session=')).split(';')[0]
     const csrf = token(await (await get('/groups', cookie)).text())
-    return { cookie, csrf }
+    return { cookie, csrf, destination: callback.headers.get('location') }
   }
-  return { get, post, login, saved, foreign, expire: () => { now += GROUP_LIMITS.inviteMs } }
+  return { get, post, login, saved, foreign, store, expire: () => { now += GROUP_LIMITS.inviteMs } }
 }
 const token = html => html.match(/name="csrf" value="([^"]+)"/)?.[1]
 const proof = html => html.match(/name="proof" value="([^"]+)"/)?.[1]
@@ -190,4 +194,81 @@ test('revocation and membership replacement deny a share whose projection was al
     finish([{ id: 'a' }])
     await assert.rejects(read, { code: 'not_found' })
   }
+})
+
+const flyerPath = html => new URL(html.match(/readonly value="([^"]+\/join\/[^"]+)"/)[1]).pathname
+const startFlyer = async (b, organizer, mode, capacity = '5') => {
+  const group = location(await b.post('/groups', organizer.cookie, { csrf: organizer.csrf, name: 'YC Fall 2026 collective network' }))
+  location(await b.post(group + '/flyer', organizer.cookie, { csrf: organizer.csrf, capacity, mode }))
+  const path = flyerPath(await show(await b.get(group, organizer.cookie)))
+  return { group, path }
+}
+
+test('flyer HTTP: preview, sign-in and signup preserve the exact invite without joining; two accounts opt in; revoke rejects new joins', async t => {
+  const b = await browser(t)
+  const organizer = await b.login('alice')
+  const { group, path } = await startFlyer(b, organizer, 'join')
+  const id = group.split('/').at(-1)
+  const campaign = path + '?src=yc-f26-flyer&utm_campaign=founders'
+  const anonymous = await b.get(campaign)
+  assert.equal(anonymous.headers.get('cache-control'), 'no-store')
+  assert.match(anonymous.headers.get('x-robots-tag'), /noindex/)
+  const landing = await show(anonymous)
+  assert.match(landing, /<h1 class="hq">YC Fall 2026 collective network<\/h1>/)
+  assert.match(landing, new RegExp(encodeURIComponent(campaign)))
+  assert.doesNotMatch(landing, /name="decision"|Reviewed set|Founder introductions|\balice\b/)
+  assert.equal((await b.store.get(id)).members.length, 0)
+  assert.equal((await b.post(campaign, undefined, { decision: 'join' })).status, 401)
+  assert.equal((await b.get(campaign + '&src=other')).status, 404)
+  assert.equal((await b.get(path + '?next=https%3A%2F%2Fevil.invalid')).status, 404)
+  const newAccount = await b.login('new-founder', campaign)
+  const existing = await b.login('bob', campaign)
+  assert.equal(newAccount.destination, campaign)
+  assert.equal(existing.destination, campaign)
+  for (const member of [newAccount, existing]) {
+    assert.match(await show(await b.get(campaign, member.cookie)), /Join this group/)
+    assert.equal((await b.get(group, member.cookie)).status, 404)
+  }
+  assert.equal((await b.store.get(id)).members.length, 0)
+  assert.equal((await b.post(campaign, newAccount.cookie, { csrf: 'wrong', decision: 'join' })).status, 400)
+  for (const member of [newAccount, existing, newAccount]) {
+    assert.equal(location(await b.post(campaign, member.cookie, { csrf: member.csrf, decision: 'join' })), group)
+    assert.match(await show(await b.get(group, member.cookie)), /Private group · Member/)
+    assert.equal((await b.get('/lists/' + b.saved.id, member.cookie)).status, 404)
+  }
+  const result = await b.store.get(id)
+  assert.equal(result.members.length, 2)
+  assert.match(await show(await b.get(campaign, existing.cookie)), /You’re a member of this collective network/)
+  assert.deepEqual(result.members.map(member => member.flyer.source), Array(2).fill({ src: 'yc-f26-flyer', utm_campaign: 'founders' }))
+  const ownerPage = await show(await b.get(group, organizer.cookie))
+  assert.match(ownerPage, /3 of 5 seats used/)
+  assert.equal(flyerPath(ownerPage), path)
+  const revoke = ownerPage.match(/action="([^"]+\/flyer\/[^"]+\/revoke)"/)[1]
+  location(await b.post(revoke, organizer.cookie, { csrf: organizer.csrf }))
+  assert.equal((await b.get(campaign)).status, 404)
+  const third = await b.login('carol')
+  assert.equal((await b.post(campaign, third.cookie, { csrf: third.csrf, decision: 'join' })).status, 404)
+  assert.equal((await b.get(group, third.cookie)).status, 404)
+  assert.match(await show(await b.get(group, existing.cookie)), /Private group · Member/)
+})
+
+test('flyer capacity and organizer approval are applied before a seat grants access', async t => {
+  const b = await browser(t)
+  const organizer = await b.login('alice'), first = await b.login('bob'), second = await b.login('carol')
+  const { group, path } = await startFlyer(b, organizer, 'approval', '2')
+  const apply = member => b.post(path, member.cookie, { csrf: member.csrf, decision: 'join' })
+  assert.match(await show(await apply(first)), /Request sent/)
+  assert.match(await show(await b.get(path, first.cookie)), /Request sent/)
+  assert.equal((await b.get(group, first.cookie)).status, 404)
+  assert.equal((await apply(second)).status, 400)
+  const html = await show(await b.get(group, organizer.cookie))
+  const request = html.match(/action="([^"]+\/requests\/[^"]+)"/)[1]
+  assert.equal((await b.post(request, second.cookie, { csrf: second.csrf, decision: 'approve' })).status, 404)
+  location(await b.post(request, organizer.cookie, { csrf: organizer.csrf, decision: 'approve' }))
+  assert.match(await show(await b.get(group, first.cookie)), /Private group · Member/)
+  assert.equal((await apply(second)).status, 400)
+  const remove = revokePath(await show(await b.get(group, organizer.cookie)), 'remove')
+  location(await b.post(remove, organizer.cookie, { csrf: organizer.csrf }))
+  assert.equal((await apply(first)).status, 404)
+  assert.equal((await b.get(group, first.cookie)).status, 404)
 })
