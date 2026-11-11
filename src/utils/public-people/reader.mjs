@@ -104,7 +104,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   // once, and building it is slow. With the default `reuse: false`, each new
   // read checks the source before reusing any compiled public index. A
   // caller's own signal reads alone unless request-scoped reuse is enabled.
-  let inflight = null, kept = null, latest = null
+  let inflight = null, kept = null, latest = null, exportPlan = null
   async function snapshot(signal) {
     if (signal?.aborted) unavailable()
     if (kept) return kept
@@ -449,6 +449,34 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // `match` says whether the rows have every word ('all') or only some of them.
       const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id)), rows = kept(ranked.rows)
       return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: rows.length }
+    },
+    // Page an export from the exact same sanitized projection and viewer
+    // visibility as browsing. Never copy the raw publication or adjacency map.
+    async exportPage(request = {}) {
+      const { signal, cursor, query = '', ids = [], unlistedGroups } = requestValue(request)
+      const viewer = viewerValue(request.viewer), groups = groupsValue(unlistedGroups)
+      if (!viewer?.signedIn || !Array.isArray(ids) || ids.length > 10000 || !ids.every(idValid)) invalid()
+      const search = queryValue(query)
+      const scope = `export:${search}:${hash(JSON.stringify([...ids].sort()))}:${groupScope(groups)}${viewerScope(viewer)}`
+      const decoded = cursorValue(cursor, scope), data = await snapshot(signal)
+      if (data.remote) return remote('exportPage', request, data)
+      // Keep one selection plan per reader, so a whole-network download
+      // walks its index once rather than rebuilding a 100k-ID set per page.
+      if (exportPlan?.data !== data || exportPlan.scope !== scope) {
+        const listed = listedFor(data.unlisted, groups), selected = new Set(ids.map(id => data.aliases.get(id) ?? id))
+        const matcher = search ? createQueryMatcher(search, 'exact') : null
+        let people = data.ordered.filter(person => listed(person.id) && (!ids.length || selected.has(person.id)))
+        if (matcher) people = rankMatches(people, matcher, person => data.tokens.get(person.id)).rows
+        exportPlan = { data, scope, people, included: new Set(people.map(person => person.id)), visibility: visibilityFor(data, viewer) }
+      }
+      const { people, included, visibility } = exportPlan
+      const result = page(people, decoded, scope, data.revision)
+      const profiles = result.profiles.map(person => ({ ...data.details.get(person.id) }))
+      const connections = []
+      for (const person of result.profiles) for (const toId of data.connected.get(person.id) ?? []) {
+        if (included.has(toId) && visibility.visible(person.id, toId)) connections.push({ fromId: person.id, toId })
+      }
+      return { revision: data.revision, profiles, connections, total: people.length, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) }
     },
     async profile(request = {}) {
       // `show` narrows to members ('members') or to `known`, the published ids

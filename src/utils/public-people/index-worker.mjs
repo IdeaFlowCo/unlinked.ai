@@ -14,7 +14,7 @@ const PREVIOUS_GRACE_MS = 60000
 // it is released when the new install begins, and calls for it wait for the
 // new index (answered `stale`, the reader installs and retries).
 const KEEP_OLD_BELOW = typeof workerData?.keepOldBelow === 'number' ? workerData.keepOldBelow : 0.45
-const METHODS = new Set(['suggest', 'list', 'profile', 'card', 'unlistedGroup', 'suspended', 'suspensions', 'addresses', 'lookupLinkedin', 'linkedinProfileIds', 'linkedinRef', 'lookup', 'linked', 'neighbors', 'company'])
+const METHODS = new Set(['exportPage', 'suggest', 'list', 'profile', 'card', 'unlistedGroup', 'suspended', 'suspensions', 'addresses', 'lookupLinkedin', 'linkedinProfileIds', 'linkedinRef', 'lookup', 'linked', 'neighbors', 'company'])
 const sources = new Map() // sourceKey -> { current, previous, timer }
 const transfers = new Map() // transfer id -> { sourceKey, cacheKey, snapshot }
 let nextTransfer = 1, released = 0, begun = 0
