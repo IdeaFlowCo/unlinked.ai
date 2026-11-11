@@ -3,6 +3,7 @@ import { constants } from 'node:fs'
 import { lstat, readdir, open } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { SEARCH_LOG_FILE, SEARCH_LOG_INVENTORY_LIMIT } from '../mcp-server/search-log-store.mjs'
 import { safeSearchRecord } from '../mcp-server/search-activity.mjs'
 
 export async function readSearchLog({ directory, requestId, accountId, since } = {}) {
@@ -10,8 +11,8 @@ export async function readSearchLog({ directory, requestId, accountId, since } =
   const info = await lstat(directory)
   if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid() || (info.mode & 0o777) !== 0o700) throw new Error('diagnostics_directory_not_private')
   const files = await readdir(directory), records = []
-  if (files.length > 64) throw new Error('diagnostics_inventory_limit')
-  for (const file of files.filter(value => /^requests-\d{4}-\d{2}-\d{2}\.jsonl$/.test(value)).sort().reverse()) {
+  if (files.length > SEARCH_LOG_INVENTORY_LIMIT) throw new Error('diagnostics_inventory_limit')
+  for (const file of files.filter(value => SEARCH_LOG_FILE.test(value)).sort((a,b) => Number(b.startsWith('queries-'))-Number(a.startsWith('queries-')) || b.localeCompare(a))) {
     const descriptor = await open(join(directory, file), constants.O_RDONLY | constants.O_NOFOLLOW)
     try {
       const stat = await descriptor.stat()

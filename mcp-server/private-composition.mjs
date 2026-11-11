@@ -4,7 +4,8 @@ import { createBrowserPerformanceRecorder } from './browser-performance.mjs'
 import { createNeo4jSavedSearchLists } from './saved-search-lists.mjs'
 import { createAuditQueue } from './audit-queue.mjs'
 import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
-import { createSearchLog, safeSearchRecord } from './search-activity.mjs'
+import { createSearchLog } from './search-activity.mjs'
+import { createSearchLogStore } from './search-log-store.mjs'
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
 import { createOpenChatConnectionSync, createNeo4jOpenChatSyncStore } from './openchat-connections.mjs'
@@ -453,7 +454,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
       const auditStat = await lstat(auditDirectory)
       if (!auditStat.isDirectory() || auditStat.isSymbolicLink() || (auditStat.mode & 0o777) !== 0o700 || auditStat.uid !== process.getuid()) throw new Error('search_audit_directory_not_private')
-      searchLogStore = await createDiagnosticsStore({ directory: join(auditDirectory, 'searches'), project: safeSearchRecord })
+      searchLogStore = await createSearchLogStore({ directory: join(auditDirectory, 'searches') })
       searchLog = createSearchLog({ emit: searchLogStore.emit })
     }
     if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {
