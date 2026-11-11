@@ -1,16 +1,38 @@
 import { parseUnlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
-import { GROUP_UUID, GroupError } from './collective-groups.mjs'
+import { flyerInvitePath, GROUP_UUID, GroupError } from './collective-groups.mjs'
 import { createCollectiveListProjection } from './collective-group-lists.mjs'
-import { renderGroup, renderGroups, renderGroupError, renderGroupInvitation, renderGroupSelection, renderGroupSharedList, renderGroupSharePreview } from './collective-group-views.mjs'
+import { renderGroup, renderGroups, renderGroupError, renderGroupInvitation, renderGroupSelection, renderGroupSharedList, renderGroupSharePreview, renderFlyerInvitation } from './collective-group-views.mjs'
 
 const signInRoute = new RegExp(`^/groups/${GROUP_UUID}(?:/invites/${GROUP_UUID}|/lists/${GROUP_UUID})?$`)
 const route = new RegExp(`^/groups/(${GROUP_UUID})(?:/(invite|select)|/(invites|members|lists)/(${GROUP_UUID})(?:/(revoke|remove))?)?$`)
+const flyerRoute = new RegExp(`^/groups/(${GROUP_UUID})/join/(${GROUP_UUID})$`)
+const flyerAdminRoute = new RegExp(`^/groups/(${GROUP_UUID})/flyer(?:/(${GROUP_UUID})/(revoke|requests/(${GROUP_UUID})))?$`)
+const sourceFields = new Set(['src', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'])
 export const isGroupPath = path => path === '/groups' || path.startsWith('/groups/')
-export const groupReturnPath = path => path === '/groups' || signInRoute.test(path)
+export const isFlyerJoinPath = path => flyerRoute.test(path)
+export function flyerJoinTarget(value) {
+  if (typeof value !== 'string' || value.length > 1100) return null
+  const question = value.indexOf('?')
+  const pathname = question < 0 ? value : value.slice(0, question)
+  const match = flyerRoute.exec(pathname)
+  if (!match) return null
+  const [, groupId, inviteId] = match
+  const params = new URLSearchParams(question < 0 ? '' : value.slice(question + 1))
+  const source = {}
+  for (const [key, item] of params) {
+    if (!sourceFields.has(key) || Object.hasOwn(source, key) || !/^[A-Za-z0-9._~-]{1,120}$/.test(item)) return null
+    source[key] = item
+  }
+  const search = new URLSearchParams(source).toString()
+  const path = flyerInvitePath(groupId, inviteId) + (search ? '?' + search : '')
+  return { groupId, inviteId, source, path }
+}
+export const groupReturnPath = path => path === '/groups' || signInRoute.test(path) || flyerJoinTarget(path)?.path === path
 const fail = code => { throw new GroupError(code) }
 const messages = {
   invalid_input: 'Refresh this page and try again.',
   invalid_name: 'Enter a group name up to 100 characters.',
+  invalid_capacity: 'Choose a capacity between 2 and 500 that includes everyone already in the group.',
   invalid_recipient: 'Use the profile link of an existing Unlinked member you can invite.',
   already_member: 'This person is already a member.',
   already_invited: 'This person already has a pending invitation.',
@@ -26,8 +48,8 @@ export function createGroupBrowser({ groups, privateLists, savedSearchLists, acc
   if (typeof accountForProfile !== 'function') throw new TypeError('collective_groups_account_resolution_required')
   return async ({ request, url, session, lookup, render, redirect }) => {
     const { pathname, searchParams, origin } = url
-    const actor = session.owner
-    const chrome = { accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf }
+    const actor = session?.owner
+    const chrome = { accountLabel: session?.accountLabel, displayName: session?.displayName, csrf: session?.csrf }
     const parsed = route.exec(pathname)
     const [ , groupId, action, collection, target, mutation ] = parsed ?? []
     const base = groupId ? `/groups/${groupId}` : '/groups'
@@ -46,6 +68,51 @@ export function createGroupBrowser({ groups, privateLists, savedSearchLists, acc
       return group
     }
     try {
+      if (isFlyerJoinPath(pathname)) {
+        const join = flyerJoinTarget(pathname + url.search)
+        if (!join) fail('not_found')
+        if (get) {
+          const preview = await groups.previewFlyer(join.groupId, join.inviteId)
+          const state = session ? await groups.flyerStatus(actor, join.groupId, join.inviteId) : null
+          return render(renderFlyerInvitation(chrome, preview, join.path, state, '/groups/' + join.groupId))
+        }
+        if (!session) return render(renderGroupError(chrome, 'Sign in to join this group.'), 401)
+        const input = await fields('decision')
+        if (input.get('decision') !== 'join') fail('invalid_input')
+        let profile
+        try {
+          const profileId = ownProfileId ? await ownProfileId(actor) : null
+          profile = profileId ? (await lookup([profileId])).get(profileId) : null
+        } catch { /* Verified account consent remains usable while People is unavailable. */ }
+        const state = await groups.joinFlyer(actor, join.groupId, join.inviteId, {
+          profileId: profile?.id ?? null,
+          name: profile?.name ?? 'Member without a public profile',
+          source: join.source,
+        })
+        if (state === 'member') return redirect('/groups/' + join.groupId)
+        const preview = await groups.previewFlyer(join.groupId, join.inviteId)
+        return render(renderFlyerInvitation(chrome, preview, join.path, 'pending'))
+      }
+      const flyerAdmin = flyerAdminRoute.exec(pathname)
+      if (flyerAdmin) {
+        if (!session || get || url.search) fail('not_found')
+        const [, id, inviteId, operation, requestId] = flyerAdmin
+        if (!inviteId) {
+          const input = await fields('capacity', 'mode')
+          const mode = input.get('mode')
+          const capacity = input.get('capacity')
+          if (!['join', 'approval'].includes(mode) || !/^\d{1,3}$/.test(capacity)) fail('invalid_capacity')
+          await groups.createFlyer(actor, id, { capacity: Number(capacity), approval: mode === 'approval' })
+        } else if (operation === 'revoke') {
+          await fields()
+          await groups.revokeFlyer(actor, id, inviteId)
+        } else {
+          const input = await fields('decision')
+          await groups.decideFlyerRequest(actor, id, inviteId, requestId, input.get('decision'))
+        }
+        return redirect('/groups/' + id)
+      }
+      if (!session) fail('not_found')
       if (pathname !== '/groups' && !parsed) fail('not_found')
       if (searchParams.size && !(get && action === 'select')) fail('not_found')
       if (pathname === '/groups') {
