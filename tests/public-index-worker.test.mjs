@@ -23,6 +23,7 @@ const withHost = async (t, options) => {
   return host
 }
 const calls = [
+  ['exportPage', { viewer: { signedIn: true, id: 'ada' } }],
   ['list', {}], ['list', { query: 'ada' }], ['list', { presence: 'member', includeTotal: true }], ['list', { exclude: ['grace'] }],
   ['profile', { id: 'ada' }], ['profile', { id: 'old-ada' }], ['profile', { id: 'missing' }], ['profile', { id: 'grace', known: new Set(['ada']), viewer: { signedIn: true } }],
   ['card', { id: 'ada', known: new Set(['grace']) }], ['suggest', { query: 'ada' }], ['company', { name: 'Example Labs' }],

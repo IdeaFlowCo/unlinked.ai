@@ -1,4 +1,6 @@
 import { createGroupBrowser, flyerJoinTarget, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
+import { bulkExportInput } from './bulk-exports.mjs'
+import { networkExportInput, streamNetworkExport } from './network-export.mjs'
 import { PRIVATE_LIST_LOADING_SCRIPT } from './private-list-loading.mjs'
 import { browserPerformanceScript } from './browser-performance.mjs'
 import { PEOPLE_FILTER_KEYS, peopleFilters, matchesPeopleFilters } from '../src/utils/public-people/search-filters.mjs'
@@ -64,7 +66,7 @@ import { publicSearchDocument } from './public-web-search.mjs'
 import { createMembersOnlySnapshotReader, iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 import { BlockError } from './member-blocks.mjs'
-import { renderListsDirectory, renderPrivateList, renderSavedSearchList, renderPeopleError, MAX_UPLOAD_FILES, renderListImport } from './private-onboarding-views.mjs'
+import { renderDownloads, renderListsDirectory, renderPrivateList, renderSavedSearchList, renderPeopleError, MAX_UPLOAD_FILES, renderListImport } from './private-onboarding-views.mjs'
 import { LIST_ERRORS, LIST_UPLOAD_BYTES, DEFAULT_LIST_NAME } from './private-list-imports.mjs'
 
 import { coordinatorFor } from './owner-coordination.mjs'
@@ -188,7 +190,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ privateLists, privateListImports, savedSearchLists, collectiveGroups, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, privateLists, privateListImports, savedSearchLists, collectiveGroups, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -242,7 +244,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
   coordination.sessionMaps.add(sessions)
-  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users, participantBlocked: async (session, userId) => {
+  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ isVerified, createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users, participantBlocked: async (session, userId) => {
     const blocks = await memberBlocks.list(session.owner)
     if (blocks.some(block => block.openChatUserId === userId)) return true
     if (!blocks.some(block => block.blocked || block.blockedProfileId)) return false
@@ -319,7 +321,8 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
   const signInOptions = (request, switching = false) => switching || cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const downloadReturn = value => { try { const url=new URL(value,base); if(url.origin!==base.origin||!['/downloads','/downloads/file'].includes(url.pathname))return false; bulkExportInput(url.searchParams); return !url.hash } catch { return false } }
+  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -674,6 +677,14 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
   const requestSessions = new WeakMap(), deletionInputs = new WeakMap()
   const sessionFor = request => requestSessions.get(request)
+  const authorizeDownloadSession = async (request,session) => {
+    const sid=cookies(request)['__Host-ul-session'],now=Date.now()
+    const denied=()=>Object.assign(Error('Sign in again to download.'),{code:'grant_revoked'})
+    if(!sid||sessions.get(sid)!==session||session.expiresAt<=now)throw denied()
+    if(sessionStore){const current=await sessionStore.get(createHash('sha256').update(sid).digest('hex'),now);if(!current||current.ownerId!==session.owner.ownerId||current.userId!==session.owner.userId||current.csrf!==session.csrf)throw denied()}
+    await getBackend(session.owner)
+  }
+
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
@@ -1244,12 +1255,13 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         sessionStore.prune(Date.now()).catch(() => {})
       }
       if (current) requestSessions.set(request, current)
+      const verified = current ? await isVerified(current.owner) : false
       if (request.method === 'POST' && url.pathname !== '/search' && current) response.once('finish', () => dropAccountNetwork(current.owner))
       // Browser autocomplete reads the same published projection for everyone.
       // Its own burst budget keeps keystrokes out of the full-page read budget.
       if (request.method === 'GET' && url.pathname === '/search-suggestions') {
         if (Date.now() - suggestWindow >= 60000) { suggestWindow = Date.now(); suggestRequests = 0 }
-        if (++suggestRequests > 600 || suggestBusy >= 8) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++suggestRequests > 600 || suggestBusy >= 8)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         suggestBusy++
         try {
           if (url.searchParams.getAll('q').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'q')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
@@ -1275,7 +1287,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       const hoverCard = request.method === 'GET' ? url.pathname.match(/^\/api\/people\/([^/]+)\/card$/) : null
       if (hoverCard) {
         if (Date.now() - cardWindow >= 60000) { cardWindow = Date.now(); cardRequests = 0 }
-        if (++cardRequests > 600 || cardBusy >= 8) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++cardRequests > 600 || cardBusy >= 8)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         cardBusy++
         try {
           if ([...url.searchParams.keys()].length) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
@@ -1316,7 +1328,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       const photo = ['GET', 'HEAD'].includes(request.method) ? photoPath(url.pathname) : null
       if (photo) {
         if (Date.now() - photoWindow >= 60000) { photoWindow = Date.now(); photoRequests = 0 }
-        if (++photoRequests > PHOTO_PER_MINUTE || photoBusy >= PHOTO_IN_FLIGHT) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++photoRequests > PHOTO_PER_MINUTE || photoBusy >= PHOTO_IN_FLIGHT)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         photoBusy++
         try {
           let hidden
@@ -1401,7 +1413,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         if ([...url.searchParams.keys()].some(key => key !== 'depth') || depthValues.length > 1 || (depthValues.length && !['1', '2'].includes(depthValues[0]))) { send(400, { error: 'invalid_input' }); return }
         const now = Date.now(), budget = contextBudgets.get(viewer.owner.ownerId) ?? { window: now, count: 0 }
         if (now - budget.window >= 60000) { budget.window = now; budget.count = 0 }
-        if (++budget.count > 60) { send(429, { error: 'rate_limited' }); return }
+        if (++budget.count > 60 && !await isVerified(viewer.owner)) { send(429, { error: 'rate_limited' }); return }
         if (contextBudgets.size > 5000) contextBudgets.clear()
         contextBudgets.set(viewer.owner.ownerId, budget)
         let id
@@ -1434,7 +1446,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
         if (Date.now() - invitationWindow >= 60000) { invitationWindow = Date.now(); invitationRequests = 0 }
-        if (++invitationRequests > 60) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++invitationRequests > 60)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         // The token never leaves this site; same-origin (not no-referrer) so the
         // page's own form POST carries a real Origin (no-referrer makes it "null").
         response.setHeader('Referrer-Policy', 'same-origin')
@@ -1446,7 +1458,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       // button or a mail provider's one-click, turns the email off.
       if (memberEmail && url.pathname === '/email/unsubscribe' && ['GET', 'POST'].includes(request.method)) {
         if (Date.now() - unsubscribeWindow >= 60000) { unsubscribeWindow = Date.now(); unsubscribeRequests = 0 }
-        if (++unsubscribeRequests > 600) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++unsubscribeRequests > 600)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         response.setHeader('Referrer-Policy', 'no-referrer')
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         let token = url.searchParams.getAll('t').length === 1 ? url.searchParams.get('t') : null
@@ -1502,7 +1514,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       const contactLink = url.pathname.match(/^\/c\/([0-9A-Za-z]{24})(\/contact\.vcf)?$/)
       if (request.method === 'GET' && contactLink && contactCards && signup) {
         if (Date.now() - contactWindow >= 60000) { contactWindow = Date.now(); contactRequests = 0 }
-        if (++contactRequests > 1200) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++contactRequests > 1200)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         // Never sent to another site; same-origin rather than no-referrer, because
         // no-referrer makes browsers send `Origin: null` with the Join/Add form,
         // which the same-origin POST check refuses (WebKit and Chromium).
@@ -1645,7 +1657,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // Declared crawlers and non-browser clients never get either priority.
         const automated = !viewer && declaredAutomation(request)
         const cardArrival = !automated && publicProfile && !publicProfile[2] && url.searchParams.getAll('via').length === 1 && url.searchParams.get('via') === 'card'
-        const admission = await publicAdmission.acquire({ ownerId: viewer?.owner.ownerId, visitor: viewer || automated ? undefined : visitorKey(request), priority: Boolean(cardArrival), route, signal: controller.signal })
+        const admission = await publicAdmission.acquire({ ownerId: viewer?.owner.ownerId, verified: viewer ? await isVerified(viewer.owner) : false, visitor: viewer || automated ? undefined : visitorKey(request), priority: Boolean(cardArrival), route, signal: controller.signal })
         response.removeListener('close', closed)
         if (!admission.release) {
           if (admission.reason !== 'cancelled') await directoryError(429, admission.retryAfter)
@@ -1925,7 +1937,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         if (!messaging || typeof readPublishedSnapshot !== 'function') { send(503, { error: 'messaging_unavailable' }); return }
         const now = Date.now(), budget = pickerBudgets.get(viewer.owner.ownerId) ?? { window: now, count: 0 }
         if (now - budget.window >= 60000) { budget.window = now; budget.count = 0 }
-        if (++budget.count > 20) { send(429, { error: 'rate_limited' }); return }
+        if (++budget.count > 20 && !await isVerified(viewer.owner)) { send(429, { error: 'rate_limited' }); return }
         if (pickerBudgets.size > 5000) pickerBudgets.clear()
         pickerBudgets.set(viewer.owner.ownerId, budget)
         try {
@@ -2061,7 +2073,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // One person finding themselves needs a handful of tries; a session
         // enumerating the private slug index does not.
         session.selfClaim.lookups = (session.selfClaim.lookups ?? 0) + 1
-        if (session.selfClaim.lookups > 20) { response.writeHead(429, { 'Retry-After': '3600' }).end(); return }
+        if (!verified && (session.selfClaim.lookups > 20)) { response.writeHead(429, { 'Retry-After': '3600' }).end(); return }
         session.selfClaim.candidate = null
         const page = lookupResult => journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, lookupResult, address }))
         let profileId = null, evidence = null
@@ -2628,6 +2640,13 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
           if (!privateLists) { journey(response, renderPrivateList({ ...chrome, error: 'Private lists are unavailable right now. Please try again later.' }), null, '', 503); return }
           try {
             const result = await privateLists.get(session.owner, privateListMatch[1], after)
+            const queryValues = url.searchParams.getAll('q'), query = queryValues[0] ?? ''
+            if (queryValues.length > 1 || query.length > 200) throw Object.assign(Error('Invalid search.'), {code:'invalid_input'})
+            if (query.trim() && bulkExports) {
+              const controller=new AbortController();response.once('close',()=>{if(!response.writableFinished)controller.abort()})
+              const found=await bulkExports.manifest(session.owner,{scope:'list',listId:'private:'+privateListMatch[1],query,inline:true,fields:['id','profileId','name','headline','company','linkedinUrl'],format:'csv'},{publicAllowed:true,privateAllowed:true,browser:true,membersOnly:iosApp(request)},controller.signal,()=>authorizeDownloadSession(request,session))
+              journey(response,renderPrivateList({...chrome,list:result.list,members:found.rows.slice(0,100).map(row=>({...row,description:[row.headline,row.company].filter(Boolean).join(' · ')})),query,matchedTotal:found.total})); return
+            }
             journey(response, renderPrivateList({ ...chrome, ...result })); return
           } catch (error) {
             if (error?.code === 'not_found') { journey(response, renderNotFound(chrome), null, '', 404); return }
@@ -2833,7 +2852,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         const blocks = memberBlocks ? await bounded(() => memberBlocks.list(session.owner), []) : null
         // An unreadable choice leaves the control out: a form must never resubmit a guessed default.
         const privacyChoice = connectionPrivacy ? await bounded(() => connectionPrivacy.get(session.owner), null) : null
-        const view=renderSettings({ ...props, ...(privacyChoice ? { connectionPrivacy: privacyChoice, connectionPrivacySaved: url.searchParams.get('privacy') === 'saved' } : {}), blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+        const view=renderSettings({ ...props, verified: await isVerified(session.owner), ...(privacyChoice ? { connectionPrivacy: privacyChoice, connectionPrivacySaved: url.searchParams.get('privacy') === 'saved' } : {}), blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
           ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
@@ -2868,6 +2887,43 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => !['csrf', 'kinds'].includes(key)) || input.getAll('kinds').some(kind => !Object.hasOwn(EMAIL_PREFERENCES, kind))) throw new Error('private_browser_csrf')
         await memberEmail.savePreferences(session.owner, input.getAll('kinds'))
         redirect(response, '/settings?email=saved#email'); return
+      }
+      if (signup && request.method === 'GET' && ['/downloads','/downloads/file'].includes(url.pathname)) {
+        if (!bulkExports) { render(response,'Downloads unavailable','<p>Try again shortly.</p>',503); return }
+        const input = bulkExportInput(url.searchParams)
+        if (url.pathname === '/downloads') {
+          let listName
+          if(input.scope==='list') {
+            const [kind,id]=input.listId.split(':')
+            const list=kind==='private'?(await privateLists?.get(session.owner,id))?.list:await savedSearchLists?.get(session.owner,id)
+            if(!list){render(response,'List unavailable','<p>This list is not available to this account.</p>',404);return}
+            listName=list.name
+          }
+          journey(response,renderDownloads({ accountLabel:session.accountLabel,displayName:session.displayName,csrf:session.csrf,input,listName,verified:await isVerified(session.owner) })); return
+        }
+        const controller = new AbortController()
+        response.once('close',()=>{if(!response.writableFinished)controller.abort()})
+        const authorize=()=>authorizeDownloadSession(request,session)
+        try { await bulkExports.stream({ owner:session.owner,input:url.searchParams,policy:{publicAllowed:true,privateAllowed:true,browser:true,membersOnly:iosApp(request)},authorize,response,signal:controller.signal }) }
+        catch(error) { if(response.headersSent){response.destroy();return} const status={scope_not_granted:403,not_found:404,invalid_input:400,grant_revoked:401}[error?.code]??503;render(response,'Download unavailable',`<p>${html(status===503?'Your data could not be read right now. Retry to get a complete copy.':error.message)}</p><p><a href="/downloads">Download my network</a></p>`,status) }
+        return
+      }
+      if (signup && request.method === 'GET' && url.pathname === '/network/export') {
+        const authorize = async () => {
+          await authorizeDownloadSession(request,session)
+          if (!await isVerified(session.owner)) throw Error('verified_network_export_required')
+        }
+        if (!await isVerified(session.owner)) { response.writeHead(403).end('Verified account required.'); return }
+        const input = networkExportInput(url.searchParams)
+        const controller = new AbortController()
+        response.once('close', () => { if (!response.writableFinished) controller.abort() })
+        const reader = createPublicPeopleReader({ readPublishedSnapshot: snapshotFor(request), photoFor }), viewer = await readerViewer(session), groups = await viewerGroupsReady(session.owner)
+        try {
+          await streamNetworkExport({ response, input, authorize, signal: controller.signal,
+            readPage: options => reader.exportPage({ ...options, viewer, ...(groups ? { unlistedGroups: groups } : {}) }),
+            readOwned: options => createAccountNetwork({ owner: session.owner, getBackend }).readNetwork(undefined, options) })
+        } catch (error) { if (response.headersSent) { response.destroy(); return } throw error }
+        return
       }
       if (signup && request.method === 'GET' && url.pathname === '/export') {
         const jobs = await jobResources()

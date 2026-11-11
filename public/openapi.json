@@ -416,7 +416,7 @@
             "name": "sort",
             "in": "query",
             "required": false,
-            "description": "best (default): relevance with q, else stored name order; name: A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case (names are returned as written); name-desc; raw: Unicode code-point order of the name as written. Bound into the cursor.",
+            "description": "best (default): relevance with q, else stored name order; name: A\u2013Z from the first letter or number, ignoring leading emoji/punctuation, accents and case (names are returned as written); name-desc; raw: Unicode code-point order of the name as written. Bound into the cursor.",
             "schema": {
               "type": "string",
               "enum": [
@@ -553,7 +553,7 @@
             "name": "sort",
             "in": "query",
             "required": false,
-            "description": "name (default): A–Z from the first letter or number, ignoring leading emoji/punctuation, accents and case (names are returned exactly as written); raw: Unicode code-point order of the name as written; name-desc; connected: most recently connected first; imported: most recently imported first; company: A–Z by company, none last. Bound into the cursor.",
+            "description": "name (default): A\u2013Z from the first letter or number, ignoring leading emoji/punctuation, accents and case (names are returned exactly as written); raw: Unicode code-point order of the name as written; name-desc; connected: most recently connected first; imported: most recently imported first; company: A\u2013Z by company, none last. Bound into the cursor.",
             "schema": {
               "type": "string",
               "enum": [
@@ -570,7 +570,7 @@
             "name": "grouping",
             "in": "query",
             "required": false,
-            "description": "Degree 1. person (default): one entry per person, grouped only on exact identity evidence — the same published profile (merges followed) or the same LinkedIn address, never a name — with sources[] listing every underlying record and top-level fields from the owner import; total counts people. none: one row per source record (pre-grouping shape). Bound into the cursor.",
+            "description": "Degree 1. person (default): one entry per person, grouped only on exact identity evidence \u2014 the same published profile (merges followed) or the same LinkedIn address, never a name \u2014 with sources[] listing every underlying record and top-level fields from the owner import; total counts people. none: one row per source record (pre-grouping shape). Bound into the cursor.",
             "schema": {
               "type": "string",
               "enum": [
@@ -876,7 +876,7 @@
         },
         "responses": {
           "200": {
-            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } — token only in this response body, never logged"
+            "description": "{ kind, ownerId, grantId, created, version, scope, tools, accessToken } \u2014 token only in this response body, never logged"
           },
           "400": {
             "description": "invalid_input"
@@ -894,7 +894,7 @@
             "description": "rate_limited (per-client budget; Retry-After)"
           },
           "503": {
-            "description": "upstream_unavailable (including an unavailable audit sink — provisioning fails closed rather than going unaudited)"
+            "description": "upstream_unavailable (including an unavailable audit sink \u2014 provisioning fails closed rather than going unaudited)"
           }
         }
       }
@@ -1609,8 +1609,8 @@
     },
     "/api/agent/v1/private/person": {
       "get": {
-        "summary": "unlinked_get_person_private: Read the owner’s private card about an Unlinked person: profileId may be a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address.",
-        "description": "Read the owner’s private card about an Unlinked person: profileId may be a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. Returns the notes and relations recorded about that person (with note and link ids for corrections), plus profileId, connectionId and linkedinRefHash when they apply. entities is empty when nothing is recorded yet. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_get_person_private: Read the owner\u2019s private card about an Unlinked person: profileId may be a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address.",
+        "description": "Read the owner\u2019s private card about an Unlinked person: profileId may be a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. Returns the notes and relations recorded about that person (with note and link ids for corrections), plus profileId, connectionId and linkedinRefHash when they apply. entities is empty when nothing is recorded yet. Notes and relations carry author (\u201cowner\u201d or \u201cagent:<client>\u201d), source (\u201capp\u201d, \u201cconnector\u201d, \u201cdirect-key\u201d or \u201csuggestion\u201d) and assertion (\u201cstated\u201d or \u201cinferred\u201d); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_get_person_private",
         "security": [
           {
@@ -1659,8 +1659,8 @@
     },
     "/api/agent/v1/private/thing": {
       "get": {
-        "summary": "unlinked_get_private_thing: Read one of the owner’s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations.",
-        "description": "Read one of the owner’s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_get_private_thing: Read one of the owner\u2019s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations.",
+        "description": "Read one of the owner\u2019s private entities (a saved person, company, idea or project, or any entity id from another private tool) with its notes and relations. Notes and relations carry author (\u201cowner\u201d or \u201cagent:<client>\u201d), source (\u201capp\u201d, \u201cconnector\u201d, \u201cdirect-key\u201d or \u201csuggestion\u201d) and assertion (\u201cstated\u201d or \u201cinferred\u201d); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_get_private_thing",
         "security": [
           {
@@ -1726,8 +1726,8 @@
     },
     "/api/agent/v1/private/things": {
       "get": {
-        "summary": "unlinked_list_private_things: List the owner’s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind.",
-        "description": "List the owner’s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind. Use an id with unlinked_get_private_thing. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_list_private_things: List the owner\u2019s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind.",
+        "description": "List the owner\u2019s private entities (saved people, companies, ideas and projects, and Unlinked or OpenChat people they wrote about), optionally by name and kind. Use an id with unlinked_get_private_thing. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_list_private_things",
         "security": [
           {
@@ -1805,8 +1805,8 @@
         }
       },
       "post": {
-        "summary": "unlinked_save_private_thing: Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”).",
-        "description": "Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (“remember Maya from dinner”). Returns its id for notes and links. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one. Set createNew true with a clientRequestId only to save a different one with an existing name; retries return the same entity. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_save_private_thing: Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (\u201cremember Maya from dinner\u201d).",
+        "description": "Find or save a private person, company, idea or project by name, for someone with no Unlinked profile or imported contact (\u201cremember Maya from dinner\u201d). Returns its id for notes and links. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates \u2014 ask the user which one. Set createNew true with a clientRequestId only to save a different one with an existing name; retries return the same entity. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_save_private_thing",
         "security": [
           {
@@ -1883,8 +1883,8 @@
     },
     "/api/agent/v1/private/search": {
       "get": {
-        "summary": "unlinked_search_private: Search the owner’s private people knowledge in one call: entities matched by name or private note text, and relations matched by relation text, either end’s name, or relationType (knows, family, works_at, worked_with, works_on, attended, interested_in, other).",
-        "description": "Search the owner’s private people knowledge in one call: entities matched by name or private note text, and relations matched by relation text, either end’s name, or relationType (knows, family, works_at, worked_with, works_on, attended, interested_in, other). Give at least one of query, relationType or kind. At most 50 of each; truncated says more matched. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_search_private: Search the owner\u2019s private people knowledge in one call: entities matched by name or private note text, and relations matched by relation text, either end\u2019s name, or relationType (knows, family, works_at, worked_with, works_on, attended, interested_in, other).",
+        "description": "Search the owner\u2019s private people knowledge in one call: entities matched by name or private note text, and relations matched by relation text, either end\u2019s name, or relationType (knows, family, works_at, worked_with, works_on, attended, interested_in, other). Give at least one of query, relationType or kind. At most 50 of each; truncated says more matched. Notes and relations carry author (\u201cowner\u201d or \u201cagent:<client>\u201d), source (\u201capp\u201d, \u201cconnector\u201d, \u201cdirect-key\u201d or \u201csuggestion\u201d) and assertion (\u201cstated\u201d or \u201cinferred\u201d); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_search_private",
         "security": [
           {
@@ -1975,8 +1975,8 @@
     },
     "/api/agent/v1/private/neighbourhood": {
       "get": {
-        "summary": "unlinked_get_neighbourhood: Read one person or thing and what surrounds it in the owner’s private graph: everything one (default) or two private relations away, and those relations (fromId/toId).",
-        "description": "Read one person or thing and what surrounds it in the owner’s private graph: everything one (default) or two private relations away, and those relations (fromId/toId). subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Never creates anything; empty when nothing is recorded. Bounded; truncated says it was cut. Notes and relations carry author (“owner” or “agent:<client>”), source (“app”, “connector”, “direct-key” or “suggestion”) and assertion (“stated” or “inferred”); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_get_neighbourhood: Read one person or thing and what surrounds it in the owner\u2019s private graph: everything one (default) or two private relations away, and those relations (fromId/toId).",
+        "description": "Read one person or thing and what surrounds it in the owner\u2019s private graph: everything one (default) or two private relations away, and those relations (fromId/toId). subjectKind \u201cunlinked\u201d = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); \u201cthing\u201d = one of the owner\u2019s saved people, companies, ideas or projects (its id); \u201cuser\u201d = an OpenChat person (user id) the owner already has private notes about. Never creates anything; empty when nothing is recorded. Bounded; truncated says it was cut. Notes and relations carry author (\u201cowner\u201d or \u201cagent:<client>\u201d), source (\u201capp\u201d, \u201cconnector\u201d, \u201cdirect-key\u201d or \u201csuggestion\u201d) and assertion (\u201cstated\u201d or \u201cinferred\u201d); null on records made before provenance was kept. Relations also carry relationType. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_get_neighbourhood",
         "security": [
           {
@@ -2059,8 +2059,8 @@
     },
     "/api/agent/v1/private/things/delete": {
       "post": {
-        "summary": "unlinked_delete_private_thing: Delete (undo) one of the owner’s private entities by id: removes it with its private notes and every private relation to or from it.",
-        "description": "Delete (undo) one of the owner’s private entities by id: removes it with its private notes and every private relation to or from it. Cannot be reversed. Deleting an entity about an Unlinked person forgets only the owner’s private notes; the profile and contact are untouched. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_delete_private_thing: Delete (undo) one of the owner\u2019s private entities by id: removes it with its private notes and every private relation to or from it.",
+        "description": "Delete (undo) one of the owner\u2019s private entities by id: removes it with its private notes and every private relation to or from it. Cannot be reversed. Deleting an entity about an Unlinked person forgets only the owner\u2019s private notes; the profile and contact are untouched. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_delete_private_thing",
         "security": [
           {
@@ -2119,7 +2119,7 @@
     "/api/agent/v1/private/notes": {
       "post": {
         "summary": "unlinked_add_private_note: Add a private note about a person or thing.",
-        "description": "Add a private note about a person or thing. subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Adding the same text again returns the existing note. Recorded as written by this agent (author agent:<key or app name>, source direct-key). Set assertion “inferred” when you concluded it yourself. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "description": "Add a private note about a person or thing. subjectKind \u201cunlinked\u201d = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); \u201cthing\u201d = one of the owner\u2019s saved people, companies, ideas or projects (its id); \u201cuser\u201d = an OpenChat person (user id) the owner already has private notes about. Adding the same text again returns the existing note. Recorded as written by this agent (author agent:<key or app name>, source direct-key). Set assertion \u201cinferred\u201d when you concluded it yourself. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_add_private_note",
         "security": [
           {
@@ -2199,8 +2199,8 @@
     },
     "/api/agent/v1/private/notes/delete": {
       "post": {
-        "summary": "unlinked_delete_private_note: Delete (undo) one of the owner’s private notes by note id.",
-        "description": "Delete (undo) one of the owner’s private notes by note id. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_delete_private_note: Delete (undo) one of the owner\u2019s private notes by note id.",
+        "description": "Delete (undo) one of the owner\u2019s private notes by note id. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_delete_private_note",
         "security": [
           {
@@ -2258,8 +2258,8 @@
     },
     "/api/agent/v1/private/links": {
       "post": {
-        "summary": "unlinked_add_private_link: Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another.",
-        "description": "Record a private relation in the owner’s own words (“knows”, “sister of”, “worked with”, “works at”), for example that one imported contact knows another. Subject: subjectKind “unlinked” = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); “thing” = one of the owner’s saved people, companies, ideas or projects (its id); “user” = an OpenChat person (user id) the owner already has private notes about. Target: toKind “unlinked” + toId (published profile id, connection id or linkedin.com/in/ address), toKind “user” + toId (OpenChat user id already in the owner’s private notes), or toKind person/company/idea/project with toId (saved thing id) or toName. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates — ask the user which one, then pass its id. Set createNew true with a clientRequestId only to save a different one with an existing name. The same subject, relation and target is one link, so retries never duplicate. Recorded as written by this agent (author agent:<key or app name>, source direct-key). relationType is derived from the words. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_add_private_link: Record a private relation in the owner\u2019s own words (\u201cknows\u201d, \u201csister of\u201d, \u201cworked with\u201d, \u201cworks at\u201d), for example that one imported contact knows another.",
+        "description": "Record a private relation in the owner\u2019s own words (\u201cknows\u201d, \u201csister of\u201d, \u201cworked with\u201d, \u201cworks at\u201d), for example that one imported contact knows another. Subject: subjectKind \u201cunlinked\u201d = an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address (the same person is one entity whichever you give); \u201cthing\u201d = one of the owner\u2019s saved people, companies, ideas or projects (its id); \u201cuser\u201d = an OpenChat person (user id) the owner already has private notes about. Target: toKind \u201cunlinked\u201d + toId (published profile id, connection id or linkedin.com/in/ address), toKind \u201cuser\u201d + toId (OpenChat user id already in the owner\u2019s private notes), or toKind person/company/idea/project with toId (saved thing id) or toName. A name is reused only when it names exactly one saved thing; when several share it the call fails with code ambiguous_name and candidates \u2014 ask the user which one, then pass its id. Set createNew true with a clientRequestId only to save a different one with an existing name. The same subject, relation and target is one link, so retries never duplicate. Recorded as written by this agent (author agent:<key or app name>, source direct-key). relationType is derived from the words. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_add_private_link",
         "security": [
           {
@@ -2370,8 +2370,8 @@
     },
     "/api/agent/v1/private/links/update": {
       "post": {
-        "summary": "unlinked_update_private_link: Correct one of the owner’s private relations in place by link id, for example “sister of” to “cousin of”.",
-        "description": "Correct one of the owner’s private relations in place by link id, for example “sister of” to “cousin of”. The relation text, its relationType and the link’s identity change together; if the owner already has that exact relation between the same two ends, the two become one and the existing link is returned with merged true. Recorded as written by this agent (author agent:<key or app name>, source direct-key). Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_update_private_link: Correct one of the owner\u2019s private relations in place by link id, for example \u201csister of\u201d to \u201ccousin of\u201d.",
+        "description": "Correct one of the owner\u2019s private relations in place by link id, for example \u201csister of\u201d to \u201ccousin of\u201d. The relation text, its relationType and the link\u2019s identity change together; if the owner already has that exact relation between the same two ends, the two become one and the existing link is returned with merged true. Recorded as written by this agent (author agent:<key or app name>, source direct-key). Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_update_private_link",
         "security": [
           {
@@ -2442,8 +2442,8 @@
     },
     "/api/agent/v1/private/links/delete": {
       "post": {
-        "summary": "unlinked_delete_private_link: Delete (undo) one of the owner’s private relations by link id.",
-        "description": "Delete (undo) one of the owner’s private relations by link id. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner’s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "unlinked_delete_private_link: Delete (undo) one of the owner\u2019s private relations by link id.",
+        "description": "Delete (undo) one of the owner\u2019s private relations by link id. Owner-only private knowledge: visible only to the owner (never to the person it is about), stored in the owner\u2019s Ideaflow people overlay and shown in Unlinked (person and contact pages) and OpenChat. Never notifies anyone. It is NOT a connection request and NOT messaging.",
         "operationId": "unlinked_delete_private_link",
         "security": [
           {
@@ -2502,7 +2502,7 @@
     "/api/agent/v1/private/investor-imports": {
       "post": {
         "operationId": "unlinked_stage_investor_csv",
-        "summary": "Inspect or stage an investor/contact CSV or XLSX in the owner’s private database (the tool name remains compatible). Supply exactly one of csv (UTF-8 text) or fileBase64 (canonical base64 original bytes, requires filename ending .csv or .xlsx); maximum original size 512 KiB. inspectOnly:true writes nothing and needs no mapping/listName: XLSX returns exact sheet names, ids, paths and visibility; with sheet set it also returns headers. XLSX staging always requires an exact sheet name, headerRow (1 by default), mapping, listName, and retainOriginalConfirmed:true ONLY after owner authorization to retain the ENTIRE original workbook including unselected/hidden tabs privately on the server. Only the selected sheet is imported; never guess a tab. Selected-sheet formulas, macros, encrypted or legacy .xls files are rejected; supply a values-only XLSX or CSV. Mapping uses exact header names; private comments use notes:[column names]. Returns importId and a new import’s validation preview; resume to commit. Same bytes, sheet/header, mapping, listName and list target replay the same import. Name/email never auto-match; exact LinkedIn references may match a readable persona, otherwise each source row becomes a private person. listId appends to an existing private list. Larger files must be split by complete rows, retaining headers; append later parts to the first listId. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "Inspect or stage an investor/contact CSV or XLSX in the owner\u2019s private database (the tool name remains compatible). Supply exactly one of csv (UTF-8 text) or fileBase64 (canonical base64 original bytes, requires filename ending .csv or .xlsx); maximum original size 512 KiB. inspectOnly:true writes nothing and needs no mapping/listName: XLSX returns exact sheet names, ids, paths and visibility; with sheet set it also returns headers. XLSX staging always requires an exact sheet name, headerRow (1 by default), mapping, listName, and retainOriginalConfirmed:true ONLY after owner authorization to retain the ENTIRE original workbook including unselected/hidden tabs privately on the server. Only the selected sheet is imported; never guess a tab. Selected-sheet formulas, macros, encrypted or legacy .xls files are rejected; supply a values-only XLSX or CSV. Mapping uses exact header names; private comments use notes:[column names]. Returns importId and a new import\u2019s validation preview; resume to commit. Same bytes, sheet/header, mapping, listName and list target replay the same import. Name/email never auto-match; exact LinkedIn references may match a readable persona, otherwise each source row becomes a private person. listId appends to an existing private list. Larger files must be split by complete rows, retaining headers; append later parts to the first listId. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
         "security": [
           {
             "accountGrant": []
@@ -2678,7 +2678,7 @@
     "/api/agent/v1/private/investor-imports/status": {
       "get": {
         "operationId": "unlinked_get_investor_import",
-        "summary": "Read an investor import’s status and private original row fields with outcome receipts, including XLSX sheet and physical row provenance. Page with nextOffset until null, at most 20 rows per call, fewer when encoded fields are large. Oversized rows report sourceRecovery. Recover the original file with sourceOffset:0 and follow source.nextOffset until null. CSV returns source.text chunks (UTF-16 offsets, at most 32768 code units); XLSX returns source.base64 chunks (BYTE offsets, at most 32768 bytes). Decode EACH base64 chunk separately, concatenate bytes and verify sourceDigest. The entire original XLSX includes unselected/hidden sheets and remains owner-private. A partial import has rejected rows; inspect reasons. This reads original outcomes, not the owner’s subsequent graph edits/deletions. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
+        "summary": "Read an investor import\u2019s status and private original row fields with outcome receipts, including XLSX sheet and physical row provenance. Page with nextOffset until null, at most 20 rows per call, fewer when encoded fields are large. Oversized rows report sourceRecovery. Recover the original file with sourceOffset:0 and follow source.nextOffset until null. CSV returns source.text chunks (UTF-16 offsets, at most 32768 code units); XLSX returns source.base64 chunks (BYTE offsets, at most 32768 bytes). Decode EACH base64 chunk separately, concatenate bytes and verify sourceDigest. The entire original XLSX includes unselected/hidden sheets and remains owner-private. A partial import has rejected rows; inspect reasons. This reads original outcomes, not the owner\u2019s subsequent graph edits/deletions. Query live lists with unlinked_list_private_things(kind:list,limit:100) and unlinked_get_private_thing(thingId:listId,limit:100), following nextCursor. Requires Private people notes & relations permission. Owner-only; never publishes profiles or notifies anyone. It is NOT a connection request and NOT messaging.",
         "security": [
           {
             "accountGrant": []
@@ -2740,6 +2740,600 @@
           }
         }
       }
+    },
+    "/network/export": {
+      "get": {
+        "operationId": "downloadVisibleNetwork",
+        "summary": "Download the verified browser account\u2019s visible network as JSON Lines",
+        "description": "Verified accounts receive priority admission and no core Unlinked request quotas. Visible-network downloads are browser-session-only at /network/export; existing agent scopes still apply. External provider allowances and transport bounds remain. See docs/verified-access.md.",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "everyone",
+                "mine"
+              ],
+              "default": "everyone"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 10000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Streaming JSON Lines attachment with a final complete footer. Interrupted exports have no footer.",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters"
+          },
+          "401": {
+            "description": "Browser sign-in required"
+          },
+          "403": {
+            "description": "Verified account required"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/exports": {
+      "post": {
+        "operationId": "prepareNetworkExport",
+        "summary": "Query or prepare a whole-result network/list download",
+        "description": "Query or download all matching people in one operation. CSV, JSON or JSON Lines; headline, summary or full detail; optional selected fields. Own network needs network access; owned lists additionally require private_notes; everyone/all require a verified account and public scope. Existing visibility and grant boundaries remain. Inline results have a real response-size bound and explicitly identify an incomplete preview; authenticated file downloads include every matching internal page.",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "inline": {
+                    "type": "boolean",
+                    "description": "Return all matching rows inline when they fit; otherwise an explicitly incomplete preview and one full download link."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "mine",
+                      "everyone",
+                      "all",
+                      "list"
+                    ]
+                  },
+                  "query": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "listId": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "csv",
+                      "json",
+                      "jsonl"
+                    ]
+                  },
+                  "detail": {
+                    "type": "string",
+                    "enum": [
+                      "headline",
+                      "summary",
+                      "full"
+                    ]
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "maxItems": 10000
+                  },
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "id",
+                        "profileId",
+                        "name",
+                        "headline",
+                        "company",
+                        "email",
+                        "location",
+                        "linkedinUrl",
+                        "url",
+                        "connectedAt",
+                        "about",
+                        "positions",
+                        "education",
+                        "skills",
+                        "connections",
+                        "notes",
+                        "sourceRecords",
+                        "source",
+                        "detailLevel",
+                        "enrichmentStatus"
+                      ]
+                    },
+                    "maxItems": 20
+                  },
+                  "presence": {
+                    "type": "string",
+                    "enum": [
+                      "member",
+                      "legacy",
+                      "shadow"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "best",
+                      "exact"
+                    ]
+                  },
+                  "degree": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "location": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "company": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "pastCompany": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "school": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "industry": {
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated download links, plus matching rows when inline=true and they fit. A preview always carries truncated=true and a size-limit reason."
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Account key required"
+          },
+          "403": {
+            "description": "Missing data scope or verified tier"
+          }
+        }
+      }
+    },
+    "/api/agent/v1/export": {
+      "get": {
+        "operationId": "downloadNetworkExport",
+        "summary": "Stream the whole selected network/list as one CSV or JSON file",
+        "description": "Query or download all matching people in one operation. CSV, JSON or JSON Lines; headline, summary or full detail; optional selected fields. Own network needs network access; owned lists additionally require private_notes; everyone/all require a verified account and public scope. Existing visibility and grant boundaries remain. Inline results have a real response-size bound and explicitly identify an incomplete preview; authenticated file downloads include every matching internal page.",
+        "security": [
+          {
+            "accountGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "everyone",
+                "all",
+                "list"
+              ]
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "listId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "json",
+                "jsonl"
+              ]
+            }
+          },
+          {
+            "name": "detail",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "headline",
+                "summary",
+                "full"
+              ]
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated values"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated values"
+            }
+          },
+          {
+            "name": "presence",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "member",
+                "legacy",
+                "shadow"
+              ]
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "best",
+                "exact"
+              ]
+            }
+          },
+          {
+            "name": "degree",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "company",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "pastCompany",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "title",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "school",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "industry",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private streamed attachment. JSON/JSONL includes a completion marker. A broken stream must be retried for a complete copy.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters or download URL too large"
+          },
+          "401": {
+            "description": "Account key required"
+          },
+          "403": {
+            "description": "Missing scope or verified tier"
+          },
+          "429": {
+            "description": "Ordinary account request allowance exhausted"
+          },
+          "503": {
+            "description": "Data unavailable; no complete export was issued"
+          }
+        }
+      }
+    },
+    "/downloads/file": {
+      "get": {
+        "operationId": "downloadNetworkInBrowser",
+        "summary": "Download the signed-in owner\u2019s full selection",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "everyone",
+                "all",
+                "list"
+              ]
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "listId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "json",
+                "jsonl"
+              ]
+            }
+          },
+          {
+            "name": "detail",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "headline",
+                "summary",
+                "full"
+              ]
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated values"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated values"
+            }
+          },
+          {
+            "name": "presence",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "member",
+                "legacy",
+                "shadow"
+              ]
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "best",
+                "exact"
+              ]
+            }
+          },
+          {
+            "name": "degree",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "company",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "pastCompany",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "title",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "school",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "industry",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private CSV, JSON or JSON Lines attachment"
+          },
+          "401": {
+            "description": "Sign in"
+          },
+          "403": {
+            "description": "Verified tier required for everyone/all"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2766,7 +3360,7 @@
             "authorizationUrl": "https://www.unlinked.ai/oauth/authorize",
             "tokenUrl": "https://www.unlinked.ai/oauth/token",
             "scopes": {
-              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile’s recorded paths, and (where available) your connection requests and notifications.",
+              "network": "Read your own Unlinked account and network: who you are, the connections in your imported files and your linked profile\u2019s recorded paths, and (where available) your connection requests and notifications.",
               "people": "Search and read the published People index on Unlinked (public professional profiles only).",
               "connections": "Send connection requests to members, and accept, ignore or withdraw your connection requests, under the same rules and daily limits as the site."
             }

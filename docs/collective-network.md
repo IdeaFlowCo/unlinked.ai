@@ -79,6 +79,29 @@ flyer destination. That mapping should preserve the source query. Redirects and
 GET previews create zero seats. A future conversion event requires a reviewed
 hook after committed acceptance.
 
+The attribution owner is `codex/referrals-20261110` (Paseo
+`96f9951d-1598-4c69-9d56-a288a3a9de67`). Its server-only observer contract is
+`attachAcceptedInvite({ owner, inviteId, acceptedAt })`. The group service
+validates the invite, commits admission and checks the selected-list ACL.
+The observer associates an existing signup receipt with completed admission.
+
+Call the observer after a newly accepted membership is durably committed.
+`owner` identifies the admitted account using both owner and user IDs.
+`inviteId` is the immutable direct-invite or flyer UUID. `acceptedAt` is the
+first committed acceptance time in server-generated milliseconds. For an
+approval request, use the applicant's account when approval creates the seat.
+Preview, sign-in, pending requests, declines and repeated joins do not produce
+another acceptance. The integration must retain the original acceptance time
+for retries and tolerate an unavailable observer after membership commits.
+The current group slice does not call this observer yet.
+
+The lists owner is `codex/lists-20261110` (Paseo
+`ff7f0090-5a17-4846-9917-07a9cf38adaa`). Group selection reuses
+`privateLists.list(owner, after)`, `privateLists.get(owner, id, after)`
+and the existing saved-search store. Its projection remains bounded to 200
+reviewed public profiles. Table and performance work should preserve these
+owner-scoped read contracts.
+
 ## Local review
 
 The historical Next.js dev server does not serve the group pages. Install the

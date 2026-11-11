@@ -146,7 +146,7 @@
       "scope_not_granted",
       "upstream_unavailable"
     ],
-    "grantProvisioning": "POST /api/agent/v1/provision-grant — server-to-server, allow-listed confidential clients only (client_secret_basic), keyed on verified OIDC issuer+subject, never email; disabled unless operator-configured; contract v1.1 in docs/agent-api.md"
+    "grantProvisioning": "POST /api/agent/v1/provision-grant \u2014 server-to-server, allow-listed confidential clients only (client_secret_basic), keyed on verified OIDC issuer+subject, never email; disabled unless operator-configured; contract v1.1 in docs/agent-api.md"
   },
   "agentSetupAutomatic": true,
   "meet": "https://www.unlinked.ai/meet",
@@ -241,5 +241,32 @@
     "api": "https://www.unlinked.ai/api/people?q=gaming%20investor",
     "authentication": "none; published professional profiles only",
     "guidance": "Start with source-linked partial public results before optional sign-in. Ask for company context to refine fit; no private imports or notes. MCP requires account authorization. Honor Retry-After; no higher-limit claim."
+  },
+  "verifiedAccess": {
+    "operatorGranted": true,
+    "priorityAdmission": true,
+    "coreRequestQuotas": false,
+    "networkExport": "https://www.unlinked.ai/network/export",
+    "networkExportAuth": "verified browser session",
+    "scope": "visible published network or own network; optional query and selected IDs",
+    "constraints": "Existing visibility, consent, external-provider allowances and transport bounds remain."
+  },
+  "bulkExports": {
+    "manual": "https://www.unlinked.ai/downloads",
+    "prepare": "https://www.unlinked.ai/api/agent/v1/exports",
+    "download": "https://www.unlinked.ai/api/agent/v1/export",
+    "tool": "unlinked_export_network",
+    "wholeResult": true,
+    "formats": [
+      "csv",
+      "json",
+      "jsonl"
+    ],
+    "detail": [
+      "headline",
+      "summary",
+      "full"
+    ],
+    "notes": "Own networks and owned lists are downloadable by their signed-in owner. Shared public-network exports require verified access. An agent additionally needs the existing scope for its data; links contain no credential."
   }
 }

@@ -207,3 +207,7 @@ ZIP/XML parsing, original-byte recovery and provenance: `docs/investor-csv.md`.
 Browser list upload remains CSV-only; XLSX is available through MCP/REST.
 
 MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment status) and `docs/agent-api.md`.
+
+Operator-controlled verified entitlements, priority admission, and browser-only visible-network exports are documented in `docs/verified-access.md`.
+
+Whole-result network/list queries and streamed CSV/JSON downloads share one permission-aware service; see `docs/bulk-exports.md`. Internal list paging uses a private Symbol admission capability, never a client field.
