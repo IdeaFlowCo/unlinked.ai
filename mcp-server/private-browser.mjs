@@ -1,4 +1,5 @@
 import { createGroupBrowser, flyerJoinTarget, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
+import { PRIVATE_LIST_LOADING_SCRIPT } from './private-list-loading.mjs'
 import { browserPerformanceScript } from './browser-performance.mjs'
 import { PEOPLE_FILTER_KEYS, peopleFilters, matchesPeopleFilters } from '../src/utils/public-people/search-filters.mjs'
 import { readRequestBody, bufferRequestBody } from './request-body.mjs'
@@ -753,7 +754,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
     if (view.privateGroup) script += ';window.addEventListener("pageshow",event=>{if(event.persisted) location.reload()})'
-    script = `${TOP_BAR_SCRIPT}${LINKEDIN_EMAIL_HELP_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${CARD_SHARE_SCRIPT}${script}`
+    script = `${PRIVATE_LIST_LOADING_SCRIPT}${TOP_BAR_SCRIPT}${LINKEDIN_EMAIL_HELP_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${CARD_SHARE_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
