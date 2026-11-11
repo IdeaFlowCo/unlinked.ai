@@ -55,6 +55,7 @@ const ROUTES = Object.freeze({
   'POST /api/agent/v1/private/links': { tool: 'unlinked_add_private_link', body: ['subjectKind', 'subjectId', 'relation', 'toKind', 'toId', 'toName', 'createNew', 'clientRequestId', 'assertion'] },
   'POST /api/agent/v1/private/links/update': { tool: 'unlinked_update_private_link', body: ['linkId', 'relation', 'assertion'] },
   'POST /api/agent/v1/private/links/delete': { tool: 'unlinked_delete_private_link', body: ['linkId'] },
+  'POST /api/agent/v1/exports': { tool:'unlinked_export_network', body:['inline','scope','query','listId','format','detail','ids','fields','presence','mode','degree','location','company','pastCompany','title','school','industry'] },
   'POST /api/agent/v1/ai-search': { tool: 'unlinked_ai_search', body: ['query', 'scope', 'timeoutMs'] },
   'POST /api/agent/v1/search-network': { tool: 'unlinked_search_network', body: ['query', 'degree', 'cursor'] },
   'POST /api/agent/v1/search-everyone': { tool: 'unlinked_search_everyone', body: ['query'] },

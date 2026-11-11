@@ -154,3 +154,7 @@ MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment s
 ## Verified account access
 
 Verified accounts receive priority admission and no core Unlinked request quotas. Visible-network downloads are browser-session-only at /network/export; existing agent scopes still apply. External provider allowances and transport bounds remain. See docs/verified-access.md.
+
+## Whole-result queries and downloads
+
+Query or download all matching people in one operation. CSV, JSON or JSON Lines; headline, summary or full detail; optional selected fields. Own network needs network access; owned lists additionally require private_notes; everyone/all require a verified account and public scope. Existing visibility and grant boundaries remain. Inline results have a real response-size bound and explicitly identify an incomplete preview; authenticated file downloads include every matching internal page. Use `unlinked_export_network` with `inline:true` for a single bounded query response; omit it for fast download preparation. For REST, POST /api/agent/v1/exports prepares/query results, and GET /api/agent/v1/export streams the file with the same direct Unlinked account bearer. The browser link requires that person to sign in; shared Ideaflow connector credentials remain at the gateway and are not direct Unlinked API keys. Private list IDs use private:<id> and saved result lists use saved:<id>. Never paste a credential into a URL.

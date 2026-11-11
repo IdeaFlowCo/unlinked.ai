@@ -214,7 +214,7 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   assert.equal(shared.scope, 'everyone')
 
   // Unknown routes and invalid input are typed, not free text.
-  const unknown = await call(app.endpoint, accessToken, 'exports')
+  const unknown = await call(app.endpoint, accessToken, 'unsupported-operation')
   assert.equal(unknown.status, 404)
   assert.equal((await unknown.json()).error.code, 'not_found')
   const invalid = await call(app.endpoint, accessToken, 'people?limit=0')
@@ -338,7 +338,7 @@ test('owner_network scope cannot reach public tools; anchored owners get proven 
   const mcpTransport = new StreamableHTTPClientTransport(new URL(`${narrowApp.endpoint}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${narrow.accessToken}` } } })
   try {
     await mcpClient.connect(mcpTransport)
-    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact', ...PRIVATE_NOTES_TOOLS, 'unlinked_list_person_targets', ...INVESTOR_TOOLS])
+    assert.deepEqual((await mcpClient.listTools()).tools.map(x => x.name), ['unlinked_search_network', 'unlinked_whoami', 'unlinked_list_connections', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact', ...PRIVATE_NOTES_TOOLS, 'unlinked_list_person_targets', ...INVESTOR_TOOLS, 'unlinked_export_network'])
     const who = await mcpClient.callTool({ name: 'unlinked_whoami', arguments: {} })
     assert.ok(!who.isError)
     assert.equal(JSON.parse(who.content[0].text).ownerId, narrowApp.owner.ownerId)
