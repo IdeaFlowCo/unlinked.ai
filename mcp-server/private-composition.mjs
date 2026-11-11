@@ -4,6 +4,7 @@ import { createBrowserPerformanceRecorder } from './browser-performance.mjs'
 import { createNeo4jSavedSearchLists } from './saved-search-lists.mjs'
 import { createAuditQueue } from './audit-queue.mjs'
 import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
+import { createSearchLog, safeSearchRecord } from './search-activity.mjs'
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
 import { createOpenChatConnectionSync, createNeo4jOpenChatSyncStore } from './openchat-connections.mjs'
@@ -145,13 +146,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, browserPerformanceStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
+  let server, worker, memberEmail, diagnosticsStore, searchLogStore, browserPerformanceStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
   const close = async () => {
     if (closed) return
     closed = true
     indexWarmKeeper?.stop()
     await contactEnrichment?.stop()
     await diagnosticsStore?.close()
+    await searchLogStore?.close()
     await browserPerformanceStore?.close()
     await connectionSync?.stop()
     await worker?.stop()
@@ -445,7 +447,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       } catch { /* the stored decisions alone still apply */ }
       return { ids, refs, complete, decided }
     }
-    let requestDiagnostics, recordBrowserPerformance
+    let requestDiagnostics, searchLog, recordBrowserPerformance
+    if (diagnosticsEnv.UNLINKED_SEARCH_LOG !== 'off') {
+      const auditDirectory = join(root, 'audit')
+      await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
+      const auditStat = await lstat(auditDirectory)
+      if (!auditStat.isDirectory() || auditStat.isSymbolicLink() || (auditStat.mode & 0o777) !== 0o700 || auditStat.uid !== process.getuid()) throw new Error('search_audit_directory_not_private')
+      searchLogStore = await createDiagnosticsStore({ directory: join(auditDirectory, 'searches'), project: safeSearchRecord })
+      searchLog = createSearchLog({ emit: searchLogStore.emit })
+    }
     if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {
       const auditDirectory = join(root, 'audit')
       await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
@@ -689,7 +699,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       })
       contactEnrichment.start()
     }
-    return { isVerified, login, getBackend, close, audit, requestDiagnostics, recordBrowserPerformance, backgroundImports: true,
+    return { isVerified, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),

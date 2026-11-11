@@ -187,6 +187,10 @@ For worktree-local disposable databases, set `MIGRATION_TEST_SOURCE_URI` and `MI
 
 Standalone `verify` requires the exact single-label checkpoint ID, manifest hash and `verified` status. Internal import verification permits its locked `copying` checkpoint only before final publication. Verification checks complete record-ledger ownership and hashes as well as node properties/counts, scoped schema and every relationship touching the imported domain, owned ledger or checkpoint; unexpected edges cannot be certified by a retry. Shared export also rejects unreviewed `Unlinked*`/`Operational*` node labels and empty-domain schema rather than silently excluding future private writes. The two explicit migration metadata labels remain excluded from recovery payloads.
 
+## Search query history
+
+The standalone composition enables the separate private search query stream unless `UNLINKED_SEARCH_LOG=off`. See [coverage, storage and operator verification](../../docs/search-query-log.md). Deploying this version begins collection; retain no query files in long-lived release/rollback backups. Metadata diagnostics remains independently controlled.
+
 ## Optional request diagnostics
 
 `UNLINKED_REQUEST_DIAGNOSTICS=on` enables the narrowly scoped private REST/MCP metadata store after the normal approved runtime release. Default is off; nginx and Docker logging remain unchanged. See [the diagnostics contract](../../docs/request-diagnostics.md) for fields, bounds, seven-date retention, rollback/disabled-process cleanup, operator lookup and post-release verification. Deploying source alone is not enabling collection.
