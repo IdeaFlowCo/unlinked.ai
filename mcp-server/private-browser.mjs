@@ -1,3 +1,4 @@
+import { createGroupBrowser, flyerJoinTarget, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
 import { browserPerformanceScript } from './browser-performance.mjs'
 import { PEOPLE_FILTER_KEYS, peopleFilters, matchesPeopleFilters } from '../src/utils/public-people/search-filters.mjs'
 import { readRequestBody, bufferRequestBody } from './request-body.mjs'
@@ -79,6 +80,7 @@ const SELECT_ACCOUNT = 'select_account'
 // account chooser instead of silently reusing the provider session. A
 // successful sign-in clears it.
 const SIGNED_OUT_COOKIE = '__Host-ul-signed-out', SIGNED_OUT_SECONDS = 60 * 60
+const FLYER_RETURN_COOKIE = '__Host-ul-group-return'
 
 // Automatic sign-in (docs/ideaflow-sign-in.md, "Automatic sign-in"): a signed-out
 // page view makes ONE silent (`prompt=none`) round trip to Ideaflow ID per
@@ -185,7 +187,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ privateLists, privateListImports, savedSearchLists, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ privateLists, privateListImports, savedSearchLists, collectiveGroups, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -205,6 +207,9 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
   setProfileHandleLookup(profileHandles ? id => profileHandles.handleFor(id) : null)
   // The profile id a /people/ segment names: a handle (any case) or the id itself.
   const handleTarget = segment => profileHandles?.resolve(segment)?.profileId ?? segment
+  const groupBrowser = collectiveGroups && createGroupBrowser({
+    groups: collectiveGroups, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
+  })
   // A default handle only for a profile an active account still stands behind,
   // so a just-deleted account (still in the published index) never gets one back.
   const ensureHandle = async profile => {
@@ -313,7 +318,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
   const signInOptions = (request, switching = false) => switching || cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -747,11 +752,12 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
     response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
     if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
+    if (view.privateGroup) script += ';window.addEventListener("pageshow",event=>{if(event.persisted) location.reload()})'
     script = `${TOP_BAR_SCRIPT}${LINKEDIN_EMAIL_HELP_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${CARD_SHARE_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
     script = `${script};if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`
     response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
-    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title>${previewMeta(view.preview, base.origin)}<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${recordBrowserPerformance && !iosResponses.has(response) ? browserPerformanceScript(status) : ''}${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="${JSQR_SRC}" defer></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${iosResponses.has(response) ? feedbackWidgetTag(nonce, { iosApp: iosResponses.get(response) || 'unknown' }) : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
+    response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title>${previewMeta(view.preview, base.origin)}<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${!view.privateGroup && recordBrowserPerformance && !iosResponses.has(response) ? browserPerformanceScript(status) : ''}${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="${JSQR_SRC}" defer></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${view.privateGroup ? '' : iosResponses.has(response) ? feedbackWidgetTag(nonce, { iosApp: iosResponses.get(response) || 'unknown' }) : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
   // `silentBack` (automatic sign-in) returns to the original page without
@@ -808,7 +814,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
     if (sessionStore) await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, subject: identity.subject, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() })
     sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), subject: identity.subject, accountLabel, displayName, csrf, expiresAt, analyticsEvents: newOwner ? ['signup'] : [], feedbackIdToken: identity.feedbackIdToken ?? null, feedbackToken: null })
-    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
+    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(FLYER_RETURN_COOKIE, '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     if (cardToken) {
       let added = false
@@ -825,8 +831,9 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     }
     // An invitation link someone signed in to answer comes first; its page then
     // continues to the old-account or find-me step when there is one.
-    const invitation = returnPath(next)?.startsWith('/i/') || returnPath(next)?.startsWith('/oauth/authorize?') ? returnPath(next) : null
-    redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : returnPath(next) ?? '/'))
+    const destination = returnPath(next)
+    const invitation = destination?.startsWith('/i/') || destination?.startsWith('/oauth/authorize?') || flyerJoinTarget(destination) ? destination : null
+    redirect(response, silentBack ?? invitation ?? (legacyCandidate && !legacyCandidate.linked ? '/legacy-account' : newOwner && selfClaim ? '/find-me' : destination ?? '/'))
     return 'signed_in'
     })
     })
@@ -1184,7 +1191,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     if (iosApp(request)) iosResponses.set(response, iosAppVersion(request.headers['user-agent']) ?? '')
     const navigationPath = new URL(request.url, base).pathname
     const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/') && !navigationPath.startsWith('/messages/person/')
-    response.setHeader('Cache-Control', navigation ? 'private, no-cache' : 'no-store')
+    response.setHeader('Cache-Control', navigation && !isGroupPath(navigationPath) ? 'private, no-cache' : 'no-store')
     if (navigation) response.setHeader('Vary', 'Cookie')
     response.setHeader('Referrer-Policy', 'strict-origin')
     response.setHeader('X-Content-Type-Options', 'nosniff')
@@ -1401,6 +1408,20 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         return
       }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline } : {}
+      if (isGroupPath(url.pathname)) {
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        if (!groupBrowser) { await journey(response, { ...renderNotFound(chrome), privateGroup: true }, null, '', 404); return }
+        if (!viewer && !isFlyerJoinPath(url.pathname)) {
+          if (request.method === 'GET') await journey(response, { ...renderSignInRequired({ next: returnPath(url.pathname) }), privateGroup: true }, null, '', 401)
+          else response.writeHead(401).end()
+          return
+        }
+        await settleAlerts(response)
+        await groupBrowser({ request, url, session: viewer, lookup: ids => pageReader(request).lookup({ ids, listedOnly: true }),
+          render: (view, status) => journey(response, { ...view, privateGroup: true }, null, '', status),
+          redirect: path => redirect(response, path) })
+        return
+      }
       const discoveryChrome = viewer && isPublicDiscoveryPath(url.pathname) ? { ...chrome, ...((await settleAlerts(response)) ? { alerts: responseAlerts.get(response) } : {}) } : chrome
       if (await servePublicDiscovery(request, response, url.pathname, discoveryChrome, { signInOrigin: authorizationOrigin, performance: Boolean(recordBrowserPerformance), origin: base.origin })) return
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
@@ -1815,8 +1836,13 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // Silent SSO: an existing Ideaflow ID session returns at once. The account
         // chooser appears only for ?switch=1 or right after an explicit sign-out.
         const result = await login.begin(signInOptions(request, url.searchParams.get('switch') === '1')), id = token()
-        pending.set(id, { ...result.transaction, next: returnPath(url.searchParams.get('next')), expiresAt: Date.now() + 5 * 60000 })
-        response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
+        const next = returnPath(url.searchParams.get('next'))
+        pending.set(id, { ...result.transaction, next, expiresAt: Date.now() + 5 * 60000 })
+        const flyerReturn = flyerJoinTarget(next)
+        response.setHeader('Set-Cookie', [
+          cookie('__Host-ul-login', id, 300),
+          cookie(FLYER_RETURN_COOKIE, flyerReturn ? Buffer.from(flyerReturn.path).toString('base64url') : '', flyerReturn ? 86400 : 0),
+        ])
         redirect(response, result.location); return
       }
       if (request.method === 'GET' && url.pathname === '/auth/callback/ideaflow') {
@@ -1834,6 +1860,16 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         pending.delete(id) // All callback outcomes consume the one-use transaction.
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', '', 0))
         if (transaction?.silent === true && state === transaction.state) { await finishSilent(response, url, transaction); return }
+        // Extended registration or a runtime restart may outlive the login
+        // transaction. Retain only a validated destination, and start a fresh
+        // OIDC exchange. This cookie never authenticates or joins an account.
+        if (!transaction && url.searchParams.getAll('code').length === 1) {
+          const retained = cookies(request)[FLYER_RETURN_COOKIE]
+          if (typeof retained === 'string' && retained.length <= 1500 && /^[A-Za-z0-9_-]+$/.test(retained)) {
+            const destination = flyerJoinTarget(Buffer.from(retained, 'base64url').toString('utf8'))
+            if (destination) { redirect(response, '/login?next=' + encodeURIComponent(destination.path)); return }
+          }
+        }
         // prompt=none answers whose attempt is gone (expired, or the runtime
         // restarted mid-hop) go home signed out, without an error page.
         if (!transaction && url.searchParams.getAll('error').length === 1 && SILENT_PROVIDER_ERRORS.has(url.searchParams.get('error'))) { redirect(response, '/'); return }
@@ -2583,7 +2619,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         let privatePage, saved, privateError, savedError
         try { if (privateLists) privatePage = await privateLists.list(session.owner, after); else privateError = true } catch { privateError = true }
         try { if (savedSearchLists) saved = await savedSearchLists.list(session.owner); else savedError = true } catch { savedError = true }
-        journey(response, renderListsDirectory({ ...chrome, privatePage, saved, privateError, savedError })); return
+        journey(response, renderListsDirectory({ ...chrome, privatePage, saved, privateError, savedError, groupsAvailable: Boolean(groupBrowser) })); return
       }
       const savedListMatch = /^\/lists\/([0-9a-f-]{36})(?:\/(share|unshare|delete))?$/.exec(url.pathname)
       if (savedSearchLists && (url.pathname === '/lists' || savedListMatch)) {
@@ -2832,6 +2868,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
           catch { data.ideaflowPrivateContext = { error: 'private_context_unavailable' } }
         }
         if (savedSearchLists) data.savedSearchLists = await savedSearchLists.list(session.owner)
+        if (collectiveGroups) data.collectiveGroups = await collectiveGroups.exportOwner(session.owner)
         await recordAudit({ event: 'account_data_exported', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex') })
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="unlinked-export-${new Date().toISOString().slice(0, 10)}.json"` })
         response.end(JSON.stringify(data, null, 2)); return
@@ -2873,6 +2910,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // Blocks this member made, and blocks of this member.
         if (memberBlocks) await memberBlocks.removeOwner(session.owner)
         const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
+        if (collectiveGroups) await collectiveGroups.removeOwner(session.owner)
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)
@@ -3098,7 +3136,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
   }
   const serve = async (request, response) => {
     const path = new URL(request.url, base).pathname
-    if (path.startsWith('/messages/person/')) {
+    if (path.startsWith('/messages/person/') || isGroupPath(path)) {
       response.setHeader('Cache-Control', 'no-store, private')
       response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
     }
@@ -3125,7 +3163,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
           pendingMessageOwners.set(ownerId, mine + 1); pendingMessageBodies++
           reserved = () => { pendingMessageBodies--; const left = pendingMessageOwners.get(ownerId) - 1; if (left) pendingMessageOwners.set(ownerId, left); else pendingMessageOwners.delete(ownerId) }
         }
-        const limit = path === '/upload' ? LIMITS.archiveBytes + 65536 : path.startsWith('/messages/api/') ? messagingBodyLimit(path, request.headers['content-type']) : 16384
+        const limit = path === '/upload' ? LIMITS.archiveBytes + 65536 : path.startsWith('/messages/api/') ? messagingBodyLimit(path, request.headers['content-type']) : isGroupPath(path) ? 4096 : 16384
         let bytes
         try { bytes = await bufferRequestBody(request, limit) }
         catch { if (!response.destroyed) response.writeHead(413, path.startsWith('/messages/api/') ? { 'Content-Type': 'application/json' } : {}).end(path.startsWith('/messages/api/') ? JSON.stringify({ error: 'body_too_large' }) : undefined); return }
