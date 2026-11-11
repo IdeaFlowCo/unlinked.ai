@@ -9,6 +9,8 @@ import { startPrivatePilot } from '../mcp-server/private-pilot.mjs'
 import { createPrivatePilotDependencies } from '../mcp-server/private-composition.mjs'
 import { accountKey, createMemoryEmailStore } from '../mcp-server/member-email.mjs'
 import { createMemoryNotificationStore } from '../mcp-server/member-notifications.mjs'
+import { createCollectiveGroups } from '../mcp-server/collective-groups.mjs'
+import { createMemoryCollectiveGroupsStore } from '../mcp-server/collective-groups-store.mjs'
 
 const require = createRequire(new URL('../mcp-server/package.json', import.meta.url))
 const { importSPKI, jwtVerify } = await import(require.resolve('jose'))
@@ -335,6 +337,30 @@ test('opt-in composition writes only agent-route diagnostics; off leaves no requ
   assert.equal(rows.length, 1); assert.equal(rows[0].request_id, requestId); assert.equal(rows[0].account_id, undefined)
 })
 
+
+test('production dispatcher passes collective groups to the browser without enrolling preview visitors', async t => {
+  const { options } = await fixture(t)
+  const dependencies = await createPrivatePilotDependencies(options)
+  t.after(dependencies.close)
+  const { port } = await fixture(t)
+  const organizer = { ownerId: 'fixture-organizer', userId: 'fixture-user' }
+  const store = createMemoryCollectiveGroupsStore()
+  const groups = createCollectiveGroups({ store, active: async () => true })
+  const group = await groups.create(organizer, 'Synthetic collective network')
+  const flyer = await groups.createFlyer(organizer, group.id, { capacity: 3, approval: false })
+  const pilot = await startPrivatePilot({ ...dependencies, collectiveGroups: groups,
+    baseUrl: `https://127.0.0.1:${port}`, port })
+  t.after(pilot.stop)
+  const endpoint = `http://127.0.0.1:${port}`
+  const path = `/groups/${group.id}/join/${flyer.id}`
+  const response = await fetch(endpoint + path, { redirect: 'manual' })
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.match(await response.text(), /Synthetic collective network/)
+  assert.equal((await store.get(group.id)).members.length, 0)
+  await groups.revokeFlyer(organizer, group.id, flyer.id)
+  assert.equal((await fetch(endpoint + path, { redirect: 'manual' })).status, 404)
+})
 
 test('production dispatcher keeps profile recipient resolution separate from card messaging', async t => {
   const { options } = await fixture(t)

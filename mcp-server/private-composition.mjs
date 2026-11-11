@@ -1,3 +1,5 @@
+import { createCollectiveGroups } from './collective-groups.mjs'
+import { createNeo4jCollectiveGroupsStore } from './collective-groups-store.mjs'
 import { createBrowserPerformanceRecorder } from './browser-performance.mjs'
 import { createNeo4jSavedSearchLists } from './saved-search-lists.mjs'
 import { createAuditQueue } from './audit-queue.mjs'
@@ -101,7 +103,7 @@ function loadNoos(root) {
     ...require(join(directory, 'dist/operational/router.js')),
     ...require(join(directory, 'dist/operational/assets.js')),
     ...require(join(directory, 'dist/operational/access-token.js')),
-    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createConnectionPrivacyStore: createNeo4jConnectionPrivacyStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createIdeaflowProfileChoiceStore: createNeo4jIdeaflowProfileChoices, createSavedSearchLists: createNeo4jSavedSearchLists, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
+    createMemberInvitationStore: createNeo4jInvitationStore, createMemberConnectionStore: createNeo4jConnectionStore, createNotificationStore: createNeo4jNotificationStore, createContactCardStore: createNeo4jContactCardStore, createCompanyFactsStore: createNeo4jCompanyFactsStore, createSessionStore: createNeo4jSessionStore, createEmailStore: createNeo4jEmailStore, createConnectionPrivacyStore: createNeo4jConnectionPrivacyStore, createHomePreferenceStore: createNeo4jHomePreferenceStore, createIdeaflowProfileChoiceStore: createNeo4jIdeaflowProfileChoices, createSavedSearchLists: createNeo4jSavedSearchLists, createCollectiveGroupsStore: createNeo4jCollectiveGroupsStore, createProfileLinkStore: createNeo4jProfileLinkStore, createProfileHandleStore: createNeo4jProfileHandleStore, createContactSlugStore: createNeo4jContactSlugStore, createSafetyReportStore: createNeo4jSafetyReportStore, createBlockStore: createNeo4jBlockStore }
 }
 
 // Explicit private-process composition; never imported by Next.js. No operator
@@ -661,6 +663,11 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
           return result.records.length === 1 ? { issuer:result.records[0].get('issuer'), subject:result.records[0].get('subject') } : null
         } finally { await session.close() }
     }
+    const collectiveGroupsStore = publicPeople ? dependencies.createCollectiveGroupsStore?.(driver, 'neo4j') : null
+    await collectiveGroupsStore?.initialize()
+    const collectiveGroups = collectiveGroupsStore ? createCollectiveGroups({
+      store: collectiveGroupsStore, active: identityForOwner, ...(memberBlocks ? { blocked: memberBlocks.between } : {}),
+    }) : undefined
     if (connectionStore) {
       connectionSync = createOpenChatConnectionSync({ store: createNeo4jOpenChatSyncStore(driver), identityForOwner, secret: process.env.UNLINKED_MESSAGING_SECRET })
       connectionSync.start()
@@ -722,6 +729,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       homePreferences,
       connectionPrivacy,
       savedSearchLists,
+      collectiveGroups,
       profileSocialLinks,
       profileHandles,
       contactSlugs,

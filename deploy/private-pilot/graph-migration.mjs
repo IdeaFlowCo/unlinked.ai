@@ -12,7 +12,7 @@ export const LABELS = Object.freeze([
   'UnlinkedHomePreference',
   'UnlinkedPersonLookup',
   // Member-published public profile links (mcp-server/profile-social-links.mjs).
-  'UnlinkedProfileLinks', 'UnlinkedSavedSearchList',
+  'UnlinkedProfileLinks', 'UnlinkedSavedSearchList', 'UnlinkedCollectiveGroup',
   // Member handles and their history (mcp-server/profile-handles.mjs).
   'UnlinkedProfileHandle', 'UnlinkedHandleProfile',
   // Removal requests and reports for operator review (mcp-server/safety-reports.mjs).
