@@ -453,19 +453,21 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // Page an export from the exact same sanitized projection and viewer
     // visibility as browsing. Never copy the raw publication or adjacency map.
     async exportPage(request = {}) {
-      const { signal, cursor, query = '', ids = [], unlistedGroups } = requestValue(request)
+      const { signal, cursor, query = '', ids = [], unlistedGroups, presence, filters: rawFilters = {}, mode = 'exact', networkSeeds, networkSelf } = requestValue(request)
       const viewer = viewerValue(request.viewer), groups = groupsValue(unlistedGroups)
       if (!viewer?.signedIn || !Array.isArray(ids) || ids.length > 10000 || !ids.every(idValid)) invalid()
-      const search = queryValue(query)
-      const scope = `export:${search}:${hash(JSON.stringify([...ids].sort()))}:${groupScope(groups)}${viewerScope(viewer)}`
+      const search = queryValue(query), filters = peopleFilters(rawFilters)
+      if (!SEARCH_MODES.includes(mode) || ![undefined, ...PRESENCE].includes(presence) || networkSeeds !== undefined && (!Array.isArray(networkSeeds) || networkSeeds.length > maxProfiles || !networkSeeds.every(idValid)) || networkSelf !== undefined && !idValid(networkSelf) || filters.degree && !networkSeeds) invalid()
+      const scope = `export:${search}:${hash(JSON.stringify([...ids].sort()))}:${groupScope(groups)}${viewerScope(viewer)}:${hash(JSON.stringify([presence, filters, mode, networkSeeds, networkSelf]))}`
       const decoded = cursorValue(cursor, scope), data = await snapshot(signal)
       if (data.remote) return remote('exportPage', request, data)
       // Keep one selection plan per reader, so a whole-network download
       // walks its index once rather than rebuilding a 100k-ID set per page.
       if (exportPlan?.data !== data || exportPlan.scope !== scope) {
         const listed = listedFor(data.unlisted, groups), selected = new Set(ids.map(id => data.aliases.get(id) ?? id))
-        const matcher = search ? createQueryMatcher(search, 'exact') : null
-        let people = data.ordered.filter(person => listed(person.id) && (!ids.length || selected.has(person.id)))
+        const matcher = search ? createQueryMatcher(search, mode) : null
+        const degrees = networkSeeds ? connectionDegrees({ seeds: networkSeeds.map(id => data.aliases.get(id) ?? id), self: data.aliases.get(networkSelf) ?? networkSelf, connected: data.connected, visible: visibilityFor(data, viewer).visible }) : null
+        let people = data.ordered.filter(person => listed(person.id) && (!presence || person.presence === presence) && matchesPeopleFilters(data.details.get(person.id), filters) && (!filters.degree || degrees.get(person.id) === Number(filters.degree)) && (!ids.length || selected.has(person.id)))
         if (matcher) people = rankMatches(people, matcher, person => data.tokens.get(person.id)).rows
         exportPlan = { data, scope, people, included: new Set(people.map(person => person.id)), visibility: visibilityFor(data, viewer) }
       }

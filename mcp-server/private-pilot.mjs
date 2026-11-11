@@ -1,3 +1,5 @@
+import { createBulkExports } from './bulk-exports.mjs'
+import { createBulkExportHttp } from './bulk-export-http.mjs'
 import { createRestartNotice } from './restart-notice.mjs'
 import { createPrivateLists, PRIVATE_LIST_READ_TOOLS } from './private-lists.mjs'
 import { createPrivateListImports, LIST_TOOLS } from './private-list-imports.mjs'
@@ -11,10 +13,10 @@ import { createPrivateBrowserHandler } from './private-browser.mjs'
 import { coordinatorFor } from './owner-coordination.mjs'
 import { createPrivateHostedHandler } from './private-hosted.mjs'
 import { createPrivateGrantService } from './private-grants.mjs'
-import { createAccountGrantService, composeAccountScope } from './account-grants.mjs'
+import { createAccountGrantService, composeAccountScope, scopeCoversPublic, scopeAllowsPrivateNotes } from './account-grants.mjs'
 import { createAccountHostedHandler } from './account-hosted.mjs'
 import { createAccountAgentApiHandler } from './account-api.mjs'
-import { createAccountToolService } from './account-tools.mjs'
+import { createAccountToolService, INTERNAL_BULK_READ } from './account-tools.mjs'
 import { createOAuthServer } from './oauth-server.mjs'
 import { createPrivateContext } from './private-context.mjs'
 import { warmPublicPeopleIndex } from './public-people-warmup.mjs'
@@ -40,7 +42,8 @@ export async function startPrivatePilot({ isVerified, ideaflowConnectorSecret, c
     issueGrant: accountGrants.issueGrant, revokeConnectionToken: accountGrants.revokeConnectionToken, coordination: coordinatorFor(sessionStore), audit }) : null
   // One tool service instance backs both agent surfaces, so the MCP tools and
   // the HTTP agent API (docs/agent-api.md) share semantics and rate budgets.
-  const toolService = accountGrants ? createAccountToolService({ isVerified, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, coordination: coordinatorFor(sessionStore), lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined,
+  let bulkExports
+  const toolService = accountGrants ? createAccountToolService({ exportManifest: (grant,input,signal,authorize) => bulkExports.manifest(grant,input,{publicAllowed:scopeCoversPublic(grant.scope),privateAllowed:scopeAllowsPrivateNotes(grant.scope),browser:false},signal,authorize), isVerified, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, coordination: coordinatorFor(sessionStore), lookupSlug: selfClaims ? slug => selfClaims.lookupSlug(slug) : undefined,
     contactAddresses: contactEnrichment ? owner => contactEnrichment.addresses(owner) : undefined,
     // Private people notes & relations (catalog v7) call the same Noos overlay as the private-context panel.
     ...(overlay && typeof overlayIdentity === 'function' ? { overlay, identityFor: overlayIdentity } : {}) }) : null
@@ -56,8 +59,10 @@ export async function startPrivatePilot({ isVerified, ideaflowConnectorSecret, c
   const privateListImports = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateListImports({
     call: async (owner, name, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: composeAccountScope({ privateNotes: true }), tools: [...LIST_TOOLS], agent: 'Unlinked import page', app: true }, name, input })).result }) : null
   const privateLists = toolService && overlay && typeof overlayIdentity === 'function' ? createPrivateLists({
+    bulkCall: async (owner,name,input) => (await toolService.call({ grant: { ownerId:owner.ownerId,userId:owner.userId,scope:composeAccountScope({privateNotes:true}),tools:[...PRIVATE_LIST_READ_TOOLS],app:true },name,input,admission:INTERNAL_BULK_READ })).result,
     call: async (owner, name, input) => (await toolService.call({ grant: { ownerId: owner.ownerId, userId: owner.userId, scope: composeAccountScope({ privateNotes: true }), tools: [...PRIVATE_LIST_READ_TOOLS], agent: 'Unlinked lists page', app: true }, name, input })).result }) : null
-  const browser = createPrivateBrowserHandler({ isVerified, privateLists, privateListImports, ideaflowProfiles, recordPublicAdmission: requestDiagnostics?.publicAdmission, recordBrowserPerformance, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, savedSearchLists, collectiveGroups, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, getBackend, complete, readPublishedSnapshot,
+  bulkExports = createBulkExports({ getBackend, readPublishedSnapshot, lookupSlug:selfClaims?slug=>selfClaims.lookupSlug(slug):undefined, ownProfileId, privateLists, savedSearchLists, isVerified })
+  const browser = createPrivateBrowserHandler({ bulkExports, isVerified, privateLists, privateListImports, ideaflowProfiles, recordPublicAdmission: requestDiagnostics?.publicAdmission, recordBrowserPerformance, createMessagingSession, resolveCardMessagingRecipient, messagingIdentities, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, connectionPrivacy, savedSearchLists, collectiveGroups, profileSocialLinks, profileHandles, safetyReports, memberBlocks, sessionStore, memberEmail, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs, getBackend, complete, readPublishedSnapshot,
     issueAccountGrant: accountGrants?.issueGrant, ensureAccountGrant: accountGrants?.ensureGrant, revokeAccountGrant: accountGrants?.revoke, revokeLegacyLink, removeOwnerAssets,
     issueGrant: grants.issueGrant, mcpEndpoint: new URL('/mcp', base).href, dataMode, backgroundImports, audit,
     oauth: oauth ?? undefined, listAccountGrants: accountGrants?.listGrants, accountKeys: accountGrants, ...(lookupCompanyFacts ? { lookupCompanyFacts } : {}), profilePhotos, autoSignIn, privateContext })
@@ -72,6 +77,7 @@ export async function startPrivatePilot({ isVerified, ideaflowConnectorSecret, c
   // Server-to-server grant provisioning stays off unless the operator supplied
   // a non-empty allow list (see docs/agent-api.md, "Grant provisioning").
   const provisioning = accountGrants && provisionAgentClients.length ? { clients: provisionAgentClients, resolveOwner, ensureGrant: accountGrants.ensureGrant, audit, coordination: coordinatorFor(sessionStore) } : undefined
+  const bulkHttp = accountGrants ? createBulkExportHttp({origin:base.origin,authenticateGrant:accountGrants.authenticateGrant,exports:bulkExports,service:toolService}) : null
   const agentApi = accountGrants ? createAccountAgentApiHandler({ authenticateGrantDetailed: accountGrants.authenticateGrantDetailed, authenticateGrant: accountGrants.authenticateGrant, service: toolService, origin: base.origin, provisioning }) : null
   const connector = accountGrants ? createIdeaflowConnectorHandler({ secret: ideaflowConnectorSecret, resolveOwner, getBackend, complete, readPublishedSnapshot, origin: base.origin, service: toolService, coordination: coordinatorFor(sessionStore) }) : null
   const messaging = createMessagingHandler({ origin: base.origin, secret: messagingSecret, resolveRecipient: resolveMessagingRecipient })
@@ -80,7 +86,7 @@ export async function startPrivatePilot({ isVerified, ideaflowConnectorSecret, c
     let pathname
     try { pathname = new URL(request.url, base).pathname } catch { response.writeHead(400).end(); return }
     if (pathname === '/api/runtime-events') { restartNotice.handle(request, response); return }
-    const handle = () => (pathname === '/api/connector/mcp' && connector ? connector(request, response) : pathname === MESSAGING_PATH ? messaging(request, response) : pathname === '/mcp' ? mcp(request, response) : oauth?.isEndpoint(pathname) ? oauth.handle(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(error => {
+    const handle = () => (pathname === '/api/agent/v1/export' && bulkHttp ? bulkHttp(request,response) : pathname === '/api/connector/mcp' && connector ? connector(request, response) : pathname === MESSAGING_PATH ? messaging(request, response) : pathname === '/mcp' ? mcp(request, response) : oauth?.isEndpoint(pathname) ? oauth.handle(request, response) : agentApi && (pathname === '/api/agent' || pathname.startsWith('/api/agent/')) ? agentApi(request, response) : browser(request, response)).catch(error => {
       requestDiagnostic().failure(error)
       if (!response.headersSent) response.writeHead(503).end()
       else response.end()
