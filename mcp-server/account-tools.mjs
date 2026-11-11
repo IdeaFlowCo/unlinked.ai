@@ -758,7 +758,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
         const current = await revalidate()
         if (name === 'unlinked_whoami' && current) result.grant = { ...result.grant, scope: current.scope, version: current.version, tools: [...current.tools] }
       }
-      searchActivity().result(result)
+      searchActivity().result(result, name)
       const text = JSON.stringify(result)
       if (Buffer.byteLength(text) > 1024 * 1024) throw new AccountToolError('result_too_large', 'The result exceeded 1 MiB; narrow the query or lower the page size.')
       return { result, text }
