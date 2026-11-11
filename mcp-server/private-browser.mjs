@@ -80,6 +80,7 @@ const SELECT_ACCOUNT = 'select_account'
 // account chooser instead of silently reusing the provider session. A
 // successful sign-in clears it.
 const SIGNED_OUT_COOKIE = '__Host-ul-signed-out', SIGNED_OUT_SECONDS = 60 * 60
+const FLYER_RETURN_COOKIE = '__Host-ul-group-return'
 
 // Automatic sign-in (docs/ideaflow-sign-in.md, "Automatic sign-in"): a signed-out
 // page view makes ONE silent (`prompt=none`) round trip to Ideaflow ID per
@@ -813,7 +814,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
     const expiresAt = Date.now() + SESSION_SECONDS * 1000
     if (sessionStore) await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, subject: identity.subject, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() })
     sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), subject: identity.subject, accountLabel, displayName, csrf, expiresAt, analyticsEvents: newOwner ? ['signup'] : [], feedbackIdToken: identity.feedbackIdToken ?? null, feedbackToken: null })
-    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
+    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(FLYER_RETURN_COOKIE, '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
     await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
     if (cardToken) {
       let added = false
@@ -1853,8 +1854,13 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // Silent SSO: an existing Ideaflow ID session returns at once. The account
         // chooser appears only for ?switch=1 or right after an explicit sign-out.
         const result = await login.begin(signInOptions(request, url.searchParams.get('switch') === '1')), id = token()
-        pending.set(id, { ...result.transaction, next: returnPath(url.searchParams.get('next')), expiresAt: Date.now() + 5 * 60000 })
-        response.setHeader('Set-Cookie', cookie('__Host-ul-login', id, 300))
+        const next = returnPath(url.searchParams.get('next'))
+        pending.set(id, { ...result.transaction, next, expiresAt: Date.now() + 5 * 60000 })
+        const flyerReturn = flyerJoinTarget(next)
+        response.setHeader('Set-Cookie', [
+          cookie('__Host-ul-login', id, 300),
+          cookie(FLYER_RETURN_COOKIE, flyerReturn ? Buffer.from(flyerReturn.path).toString('base64url') : '', flyerReturn ? 86400 : 0),
+        ])
         redirect(response, result.location); return
       }
       if (request.method === 'GET' && url.pathname === '/auth/callback/ideaflow') {
@@ -1872,6 +1878,16 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         pending.delete(id) // All callback outcomes consume the one-use transaction.
         response.setHeader('Set-Cookie', cookie('__Host-ul-login', '', 0))
         if (transaction?.silent === true && state === transaction.state) { await finishSilent(response, url, transaction); return }
+        // Extended registration or a runtime restart may outlive the login
+        // transaction. Retain only a validated destination, and start a fresh
+        // OIDC exchange. This cookie never authenticates or joins an account.
+        if (!transaction && url.searchParams.getAll('code').length === 1) {
+          const retained = cookies(request)[FLYER_RETURN_COOKIE]
+          if (typeof retained === 'string' && retained.length <= 1500 && /^[A-Za-z0-9_-]+$/.test(retained)) {
+            const destination = flyerJoinTarget(Buffer.from(retained, 'base64url').toString('utf8'))
+            if (destination) { redirect(response, '/login?next=' + encodeURIComponent(destination.path)); return }
+          }
+        }
         // prompt=none answers whose attempt is gone (expired, or the runtime
         // restarted mid-hop) go home signed out, without an error page.
         if (!transaction && url.searchParams.getAll('error').length === 1 && SILENT_PROVIDER_ERRORS.has(url.searchParams.get('error'))) { redirect(response, '/'); return }

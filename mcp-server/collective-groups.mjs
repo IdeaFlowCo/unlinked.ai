@@ -42,6 +42,11 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
   const own = (actor, group) => { if (!same(actor, group.organizer)) fail() }
   const availableInvite = (group, inviteId, actor) => group?.invites.find(row => row.id === inviteId && same(row.actor, actor) && row.expiresAt > now())
   const pending = group => group.invites.filter(row => row.expiresAt > now())
+  const reservedSeats = (group, actor) => {
+    const flyer = group.flyer
+    const requests = flyer && !flyer.revoked && flyer.expiresAt > now() ? flyer.requests : []
+    return memberCount(group) + requests.filter(row => !same(row.actor, actor)).length
+  }
   const validInvite = async (actor, id, inviteId) => {
     await requireLive(actor)
     const group = await store.get(id)
@@ -57,7 +62,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
     return flyer
   }
   const addFlyerMember = (group, flyer, member) => {
-    if (memberCount(group) >= seatLimit(group)) fail('group_full')
+    if (reservedSeats(group, member.actor) >= seatLimit(group)) fail('group_full')
     group.members.push(member)
     group.invites = pending(group).filter(row => !same(row.actor, member.actor))
     flyer.requests = flyer.requests.filter(row => !same(row.actor, member.actor))
@@ -103,7 +108,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
         group.invites = pending(group)
         if (seat(group, recipient)) fail('already_member')
         if (group.invites.some(row => same(row.actor, recipient))) fail('already_invited')
-        if (group.invites.length >= GROUP_LIMITS.invites || memberCount(group) >= seatLimit(group)) fail('group_full')
+        if (group.invites.length >= GROUP_LIMITS.invites || reservedSeats(group, recipient) >= seatLimit(group)) fail('group_full')
         group.invites.push(invite)
         return group
       })
@@ -120,7 +125,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
         const invite = availableInvite(group, inviteId, actor)
         if (!invite) fail()
         if (decision === 'accept') {
-          if (memberCount(group) >= seatLimit(group)) fail('group_full')
+          if (reservedSeats(group, actor) >= seatLimit(group)) fail('group_full')
           if (seat(group, actor)) fail('already_member')
           group.members.push({ ...person(invite), actor: invite.actor })
           if (group.flyer) group.flyer.requests = group.flyer.requests.filter(row => !same(row.actor, actor))

@@ -30,6 +30,10 @@ capacity includes pending requests. Repeated submissions by one account retain
 one seat. Revoking the link rejects subsequent join requests and clears pending
 requests. Existing accepted members retain their membership until removed.
 
+An interrupted signup can resume for 24 hours using an HttpOnly return cookie
+containing the validated flyer destination and source query. An expired OIDC
+transaction restarts sign-in with a fresh state and PKCE exchange.
+
 The group page shows membership after joining. The flyer landing also shows
 membership or pending-request state when reopened by the signed-in applicant.
 An account removed after joining through that flyer cannot reuse the same
