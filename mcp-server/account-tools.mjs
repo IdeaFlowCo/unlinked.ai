@@ -163,7 +163,7 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 // `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
 // people overlay client (private-context.mjs) and the owner identity bridge.
-export function createAccountToolService({ getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
+export function createAccountToolService({ isVerified = async () => false, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // Write tools use the same rules as the site's Connect button.
@@ -657,7 +657,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
     if (PRIVATE_NOTES_TOOL_SET.has(name) && !scopeAllowsPrivateNotes(grant.scope)) throw new AccountToolError('scope_not_granted', 'Private people notes & relations are switched off for this key (Settings) or not consented for this app.')
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
-    const release = DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
+    const release = await isVerified(grant) ? null : DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
     try {
       const execute = async () => {
       if (coordination && MUTATING_TOOLS.has(name) && requestContext?.ownerCheckpoint !== undefined && coordination.version(grant.ownerId) > requestContext.ownerCheckpoint) throw new AccountToolError('grant_revoked', 'The account changed during this request; reconnect and retry.')
@@ -681,7 +681,7 @@ export function createAccountToolService({ getBackend, complete, readPublishedSn
   // sharing the same per-owner and process-wide AI admission as REST/tools.
   async function withSearchBudget(grant, name, work) {
     if (!['unlinked_search_network', 'unlinked_search_everyone'].includes(name) || !grant?.tools?.includes(name)) throw new AccountToolError('scope_not_granted', 'This grant does not include the requested search.')
-    const release = admitAi(grant.ownerId)
+    const release = await isVerified(grant) ? () => {} : admitAi(grant.ownerId)
     try { return await work() } finally { release() }
   }
   return { call, withSearchBudget }

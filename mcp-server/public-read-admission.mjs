@@ -33,7 +33,7 @@ export function createPublicReadAdmission({ now = Date.now, inFlight = 8, anonym
     return ++value.requests
   }
   return {
-    async acquire({ ownerId, visitor, priority = false, route, signal } = {}) {
+    async acquire({ ownerId, verified = false, visitor, priority = false, route, signal } = {}) {
       const time = now()
       let lane = ownerId ? 'viewer' : 'anonymous'
       const result = (reason, retryAfter, release) => {
@@ -41,6 +41,9 @@ export function createPublicReadAdmission({ now = Date.now, inFlight = 8, anonym
         return { reason, retryAfter, release }
       }
       if (signal?.aborted) return result('cancelled')
+      // A server-resolved verified owner has a separate immediate lane. It
+      // consumes none of the regular pool, queues or account quotas.
+      if (ownerId && verified === true) { lane = 'verified'; return result('admitted', undefined, () => {}) }
       if (lane === 'anonymous') {
         const visits = visit(visitor, time)
         if (visits !== null && visits > visitorPerMinute) return result('minute', Math.max(1, Math.ceil((visitors.get(visitor).window + 60000 - time) / 1000)))

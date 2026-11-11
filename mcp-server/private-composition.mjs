@@ -16,6 +16,7 @@ import { createContactSlugs, createNeo4jContactSlugStore } from './contact-slugs
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { publishedPeopleFor } from './connection-identity.mjs'
 import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
+import { createVerifiedAccess } from './verified-access.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS, LINKEDIN_ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
@@ -192,6 +193,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // The adapter loads once; any failed check leaves lookups off while
     // already confirmed sources stay readable.
     const lookup = signupLookupStore ? await prepareProfileLookup({ env: profileLookupEnv, load: profileLookupLoader, log: emailLog }) : null
+    const isVerified = createVerifiedAccess({ driver })
     const signupLookup = signupLookupStore ? createSignupProfileLookup({ store: signupLookupStore, ...lookup }) : undefined
     const personLookupStore = publicPeople ? createNeo4jPersonLookupStore(driver) : null
     await personLookupStore?.initialize()
@@ -280,7 +282,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const memberBlocks = blockStore ? createMemberBlocks({ store: blockStore }) : undefined
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
     await connectionStore?.initialize()
-    const memberConnections = connectionStore ? createConnectionRequests({ store: connectionStore, notifications: notifications ?? null, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
+    const memberConnections = connectionStore ? createConnectionRequests({ isVerified, store: connectionStore, notifications: notifications ?? null, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
     const memberInvitations = invitationStore ? createMemberInvitations({ store: invitationStore, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onHeavyUse: event => audit({ ...event, at: new Date().toISOString() }),
       // The inviter hears that their invite was accepted (and so that the invitee joined).
       onAccepted: notifications ? async value => notifications.notify({ recipient: value.inviter, kind: 'invite_accepted', actor: value.invitee, actorName: value.inviteeName,
@@ -680,7 +682,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       })
       contactEnrichment.start()
     }
-    return { login, getBackend, close, audit, requestDiagnostics, recordBrowserPerformance, backgroundImports: true,
+    return { isVerified, login, getBackend, close, audit, requestDiagnostics, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),
