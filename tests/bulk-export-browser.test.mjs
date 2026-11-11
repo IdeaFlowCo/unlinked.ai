@@ -36,3 +36,10 @@ test('network and owned list actions carry the whole selection, query and struct
  assert.match(renderSavedSearchList({csrf:'csrf',saved,people:[]}).content,/Download whole list/)
  assert.doesNotMatch(renderSavedSearchList({csrf:'csrf',saved,people:[],shared:true}).content,/Download whole list/)
 })
+
+
+test('download form escapes query text in the page heading',async()=>{
+ const {bulkDownloadForm}=await import('../mcp-server/bulk-export-views.mjs')
+ const form=bulkDownloadForm({scope:'mine',query:'<img src=x onerror=alert(1)>',format:'csv',detail:'summary',ids:[],fields:[]})
+ assert.ok(!form.content.includes('<img'));assert.match(form.content,/&lt;img/)
+})

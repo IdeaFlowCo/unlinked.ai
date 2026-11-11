@@ -91,7 +91,7 @@ export function createBulkExports({getBackend,readPublishedSnapshot,lookupSlug,o
       }
     }
     const lookup=async ids=>{const result=new Map();for(let at=0;at<ids.length;at+=1000){await authorize();for(const [id,row]of await reader.lookup({ids:ids.slice(at,at+1000),details:true,signal}))result.set(id,row)}return result}
-    const wanted=row=>(!selected.size||selected.has(row.id)||selected.has(row.profileId)||row.source?.assertionIds?.some(id=>selected.has(id)))&&queryMatches(row,input.query)&&matchesPeopleFilters(row,input.filters)
+    const wanted=row=>(!input.presence||row.presence===input.presence)&&(!selected.size||selected.has(row.id)||selected.has(row.profileId)||row.source?.assertionIds?.some(id=>selected.has(id)))&&queryMatches(row,input.query)&&matchesPeopleFilters(row,input.filters)
     let lastRevision=null, listFence=null
     async function* imported(rows=ownRows) {
       if (input.filters.degree && input.filters.degree !== '1') return
@@ -159,7 +159,7 @@ export function createBulkExports({getBackend,readPublishedSnapshot,lookupSlug,o
       if(['everyone','all'].includes(input.scope))yield* published()
     }
     const finish=async()=>{await authorize();await listFence?.();
-      if(own&&['mine','all'].includes(input.scope)){
+      if(own&&(['mine','all'].includes(input.scope)||input.scope==='list'&&input.listId.startsWith('saved:'))){
         const backend=await getBackend(owner),current=await backend.listImportIds()
         if(JSON.stringify([...current].sort())!==JSON.stringify([...(own.imports??[])].sort()))throw fail('upstream_unavailable','Your imports changed during download. Retry for a complete copy.')
         if(own.legacyProfileId&&(await backend.readLegacyProfile())?.profileId!==own.legacyProfileId)throw fail('upstream_unavailable','Your linked profile changed during download.')

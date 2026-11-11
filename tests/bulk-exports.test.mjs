@@ -96,3 +96,10 @@ test('an inline private-list export cannot finish after its private permission i
  const tool=createAccountToolService({getBackend,exportManifest:async(_grant,_input,_signal,authorize)=>{await authorize();return {private:'must not be returned'}}})
  await assert.rejects(tool.call({grant:original,name:'unlinked_export_network',input:{scope:'list',listId:'private:list',inline:true},revalidate:async()=>++checks===1?original:{...original,scope:'owner_network'}}),{code:'scope_not_granted'})
 })
+
+
+test('list exports apply presence filters to the complete selection',async()=>{
+ const instance=createBulkExports({getBackend,readPublishedSnapshot:async()=>({...source(),members:['person-0']}),savedSearchLists:{get:async()=>({name:'Saved',refs:['public:person-0','public:person-1']})}})
+ const res=await run(instance,{scope:'list',listId:'saved:11111111-1111-1111-1111-111111111111',presence:'member',format:'json'})
+ const result=JSON.parse(res.text());assert.equal(result.count,1);assert.equal(result.rows[0].name,'Person 000')
+})
