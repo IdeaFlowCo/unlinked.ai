@@ -1,3 +1,5 @@
+import { EXPORT_FIELDS } from './bulk-export-format.mjs'
+export const INTERNAL_BULK_READ = Symbol('unlinked-internal-bulk-read')
 import { reportIndexError } from '../src/utils/public-people/error-report.mjs'
 import { INVESTOR_TOOLS, INVESTOR_MUTATING, INVESTOR_SCHEMAS, INVESTOR_DESCRIPTIONS } from './investor-tools.mjs'
 import { requestDiagnostic } from './request-diagnostics.mjs'
@@ -65,6 +67,7 @@ export class AccountToolError extends Error {
 export const CONNECTION_GROUPINGS = Object.freeze(['person', 'none'])
 
 export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
+  unlinked_export_network: { inline: z.boolean().optional(), scope: z.enum(['mine','everyone','all','list']).optional(), query: z.string().max(200).optional(), listId: z.string().max(100).optional(), format: z.enum(['csv','json','jsonl']).optional(), detail: z.enum(['headline','summary','full']).optional(), ids: z.array(z.string().min(1).max(160)).max(10000).optional(), fields: z.array(z.enum(EXPORT_FIELDS)).max(EXPORT_FIELDS.length).optional(), presence: z.enum(['member','legacy','shadow']).optional(), mode: z.enum(['best','exact']).optional(), ...Object.fromEntries(['degree','location','company','pastCompany','title','school','industry'].map(key=>[key,z.string().max(120).optional()])) },
   unlinked_whoami: {},
   unlinked_list_person_targets: { q: z.string().max(100).optional(), cursor: z.string().max(4096).optional(), limit: z.number().int().min(1).max(50).optional() },
   unlinked_list_people: {
@@ -102,6 +105,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
 })
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
+  unlinked_export_network: 'Set inline:true to query every matching row in one response when it fits; a real response-size limit returns an explicit incomplete preview plus a full download link. Prepare one complete authenticated download of all matching people, with no manual cursor walking or row/page truncation. scope mine exports your network; list + listId private:<id> or saved:<id> exports a current owned list. Verified accounts with public scope may use everyone or all (own + published). Choose csv for a spreadsheet, json for structured records, or jsonl for streaming; detail headline, summary or full, or select fields. Full includes available profile evidence; private list notes require private-notes scope. Returns browser and bearer-authenticated API links without embedding a token. Fetch the API link with the SAME account bearer in one request; use the browser link while signed in for manual download. The response streams every internal page and confirms completion. No public sharing or privilege expansion.',
   unlinked_list_person_targets: 'Read-only current owner-network members with proven active Ideaflow identity, for cross-app person targets. Exact published-profile ownership only; no names/email guesses, contact details, messages, relationship assertions, account creation or sends. Connected does not mean chatted. Cursor pages the current own network, including imported connections.',
   unlinked_whoami: 'Return the authenticated grant owner: the stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy-profile anchor if any. Linkage is the grant itself — never email matching. No contact email/phone is returned.',
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=legacy keeps recovered accounts awaiting claim, presence=shadow keeps imported profiles without a recovered account. enrichmentStatus filters enriched, not_recorded (no current published enrichment evidence; not proof of never enriched), or unknown. Enrichment is independent of detailLevel and membership. sort: best (default: relevance with q, else stored name order), name (A–Z by first letter or number, ignoring leading emoji/punctuation, accents and case), name-desc, raw (Unicode code-point order of the name as written). Paginated with an opaque cursor bound to the query and sort, at most 50 per page, with total and snapshot revision. Public fields only.',
@@ -119,7 +123,7 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   ...INVESTOR_DESCRIPTIONS,
 })
 
-const DETERMINISTIC_TOOLS = new Set(['unlinked_list_person_targets', ...PRIVATE_NOTES_TOOLS, ...INVESTOR_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
+const DETERMINISTIC_TOOLS = new Set(['unlinked_export_network', 'unlinked_list_person_targets', ...PRIVATE_NOTES_TOOLS, ...INVESTOR_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
 export const WRITE_TOOLS = new Set(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
 // Every tool that changes something: connection writes plus private-notes writes.
 export const MUTATING_TOOLS = new Set([...WRITE_TOOLS, ...PRIVATE_NOTES_MUTATING, ...INVESTOR_MUTATING])
@@ -175,7 +179,7 @@ const indexReasonOf = (stage, error) => {
   return 'tool_exception'
 }
 const indexFailure = (stage, error) => Object.assign(new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.'), { stage, indexReason: indexReasonOf(stage, error) })
-export function createAccountToolService({ isVerified = async () => false, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
+export function createAccountToolService({ exportManifest, isVerified = async () => false, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // An owner's whole network read (every published import, the legacy link,
@@ -344,6 +348,13 @@ export function createAccountToolService({ isVerified = async () => false, getBa
     return { kind: 'unlinked_connection_request_update', id, status, visibility: 'owner_private' }
   }
   const tools = {
+    async unlinked_export_network(grant, input, signal, revalidate) {
+      if (typeof exportManifest !== 'function') throw new AccountToolError('upstream_unavailable', 'Complete downloads are unavailable on this runtime.')
+      try { return await exportManifest(grant, input, signal, async()=>{
+        const current=await revalidate?.()
+        if(current&&(['everyone','all'].includes(input.scope)&&!scopeCoversPublic(current.scope)||input.scope==='list'&&!scopeAllowsPrivateNotes(current.scope)))throw new AccountToolError('scope_not_granted','The download permission was removed.')
+      }) } catch(error) { throw new AccountToolError(error.code ?? 'upstream_unavailable', error.code ? error.message : 'The download could not be prepared.') }
+    },
     async unlinked_send_connection_request(grant, { profileId, note }, signal, revalidate) {
       requireConnections()
       let outcome
@@ -725,7 +736,7 @@ export function createAccountToolService({ isVerified = async () => false, getBa
   // on revoked/replaced identity or removal of the requested permission. Unrelated
   // permission edits are allowed. Reads recheck after work; writes recheck before
   // execution (send also after target lookup), never misreport a committed write.
-  async function call({ grant, name, input = {}, signal, revalidate, requestContext }) {
+  async function call({ grant, name, input = {}, signal, revalidate, requestContext, admission }) {
     if (!grant || typeof grant.ownerId !== 'string' || typeof grant.userId !== 'string' || !Array.isArray(grant.tools)) throw new AccountToolError('grant_revoked', 'The grant is no longer valid.')
     if (!Object.hasOwn(tools, name)) throw new AccountToolError('not_found', 'Unknown tool.')
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
@@ -733,7 +744,7 @@ export function createAccountToolService({ isVerified = async () => false, getBa
     if (PRIVATE_NOTES_TOOL_SET.has(name) && !scopeAllowsPrivateNotes(grant.scope)) throw new AccountToolError('scope_not_granted', 'Private people notes & relations are switched off for this key (Settings) or not consented for this app.')
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
-    const release = await isVerified(grant) ? null : DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
+    const release = admission === INTERNAL_BULK_READ && DETERMINISTIC_TOOLS.has(name) || await isVerified(grant) ? null : DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
     try {
       const execute = async () => {
       if (coordination && MUTATING_TOOLS.has(name) && requestContext?.ownerCheckpoint !== undefined && coordination.version(grant.ownerId) > requestContext.ownerCheckpoint) throw new AccountToolError('grant_revoked', 'The account changed during this request; reconnect and retry.')

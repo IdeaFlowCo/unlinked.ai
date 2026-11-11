@@ -80,8 +80,11 @@ export const ACCOUNT_GRANT_TOOL_VERSIONS = Object.freeze({
   // Private CSV ingestion adds no public/network permission. Historical catalogs stay frozen.
   9: Object.freeze(Object.fromEntries(Object.entries(ACCOUNT_GRANT_V8).map(([scope, tools]) =>
     [scope, Object.freeze([...tools, ...(scope.endsWith('_and_private_notes') ? INVESTOR_TOOLS : [])])]))),
+  // Complete downloadable results use the same existing owner/public/private boundaries.
+  10: Object.freeze(Object.fromEntries(Object.entries(ACCOUNT_GRANT_V8).map(([scope, tools]) =>
+    [scope, Object.freeze([...tools, ...(scope.endsWith('_and_private_notes') ? INVESTOR_TOOLS : []), 'unlinked_export_network'])]))),
 })
-export const CURRENT_ACCOUNT_GRANT_VERSION = 9
+export const CURRENT_ACCOUNT_GRANT_VERSION = 10
 export const accountGrantTools = (version, scope) => ACCOUNT_GRANT_TOOL_VERSIONS[version]?.[scope] ?? null
 // Scope grammar: owner_network[_and_public][_and_write][_and_private_notes].
 const SCOPE_PATTERN = /^owner_network(_and_public)?(_and_write)?(_and_private_notes)?$/

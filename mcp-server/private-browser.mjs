@@ -1,3 +1,4 @@
+import { bulkExportInput } from './bulk-exports.mjs'
 import { networkExportInput, streamNetworkExport } from './network-export.mjs'
 import { createGroupBrowser, flyerJoinTarget, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
 import { browserPerformanceScript } from './browser-performance.mjs'
@@ -64,7 +65,7 @@ import { publicSearchDocument } from './public-web-search.mjs'
 import { createMembersOnlySnapshotReader, iosAppUserAgent } from '../src/utils/public-people/members-only.mjs'
 import { SafetyReportError, ownerHash } from './safety-reports.mjs'
 import { BlockError } from './member-blocks.mjs'
-import { renderListsDirectory, renderPrivateList, renderSavedSearchList, renderPeopleError, MAX_UPLOAD_FILES, renderListImport } from './private-onboarding-views.mjs'
+import { renderDownloads, renderListsDirectory, renderPrivateList, renderSavedSearchList, renderPeopleError, MAX_UPLOAD_FILES, renderListImport } from './private-onboarding-views.mjs'
 import { LIST_ERRORS, LIST_UPLOAD_BYTES, DEFAULT_LIST_NAME } from './private-list-imports.mjs'
 
 import { coordinatorFor } from './owner-coordination.mjs'
@@ -188,7 +189,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ isVerified = async () => false, privateLists, privateListImports, savedSearchLists, collectiveGroups, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, privateLists, privateListImports, savedSearchLists, collectiveGroups, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -319,7 +320,8 @@ export function createPrivateBrowserHandler({ isVerified = async () => false, pr
   const signInOptions = (request, switching = false) => switching || cookies(request)[SIGNED_OUT_COOKIE] === '1' ? { prompt: SELECT_ACCOUNT } : {}
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
-  const returnPath = value => typeof value === 'string' && (/^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const downloadReturn = value => { try { const url=new URL(value,base); if(url.origin!==base.origin||!['/downloads','/downloads/file'].includes(url.pathname))return false; bulkExportInput(url.searchParams); return !url.hash } catch { return false } }
+  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -674,6 +676,14 @@ export function createPrivateBrowserHandler({ isVerified = async () => false, pr
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
   const requestSessions = new WeakMap(), deletionInputs = new WeakMap()
   const sessionFor = request => requestSessions.get(request)
+  const authorizeDownloadSession = async (request,session) => {
+    const sid=cookies(request)['__Host-ul-session'],now=Date.now()
+    const denied=()=>Object.assign(Error('Sign in again to download.'),{code:'grant_revoked'})
+    if(!sid||sessions.get(sid)!==session||session.expiresAt<=now)throw denied()
+    if(sessionStore){const current=await sessionStore.get(createHash('sha256').update(sid).digest('hex'),now);if(!current||current.ownerId!==session.owner.ownerId||current.userId!==session.owner.userId||current.csrf!==session.csrf)throw denied()}
+    await getBackend(session.owner)
+  }
+
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
@@ -2611,6 +2621,13 @@ export function createPrivateBrowserHandler({ isVerified = async () => false, pr
           if (!privateLists) { journey(response, renderPrivateList({ ...chrome, error: 'Private lists are unavailable right now. Please try again later.' }), null, '', 503); return }
           try {
             const result = await privateLists.get(session.owner, privateListMatch[1], after)
+            const queryValues = url.searchParams.getAll('q'), query = queryValues[0] ?? ''
+            if (queryValues.length > 1 || query.length > 200) throw Object.assign(Error('Invalid search.'), {code:'invalid_input'})
+            if (query.trim() && bulkExports) {
+              const controller=new AbortController();response.once('close',()=>{if(!response.writableFinished)controller.abort()})
+              const found=await bulkExports.manifest(session.owner,{scope:'list',listId:'private:'+privateListMatch[1],query,inline:true,fields:['id','profileId','name','headline','company','linkedinUrl'],format:'csv'},{publicAllowed:true,privateAllowed:true,browser:true,membersOnly:iosApp(request)},controller.signal,()=>authorizeDownloadSession(request,session))
+              journey(response,renderPrivateList({...chrome,list:result.list,members:found.rows.slice(0,100).map(row=>({...row,description:[row.headline,row.company].filter(Boolean).join(' · ')})),query,matchedTotal:found.total})); return
+            }
             journey(response, renderPrivateList({ ...chrome, ...result })); return
           } catch (error) {
             if (error?.code === 'not_found') { journey(response, renderNotFound(chrome), null, '', 404); return }
@@ -2852,10 +2869,30 @@ export function createPrivateBrowserHandler({ isVerified = async () => false, pr
         await memberEmail.savePreferences(session.owner, input.getAll('kinds'))
         redirect(response, '/settings?email=saved#email'); return
       }
+      if (signup && request.method === 'GET' && ['/downloads','/downloads/file'].includes(url.pathname)) {
+        if (!bulkExports) { render(response,'Downloads unavailable','<p>Try again shortly.</p>',503); return }
+        const input = bulkExportInput(url.searchParams)
+        if (url.pathname === '/downloads') {
+          let listName
+          if(input.scope==='list') {
+            const [kind,id]=input.listId.split(':')
+            const list=kind==='private'?(await privateLists?.get(session.owner,id))?.list:await savedSearchLists?.get(session.owner,id)
+            if(!list){render(response,'List unavailable','<p>This list is not available to this account.</p>',404);return}
+            listName=list.name
+          }
+          journey(response,renderDownloads({ accountLabel:session.accountLabel,displayName:session.displayName,csrf:session.csrf,input,listName,verified:await isVerified(session.owner) })); return
+        }
+        const controller = new AbortController()
+        response.once('close',()=>{if(!response.writableFinished)controller.abort()})
+        const authorize=()=>authorizeDownloadSession(request,session)
+        try { await bulkExports.stream({ owner:session.owner,input:url.searchParams,policy:{publicAllowed:true,privateAllowed:true,browser:true,membersOnly:iosApp(request)},authorize,response,signal:controller.signal }) }
+        catch(error) { if(response.headersSent){response.destroy();return} const status={scope_not_granted:403,not_found:404,invalid_input:400,grant_revoked:401}[error?.code]??503;render(response,'Download unavailable',`<p>${html(status===503?'Your data could not be read right now. Retry to get a complete copy.':error.message)}</p><p><a href="/downloads">Download my network</a></p>`,status) }
+        return
+      }
       if (signup && request.method === 'GET' && url.pathname === '/network/export') {
         const authorize = async () => {
-          if (sessionFor(request) !== session || !await isVerified(session.owner)) throw Error('verified_network_export_required')
-          await getBackend(session.owner)
+          await authorizeDownloadSession(request,session)
+          if (!await isVerified(session.owner)) throw Error('verified_network_export_required')
         }
         if (!await isVerified(session.owner)) { response.writeHead(403).end('Verified account required.'); return }
         const input = networkExportInput(url.searchParams)
