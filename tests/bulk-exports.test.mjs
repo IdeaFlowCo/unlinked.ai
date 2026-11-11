@@ -60,7 +60,7 @@ test('private-list bulk paging skips repeated rate admission while keeping the n
  await assert.rejects(tool.call({grant:{...grant,tools:[]},name:'unlinked_list_notifications',admission:INTERNAL_BULK_READ}),{code:'scope_not_granted'})
 })
 test('download input rejects duplicate parameters, unsupported formats and unknown fields',()=>{
- for(const value of [new URLSearchParams('scope=mine&scope=all'),{scope:'admin'},{format:'xlsx'},{fields:['password']},{ownerId:'another'}])assert.throws(()=>bulkExportInput(value))
+ for(const value of [new URLSearchParams('scope=mine&scope=all'),{scope:'admin'},{format:'xlsx'},{fields:['password']},{ownerId:'another'},{scope:'list',listId:'private:list',degree:'2'}])assert.throws(()=>bulkExportInput(value))
 })
 
 test('inline queries return every matching row in one call when it fits, and declare real size overflow explicitly',async()=>{
