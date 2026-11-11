@@ -59,7 +59,7 @@ export function connectionNote(value) {
 }
 
 // `blocked(a, b)`: whether either account blocked the other (member-blocks.mjs); a block refuses new requests and accepts.
-export function createConnectionRequests({ store, notifications = null, onAccepted = null, blocked = null, coordination, validateParticipant, now = Date.now, perDay = CONNECTION_REQUESTS_PER_DAY, cooldownMs = RESEND_COOLDOWN_MS } = {}) {
+export function createConnectionRequests({ isVerified = async () => false, store, notifications = null, onAccepted = null, blocked = null, coordination, validateParticipant, now = Date.now, perDay = CONNECTION_REQUESTS_PER_DAY, cooldownMs = RESEND_COOLDOWN_MS } = {}) {
   if (!store || ['insert', 'get', 'listPair', 'listByRecipient', 'listBySender', 'listAccepted', 'transition', 'countSentSince', 'countReceivedPending', 'deleteOwner'].some(name => typeof store[name] !== 'function')) throw new Error('connection_store_required')
   if (!Number.isSafeInteger(perDay) || perDay < 1 || !Number.isSafeInteger(cooldownMs) || cooldownMs < 0) throw new Error('connection_limits_invalid')
   // Notifications never decide whether a request works.
@@ -88,7 +88,7 @@ export function createConnectionRequests({ store, notifications = null, onAccept
       const at = now()
       const withdrawn = existing.filter(record => record.status === 'withdrawn' && same(senderOf(record), sender)).map(record => record.withdrawnAt ?? 0)
       if (withdrawn.length && Math.max(...withdrawn) + cooldownMs > at) throw new ConnectionError('connection_cooldown')
-      if (await store.countSentSince(sender, at - DAY) >= perDay) throw new ConnectionError('connection_rate_limited')
+      if (!await isVerified(sender) && await store.countSentSince(sender, at - DAY) >= perDay) throw new ConnectionError('connection_rate_limited')
       const record = { id: randomUUID(), pairKey: pair, openKey: pair, senderOwnerId: sender.ownerId, senderUserId: sender.userId, senderName: connectionName(senderName) ?? 'An Unlinked member',
         recipientOwnerId: recipient.ownerId, recipientUserId: recipient.userId, recipientName: connectionName(recipientName) ?? 'An Unlinked member', status: 'pending', createdAt: at }
       if (typeof senderProfileId === 'string' && senderProfileId) record.senderProfileId = senderProfileId

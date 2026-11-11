@@ -1,3 +1,4 @@
+import { networkExportInput, streamNetworkExport } from './network-export.mjs'
 import { createGroupBrowser, flyerJoinTarget, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
 import { browserPerformanceScript } from './browser-performance.mjs'
 import { PEOPLE_FILTER_KEYS, peopleFilters, matchesPeopleFilters } from '../src/utils/public-people/search-filters.mjs'
@@ -187,7 +188,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ privateLists, privateListImports, savedSearchLists, collectiveGroups, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ isVerified = async () => false, privateLists, privateListImports, savedSearchLists, collectiveGroups, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -241,7 +242,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
   // Native Messages: OpenChat stays the only message store; this proxy keeps each
   // member's embedded OpenChat credential on the server (docs/openchat-message.md).
   coordination.sessionMaps.add(sessions)
-  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users, participantBlocked: async (session, userId) => {
+  const messaging = typeof createMessagingSession === 'function' ? createMessagingProxy({ isVerified, createMessagingSession, resolveOwnerRecipient: resolveCardMessagingRecipient, isSessionLive: session => { for (const value of sessions.values()) if (value === session) return true; return false }, ...(typeof messagingIdentities === 'function' ? { profilesForParticipants: (...args) => profilesForParticipants(...args), profilePathFor: id => profilePath(id) } : {}), ...(memberBlocks ? { blockedUsers: async session => (await memberBlocks.hidden(session.owner)).users, participantBlocked: async (session, userId) => {
     const blocks = await memberBlocks.list(session.owner)
     if (blocks.some(block => block.openChatUserId === userId)) return true
     if (!blocks.some(block => block.blocked || block.blockedProfileId)) return false
@@ -1237,12 +1238,13 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         sessionStore.prune(Date.now()).catch(() => {})
       }
       if (current) requestSessions.set(request, current)
+      const verified = current ? await isVerified(current.owner) : false
       if (request.method === 'POST' && url.pathname !== '/search' && current) response.once('finish', () => dropAccountNetwork(current.owner))
       // Browser autocomplete reads the same published projection for everyone.
       // Its own burst budget keeps keystrokes out of the full-page read budget.
       if (request.method === 'GET' && url.pathname === '/search-suggestions') {
         if (Date.now() - suggestWindow >= 60000) { suggestWindow = Date.now(); suggestRequests = 0 }
-        if (++suggestRequests > 600 || suggestBusy >= 8) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++suggestRequests > 600 || suggestBusy >= 8)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         suggestBusy++
         try {
           if (url.searchParams.getAll('q').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'q')) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
@@ -1268,7 +1270,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       const hoverCard = request.method === 'GET' ? url.pathname.match(/^\/api\/people\/([^/]+)\/card$/) : null
       if (hoverCard) {
         if (Date.now() - cardWindow >= 60000) { cardWindow = Date.now(); cardRequests = 0 }
-        if (++cardRequests > 600 || cardBusy >= 8) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++cardRequests > 600 || cardBusy >= 8)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         cardBusy++
         try {
           if ([...url.searchParams.keys()].length) throw new PublicPeopleReaderError(400, 'public_people_input_invalid')
@@ -1309,7 +1311,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       const photo = ['GET', 'HEAD'].includes(request.method) ? photoPath(url.pathname) : null
       if (photo) {
         if (Date.now() - photoWindow >= 60000) { photoWindow = Date.now(); photoRequests = 0 }
-        if (++photoRequests > PHOTO_PER_MINUTE || photoBusy >= PHOTO_IN_FLIGHT) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++photoRequests > PHOTO_PER_MINUTE || photoBusy >= PHOTO_IN_FLIGHT)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         photoBusy++
         try {
           let hidden
@@ -1394,7 +1396,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         if ([...url.searchParams.keys()].some(key => key !== 'depth') || depthValues.length > 1 || (depthValues.length && !['1', '2'].includes(depthValues[0]))) { send(400, { error: 'invalid_input' }); return }
         const now = Date.now(), budget = contextBudgets.get(viewer.owner.ownerId) ?? { window: now, count: 0 }
         if (now - budget.window >= 60000) { budget.window = now; budget.count = 0 }
-        if (++budget.count > 60) { send(429, { error: 'rate_limited' }); return }
+        if (++budget.count > 60 && !await isVerified(viewer.owner)) { send(429, { error: 'rate_limited' }); return }
         if (contextBudgets.size > 5000) contextBudgets.clear()
         contextBudgets.set(viewer.owner.ownerId, budget)
         let id
@@ -1427,7 +1429,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       const invitationLink = url.pathname.match(/^\/i\/([A-Za-z0-9_-]{43})$/)
       if (request.method === 'GET' && invitationLink && memberInvitations && signup) {
         if (Date.now() - invitationWindow >= 60000) { invitationWindow = Date.now(); invitationRequests = 0 }
-        if (++invitationRequests > 60) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++invitationRequests > 60)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         // The token never leaves this site; same-origin (not no-referrer) so the
         // page's own form POST carries a real Origin (no-referrer makes it "null").
         response.setHeader('Referrer-Policy', 'same-origin')
@@ -1439,7 +1441,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       // button or a mail provider's one-click, turns the email off.
       if (memberEmail && url.pathname === '/email/unsubscribe' && ['GET', 'POST'].includes(request.method)) {
         if (Date.now() - unsubscribeWindow >= 60000) { unsubscribeWindow = Date.now(); unsubscribeRequests = 0 }
-        if (++unsubscribeRequests > 600) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++unsubscribeRequests > 600)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         response.setHeader('Referrer-Policy', 'no-referrer')
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         let token = url.searchParams.getAll('t').length === 1 ? url.searchParams.get('t') : null
@@ -1495,7 +1497,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
       const contactLink = url.pathname.match(/^\/c\/([0-9A-Za-z]{24})(\/contact\.vcf)?$/)
       if (request.method === 'GET' && contactLink && contactCards && signup) {
         if (Date.now() - contactWindow >= 60000) { contactWindow = Date.now(); contactRequests = 0 }
-        if (++contactRequests > 1200) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
+        if (!verified && (++contactRequests > 1200)) { response.writeHead(429, { 'Retry-After': '10' }).end(); return }
         // Never sent to another site; same-origin rather than no-referrer, because
         // no-referrer makes browsers send `Origin: null` with the Join/Add form,
         // which the same-origin POST check refuses (WebKit and Chromium).
@@ -1633,7 +1635,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // Declared crawlers and non-browser clients never get either priority.
         const automated = !viewer && declaredAutomation(request)
         const cardArrival = !automated && publicProfile && !publicProfile[2] && url.searchParams.getAll('via').length === 1 && url.searchParams.get('via') === 'card'
-        const admission = await publicAdmission.acquire({ ownerId: viewer?.owner.ownerId, visitor: viewer || automated ? undefined : visitorKey(request), priority: Boolean(cardArrival), route, signal: controller.signal })
+        const admission = await publicAdmission.acquire({ ownerId: viewer?.owner.ownerId, verified: viewer ? await isVerified(viewer.owner) : false, visitor: viewer || automated ? undefined : visitorKey(request), priority: Boolean(cardArrival), route, signal: controller.signal })
         response.removeListener('close', closed)
         if (!admission.release) {
           if (admission.reason !== 'cancelled') await directoryError(429, admission.retryAfter)
@@ -1906,7 +1908,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         if (!messaging || typeof readPublishedSnapshot !== 'function') { send(503, { error: 'messaging_unavailable' }); return }
         const now = Date.now(), budget = pickerBudgets.get(viewer.owner.ownerId) ?? { window: now, count: 0 }
         if (now - budget.window >= 60000) { budget.window = now; budget.count = 0 }
-        if (++budget.count > 20) { send(429, { error: 'rate_limited' }); return }
+        if (++budget.count > 20 && !await isVerified(viewer.owner)) { send(429, { error: 'rate_limited' }); return }
         if (pickerBudgets.size > 5000) pickerBudgets.clear()
         pickerBudgets.set(viewer.owner.ownerId, budget)
         try {
@@ -2042,7 +2044,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         // One person finding themselves needs a handful of tries; a session
         // enumerating the private slug index does not.
         session.selfClaim.lookups = (session.selfClaim.lookups ?? 0) + 1
-        if (session.selfClaim.lookups > 20) { response.writeHead(429, { 'Retry-After': '3600' }).end(); return }
+        if (!verified && (session.selfClaim.lookups > 20)) { response.writeHead(429, { 'Retry-After': '3600' }).end(); return }
         session.selfClaim.candidate = null
         const page = lookupResult => journey(response, renderFindMe({ accountLabel: session.accountLabel, displayName: session.displayName, csrf: session.csrf, lookupResult, address }))
         let profileId = null, evidence = null
@@ -2814,7 +2816,7 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         const blocks = memberBlocks ? await bounded(() => memberBlocks.list(session.owner), []) : null
         // An unreadable choice leaves the control out: a form must never resubmit a guessed default.
         const privacyChoice = connectionPrivacy ? await bounded(() => connectionPrivacy.get(session.owner), null) : null
-        const view=renderSettings({ ...props, ...(privacyChoice ? { connectionPrivacy: privacyChoice, connectionPrivacySaved: url.searchParams.get('privacy') === 'saved' } : {}), blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+        const view=renderSettings({ ...props, verified: await isVerified(session.owner), ...(privacyChoice ? { connectionPrivacy: privacyChoice, connectionPrivacySaved: url.searchParams.get('privacy') === 'saved' } : {}), blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
           ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
         journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
@@ -2849,6 +2851,23 @@ export function createPrivateBrowserHandler({ privateLists, privateListImports, 
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || [...input.keys()].some(key => !['csrf', 'kinds'].includes(key)) || input.getAll('kinds').some(kind => !Object.hasOwn(EMAIL_PREFERENCES, kind))) throw new Error('private_browser_csrf')
         await memberEmail.savePreferences(session.owner, input.getAll('kinds'))
         redirect(response, '/settings?email=saved#email'); return
+      }
+      if (signup && request.method === 'GET' && url.pathname === '/network/export') {
+        const authorize = async () => {
+          if (sessionFor(request) !== session || !await isVerified(session.owner)) throw Error('verified_network_export_required')
+          await getBackend(session.owner)
+        }
+        if (!await isVerified(session.owner)) { response.writeHead(403).end('Verified account required.'); return }
+        const input = networkExportInput(url.searchParams)
+        const controller = new AbortController()
+        response.once('close', () => { if (!response.writableFinished) controller.abort() })
+        const reader = createPublicPeopleReader({ readPublishedSnapshot: snapshotFor(request), photoFor }), viewer = await readerViewer(session), groups = await viewerGroupsReady(session.owner)
+        try {
+          await streamNetworkExport({ response, input, authorize, signal: controller.signal,
+            readPage: options => reader.exportPage({ ...options, viewer, ...(groups ? { unlistedGroups: groups } : {}) }),
+            readOwned: options => createAccountNetwork({ owner: session.owner, getBackend }).readNetwork(undefined, options) })
+        } catch (error) { if (response.headersSent) { response.destroy(); return } throw error }
+        return
       }
       if (signup && request.method === 'GET' && url.pathname === '/export') {
         const jobs = await jobResources()

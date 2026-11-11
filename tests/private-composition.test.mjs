@@ -64,7 +64,7 @@ async function fixture(t) {
         },
         session(options) {
           state.receiptSessionOptions = options
-          return { async run(query, params) { state.receiptQuery = { query, params }; return { records: (state.receipts ?? []).map(values => ({ get: key => values[key] })) } }, async close() { state.receiptSessionClosed = true } }
+          return { async executeRead(work) { return work({ run: this.run.bind(this) }) }, async run(query, params) { state.receiptQuery = { query, params }; return { records: (state.receipts ?? []).map(values => ({ get: key => values[key] })) } }, async close() { state.receiptSessionClosed = true } }
         },
         close: async () => { state.closes++ },
       }
