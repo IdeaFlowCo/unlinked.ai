@@ -3,7 +3,7 @@
 // Each row is its own operational resource, so reading an owner network
 // costs one loopback HTTP + graph round trip per connection: a 4,416-row
 // network took 42-85 s on every unlinked_list_connections / ai_search call.
-// Observations are written once and an indexed import's sourceRevision
+// Observations are written once and a finished import's sourceRevision
 // changes on any republication, so (owner, import, sourceRevision) names an
 // immutable row set. The reader still re-reads the import resource on every
 // call (live, same revision) before and after using cached rows, so a
