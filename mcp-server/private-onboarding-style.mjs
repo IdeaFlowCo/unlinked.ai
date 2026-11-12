@@ -701,6 +701,14 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .private-context .pc-facts.due{color:#a3461b}
 .unlinked-onboarding .private-context .pc-explore{margin-top:10px;min-height:36px}
 .unlinked-onboarding .private-context .pc-hint{margin:14px 0 0;font-size:13px}
+.unlinked-onboarding .private-context .pc-more{margin-top:16px;border-top:1px solid var(--line);padding-top:8px}
+.unlinked-onboarding .private-context .pc-more>summary{font-size:14px;font-weight:600;min-height:44px}
+.unlinked-onboarding .private-context .pc-source-record{margin-top:8px;padding:8px 12px;background:var(--page);border:1px solid var(--line);border-radius:var(--r)}
+.unlinked-onboarding .private-context .pc-source-record>summary,.unlinked-onboarding .private-context .pc-sources>summary{font-size:14px;min-height:44px}
+.unlinked-onboarding .private-context .pc-source{margin:8px 0 12px;padding:8px 0;overflow-wrap:anywhere}
+.unlinked-onboarding .private-context .pc-source .small{margin:4px 0}
+.unlinked-onboarding .private-context .pc-source a{display:inline-flex;align-items:center;min-height:44px;margin-right:12px}
+.unlinked-onboarding .private-context summary:focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:var(--r)}
 @media(max-width:600px){.unlinked-onboarding .private-context{margin-top:12px}}
 .unlinked-onboarding .home{max-width:1040px;margin:0 auto;padding-top:28px}
 .unlinked-onboarding .home-head .hq{margin-bottom:6px}
