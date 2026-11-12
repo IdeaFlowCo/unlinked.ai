@@ -10,6 +10,9 @@ import { createPrivatePilotDependencies } from '../mcp-server/private-compositio
 import { accountKey, createMemoryEmailStore } from '../mcp-server/member-email.mjs'
 import { createMemoryNotificationStore } from '../mcp-server/member-notifications.mjs'
 
+import { createCollectiveGroups } from '../mcp-server/collective-groups.mjs'
+import { createMemoryCollectiveGroupsStore } from '../mcp-server/collective-groups-store.mjs'
+
 const require = createRequire(new URL('../mcp-server/package.json', import.meta.url))
 const { importSPKI, jwtVerify } = await import(require.resolve('jose'))
 const configuration = { issuer: 'https://identity.invalid/api/auth', clientId: 'private-test-client',
@@ -427,4 +430,58 @@ test('worker discovery failure reaches both the container log and private audit 
     console.log = originalLog
     await dependencies?.close()
   }
+})
+
+
+test('standalone launcher connects community intake to asks, introductions and group joins', async t => {
+  for (const enabled of [true, false]) await t.test(enabled ? 'configured' : 'unconfigured', async t => {
+    const { port } = await fixture(t)
+    const origin = `https://127.0.0.1:${port}`
+    const organizer = { ownerId: 'organizer', userId: 'organizer-user' }
+    const member = { ownerId: 'member', userId: 'member-user' }
+    const groups = createCollectiveGroups({ store: createMemoryCollectiveGroupsStore(), active: async () => true })
+    const group = await groups.create(organizer, 'Launcher community')
+    const flyer = await groups.createFlyer(organizer, group.id, { capacity: 10, approval: false })
+    const calls = []
+    const communityIntake = enabled ? { list: async owner => {
+      calls.push(owner)
+      return { entries: [{ id: 1, title: 'Launcher fixture ask', body: '', kind: 'ask', status: 'open', audience: 'only_me' }] }
+    } } : undefined
+    const pilot = await startPrivatePilot({ baseUrl: origin, port, collectiveGroups: groups, communityIntake,
+      complete: async () => '', accountGrantKey: new Uint8Array(32).fill(7),
+      signup: async () => member, resolveOwner: async () => member, accountForProfile: async () => null,
+      login: { begin: async () => ({ location: 'https://identity.invalid', transaction: { state: 's' } }),
+        finish: async () => ({ issuer: 'https://identity.invalid', subject: 'member', displayName: 'Member' }) },
+      getBackend: async () => ({ listImportIds: async () => [], listImportJobIds: async () => [] }),
+    })
+    t.after(pilot.stop)
+    const request = (path, options = {}) => fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual', ...options })
+    const started = await request('/login')
+    const loginCookie = started.headers.getSetCookie().find(v => v.startsWith('__Host-ul-login=')).split(';')[0]
+    const finished = await request('/auth/callback/ideaflow?state=s&code=c', { headers: { Cookie: loginCookie } })
+    assert.equal(finished.status, 303)
+    const cookie = finished.headers.getSetCookie().find(v => v.startsWith('__Host-ul-session=')).split(';')[0]
+    const headers = { Cookie: cookie }
+    const asks = await request('/asks', { headers })
+    assert.equal(asks.status, 200)
+    const asksHtml = await asks.text()
+    assert.match(asksHtml, enabled ? /Launcher fixture ask/ : /Profile connection unavailable/)
+    assert.deepEqual(calls, enabled ? [member] : [])
+    const introduction = await request('/profile/context', { headers })
+    assert.equal(introduction.status, 200)
+    assert.match(await introduction.text(), enabled ? /Review my introduction/ : /Profile connection unavailable/)
+    const joinPath = `/groups/${group.id}/join/${flyer.id}`
+    const invite = await request(joinPath, { headers })
+    assert.equal(invite.status, 200)
+    const csrf = /name="csrf" value="([^"]+)"/.exec(await invite.text())[1]
+    const joined = await request(joinPath, { method: 'POST',
+      headers: { ...headers, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ csrf, decision: 'join' }),
+    })
+    assert.equal(joined.status, 303)
+    assert.equal(joined.headers.get('location'), `/groups/${group.id}${enabled ? '/welcome' : ''}`)
+    const welcome = await request(`/groups/${group.id}/welcome`, { headers })
+    assert.equal(welcome.status, 200)
+    assert.match(await welcome.text(), enabled ? /Review my introduction/ : /Profile connection unavailable/)
+  })
 })
