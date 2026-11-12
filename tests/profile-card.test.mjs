@@ -68,16 +68,19 @@ test('own profile records bounded stage timings without identity or profile cont
     listImportJobIds: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return [] },
   } })
   const signed = await fixture.start()
-  const response = await fetch(`${signed.endpoint}/profile`, { headers: { Cookie: signed.cookie } })
+  const response = await fetch(`${signed.endpoint}/profile?private_marker=synthetic-secret`, { headers: { Cookie: signed.cookie } })
   assert.equal(response.status, 200)
-  await response.text()
+  const document = await response.text()
   const event = events.find(row => row.event === 'own_profile_timing')
   assert.ok(event)
+  assert.deepEqual(Object.keys(event).sort(), ['at', 'duration_ms', 'event', 'status', 'steps_ms'])
   assert.equal(event.status, 200)
   assert.ok(event.duration_ms >= 20)
   assert.ok(event.steps_ms.jobs >= 20)
   assert.ok(Number.isFinite(event.steps_ms.own_card))
-  assert.doesNotMatch(JSON.stringify(event), /synthetic-card-owner|Card Owner|__Host-ul-session/)
+  assert.doesNotMatch(JSON.stringify(event), /synthetic-card-owner|synthetic-card-user|Card Owner|__Host-ul-session|synthetic-secret|private_marker/)
+  await profileEvidence('own-profile.html', document)
+  await profileEvidence('own-profile-timing.json', JSON.stringify(event, null, 2) + '\n')
 })
 
 test('the card page is owner-only, linked from the profile, and shows a decodable QR only for a verified public target', async t => {

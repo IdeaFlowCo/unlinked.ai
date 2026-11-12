@@ -689,7 +689,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
-  const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never changes identity authority. */ } }
+  const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), ...(event.event === 'own_profile_timing' ? {} : { origin: base.origin }) }) } catch { /* Audit availability never changes identity authority. */ } }
   // The signed-in reader of each in-flight response, so every page's Me menu can
   // show the headline once this session has read the member's profile.
   const readers = new WeakMap()
