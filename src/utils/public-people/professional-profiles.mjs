@@ -31,7 +31,7 @@ export function prepareProfessionalSnapshot(bytes) {
   return { state:'published', complete:true, revision:PROFESSIONAL_PEOPLE_DATASET + ':' + hash(JSON.stringify(profiles)), profiles, connections:[] }
 }
 export function validateProfessionalSnapshot(snapshot) {
-  if (!snapshot || snapshot.state !== 'published' || snapshot.complete !== true || !Array.isArray(snapshot.connections) || snapshot.connections.length) throw Error('professional_snapshot_invalid')
+  if (!object(snapshot) || Object.keys(snapshot).some(key => !['state','complete','revision','profiles','connections'].includes(key)) || snapshot.state !== 'published' || snapshot.complete !== true || !Array.isArray(snapshot.connections) || snapshot.connections.length) throw Error('professional_snapshot_invalid')
   const prepared = prepareProfessionalSnapshot(Buffer.from(JSON.stringify(snapshot.profiles)))
   if (snapshot.revision !== prepared.revision) throw Error('professional_snapshot_invalid')
   return prepared

@@ -32,7 +32,7 @@ test('revocation invalidates kept index and removes the professional profile',as
  const before=await read();assert.equal(before.profiles.length,1);publication=null;now=11;const after=await read();assert.equal(after.profiles.length,0);assert.notEqual(before.revision,after.revision)
 })
 test('malformed or relationship-bearing source fails instead of exposing it',async()=>{
- for(const publication of [{...prepare([person('bad')]),connections:[{fromId:'private-list',toId:'person'}]},{...prepare([person('bad')]),revision:'unverified'}]){
+ for(const publication of [{...prepare([person('bad')]),connections:[{fromId:'private-list',toId:'person'}]},{...prepare([person('bad')]),revision:'unverified'},{...prepare([person('bad')]),privateList:'never public'}]){
   const read=createMemberPublicIndex({readLegacy:async()=>legacy,discover:async()=>[],professionalProfiles:true,publicPeople:{read:async dataset=>dataset===PROFESSIONAL_PEOPLE_DATASET?publication:null}})
   await assert.rejects(read(),/professional_snapshot_invalid/)
  }
