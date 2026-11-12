@@ -69,6 +69,7 @@ export function createCommunityIntakeClient({identityForOwner,secret,origin='htt
       if(r.status===409) {
         let code
         try { code=(await r.json())?.error } catch { /* Keep the fixed conflict fallback for non-JSON errors. */ }
+        if(code==='entry_visibility_conflict')throw new IntakeError('Review this entry’s visibility in Social before editing it through Unlinked. Open My asks and offers to find its Social link.')
         if(code==='entry_has_children')throw new IntakeError('This entry has attached content. Manage its audience and attached content in Social before changing its sharing here.')
         throw new IntakeError('This entry changed. Reload it before saving again.')
       }
