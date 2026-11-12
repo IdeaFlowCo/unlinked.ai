@@ -8,16 +8,16 @@ class Element {
   append(el) { this.children.push(el) } focus() { this.focused=true }
   addEventListener(k,fn) { this.listeners[k]=fn } querySelector() { return null }
 }
-function fixture({pages, saved, initial=['a']}) {
+function fixture({pages, saved, initial=['a'], view}) {
   const rows=new Element(), link=new Element(), status=new Element(), root=new Element(), empty=new Element();
-  rows.children=initial.map(id=>new Element(id)); root.dataset.privateList='list1'; link.attrs.href='/lists/private/list1?after=one';
+  rows.children=initial.map(id=>new Element(id)); root.dataset.privateList='list1'; if(view)root.dataset.listView=view; link.attrs.href='/lists/private/list1?after=one'+(view?'&view='+view:'');
   root.querySelector=selector=>({'[data-list-members]':rows,'[data-load-members]':link,'[data-member-status]':status,'[data-members-empty]':empty})[selector];
   const events={}, requests=[], win={location:new URL('https://example.test/lists/private/list1'),scrollY:42,
     document:{querySelector:()=>root,importNode:el=>new Element(el.dataset.memberId)},
     history:{state:saved?{privateList:saved}:null,replaceState(value){this.state=value}},
     addEventListener:(k,fn)=>events[k]=fn, requestAnimationFrame:fn=>fn(),scrollTo:(x,y)=>{win.restoredY=y},
     async fetch(url){requests.push(url);const page=pages.shift();if(page instanceof Error)throw page;return {ok:true,redirected:false,url,text:async()=>page}},
-    DOMParser:class {parseFromString(page){const batch=new Element();batch.children=page.ids.map(id=>new Element(id));const more=new Element();more.attrs.href=page.next;return {querySelector:()=>({dataset:{privateList:page.list||'list1'},querySelector:selector=>selector==='[data-list-members]'?batch:page.next?more:null})}}}}
+    DOMParser:class {parseFromString(page){const batch=new Element();batch.children=page.ids.map(id=>new Element(id));const more=new Element();more.attrs.href=page.next;return {querySelector:()=>({dataset:{privateList:page.list||'list1', listView:page.view},querySelector:selector=>selector==='[data-list-members]'?batch:page.next?more:null})}}}}
   enhancePrivateList(win);
   const click=()=>link.listeners.click({button:0,preventDefault(){}});
   return {win,rows,link,status,requests,click,events,empty};
@@ -45,4 +45,10 @@ test('Back restoration re-fetches authorized pages without persisting private me
 test('empty filtered page can continue and oversized pages never append',async()=>{
   const f=fixture({initial:[],pages:[{ids:[],next:'/lists/private/list1?after=two'},{ids:['b']}]});f.click();await settle();f.click();await settle();assert.equal(f.rows.children.length,1);assert.equal(f.empty.hasAttribute('hidden'),true);
   const bad=fixture({pages:[{ids:Array.from({length:51},(_,i)=>String(i))}]});bad.click();await settle();assert.equal(bad.rows.children.length,1);
+});
+
+test('table paging accepts only the same presentation and rejects a list response',async()=>{
+  const good=fixture({view:'table',pages:[{ids:['b'],view:'table'}]});good.click();await settle();assert.equal(good.rows.children.length,2);
+  const bad=fixture({view:'table',pages:[{ids:['b']}]});bad.click();await settle();
+  assert.equal(bad.rows.children.length,1);assert.match(bad.status.textContent,/could not/);
 });

@@ -757,4 +757,27 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 @media(max-width:370px){.unlinked-onboarding nav{font-size:13px}.unlinked-onboarding nav .nav-ico{width:34px}}
 
 .network-facets{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0}.network-facets label{font-size:13px;font-weight:600}.network-facets input,.network-facets select{display:block;width:100%;font:inherit;padding:9px;border:1px solid var(--line,#dde1e9);border-radius:6px;background:var(--bg,#f7f8fa);color:inherit;box-sizing:border-box}.network-advanced{margin-top:12px}.network-advanced summary{cursor:pointer;font-weight:600;font-size:14px}.result-select{font-size:12px;display:inline-flex;align-items:center;gap:6px;min-height:36px}.result-select input{width:16px;height:16px}.save-results form{display:flex;align-items:end;gap:12px;flex-wrap:wrap}.save-results label{display:grid;gap:4px}.save-results input{max-width:100%}@media(max-width:600px){.network-facets input,.network-facets select{font-size:16px}}
+
+/* Private collections: identity-led rows, with the app's existing tokens. */
+.unlinked-onboarding .private-list-page .hq{font-size:24px;line-height:1.25;margin-bottom:12px}
+.unlinked-onboarding .private-list-page .list-description{font-size:14px;line-height:1.6;max-width:80ch;white-space:pre-wrap;overflow-wrap:anywhere}
+.unlinked-onboarding .list-view-switch{display:flex;gap:4px;margin:16px 0;padding:0;border:0;justify-content:flex-start}
+.unlinked-onboarding .list-view-switch a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;border:1px solid var(--line2);border-radius:6px;font-size:14px;color:var(--fg);text-decoration:none}
+.unlinked-onboarding .list-view-switch a[aria-current]{background:var(--tint);border-color:var(--brand);color:var(--brand);font-weight:600}
+.unlinked-onboarding .private-members article{padding:12px 0;border-bottom:1px solid var(--line)}
+.unlinked-onboarding .private-members article:last-child{border-bottom:0}
+.unlinked-onboarding .private-members h2{font-size:15px;line-height:1.5;margin:0 0 4px;font-weight:600}
+.unlinked-onboarding .list-context{font-size:14px;line-height:1.5;overflow-wrap:anywhere;min-width:0}
+.unlinked-onboarding .list-context summary{cursor:pointer;min-height:44px;padding:10px 0;color:var(--muted)}
+.unlinked-onboarding .list-context summary span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.unlinked-onboarding .list-context[open] summary span{-webkit-line-clamp:1}
+.unlinked-onboarding .list-context p{white-space:pre-wrap;margin:8px 0;max-width:80ch}
+.unlinked-onboarding .private-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r);margin-top:16px}
+.unlinked-onboarding .private-members-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:14px}
+.unlinked-onboarding .private-members-table th,.unlinked-onboarding .private-members-table td{text-align:left;vertical-align:top;padding:8px 16px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.unlinked-onboarding .private-members-table thead th{position:sticky;top:0;background:var(--page);font-size:12px;color:var(--muted);font-weight:600;height:40px}
+.unlinked-onboarding .private-members-table th:first-child{width:30%}
+.unlinked-onboarding .private-members-table tbody th{font-weight:600;line-height:1.5;padding-top:18px}
+.unlinked-onboarding .private-list-page a:focus-visible,.unlinked-onboarding .private-list-page summary:focus-visible,.unlinked-onboarding .private-table-wrap:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+@media(max-width:767px){.unlinked-onboarding .private-members-table th,.unlinked-onboarding .private-members-table td{padding-left:10px;padding-right:10px}.unlinked-onboarding .private-members-table th:first-child{width:36%}}
 `

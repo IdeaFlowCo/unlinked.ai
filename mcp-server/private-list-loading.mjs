@@ -9,7 +9,7 @@ export function enhancePrivateList(win = window) {
   let busy = false, pages = [], next = link.getAttribute('href');
   const seen = new Set([...rows.children].map(el => el.dataset.memberId));
   const visited = new Set([win.location.href]);
-  const safeUrl = value => { const url = new URL(value, win.location.href); if (url.origin !== win.location.origin || url.pathname !== listPath || [...url.searchParams.keys()].some(key => key !== 'after')) throw Error(); return url.href; };
+  const safeUrl = value => { const url = new URL(value, win.location.href); if (url.origin !== win.location.origin || url.pathname !== listPath || (url.searchParams.get('view') || 'list') !== (root.dataset.listView || 'list') || [...url.searchParams.keys()].some(key => !['after', 'view'].includes(key))) throw Error(); return url.href; };
   const save = () => { try { win.history.replaceState({ ...win.history.state, privateList: { path: listPath, pages, scroll: win.scrollY } }, ''); } catch {} };
   async function load(restore = false) {
     if (busy || !next) return false;
@@ -21,7 +21,7 @@ export function enhancePrivateList(win = window) {
       if (!response.ok || response.redirected || safeUrl(response.url) !== target) throw Error();
       const page = new win.DOMParser().parseFromString(await response.text(), 'text/html');
       const incoming = page.querySelector('[data-private-list]');
-      if (!incoming || incoming.dataset.privateList !== root.dataset.privateList) throw Error();
+      if (!incoming || incoming.dataset.privateList !== root.dataset.privateList || incoming.dataset.listView !== root.dataset.listView) throw Error();
       const batch = incoming.querySelector('[data-list-members]');
       if (!batch) throw Error();
       const candidates = [...batch.children];
