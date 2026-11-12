@@ -104,22 +104,28 @@ export function linkedinIdentityMergesAsync(input) { return runAsync(linkedinIde
 function* linkedinIdentityMergesSteps({ profiles, members = [], absorbers = members, decisions = [], refFor, prefer = () => null }) {
   const tick = ticker(512)
   const memberSet = new Set(members), absorbing = new Set(absorbers)
-  const named = new Set(), mergedAway = new Set(), removed = new Set()
+  const known = new Set(profiles.map(profile => profile.id))
+  const named = new Set(), mergedAway = new Set(), removed = new Set(), survivorOf = new Map()
   for (const decision of decisions) {
     if (typeof decision?.profileId !== 'string') continue
     named.add(decision.profileId)
-    if (decision.kind === 'merge') mergedAway.add(decision.profileId)
+    if (decision.kind === 'merge' && known.has(decision.profileId) && known.has(decision.survivorId) && !memberSet.has(decision.profileId)) {
+      mergedAway.add(decision.profileId)
+      survivorOf.set(decision.profileId, decision.survivorId)
+    }
     if (decision.kind === 'remove') removed.add(decision.profileId)
   }
   const candidates = profiles.filter(profile => !mergedAway.has(profile.id))
   const parent = new Map(candidates.map(profile => [profile.id, profile.id])), owners = new Map()
   const root = id => { let value = id; while (parent.get(value) !== value) value = parent.get(value); while (parent.get(id) !== id) { const next = parent.get(id); parent.set(id, value); id = next } return value }
-  for (const profile of candidates) {
+  for (const profile of profiles) {
     if (tick()) yield
+    const id = survivorOf.get(profile.id) ?? profile.id
+    if (!parent.has(id)) continue
     const value = refFor(profile), refs = Array.isArray(value) ? value : [value]
     for (const ref of new Set(refs.filter(Boolean))) {
-      if (!owners.has(ref)) { owners.set(ref, profile.id); continue }
-      const a = root(owners.get(ref)), b = root(profile.id)
+      if (!owners.has(ref)) { owners.set(ref, id); continue }
+      const a = root(owners.get(ref)), b = root(id)
       if (a !== b) parent.set(b, a)
     }
   }
@@ -130,7 +136,7 @@ function* linkedinIdentityMergesSteps({ profiles, members = [], absorbers = memb
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(profile.id)
   }
-  const merges = [], survivorFor = new Map()
+  const merges = [], survivorFor = new Map(), mergeTargets = new Set(survivorOf.values())
   const fold = (survivorId, ids, extra = {}) => { for (const id of ids) { merges.push({ id: `same-linkedin:${id}`, kind: 'merge', profileId: id, survivorId, ...extra }); survivorFor.set(id, survivorId) } }
   for (const ids of groups.values()) {
     if (ids.length < 2) continue
@@ -142,13 +148,27 @@ function* linkedinIdentityMergesSteps({ profiles, members = [], absorbers = memb
       if (movable.length) fold(membersHere[0], movable, { fill: false })
       continue
     }
-    // Imported copies only: a legacy profile already absorbs its copies by address.
-    if (!ids.every(id => id.startsWith('public-'))) continue
+    const professional = id => /^professional-[a-f0-9]{64}$/.test(id)
+    const copy = id => id.startsWith('public-') || professional(id)
+    const hasProfessional = ids.some(professional)
+    if (!ids.every(copy) && !hasProfessional) continue
     const movable = ids.filter(id => !named.has(id)), removedHere = ids.filter(id => removed.has(id)).sort()
     if (removedHere.length) { if (movable.length) fold(removedHere[0], movable); continue }
+    const namedHere = ids.filter(id => named.has(id))
+    const targetsHere = ids.filter(id => mergeTargets.has(id))
+    const protectedHere = namedHere.length ? namedHere : targetsHere
+    const anchors = protectedHere.length ? protectedHere : ids.filter(id => !copy(id))
+    if (anchors.length && hasProfessional) {
+      const eligible = protectedHere.length ? anchors : movable
+      const preferred = prefer(eligible)
+      const survivorId = eligible.includes(preferred) ? preferred : [...anchors].sort()[0]
+      fold(survivorId, movable.filter(id => id !== survivorId))
+      continue
+    }
     if (movable.length < ids.length || movable.length < 2) continue
     const preferred = prefer(movable)
-    const survivorId = movable.includes(preferred) ? preferred : [...movable].sort()[0]
+    const existing = movable.filter(id => !professional(id))
+    const survivorId = movable.includes(preferred) ? preferred : (existing.length ? existing : [...movable]).sort()[0]
     fold(survivorId, movable.filter(id => id !== survivorId))
   }
   const keepOwn = new Set(merges.filter(value => value.fill === false).map(value => value.survivorId))

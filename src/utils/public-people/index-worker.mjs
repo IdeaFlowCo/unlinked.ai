@@ -1,5 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads'
 import { reportIndexError } from './error-report.mjs'
+import { indexFailureReason } from './failure-reasons.mjs'
 import { getHeapStatistics } from 'node:v8'
 import { createPublicPeopleReader } from './reader.mjs'
 
@@ -44,7 +45,7 @@ const readerFor = (entry, pageSize, limits) => {
 // reason 'exception' plus one fixed stderr line (error-report.mjs).
 const typed = error => Number.isSafeInteger(error?.status) && typeof error?.code === 'string'
 const errorOf = error => typed(error)
-  ? { status: error.status, code: error.code }
+  ? { status: error.status, code: error.code, ...(indexFailureReason(error.reason) ? { reason: error.reason } : {}) }
   : { status: 503, code: 'public_people_unavailable', reason: 'exception' }
 const report = (message, error) => {
   if (typed(error)) return

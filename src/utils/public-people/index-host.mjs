@@ -1,4 +1,5 @@
 import { Worker, isMainThread } from 'node:worker_threads'
+import { indexFailureReason } from './failure-reasons.mjs'
 
 // Main-thread side of the public People index worker (docs/public-people-reader.md).
 //
@@ -35,7 +36,6 @@ export class PublicIndexHostError extends Error {
   constructor(status, code, stale = false, reason) { super(code); this.name = 'PublicIndexHostError'; this.status = status; this.code = code; this.stale = stale; if (reason) this.reason = reason }
 }
 // `reason` is a fixed value for diagnostics: worker_timeout, worker_unavailable or the worker's own.
-const REASONS = new Set(['exception'])
 const unavailable = (reason = 'worker_unavailable') => new PublicIndexHostError(503, 'public_people_unavailable', false, reason)
 
 let active = null
@@ -86,7 +86,7 @@ export function createPublicIndexHost({ workerUrl = new URL('./index-worker.mjs'
       const entry = pending.get(message?.id)
       if (!entry) return
       pending.delete(message.id); clearTimeout(entry.timer); settle()
-      if (message.error) entry.reject(new PublicIndexHostError(message.error.status ?? 503, message.error.code ?? 'public_people_unavailable', message.error.stale === true, REASONS.has(message.error.reason) ? message.error.reason : (message.error.stale === true ? 'stale' : 'worker_refused')))
+      if (message.error) entry.reject(new PublicIndexHostError(message.error.status ?? 503, message.error.code ?? 'public_people_unavailable', message.error.stale === true, indexFailureReason(message.error.reason) ?? (message.error.stale === true ? 'stale' : 'worker_refused')))
       else entry.resolve(message.result)
     })
     const lost = () => {

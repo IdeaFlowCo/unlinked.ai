@@ -12,6 +12,7 @@ import { listedFor, unlistedProfiles, UNLISTED_GROUP } from './unlisted.mjs'
 import { connectionPolicies, createConnectionVisibility } from './connection-privacy.mjs'
 import { activePublicIndexHost } from './index-host.mjs'
 import { reportIndexError } from './error-report.mjs'
+import { indexFailureReason } from './failure-reasons.mjs'
 
 export class PublicPeopleReaderError extends Error {
   // `reason` (optional) is a fixed diagnostic value, e.g. build_timeout, aborted, stale, worker_timeout.
@@ -280,7 +281,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // validation (typed refusals without a reason). Never the error text.
       // Always the generic 503: a provider's own status/code never passes through.
       if (error instanceof PublicPeopleReaderError) throw new PublicPeopleReaderError(503, 'public_people_unavailable', ['build_timeout', 'aborted'].includes(error.reason) ? error.reason : 'snapshot_invalid')
-      if (typeof error?.reason === 'string') throw new PublicPeopleReaderError(503, 'public_people_unavailable', error.reason === 'worker_timeout' ? 'install_timeout' : error.reason)
+      if (indexFailureReason(error?.reason)) throw new PublicPeopleReaderError(503, 'public_people_unavailable', error.reason === 'worker_timeout' ? 'install_timeout' : error.reason)
       reportIndexError('reader', 'build', error)
       throw new PublicPeopleReaderError(503, 'public_people_unavailable', 'reader_exception')
     } finally {
@@ -369,7 +370,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     if (error instanceof PublicPeopleReaderError) return error
     const typedFailure = Number.isSafeInteger(error?.status)
     if (!typedFailure) reportIndexError('reader', 'any', error)
-    const reason = typeof error?.reason === 'string' ? error.reason : error?.stale ? 'stale' : typedFailure ? undefined : 'reader_exception'
+    const reason = indexFailureReason(error?.reason) ?? (error?.stale ? 'stale' : typedFailure ? undefined : 'reader_exception')
     return new PublicPeopleReaderError(error?.status === 400 ? 400 : 503, error?.status === 400 ? 'public_people_input_invalid' : 'public_people_unavailable', reason)
   }
   // Run `method` in the index worker against the snapshot descriptor `data`.
