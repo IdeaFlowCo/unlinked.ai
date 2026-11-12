@@ -11,6 +11,19 @@ const fileScript=`document.querySelector('[data-context-file]')?.addEventListene
 const shell=(chrome,title,body)=>({...renderPageShell(title,style+`<section class="community-intake"><p class="small"><a href="/groups">Communities</a> · <a href="/asks">My asks and offers</a> · <a href="/profile/context">Add more about me</a></p>${body}</section>`,{...chrome,active:'lists'}),script:fileScript})
 const audiences=group=>[['only_me','Only me'],...(group?[['group',`Members of ${group.name}`]]:[]),['public','Public on my Ideaflow profile']]
 const requestForm=(path,csrf,body)=>`<form method="post" action="${h(path)}">${field('csrf',csrf)}${body}</form>`
+function pagination(params,allowed) {
+ if([...params.keys()].some(key=>!allowed||!['cursor','limit'].includes(key)))throw new IntakeError('This page does not accept those query parameters.')
+ const page={limit:100}
+ for(const key of ['cursor','limit']) {
+  const values=params.getAll(key)
+  if(!values.length)continue
+  const value=Number(values[0])
+  if(values.length!==1||!/^[1-9]\d*$/.test(values[0])||!Number.isSafeInteger(value)||(key==='limit'&&value>500))throw new IntakeError('Use a positive cursor and a page size from 1 to 500.')
+  page[key]=value
+ }
+ return page
+}
+const pageLinks=(path,page,nextCursor)=>`<nav aria-label="Entry pages">${page.cursor?`<a href="${h(path)}?limit=${page.limit}">Newest entries</a> `:''}${Number.isSafeInteger(nextCursor)&&nextCursor>0?`<a href="${h(path)}?cursor=${nextCursor}&amp;limit=${page.limit}" rel="next">Older entries →</a>`:''}</nav>`
 function entryFields(e,i,group,selected=true){return `<article class="review-entry"><label><input type="checkbox" name="selected" value="${i}"${selected?' checked':''}> Save this entry</label><label>Entry<input name="title-${i}" value="${h(e.title)}" maxlength="300" required></label><label>Details (optional)<textarea name="body-${i}" maxlength="1000">${h(e.body)}</textarea></label><div class="review-controls"><label>Type<select name="kind-${i}">${options(typeOptions,e.kind)}</select></label><label>Who can see it?<select name="audience-${i}">${options(audiences(group),e.audience||'only_me')}</select></label></div>${field('source-'+i,e.source)}</article>`}
 function review(chrome,rows,path,group,requestId=randomUUID(),error='') {
  return shell(chrome,'Review your profile draft',`<h1 class="hq">Choose what to save and share.</h1><p class="lead">These are suggestions. Edit them, leave out anything sensitive, and choose an audience for each entry.</p>${error?`<p role="alert" class="notice">${h(error)}</p>`:''}${requestForm(path+'/save',chrome.csrf,field('requestId',requestId)+field('count',rows.length)+rows.map((e,i)=>entryFields(e,i,group,e.selected)).join('')+'<p class="small">Saving keeps these canonical entries in your Ideaflow profile and lets Unlinked read and update these entries. A Social profile is created if needed. Existing private Social content is not imported.</p><button type="submit">Save selected entries</button>')}<p><a href="${h(path)}">Back without saving</a></p>`)
@@ -24,27 +37,29 @@ export function createCommunityIntakeBrowser({client,groups,body}) {
   const match=COMMUNITY_GROUP_PATH.exec(url.pathname),groupId=match?.[1],suffix=match?.[3]||url.pathname.split('/').pop(),path=groupId?`/groups/${groupId}/welcome`:'/profile/context'
   const chrome={accountLabel:session?.accountLabel,displayName:session?.displayName,csrf:session?.csrf},actor=session?.owner
   if(!actor)return render(shell(chrome,'Sign in to continue',`<h1>Sign in to continue</h1><a class="button" href="/login?next=${encodeURIComponent(url.pathname)}">Continue with Ideaflow</a>`),401)
-  if(url.search)return render(shell(chrome,'Page unavailable','<p>This page does not accept query parameters.</p>'),400)
   let rows=null,requestId=null,group=null
   try {
+    const page=pagination(url.searchParams,request.method==='GET'&&(url.pathname==='/asks'||(match?.[2]==='community'&&!match[3])))
     if(groupId)group=await groups.detail(actor,groupId)
     if(!client)return render(shell(chrome,'Profile connection unavailable','<h1>Profile connection unavailable</h1><p>You can still use your groups. Please try adding your introduction again later.</p>'),request.method==='GET'?200:503)
     if(request.method==='GET') {
       if(match?.[2]==='community') {
         const roster=await groups.roster(actor,groupId),signature=JSON.stringify(roster)
-        const entries=await client.group(actor,groupId,roster)
+        const result=await client.group(actor,groupId,roster,page)
         if(JSON.stringify(await groups.roster(actor,groupId))!==signature)throw new IntakeError('Group membership changed. Reload this page.')
-        const open=entries.filter(e=>e.status!=='done'&&e.status!=='paused')
+        const open=result.entries.filter(e=>e.status!=='done'&&e.status!=='paused')
         const list=kind=>open.filter(e=>e.kind===kind).map(e=>`<article class="review-entry"><h3>${h(e.title)}</h3><p class="small">${h(e.name)}</p>${e.body?`<p>${h(e.body)}</p>`:''}</article>`).join('')||'<p class="small">Nothing shared here yet.</p>'
         const people=roster.map(r=>`<tr><td>${r.profileId?`<a href="${profilePath(r.profileId)}">${h(r.name)}</a>`:h(r.name)}</td><td>${h(r.role)}</td></tr>`).join('')
-        return render(shell(chrome,group.name+' · Community',`<h1 class="hq">${h(group.name)}</h1><p class="lead">People, asks and offers shared with this group.</p><p class="actions"><a class="button" href="${path}">Add an ask or offer</a><a href="/groups/${groupId}">Group settings and lists</a></p><section class="card"><h2>Looking for help</h2>${list('ask')}</section><section class="card"><h2>Can help with</h2>${list('offer')}</section><details class="card"><summary>Ideas and introductions</summary>${list('idea')}${list('note')}</details><section class="card"><h2>People</h2><table><thead><tr><th>Name</th><th>Role</th></tr></thead><tbody>${people}</tbody></table></section>`))
+        return render(shell(chrome,group.name+' · Community',`<h1 class="hq">${h(group.name)}</h1><p class="lead">People, asks and offers shared with this group.</p><p class="actions"><a class="button" href="${path}">Add an ask or offer</a><a href="/groups/${groupId}">Group settings and lists</a></p><section class="card"><h2>Looking for help</h2>${list('ask')}</section><section class="card"><h2>Can help with</h2>${list('offer')}</section><details class="card"><summary>Ideas and introductions</summary>${list('idea')}${list('note')}</details>${pageLinks(url.pathname,page,result.nextCursor)}<section class="card"><h2>People</h2><table><thead><tr><th>Name</th><th>Role</th></tr></thead><tbody>${people}</tbody></table></section>`))
       }
       if(url.pathname==='/asks') {
-        const mine=await client.list(actor),directory=await groups.directory(actor)
-        return render(shell(chrome,'My asks and offers',`<h1 class="hq">My asks and offers</h1><p class="lead">Your saved community entries. Update their status or change who can see them.</p><p><a class="button" href="/profile/context">Add an entry</a>${mine.profileUrl?` · <a href="${h(mine.profileUrl)}">My full Ideaflow profile</a>`:''}</p>${mine.entries.map(e=>`<article class="card"><h2>${h(e.title)}</h2><p class="small">${h(e.kind)} · ${h(e.status)} · ${h(e.audience==='group'?directory.groups.find(g=>g.id===e.groupId)?.name||'Former group':e.audience==='public'?'Public':'Only me')}</p><p>${h(e.body)}</p><a href="/asks/${e.id}">Edit entry</a></article>`).join('')||'<p>No saved entries yet.</p>'}<p><a href="https://neo4j.testingsuperconnector.network" rel="noopener">Open Superconnector →</a> Use your Ideaflow ID; joining a community here does not automatically join a Superconnector network.</p>`))
+        const mine=await client.list(actor,page),directory=await groups.directory(actor)
+        return render(shell(chrome,'My asks and offers',`<h1 class="hq">My asks and offers</h1><p class="lead">Your saved community entries. Update their status or change who can see them.</p><p><a class="button" href="/profile/context">Add an entry</a>${mine.profileUrl?` · <a href="${h(mine.profileUrl)}">My full Ideaflow profile</a>`:''}</p>${mine.entries.map(e=>`<article class="card"><h2>${h(e.title)}</h2><p class="small">${h(e.kind)} · ${h(e.status)} · ${h(e.audience==='group'?directory.groups.find(g=>g.id===e.groupId)?.name||'Former group':e.audience==='public'?'Public':'Only me')}</p><p>${h(e.body)}</p><a href="/asks/${e.id}">Edit entry</a></article>`).join('')||'<p>No saved entries yet.</p>'}${pageLinks(url.pathname,page,mine.nextCursor)}<p><a href="https://neo4j.testingsuperconnector.network" rel="noopener">Open Superconnector →</a> Use your Ideaflow ID; joining a community here does not automatically join a Superconnector network.</p>`))
       }
       const edit=/^\/asks\/(\d+)$/.exec(url.pathname)
-      if(edit){const mine=await client.list(actor),e=mine.entries.find(e=>e.id===Number(edit[1]));if(!e)throw new IntakeError('This entry is unavailable.')
+      if(edit){const id=Number(edit[1]);if(!Number.isSafeInteger(id)||id<1||id>=Number.MAX_SAFE_INTEGER)throw new IntakeError('This entry is unavailable.')
+        // Social orders by descending id and selects id < cursor; this fetches the exact entry without scanning older pages.
+        const mine=await client.list(actor,{cursor:id+1,limit:1}),e=mine.entries.find(e=>e.id===id);if(!e)throw new IntakeError('This entry is unavailable.')
         const directory=await groups.directory(actor),choices=directory.groups;const target=choices.length||e.audience==='group'?{name:'the selected community'}:null
         const selectedGroup=choices.some(g=>g.id===e.groupId)?e.groupId:''
         const communityOptions=[['','Choose a community'],...choices.map(g=>[g.id,g.name])]
