@@ -31,3 +31,13 @@ test('full long context remains available without making every row a full biogra
  assert.match(renderPrivateList({...props,members:[],nextCursor:null,view:'table'}).content,/This list has no people yet/)
  assert.doesNotMatch(renderPrivateList({error:'Unavailable',view:'table'}).content,/<table/)
 })
+
+test('short context appears once as plain text in both views; only long context needs disclosure', () => {
+ for(const view of ['list','table']) {
+  const page=renderPrivateList({...props,view,members:[{id:'s',name:'Short',description:'A brief professional context.'},{id:'l',name:'Long',description:'Detailed context. '.repeat(50)},{id:'e',name:'Empty'}]})
+  assert.match(page.content, /<p class="list-context-text">A brief professional context\.<\/p>/)
+  assert.equal(page.content.split('A brief professional context.').length-1,1)
+  assert.equal((page.content.match(/<details class="list-context">/g)||[]).length,1)
+  assert.match(page.content, /<span class="small">—<\/span>/)
+ }
+})
