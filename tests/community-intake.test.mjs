@@ -14,7 +14,7 @@ const profiles = ['alice', 'bob', 'carol', 'public-a', 'public-b'].map(id => ({ 
 const recipient = { id: 'bob', name: 'Bob' }
 const secret = 'Private fixture contact and query'
 
-async function browser(t, extra = {}) {
+async function browser(t, extra = {}, groupOptions = {}) {
   const store = createMemoryCollectiveGroupsStore()
   const registered = new Set(['alice', 'bob', 'carol'])
   const savedSearchLists = createMemorySavedSearchLists()
@@ -23,7 +23,7 @@ async function browser(t, extra = {}) {
   const foreign = await savedSearchLists.create(carol, { name: 'Carol private list', queryUrl: '/network', refs: ['public:public-b'] })
   let now = 1000
   const active = actor => registered.has(actor.ownerId) && actor.userId === account(actor.ownerId).userId
-  const collectiveGroups = createCollectiveGroups({ store, now: () => now, active })
+  const collectiveGroups = createCollectiveGroups({ store, now: () => now, active, ...groupOptions })
   let exchanges = 0
   const options = { ...extra, collectiveGroups, savedSearchLists, networkFreshMs: 0,
     privateLists: {
@@ -59,13 +59,13 @@ async function browser(t, extra = {}) {
     const csrf = token(await (await get('/groups', cookie)).text())
     return { cookie, csrf, destination: callback.headers.get('location') }
   }
-  return { get, post, login, saved, foreign, store, expire: () => { now += GROUP_LIMITS.inviteMs },
+  return { get, post, login, saved, foreign, store, groups: collectiveGroups, expire: () => { now += GROUP_LIMITS.inviteMs },
     restart: () => { handler = createPrivateBrowserHandler({ ...options, baseUrl }) },
     exchanges: () => exchanges,
   }
 }
 const token = html => html.match(/name="csrf" value="([^"]+)"/)?.[1]
-import { draftContext, createCommunityIntakeClient } from '../mcp-server/community-intake.mjs'
+import { draftContext, createCommunityIntakeClient, identityKey } from '../mcp-server/community-intake.mjs'
 
 test('bounded local drafts preserve tasks and support quoted Goodreads CSV and assistant JSON',()=>{
  const draft=draftContext('Call accountant\nI need help finding a cofounder\nI can help with Postgres','tasks')
@@ -125,3 +125,139 @@ test('a saved private entry can be shared later only into a current community',a
  assert.equal((await b.post('/asks/7',owner.cookie,{...form,groupId:randomUUID()})).status,400);assert.equal(updates.length,0);
  assert.equal((await b.post('/asks/7',owner.cookie,form)).status,303);assert.equal(updates[0].entry.groupId,id);assert.equal(updates[0].revision,entry.revision);
 });
+
+const decodeForm = value => value.replace(/&(amp|quot|#39|lt|gt);/g, (_, key) => ({ amp: '&', quot: '"', '#39': "'", lt: '<', gt: '>' })[key])
+function editForm(html) {
+ const form=html.match(/<form method="post" action="\/asks\/\d+">([\s\S]*?)<\/form>/)?.[1]
+ assert.ok(form,'entry edit form is present')
+ const fields=new URLSearchParams()
+ for(const [tag] of form.matchAll(/<input\b[^>]*>/g)) {
+  const name=tag.match(/name="([^"]*)"/)?.[1],value=tag.match(/value="([^"]*)"/)?.[1]||''
+  if(name&&(!/type="checkbox"/.test(tag)||/ checked(?:>|\s)/.test(tag)))fields.append(name,decodeForm(value))
+ }
+ for(const [,name,value] of form.matchAll(/<textarea name="([^"]*)"[^>]*>([\s\S]*?)<\/textarea>/g))fields.set(name,decodeForm(value))
+ for(const [,name,content] of form.matchAll(/<select name="([^"]*)">([\s\S]*?)<\/select>/g)) {
+  const choices=[...content.matchAll(/<option value="([^"]*)"([^>]*)>/g)]
+  const choice=choices.find(row=>/\bselected\b/.test(row[2]))||choices[0]
+  fields.set(name,decodeForm(choice[1]))
+ }
+ return fields
+}
+test('editing a former-group entry never submits a replacement community implicitly',async t=>{
+ const updates=[],entry={id:7,title:'Private introduction',body:'Need a mentor',kind:'ask',source:'manual',audience:'group',status:'open',revision:'a'.repeat(64)}
+ const b=await browser(t,{communityIntake:{list:async()=>({entries:[entry]}),update:async(actor,data)=>updates.push(data)}})
+ const owner=await b.login('alice'),organizer=await b.login('bob')
+ const former=await b.groups.create(bob,'Former community')
+ entry.groupId=former.id
+ const invite=await b.groups.invite(bob,former.id,alice,profiles[0])
+ await b.groups.respond(alice,former.id,invite,'accept')
+ const unchanged=editForm(await (await b.get('/asks/7',owner.cookie)).text())
+ assert.equal(unchanged.get('groupId'),former.id)
+ const member=(await b.store.get(former.id)).members[0]
+ assert.equal((await b.post(`/groups/${former.id}/members/${member.id}/remove`,organizer.cookie,{csrf:organizer.csrf})).status,303)
+ const noGroups=editForm(await (await b.get('/asks/7',owner.cookie)).text())
+ assert.equal(noGroups.get('audience-0'),'group')
+ assert.equal((await b.post('/asks/7',owner.cookie,noGroups)).status,400)
+ const current=await b.groups.create(alice,'Current community')
+ const form=editForm(await (await b.get('/asks/7',owner.cookie)).text())
+ assert.equal(form.get('audience-0'),'group')
+ assert.equal(form.get('groupId'),'')
+ form.set('status','done')
+ assert.equal((await b.post('/asks/7',owner.cookie,form)).status,400)
+ assert.equal(updates.length,0)
+ form.set('groupId',former.id)
+ assert.equal((await b.post('/asks/7',owner.cookie,form)).status,400)
+ assert.equal(updates.length,0)
+ form.set('groupId',current.id)
+ assert.equal((await b.post('/asks/7',owner.cookie,form)).status,303)
+ assert.equal(updates[0].entry.groupId,current.id)
+ assert.equal(updates[0].status,'done')
+ form.set('groupId','')
+ form.set('audience-0','only_me')
+ assert.equal((await b.post('/asks/7',owner.cookie,form)).status,303)
+ assert.equal(updates[1].entry.audience,'only_me')
+ assert.equal(updates[1].entry.groupId,undefined)
+})
+test('all intake HTTP pages and error responses retain no-store and noindex',async t=>{
+ const entry={id:7,title:'An ask',body:'',kind:'ask',source:'manual',audience:'only_me',status:'open',revision:'a'.repeat(64)}
+ const b=await browser(t,{communityIntake:{list:async()=>({entries:[entry]}),group:async()=>[]}}),owner=await b.login('alice')
+ const group=await b.groups.create(alice,'Cache fixture')
+ const paths=['/asks','/asks/7','/profile/context',`/groups/${group.id}/welcome`,`/groups/${group.id}/community`]
+ for(const path of paths)for(const cookie of [owner.cookie,undefined]) {
+  const response=await b.get(path,cookie)
+  assert.equal(response.status,cookie?200:401,path)
+  assert.match(response.headers.get('cache-control'),/\bno-store\b/,path)
+  assert.match(response.headers.get('x-robots-tag'),/noindex/,path)
+  await response.text()
+ }
+ for(const path of ['/asks/999','/profile/context?unexpected=1']) {
+  const response=await b.get(path,owner.cookie)
+  assert.equal(response.status,400)
+  assert.match(response.headers.get('cache-control'),/\bno-store\b/)
+  await response.text()
+ }
+ const preview=await b.post('/profile/context/preview',owner.cookie,{csrf:owner.csrf,source:'quick',ask:'Need a mentor'})
+ assert.equal(preview.status,200)
+ assert.match(preview.headers.get('cache-control'),/\bno-store\b/)
+ await preview.text()
+})
+const tick=()=>new Promise(resolve=>setImmediate(resolve))
+test('500-seat rosters bound live checks and preserve order and final membership',async()=>{
+ const store=createMemoryCollectiveGroupsStore(),id=randomUUID()
+ const members=Array.from({length:499},(_,i)=>({id:randomUUID(),actor:account('member-'+i),name:'Member '+i,profileId:null}))
+ await store.create({id,name:'Large community',organizer:alice,organizerProfileId:null,members,invites:[],shares:[]})
+ let inFlight=0,peak=0,unavailable=false
+ const check=async value=>{inFlight++;peak=Math.max(peak,inFlight);try{await tick();await tick();return value}finally{inFlight--}}
+ const groups=createCollectiveGroups({store,active:async actor=>{
+  if(unavailable&&actor.ownerId==='member-0')throw Error('identity unavailable')
+  if(actor.ownerId==='member-30')await store.change(id,group=>({...group,members:group.members.filter(row=>row.actor.ownerId!=='member-30')}))
+  return check(actor.ownerId!=='member-10')
+ },blocked:async(a,b)=>check(b.ownerId==='member-20')})
+ const roster=await groups.roster(alice,id)
+ assert.ok(peak>1)
+ assert.ok(peak<=8)
+ assert.deepEqual(roster.map(row=>row.actor.ownerId),['alice',...members.map(row=>row.actor.ownerId).filter(id=>!['member-10','member-20','member-30'].includes(id))])
+ unavailable=true
+ await assert.rejects(groups.roster(alice,id),/identity unavailable/)
+})
+test('Social group identity resolution is bounded, ordered, filtered and fails closed',async()=>{
+ const roster=Array.from({length:500},(_,i)=>({actor:account('member-'+i)})),calls=[]
+ let inFlight=0,peak=0,unavailable=false
+ const identityForOwner=async owner=>{
+  inFlight++;peak=Math.max(peak,inFlight)
+  try {
+   await tick()
+   if(unavailable&&owner.ownerId==='member-0')throw Error('identity unavailable')
+   if(owner.ownerId==='member-10')return null
+   return {issuer:owner.ownerId==='member-20'?'https://untrusted.invalid':'https://id.ideaflow.app/api/auth',subject:owner.userId}
+  }finally{inFlight--}
+ }
+ const identity=subject=>({issuer:'https://id.ideaflow.app/api/auth',subject})
+ const client=createCommunityIntakeClient({secret:'fixture-secret-'.repeat(4),identityForOwner,fetchImpl:async(url,opts)=>{
+  calls.push(JSON.parse(opts.body))
+  return {ok:true,json:async()=>({entries:[{ownerKey:identityKey(identity('member-0-user')),title:'Visible ask'},{ownerKey:identityKey(identity('member-10-user')),title:'Inactive'},{ownerKey:identityKey(identity('member-20-user')),title:'Unverified'},{ownerKey:identityKey(identity('outsider')),title:'Outsider'}]})}
+ }})
+ assert.deepEqual(await client.group(alice,randomUUID(),roster),[{title:'Visible ask'}])
+ assert.ok(peak>1)
+ assert.ok(peak<=8)
+ assert.deepEqual(calls[0].members,roster.filter(row=>!['member-10','member-20'].includes(row.actor.ownerId)).map(row=>identity(row.actor.userId)))
+ unavailable=true
+ await assert.rejects(client.group(alice,randomUUID(),roster),/identity unavailable/)
+ assert.equal(calls.length,1)
+})
+test('community responses revalidate live blocks and membership after Social returns',async t=>{
+ let blocked=false,onRead=async()=>{}
+ const b=await browser(t,{communityIntake:{group:async()=>{await onRead();return [{kind:'ask',title:'Hidden fixture ask',status:'open'}]}}},{blocked:async(a,b)=>blocked&&[a.ownerId,b.ownerId].includes('bob')})
+ const owner=await b.login('alice'),member=await b.login('bob'),group=await b.groups.create(alice,'Revalidation fixture')
+ const invite=await b.groups.invite(alice,group.id,bob,profiles[1])
+ await b.groups.respond(bob,group.id,invite,'accept')
+ onRead=async()=>{blocked=true}
+ const changedBlock=await b.get(`/groups/${group.id}/community`,owner.cookie)
+ assert.equal(changedBlock.status,400)
+ assert.doesNotMatch(await changedBlock.text(),/Hidden fixture ask/)
+ blocked=false
+ onRead=async()=>{const seat=(await b.store.get(group.id)).members[0];await b.groups.revoke(alice,group.id,'member',seat.id)}
+ const removedViewer=await b.get(`/groups/${group.id}/community`,member.cookie)
+ assert.equal(removedViewer.status,400)
+ assert.doesNotMatch(await removedViewer.text(),/Hidden fixture ask/)
+})

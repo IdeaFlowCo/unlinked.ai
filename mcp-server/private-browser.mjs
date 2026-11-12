@@ -1214,7 +1214,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     if (iosApp(request)) iosResponses.set(response, iosAppVersion(request.headers['user-agent']) ?? '')
     const navigationPath = new URL(request.url, base).pathname
     const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/') && !navigationPath.startsWith('/messages/person/')
-    response.setHeader('Cache-Control', navigation && !isGroupPath(navigationPath) ? 'private, no-cache' : 'no-store')
+    response.setHeader('Cache-Control', navigation && !isGroupPath(navigationPath) && !isCommunityPath(navigationPath) ? 'private, no-cache' : 'no-store')
     if (navigation) response.setHeader('Vary', 'Cookie')
     response.setHeader('Referrer-Policy', 'strict-origin')
     response.setHeader('X-Content-Type-Options', 'nosniff')
