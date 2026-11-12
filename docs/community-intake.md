@@ -8,6 +8,8 @@ Social stores the canonical nodes and their owner under the exact verified Ideaf
 
 Unlinked owns membership and blocking. Before showing a group projection it obtains live authorized members, resolves their persisted identities, requests only exact-group placements, and verifies the roster again. Live member/block checks and persisted identity resolution run with at most eight concurrent operations per pass and retain roster order; lookup failures deny the projection. Removed members and blocked pairs are excluded. No membership is copied to Social or Superconnector. Joining Unlinked does not join a Superconnector network; the handoff uses the same Ideaflow ID.
 
+`/asks` and `/groups/:id/community` show one bounded Social page at a time, with Older entries and Newest entries links. They accept only a positive integer `cursor` and `limit` (default 100, maximum 500), with entries ordered by descending id below the cursor. Group pages repeat live roster validation on every request, even when filtering leaves a page empty. Editing a saved entry uses its id to fetch the exact position in the owner's paginated entries, retaining revision checks for saves.
+
 ## Configuration and release
 
 Set `UNLINKED_SOCIAL_INTAKE_SECRET` to the dedicated value configured as Social's `IDEANETWORK_UNLINKED_SECRET` (at least 32 characters), using protected service environment files. `UNLINKED_SOCIAL_INTAKE_ORIGIN` defaults to `https://social.ideaflow.app`. Deploy the compatible Social partner routes before enabling Unlinked. No provider/model credential is required. When disabled, group signup still works and profile pages explain the unavailable connection.

@@ -69,18 +69,18 @@ export function createCommunityIntakeClient({identityForOwner,secret,origin='htt
     return r.json()
   }
   return {
-    list:owner=>call(owner,'entries'),
+    list:(owner,page={})=>call(owner,'entries',page),
     save:(owner,data)=>call(owner,'intake',data),
     update:(owner,data)=>call(owner,'entry',data),
-    async group(owner,groupId,roster){
+    async group(owner,groupId,roster,page={}){
       const members=(await concurrentMap(roster,async row=>{
         const id=await identityForOwner(row.actor)
         return id?.issuer===issuer&&id.subject?id:null
       })).filter(Boolean)
-      const result=await call(owner,'group',{groupId,members})
+      const result=await call(owner,'group',{...page,groupId,members})
       // Keep opaque identity keys inside this server; expose only roster-bound people and their entries.
       const allowed=new Set(members.map(identityKey))
-      return (result.entries||[]).filter(e=>allowed.has(e.ownerKey)).map(({ownerKey,...entry})=>entry)
+      return {entries:(result.entries||[]).filter(e=>allowed.has(e.ownerKey)).map(({ownerKey,...entry})=>entry),nextCursor:result.nextCursor}
     },
   }
 }
