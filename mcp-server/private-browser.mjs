@@ -2339,7 +2339,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
         // Start reading the public index now; the contact lookup below joins it.
-        const warming = typeof readPublishedSnapshot === 'function' ? readerFor(request).lookup({ ids: [] }).catch(() => null) : null
+        const warming = typeof readPublishedSnapshot === 'function' ? profileStep(response, 'index_wait', () => readerFor(request).lookup({ ids: [] }).catch(() => null)) : null
         try {
           const connections = (await profileStep(response, 'network', () => accountNetwork(session.owner))).assertions.filter(row => row.category === 'connections')
           // One card per person, so the count and the preview never repeat someone.
@@ -2347,7 +2347,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           connectionCount = cards.length
           contacts = cards.slice(0, 10)
         } catch { /* The profile stands on its own while the network is still being read. */ }
-        await profileStep(response, 'index_wait', () => warming)
+        await warming
         // The photo published for this member's public profile, when there is one.
         let mine = null, profileHandleView = null
         if (typeof ownProfileId === 'function') {
