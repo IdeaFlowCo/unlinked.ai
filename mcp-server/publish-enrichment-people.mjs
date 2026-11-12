@@ -41,6 +41,12 @@ export function prepareEnrichmentSnapshot(bytes, dataset = ENRICHMENT_DATASET) {
 
 // A provenance record travels into the private receipt only (never the
 // public dataset): where the rows came from and when they were fetched.
+export function checkStoreValidation(snapshot, validatePublicSnapshot) {
+  if (typeof validatePublicSnapshot !== 'function') throw new Error('enrichment_store_validator_missing')
+  validatePublicSnapshot(snapshot)
+  return true
+}
+
 export function readProvenance(bytes) {
   if (!Buffer.isBuffer(bytes) || bytes.length > 64 * 1024) throw new Error('enrichment_provenance_invalid')
   const value = JSON.parse(bytes.toString('utf8'))
