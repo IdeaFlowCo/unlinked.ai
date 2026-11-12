@@ -240,8 +240,14 @@ export function createScopedImportReader({ readResource, readAsset, grant, maxAs
       }
       return { ids, rows }
     }
-    // Only finished imports are cached: their row set is fixed for the revision.
-    const cacheable = Boolean(rowCache) && resource.payload.status === 'indexed' && Number.isSafeInteger(resource.sourceRevision)
+    // A completed archive with rejected rows is terminal `partial`, not still
+    // publishing. Its accepted observations are just as immutable as `indexed`.
+    // Legacy/gated partial jobs still read live until the publisher explicitly
+    // marks the observation index ready. Manifest/revision and erase checks
+    // below protect both terminal states.
+    const finished = resource.payload.status === 'indexed' || resource.payload.status === 'partial' &&
+      resource.payload.phase === 'private_observation_index_ready' && resource.payload.indexGate === null && resource.payload.indexVersion === 'observation-v1'
+    const cacheable = Boolean(rowCache) && finished && Number.isSafeInteger(resource.sourceRevision)
     const declared = resource.payload.counts?.indexed
     if (Number.isSafeInteger(declared) && declared > maxAssertions) throw new Error(limitError)
     // The manifest fingerprint guards the key even if content ever changed
