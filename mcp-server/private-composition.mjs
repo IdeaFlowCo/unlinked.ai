@@ -567,7 +567,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // LinkedIn-keyed enrichment fills gaps on imported profiles, and profiles
     // sharing one LinkedIn address fold into one page; the copy already holding
     // the person's readable address survives (docs/profile-handles.md).
-    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true,
+    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true, professionalProfiles: true,
       preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list, readConnectionPrivacy: connectionPrivacy ? () => connectionPrivacy.list() : undefined, onMemberPhotos: map => { memberPhotos = map },
       includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       // The live legacy pointer, so a no-change rebuild check never reads the dataset.
