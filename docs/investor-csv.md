@@ -215,6 +215,7 @@ create a share link, and show an unavailable state when the overlay fails. The
 browser adapter has only the two existing private read tools. Import-result pages
 link directly to the resulting list once a `listId` exists. List editing remains
 in OpenChat/the existing agent tools.
+For List/Table controls and context disclosures, see [private list presentation](private-list-presentation.md).
 
 Focused checks: `node --test tests/private-lists.test.mjs
  tests/saved-search-lists.test.mjs tests/private-list-imports.test.mjs` (one line).

@@ -25,7 +25,8 @@ test('full long context remains available without making every row a full biogra
  const text='context '.repeat(100)
  const view=renderPrivateList({...props, members:[{id:'x',name:'Example',description:text}], view:'table'})
  const summary=view.content.match(/<summary>([\s\S]*?)<\/summary>/g).find(x=>x.includes('context'))
- assert.ok(summary.length < 250)
+ const preview=summary.match(/<span class="list-context-preview">([^<]*)<\/span>/)[1]
+ assert.ok(preview.length <= 181)
  assert.ok(view.content.includes('<p>'+text+'</p>'))
  assert.match(renderPrivateList({...props,members:[],nextCursor:null,view:'table'}).content,/This list has no people yet/)
  assert.doesNotMatch(renderPrivateList({error:'Unavailable',view:'table'}).content,/<table/)
