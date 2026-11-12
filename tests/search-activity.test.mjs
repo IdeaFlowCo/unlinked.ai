@@ -17,7 +17,6 @@ import { accountGrantTools } from '../mcp-server/account-grants.mjs'
 const owner = { ownerId: randomUUID(), userId: randomUUID() }
 const grant = { ...owner, grantId: 'test-grant', version: 4, scope: 'owner_network_and_public', tools: accountGrantTools(4, 'owner_network_and_public') }
 const SECRET = 'synthetic-sensitive-never-log', gatewaySecret = 'synthetic-gateway-secret-at-least32chars'
-const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
 async function fixture(t, { complete, service, emit, enabled = true, maxPerMinute = 600, now, authError } = {}) {
   const rows = [], queries = [], searchLog = createSearchLog({ emit: row => queries.push(row) }), diagnostics = createRequestDiagnostics({ emit: emit ?? (row => rows.push(row)), maxPerMinute, ...(now ? { now } : {}) })
   let api, mcp, gateway, browser
