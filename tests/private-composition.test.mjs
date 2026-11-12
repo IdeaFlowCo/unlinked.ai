@@ -365,6 +365,75 @@ test('production dispatcher passes collective groups to the browser without enro
   assert.equal((await fetch(endpoint + path, { redirect: 'manual' })).status, 404)
 })
 
+test('production dispatcher carries community intake through flyer join, review, save and personal asks', async t => {
+  const { options } = await fixture(t)
+  const dependencies = await createPrivatePilotDependencies(options)
+  t.after(dependencies.close)
+  const { port } = await fixture(t)
+  const organizer = { ownerId: 'fixture-organizer', userId: 'fixture-organizer-user' }
+  const member = { ownerId: 'fixture-member', userId: 'fixture-member-user' }
+  const store = createMemoryCollectiveGroupsStore()
+  const groups = createCollectiveGroups({ store, active: async () => true })
+  const group = await groups.create(organizer, 'Boulder runtime fixture')
+  const flyer = await groups.createFlyer(organizer, group.id, { capacity: 3, approval: false })
+  const saved = [], calls = []
+  const client = {
+    list: async actor => { calls.push(['list', actor]); return { entries: saved } },
+    save: async (actor, input) => {
+      calls.push(['save', actor])
+      assert.equal(input.consent, true)
+      saved.push(...input.entries.map((entry, index) => ({ ...entry, id: index + 1, status: 'open', revision: 'fixture-revision' })))
+      return { entries: saved }
+    },
+    group: async () => ({ entries: [] }),
+  }
+  const origin = `https://127.0.0.1:${port}`
+  const pilot = await startPrivatePilot({ ...dependencies, baseUrl: origin, port,
+    collectiveGroups: groups, communityIntake: client,
+    accountGrantKey: new Uint8Array(32).fill(7), signup: async () => member,
+    resolveOwner: async () => member,
+    login: { begin: async () => ({ location: 'https://identity.invalid', transaction: { state: 's' } }), finish: async () => ({ subject: 'fixture-member', displayName: 'Fixture member' }) },
+    getBackend: async () => ({ listImportIds: async () => [], listImportJobIds: async () => [] }),
+  })
+  t.after(pilot.stop)
+  const request = (path, options = {}) => fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual', ...options })
+  assert.equal((await request('/asks')).status, 401)
+  assert.equal(calls.length, 0)
+  const path = `/groups/${group.id}`, invite = `${path}/join/${flyer.id}`
+  const started = await request('/login?next=' + encodeURIComponent(invite))
+  const login = started.headers.getSetCookie().find(v => v.startsWith('__Host-ul-login=')).split(';')[0]
+  const finished = await request('/auth/callback/ideaflow?state=s&code=c', { headers: { Cookie: login } })
+  assert.equal(finished.headers.get('location'), invite)
+  const cookie = finished.headers.getSetCookie().find(v => v.startsWith('__Host-ul-session=')).split(';')[0]
+  const get = path => request(path, { headers: { Cookie: cookie } })
+  const token = markup => /name="csrf" value="([^"]+)"/.exec(markup)[1]
+  const csrf = token(await (await get(invite)).text())
+  const post = (path, fields) => request(path, { method: 'POST', headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, ...fields }) })
+  const joined = await post(invite, { decision: 'join' })
+  assert.equal(joined.headers.get('location'), `${path}/welcome`)
+  const welcome = await get(`${path}/welcome`)
+  assert.equal(welcome.status, 200)
+  assert.match(await welcome.text(), /Introduce yourself to Boulder runtime fixture/)
+  const preview = await post(`${path}/welcome/preview`, { source: 'quick', ask: 'A Postgres mentor' })
+  assert.equal(preview.status, 200)
+  const review = await preview.text()
+  assert.match(review, /Only me/)
+  const requestId = /name="requestId" value="([^"]+)"/.exec(review)[1]
+  const fields = { requestId, count: '1', selected: '0', 'title-0': 'A Postgres mentor', 'body-0': '', 'kind-0': 'ask', 'source-0': 'manual', 'audience-0': 'only_me' }
+  assert.equal((await post(`${path}/welcome/save`, { ...fields, csrf: 'wrong' })).status, 400)
+  assert.equal(saved.length, 0)
+  const result = await post(`${path}/welcome/save`, fields)
+  assert.equal(result.status, 303)
+  assert.equal(saved.length, 1)
+  assert.equal(saved[0].audience, 'only_me')
+  assert.equal(saved[0].groupId, undefined)
+  const asks = await get('/asks')
+  assert.equal(asks.status, 200)
+  assert.equal(asks.headers.get('cache-control'), 'no-store')
+  assert.match(await asks.text(), /A Postgres mentor/)
+  assert.deepEqual(calls, [['save', member], ['list', member]])
+})
+
 test('production dispatcher keeps profile recipient resolution separate from card messaging', async t => {
   const { options } = await fixture(t)
   const dependencies = await createPrivatePilotDependencies(options)
