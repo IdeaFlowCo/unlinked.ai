@@ -43,7 +43,7 @@ test('signed-in members get one Me menu: profile header, lists, card, settings, 
   assert.match(menu, /<div class="me-panel" role="menu" aria-label="Account">/)
   assert.match(menu, /<div class="me-who"><b>Sam Rivera<\/b><!--me-headline--><\/div><a class="button sec sm me-view" role="menuitem" href="\/profile">View profile<\/a>/)
   const items = [...menu.matchAll(/role="menuitem"[^>]*?(?:href="([^"]+)")?>([^<]*)/g)].map(match => match[1] ?? match[2])
-  assert.deepEqual(items, ['/profile', '/lists', '/card', '/scan', '/settings', '/support', '/support', 'Switch account', 'Sign out'])
+  assert.deepEqual(items, ['/profile', '/asks', '/profile/context', '/lists', '/card', '/scan', '/settings', '/support', '/support', 'Switch account', 'Sign out'])
   // Switch account and Sign out are CSRF-protected POSTs, never links.
   assert.match(menu, /<div class="me-sep" role="separator"><\/div><form method="post" action="\/switch-account" role="none"><input type="hidden" name="csrf" value="csrf-value"><button type="submit" class="me-out" role="menuitem">Switch account<\/button><\/form><form method="post" action="\/logout" role="none"><input type="hidden" name="csrf" value="csrf-value"><button type="submit" class="me-out" role="menuitem">Sign out<\/button><\/form><\/div>$/)
   // Send feedback opens the WIT panel (FEEDBACK_MENU_SCRIPT); without script it is the support page.

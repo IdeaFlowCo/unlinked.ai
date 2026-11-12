@@ -1,3 +1,5 @@
+import { isCommunityPath } from './community-intake.mjs'
+import { createCommunityIntakeBrowser } from './community-intake-browser.mjs'
 import { createGroupBrowser, flyerJoinTarget, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
 import { bulkExportInput } from './bulk-exports.mjs'
 import { networkExportInput, streamNetworkExport } from './network-export.mjs'
@@ -191,7 +193,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, privateLists, privateListImports, savedSearchLists, collectiveGroups, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, privateLists, privateListImports, savedSearchLists, collectiveGroups, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -207,12 +209,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   if (privateListImports !== undefined && privateListImports !== null && ['stage', 'status', 'resume', 'running'].some(key => typeof privateListImports[key] !== 'function')) throw new Error('private_list_imports_configuration_required')
   if (profileSocialLinks !== undefined && ['get', 'set', 'forProfile', 'removeOwner'].some(key => typeof profileSocialLinks?.[key] !== 'function')) throw new Error('profile_links_configuration_required')
   if (profileHandles !== undefined && ['resolve', 'handleFor', 'ensure', 'availability', 'rename', 'removeProfile'].some(key => typeof profileHandles?.[key] !== 'function')) throw new Error('profile_handles_configuration_required')
+  const communityBrowser = createCommunityIntakeBrowser({ client: communityIntake, groups: collectiveGroups, body })
   // Every emitted /people/ link prefers the member's handle (docs/profile-handles.md).
   setProfileHandleLookup(profileHandles ? id => profileHandles.handleFor(id) : null)
   // The profile id a /people/ segment names: a handle (any case) or the id itself.
   const handleTarget = segment => profileHandles?.resolve(segment)?.profileId ?? segment
   const groupBrowser = collectiveGroups && createGroupBrowser({
-    groups: collectiveGroups, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
+    groups: collectiveGroups, welcome: Boolean(communityIntake), privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
   })
   // A default handle only for a profile an active account still stands behind,
   // so a just-deleted account (still in the published index) never gets one back.
@@ -323,7 +326,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
   const downloadReturn = value => { try { const url=new URL(value,base); if(url.origin!==base.origin||!['/downloads','/downloads/file'].includes(url.pathname))return false; bulkExportInput(url.searchParams); return !url.hash } catch { return false } }
-  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || isCommunityPath(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -1442,6 +1445,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         return
       }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline } : {}
+      if (isCommunityPath(url.pathname)) {
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        await communityBrowser({ request, url, session: viewer,
+          render: (view, status) => journey(response, { ...view, privateGroup: true }, null, view.script || '', status),
+          redirect: path => redirect(response, path) })
+        return
+      }
       if (isGroupPath(url.pathname)) {
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         if (!groupBrowser) { await journey(response, { ...renderNotFound(chrome), privateGroup: true }, null, '', 404); return }
@@ -3244,7 +3254,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         void recordAudit({ event: 'own_profile_timing', status: response.statusCode, duration_ms: Math.round(performance.now() - trace.start), steps_ms: trace.steps })
       })
     }
-    if (path.startsWith('/messages/person/') || isGroupPath(path)) {
+    if (path.startsWith('/messages/person/') || isGroupPath(path) || isCommunityPath(path)) {
       response.setHeader('Cache-Control', 'no-store, private')
       response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
     }
@@ -3271,7 +3281,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           pendingMessageOwners.set(ownerId, mine + 1); pendingMessageBodies++
           reserved = () => { pendingMessageBodies--; const left = pendingMessageOwners.get(ownerId) - 1; if (left) pendingMessageOwners.set(ownerId, left); else pendingMessageOwners.delete(ownerId) }
         }
-        const limit = path === '/upload' ? LIMITS.archiveBytes + 65536 : path.startsWith('/messages/api/') ? messagingBodyLimit(path, request.headers['content-type']) : isGroupPath(path) ? 4096 : 16384
+        const limit = isCommunityPath(path) ? 65536 : path === '/upload' ? LIMITS.archiveBytes + 65536 : path.startsWith('/messages/api/') ? messagingBodyLimit(path, request.headers['content-type']) : isGroupPath(path) ? 4096 : 16384
         let bytes
         try { bytes = await bufferRequestBody(request, limit) }
         catch { if (!response.destroyed) response.writeHead(413, path.startsWith('/messages/api/') ? { 'Content-Type': 'application/json' } : {}).end(path.startsWith('/messages/api/') ? JSON.stringify({ error: 'body_too_large' }) : undefined); return }

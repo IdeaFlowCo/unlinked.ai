@@ -1,0 +1,17 @@
+# Community introductions and asks
+
+A reusable group invitation retains its destination through Ideaflow signup. With the Social intake connection configured, explicit Join leads to `/groups/:id/welcome`. The introduction is optional; membership does not require an import. `/profile/context` and `/asks` remain available from Me afterward.
+
+Quick introductions, task/idea lists, Goodreads CSV, and an assistant-produced JSON draft are parsed locally into a review form. No model receives the input. Tasks are unselected by default unless recognized as asks/offers. Every entry has an explicit audience, default Only me; selecting a group or Public is an affirmative choice. Only selected entries are saved. Existing X/GitHub/website links and LinkedIn import remain separate supported screens. Photo/live bookshelf sync and X scraping are not implemented.
+
+Social stores the canonical nodes and their owner under the exact verified Ideaflow issuer and subject. First save explicitly consents to a Social profile and this narrow Unlinked connection. A dedicated partner secret enables read/update of intake-created entries only; it does not grant access to existing private Social data. Social's durable request receipt makes retry safe; edit revisions reject stale writes. `/asks/:id` supports status and audience changes, including sharing a previously private entry with a current community.
+
+Unlinked owns membership and blocking. Before showing a group projection it obtains live authorized members, resolves their persisted identities, requests only exact-group placements, and verifies the roster again. Removed members and blocked pairs are excluded. No membership is copied to Social or Superconnector. Joining Unlinked does not join a Superconnector network; the handoff uses the same Ideaflow ID.
+
+## Configuration and release
+
+Set `UNLINKED_SOCIAL_INTAKE_SECRET` to the dedicated value configured as Social's `IDEANETWORK_UNLINKED_SECRET` (at least 32 characters), using protected service environment files. `UNLINKED_SOCIAL_INTAKE_ORIGIN` defaults to `https://social.ideaflow.app`. Deploy the compatible Social partner routes before enabling Unlinked. No provider/model credential is required. When disabled, group signup still works and profile pages explain the unavailable connection.
+
+All intake routes use authenticated sessions, same-origin POSTs and CSRF; group routes also enforce live membership. Responses are no-store/noindex with neutral anonymous metadata. Inputs, prompts and profile entries are never placed in invite URLs. Do not put the partner secret into a browser bundle, logs or repository.
+
+Validation: `node --test tests/community-intake.test.mjs tests/collective-group-browser.test.mjs`; full Node suite on the designated cloud builder. The HTTP fixtures cover signup intent, selected-only save, CSRF/origin rejection, edit-to-group authorization, and membership removal. Browser visual verification remains separate.

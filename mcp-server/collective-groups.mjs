@@ -99,6 +99,14 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
           } } : {}),
       }
     },
+    async roster(actor, id) {
+      const { group } = await authorized(actor, id)
+      const candidates = [{ actor: group.organizer, profileId: group.organizerProfileId, name: 'Organizer', role: 'Organizer' }, ...group.members.map(row => ({ actor: row.actor, profileId: row.profileId, name: row.name, role: 'Member' }))]
+      const visible = []
+      for (const row of candidates) if (await live(row.actor) && (same(row.actor, actor) || !await blocked(actor, row.actor))) visible.push(row)
+      const { group: latest } = await authorized(actor, id)
+      return visible.filter(row => same(row.actor, latest.organizer) || seat(latest, row.actor))
+    },
     async invite(actor, id, recipient, profile) {
       await authorized(actor, id, true)
       if (!await live(recipient) || same(actor, recipient) || !await canMeet(actor, recipient)) fail('invalid_recipient')
