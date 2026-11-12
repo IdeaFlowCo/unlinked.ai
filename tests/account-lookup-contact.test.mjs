@@ -147,3 +147,41 @@ test('a LinkedIn address the owner attached privately keys a profile-less contac
   const broken = createAccountToolService({ getBackend: async who => backend(who), readPublishedSnapshot: snapshot, contactAddresses: async () => { throw Error('store down') } })
   await assert.rejects(broken.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: id } }), error => error.code === 'upstream_unavailable')
 })
+
+test('an unavailable public index names the failing lookup step and a fixed reason, never the error text', async () => {
+  const down = createAccountToolService({ getBackend: async who => backendFor(who), readPublishedSnapshot: async () => { throw new Error('private detail must not travel') } })
+  const call = input => down.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input })
+  await assert.rejects(call({ profileId: 'pub-ada' }), error => error.code === 'upstream_unavailable' && error.stage === 'index_profile_lookup' && !String(error.indexReason ?? '').includes('private'))
+  await assert.rejects(call({ connectionId: ada.id }), error => error.code === 'upstream_unavailable' && error.stage === 'index_published_lookup')
+  const slow = createAccountToolService({ getBackend: async who => backendFor(who), readPublishedSnapshot: async () => { throw new Error('x') }, contactAddresses: async () => { throw new Error('store down') } })
+  await assert.rejects(slow.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: ada.id } }), error => error.stage === 'contact_addresses')
+})
+
+test('lookups share one owner network read while fresh, and a caller that gives up still warms the next', async () => {
+  let reads = 0
+  const counted = who => ({ ...backendFor(who), readLegacyObservations: async () => { reads++; await new Promise(resolve => setTimeout(resolve, 30)); return who.ownerId === owner.ownerId ? { assertions: [ada, grace, nameOnly] } : null } })
+  const shared = createAccountToolService({ getBackend: async who => counted(who), readPublishedSnapshot: snapshot, lookupSlug: slug => slugs.get(slug) ?? null })
+  const call = (input, signal) => shared.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input, signal })
+  const impatient = new AbortController()
+  const abandoned = call({ connectionId: ada.id }, impatient.signal)
+  impatient.abort()
+  await assert.rejects(abandoned)
+  await new Promise(resolve => setTimeout(resolve, 60))
+  const first = (await call({ connectionId: ada.id })).result, second = (await call({ connectionId: grace.id })).result
+  assert.equal(first.contact.connectionId, ada.id); assert.equal(second.contact.connectionId, grace.id)
+  assert.equal(reads, 1, 'the abandoned read finished and served both later lookups')
+  const live = createAccountToolService({ getBackend: async who => counted(who), readPublishedSnapshot: snapshot, limits: { networkFreshMs: 0 } })
+  reads = 0
+  await live.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: ada.id } })
+  await live.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input: { connectionId: ada.id } })
+  assert.equal(reads, 2, 'networkFreshMs 0 reads live every time')
+})
+
+test('one connection with an address the index refuses does not fail lookups of the others', async () => {
+  // rowSlug decodes %21 to '!', which the published-index address parser refuses (input_invalid).
+  const odd = row(sha('odd'), 'Odd', 'Slug', 'https://www.linkedin.com/in/synthetic%21odd')
+  const service = createAccountToolService({ getBackend: async who => ({ ...backendFor(who), readLegacyObservations: async () => (who.ownerId === owner.ownerId ? { assertions: [ada, grace, nameOnly, odd] } : null) }), readPublishedSnapshot: snapshot, lookupSlug: slug => slugs.get(slug) ?? null })
+  const call = input => service.call({ grant: grantFor(owner), name: 'unlinked_lookup_contact', input }).then(value => value.result)
+  assert.equal((await call({ connectionId: ada.id })).contact.connectionId, ada.id)
+  assert.equal((await call({ connectionId: odd.id })).contact.connectionId, odd.id)
+})

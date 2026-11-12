@@ -6,8 +6,8 @@ import { isAbsolute, join } from 'node:path'
 const DAY = 86400000, FILE = /^requests-\d{4}-\d{2}-\d{2}\.jsonl$/
 // A dedicated mode-700 directory, never the general browser audit file. One
 // writer per runtime, at most seven UTC dates / 56 MiB and 128 queued rows.
-export async function createDiagnosticsStore({ directory, now = () => new Date(), maxBytes = 8 * 1024 * 1024, maxQueue = 128, retentionDays = 7 } = {}) {
-  if (!isAbsolute(directory ?? '') || !Number.isSafeInteger(maxBytes) || maxBytes < 1024 || maxBytes > 8 * 1024 * 1024 || !Number.isSafeInteger(maxQueue) || maxQueue < 1 || maxQueue > 128 || !Number.isSafeInteger(retentionDays) || retentionDays < 1 || retentionDays > 7) throw new Error('diagnostics_store_configuration_invalid')
+export async function createDiagnosticsStore({ directory, now = () => new Date(), maxBytes = 8 * 1024 * 1024, maxQueue = 128, retentionDays = 7, project = safeDiagnosticRecord } = {}) {
+  if (typeof project !== 'function' || !isAbsolute(directory ?? '') || !Number.isSafeInteger(maxBytes) || maxBytes < 1024 || maxBytes > 8 * 1024 * 1024 || !Number.isSafeInteger(maxQueue) || maxQueue < 1 || maxQueue > 128 || !Number.isSafeInteger(retentionDays) || retentionDays < 1 || retentionDays > 7) throw new Error('diagnostics_store_configuration_invalid')
   await mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
   const info = await lstat(directory)
   if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o700 || info.uid !== process.getuid()) throw new Error('diagnostics_directory_not_private')
@@ -41,9 +41,9 @@ export async function createDiagnosticsStore({ directory, now = () => new Date()
   return {
     emit(record) {
       if (closed || pending >= maxQueue) { dropped++; stats.dropped++; return }
-      // The only caller is the fixed-schema projection in request-diagnostics.
-      // No body/header/error object is passed to this sink.
-      const snapshot = safeDiagnosticRecord(record)
+      // Re-project before persistence, using the diagnostics schema by default.
+      // Query history has its own non-expiring store in search-log-store.mjs.
+      const snapshot = project(record)
       if (!snapshot) { dropped++; stats.dropped++; return }
       pending++
       chain = chain.then(async () => {

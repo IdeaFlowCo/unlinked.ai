@@ -190,6 +190,8 @@ Settings manual-key setup, lifecycle, compatibility and release/rollback constra
 
 ## Request diagnostics
 
+Private search query history, its collection switch, retention, ops warnings and operator reader are owned by [docs/search-query-log.md](docs/search-query-log.md). Query text must remain separate from metadata diagnostics and public analytics.
+
 Default-off standalone REST/MCP diagnostics, trust/redaction boundaries, private retention and the operator reader are documented in [docs/request-diagnostics.md](docs/request-diagnostics.md). Never enable broad access logging or log request bodies/credentials to diagnose an agent. Enabling collection requires the normal scoped runtime release gate.
 
 Public People presence and the historical-account reclaim boundary are owned by the repository contract [Historical membership](docs/public-people-reader.md#historical-membership).
@@ -205,6 +207,8 @@ Private CSV/XLSX investor/list imports reuse the three catalog-v9 tools. Explici
 sheet selection, whole-workbook private-retention acknowledgement, bounded
 ZIP/XML parsing, original-byte recovery and provenance: `docs/investor-csv.md`.
 Browser list upload remains CSV-only; XLSX is available through MCP/REST.
+
+Offline professional-profile publication stores only Noos-supported basic fields; its immutable audit manifest supplies validated URLs at runtime. Publisher, hydration, rollback and pending delivery acceptance: `docs/professional-profile-publication.md`.
 
 MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment status) and `docs/agent-api.md`.
 

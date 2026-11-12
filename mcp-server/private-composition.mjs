@@ -4,6 +4,8 @@ import { createBrowserPerformanceRecorder } from './browser-performance.mjs'
 import { createNeo4jSavedSearchLists } from './saved-search-lists.mjs'
 import { createAuditQueue } from './audit-queue.mjs'
 import { LEGACY_ACCOUNT_SOURCE_SHA256, LEGACY_ACCOUNT_PRODUCTION_MANIFEST_SHA256 } from './legacy-account-manifest.mjs'
+import { createSearchLog } from './search-activity.mjs'
+import { createSearchLogStore } from './search-log-store.mjs'
 import { createRequestDiagnostics } from './request-diagnostics.mjs'
 import { createDiagnosticsStore } from './request-diagnostics-store.mjs'
 import { createOpenChatConnectionSync, createNeo4jOpenChatSyncStore } from './openchat-connections.mjs'
@@ -11,6 +13,7 @@ import { validTimestamp } from '../src/utils/network-order.mjs'
 import { createMessagingResolver, createMessagingSession, createMessagingRecipient, createMessagingIdentities } from './messaging.mjs'
 
 import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
+import { withProfessionalProfileDetails } from './professional-people-manifest.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import { createContactEnrichment, createNeo4jContactEnrichmentStore } from './contact-enrichment.mjs'
@@ -145,13 +148,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, browserPerformanceStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
+  let server, worker, memberEmail, diagnosticsStore, searchLogStore, browserPerformanceStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
   const close = async () => {
     if (closed) return
     closed = true
     indexWarmKeeper?.stop()
     await contactEnrichment?.stop()
     await diagnosticsStore?.close()
+    await searchLogStore?.close()
     await browserPerformanceStore?.close()
     await connectionSync?.stop()
     await worker?.stop()
@@ -189,7 +193,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const publicPeopleStore = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
     await publicPeopleStore?.initialize()
     // Reuses an unchanged published revision instead of re-reading its chunks.
-    const publicPeople = cachePublicPeopleReads(publicPeopleStore, publishedRevisionReader(driver, 'neo4j'))
+    const publicPeople = withProfessionalProfileDetails(cachePublicPeopleReads(publicPeopleStore, publishedRevisionReader(driver, 'neo4j')), root)
     const signupLookupStore = publicPeople ? createNeo4jSignupProfileStore(driver) : null
     await signupLookupStore?.initialize()
     // The adapter loads once; any failed check leaves lookups off while
@@ -445,7 +449,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       } catch { /* the stored decisions alone still apply */ }
       return { ids, refs, complete, decided }
     }
-    let requestDiagnostics, recordBrowserPerformance
+    let requestDiagnostics, searchLog, recordBrowserPerformance
+    if (diagnosticsEnv.UNLINKED_SEARCH_LOG !== 'off') {
+      const auditDirectory = join(root, 'audit')
+      await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
+      const auditStat = await lstat(auditDirectory)
+      if (!auditStat.isDirectory() || auditStat.isSymbolicLink() || (auditStat.mode & 0o777) !== 0o700 || auditStat.uid !== process.getuid()) throw new Error('search_audit_directory_not_private')
+      searchLogStore = await createSearchLogStore({ directory: join(auditDirectory, 'searches') })
+      searchLog = createSearchLog({ emit: searchLogStore.emit })
+    }
     if (diagnosticsEnv.UNLINKED_REQUEST_DIAGNOSTICS === 'on') {
       const auditDirectory = join(root, 'audit')
       await mkdir(auditDirectory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
@@ -556,7 +568,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // LinkedIn-keyed enrichment fills gaps on imported profiles, and profiles
     // sharing one LinkedIn address fold into one page; the copy already holding
     // the person's readable address survives (docs/profile-handles.md).
-    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true,
+    const readPublishedSnapshot = publicPeople ? createMemberPublicIndex({ publicPeople, enrichmentDatasets: ENRICHMENT_DATASETS, linkedinEnrichmentDatasets: [...LINKEDIN_ENRICHMENT_DATASETS], mergeSameLinkedin: true, professionalProfiles: true,
       preferSurvivor: ids => ids.find(id => profileHandles?.handleFor(id)) ?? null, getBackend, readSignupProfiles: signupLookup?.list, readConnectionPrivacy: connectionPrivacy ? () => connectionPrivacy.list() : undefined, onMemberPhotos: map => { memberPhotos = map },
       includeDetails: true, freshMs: publicIndexFreshMs, staleMs: publicIndexStaleMs,
       // The live legacy pointer, so a no-change rebuild check never reads the dataset.
@@ -689,7 +701,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       })
       contactEnrichment.start()
     }
-    return { isVerified, login, getBackend, close, audit, requestDiagnostics, recordBrowserPerformance, backgroundImports: true,
+    return { isVerified, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),

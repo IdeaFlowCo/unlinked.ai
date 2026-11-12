@@ -45,6 +45,7 @@ import { ConnectionError } from './member-connections.mjs'
 import { emailAddress, EMAIL_PREFERENCES } from './member-email.mjs'
 import { CONNECTION_FEEDBACK_SCRIPT, CONNECTION_FEEDBACK_SRC, CONNECTION_FEEDBACK_VERSION } from './connection-feedback.mjs'
 import { FEEDBACK_TOKEN_PATH, FEEDBACK_WIDGET_API, FEEDBACK_WIDGET_SITE, FEEDBACK_UPLOAD_ORIGIN, exchangeFeedbackToken, feedbackWidgetTag, iosAppVersion } from './feedback-widget.mjs'
+import { searchActivity } from './search-activity.mjs'
 import { ANALYTICS_ORIGIN, analyticsTag, queueAnalyticsEvent, takeAnalyticsEvents } from './ideaflow-analytics.mjs'
 import { createConnectionActions } from './connection-actions.mjs'
 import { PRIVATE_CONTEXT_SCRIPT } from './private-context.mjs'
@@ -688,7 +689,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
-  const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never changes identity authority. */ } }
+  const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), ...(event.event === 'own_profile_timing' ? {} : { origin: base.origin }) }) } catch { /* Audit availability never changes identity authority. */ } }
   // The signed-in reader of each in-flight response, so every page's Me menu can
   // show the headline once this session has read the member's profile.
   const readers = new WeakMap()
@@ -704,6 +705,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   // Per-response route stage durations for Server-Timing on rendered pages:
   // fixed stage names and whole milliseconds only, never identifiers or paths.
   const responseTimings = new WeakMap()
+  // Private operational timing, scoped to the own-profile page. No identity or content.
+  const ownProfileTiming = new WeakMap()
+  const profileStep = async (response, name, work) => {
+    const trace = ownProfileTiming.get(response)
+    if (!trace) return work()
+    const start = performance.now()
+    try { return await work() } finally { trace.steps[name] = Math.round(performance.now() - start) }
+  }
   const STAGES = new Set(['alerts', 'company', 'facts'])
   const mark = (response, stage, begunMs) => {
     if (!STAGES.has(stage)) return
@@ -1254,7 +1263,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         lastPrune = Date.now()
         sessionStore.prune(Date.now()).catch(() => {})
       }
-      if (current) requestSessions.set(request, current)
+      if (current) { requestSessions.set(request, current); searchActivity().authenticated(current.owner.ownerId) }
       const verified = current ? await isVerified(current.owner) : false
       if (request.method === 'POST' && url.pathname !== '/search' && current) response.once('finish', () => dropAccountNetwork(current.owner))
       // Browser autocomplete reads the same published projection for everyone.
@@ -1273,6 +1282,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           if (query === '') readerFor(request).warm()
           const groups = viewer ? viewerGroups(viewer.owner) : null
           const result = query === '' ? { people: [], companies: [] } : await readerFor(request).suggest({ query, ...(known ? { known } : {}), ...(groups ? { unlistedGroups: groups } : {}) })
+          searchActivity().result({ matches: [...(result.people ?? []), ...(result.companies ?? [])] })
           if (profileHandles && Array.isArray(result.people)) result.people = result.people.map(row => { const handle = profileHandles.handleFor(row.id); return handle ? { ...row, handle } : row })
           response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, private', Vary: 'Cookie' }); response.end(JSON.stringify(result))
         } catch (error) {
@@ -1775,6 +1785,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           const query = url.searchParams.get('q') ?? '', mode = url.searchParams.get('mode') ?? 'best', presence = url.searchParams.get('presence') ?? undefined
           const sort = url.pathname === '/api/people' ? 'best' : url.searchParams.get('sort') ?? 'best'
           const result = await readerFor(request).list({ query, mode, presence, sort, filters, includeTotal: url.pathname !== '/api/people', cursor: url.searchParams.get('cursor') ?? undefined })
+          searchActivity().result(result)
           if (url.pathname === '/api/people') { response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(result)); return }
           if (url.pathname === '/search-public') {
             const content = publicSearchDocument(result, { query, mode, presence })
@@ -1793,6 +1804,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         if (!publicAi) { response.writeHead(404).end(); return }
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
         const query = input.get('query') ?? ''
+        searchActivity().input({ query })
         if (input.getAll('query').length !== 1 || !query.trim() || query.length > 200 || [...input.keys()].some(key => key !== 'query')) throw new Error('public_ask_input_invalid')
         // The ordinary list for the same words stays on the page beside the AI picks.
         let listed = {}
@@ -1810,6 +1822,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
           const result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
+          searchActivity().result(result)
           journey(response, page({ aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }))
         } catch {
           journey(response, page({ aiError: 'AI search could not finish. Try again; the regular results are below.' }), null, '', 503)
@@ -2147,6 +2160,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         try {
           if ([...url.searchParams.keys()].some(key => !['degree','q','cursor'].includes(key)) || ['degree','q','cursor'].some(key => url.searchParams.getAll(key).length > 1)) throw Error('known_connections_input_invalid')
           const result = await createKnownConnectionsReader({ owner: session.owner, getBackend, readPublishedSnapshot })({ degree: Number(url.searchParams.get('degree') ?? '1'), query: url.searchParams.get('q') ?? '', cursor: url.searchParams.get('cursor') ?? undefined, signal: AbortSignal.timeout(30000) })
+          searchActivity().result(result)
           response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
         } catch (error) {
           const status = /input_invalid|cursor_invalid/.test(error.message) ? 400 : error.message === 'known_connections_anchor_unavailable' ? 409 : 503
@@ -2316,7 +2330,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       }
       if (signup && ((request.method === 'GET' && ['/profile', '/card', '/scan'].includes(url.pathname)) || ((request.method === 'GET' && url.pathname === '/profile/handle/check') || (request.method === 'POST' && ['/profile/links', '/profile/handle', '/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname))))) {
         let hidden
-        try { hidden = await ownSuspension(session.owner, backend) } catch {
+        try { hidden = await profileStep(response, 'suspension', () => ownSuspension(session.owner, backend)) } catch {
           // The server could not confirm the profile's status (usually the
           // minute after a restart while the people index warms). Not an
           // import failure and not a suspension: say so, and keep an import's
@@ -2332,23 +2346,23 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         if (hidden) { render(response, 'Profile hidden', '<p>Your Unlinked profile is hidden by Unlinked support. Your account, sign-in and imports are unaffected. Email <a href="mailto:support@ideaflow.app">support@ideaflow.app</a> to ask why or to have it restored.</p>', 404); return }
       }
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
-        const jobs = await jobResources(), props = jobProps(jobs)
+        const jobs = await profileStep(response, 'jobs', () => jobResources()), props = jobProps(jobs)
         if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
-        const summary = await importSummary(jobs)
+        const summary = await profileStep(response, 'import_summary', () => importSummary(jobs))
         // Reuse the card's snapshot-verified public context; private rows and
         // imported contact details never establish a cross-product recipient.
-        const { profile, hasStoredProfile, publicProfileUrl } = await readOwnCard(jobs)
+        const { profile, hasStoredProfile, publicProfileUrl } = await profileStep(response, 'own_card', () => readOwnCard(jobs))
         const offerLookup = Boolean(selfClaims && session.selfClaim && !hasStoredProfile)
         let testClaim = null
-        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await backend.readTestProfileClaim() } catch { testClaim = null } }
+        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await profileStep(response, 'test_claim', () => backend.readTestProfileClaim()) } catch { testClaim = null } }
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
         // Start reading the public index now; the contact lookup below joins it.
-        const warming = typeof readPublishedSnapshot === 'function' ? readerFor(request).lookup({ ids: [] }).catch(() => null) : null
+        const warming = typeof readPublishedSnapshot === 'function' ? profileStep(response, 'index_wait', () => readerFor(request).lookup({ ids: [] }).catch(() => null)) : null
         try {
-          const connections = (await accountNetwork(session.owner)).assertions.filter(row => row.category === 'connections')
+          const connections = (await profileStep(response, 'network', () => accountNetwork(session.owner))).assertions.filter(row => row.category === 'connections')
           // One card per person, so the count and the preview never repeat someone.
-          const cards = await personCards(connections, readerFor(request))
+          const cards = await profileStep(response, 'person_cards', () => personCards(connections, readerFor(request)))
           connectionCount = cards.length
           contacts = cards.slice(0, 10)
         } catch { /* The profile stands on its own while the network is still being read. */ }
@@ -2356,13 +2370,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // The photo published for this member's public profile, when there is one.
         let mine = null, profileHandleView = null
         if (typeof ownProfileId === 'function') {
-          mine = await ownProfileId(session.owner).catch(() => null)
+          mine = await profileStep(response, 'own_profile_id', () => ownProfileId(session.owner).catch(() => null))
           const photo = mine ? profilePhotos?.urlFor(mine) : null
           if (photo) profile.photo = photo
-          const published = mine ? await publicReader.profile({ id: mine, viewer: selfViewer(mine) }).catch(() => null) : null
+          const published = mine ? await profileStep(response, 'public_profile', () => publicReader.profile({ id: mine, viewer: selfViewer(mine) }).catch(() => null)) : null
           // The member's handle (docs/profile-handles.md): given on first view, editable here.
           if (profileHandles && published?.profile?.presence === 'member') {
-            const current = profileHandles.handleFor(published.profile.id) ?? await bounded(() => ensureHandle(published.profile), null)
+            const current = profileHandles.handleFor(published.profile.id) ?? await profileStep(response, 'ensure_handle', () => bounded(() => ensureHandle(published.profile), null))
             const notice = url.searchParams.get('handle')
             if (current) profileHandleView = { handle: current, ...(['saved', 'taken', 'invalid', 'length', 'reserved', 'limit', 'unavailable'].includes(notice) ? { notice } : {}) }
           }
@@ -2374,8 +2388,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // the current public profile id, like /card's identity sync.
         let socialLinks
         if (profileSocialLinks) {
-          const saved = await bounded(() => profileSocialLinks.get(session.owner), null)
-          if (saved?.links?.length && mine && saved.profileId !== mine) await profileSocialLinks.rebind(session.owner, { profileId: mine, observed: saved }).catch(() => {})
+          const saved = await profileStep(response, 'social_links', () => bounded(() => profileSocialLinks.get(session.owner), null))
+          if (saved?.links?.length && mine && saved.profileId !== mine) await profileStep(response, 'social_rebind', () => profileSocialLinks.rebind(session.owner, { profileId: mine, observed: saved }).catch(() => {}))
           if (saved?.links?.length) profile.socialLinks = saved.links
           const notice = url.searchParams.get('links')
           const line = Number.parseInt(url.searchParams.get('line') ?? '', 10)
@@ -2744,7 +2758,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           const ordered = orderNetwork(ranked.rows, sort)
           const rows = await withConnect(session.owner, ordered.slice(index * 100, (index + 1) * 100), reader)
           const enrichmentPreferences = contactEnrichment ? await contactEnrichment.preferences(session.owner).catch(() => null) : undefined
-        const view = renderPeople({ ...props, enrichmentPreferences, enrichmentAvailable: Boolean(contactEnrichment), membersOnly: iosApp(request), query: typed, mode, presence, sort, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts, filters, savedListsAvailable: Boolean(savedSearchLists),
+          searchActivity().result({ people: rows, total: ranked.rows.length })
+          const view = renderPeople({ ...props, enrichmentPreferences, enrichmentAvailable: Boolean(contactEnrichment), membersOnly: iosApp(request), query: typed, mode, presence, sort, match: ranked.match, state: mine ? 'ready' : 'unavailable', returnTo, notice, connectedCounts, filters, savedListsAvailable: Boolean(savedSearchLists),
             connectedView: { rows, total: ranked.rows.length, ...(ranked.rows.length > (index + 1) * 100 ? { nextPage: index + 1 } : {}) } })
           journey(response, view, props.importJob); return
         }
@@ -2771,6 +2786,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const own = ownShown ? contacts : undefined
         // Cards on both sections are counted once each.
         const counted = Number.isSafeInteger(total) ? total + (own !== undefined ? matchingContacts.length : 0) : total
+        searchActivity().result({ people: [...(own ?? []), ...(everyone ?? [])], total: counted, nextCursor })
         const view = renderPeople({ ...props, membersOnly: iosApp(request), scope, own, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total: counted, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, filters, savedListsAvailable: Boolean(savedSearchLists), added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
         journey(response, view, props.importJob)
         return
@@ -3013,6 +3029,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           await revokeAccountGrant(session.owner, input.get('grantId')); redirect(response, '/settings'); return
         }
         if (url.pathname === '/search-account') {
+          searchActivity().input({ query: input.get('query'), scope: input.getAll('scope').at(-1) })
           if (input.getAll('query').length !== 1) throw new Error('private_search_query_limit')
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
@@ -3037,11 +3054,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
             const ai = result
               ? { aiMatches: await withConnect(session.owner, result.matches, reader), aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }
               : { aiError: own === undefined ? 'AI search could not finish. Try again in a minute.' : 'AI search could not finish. Try again in a minute; your own matching people are below.' }
+            searchActivity().result(result)
             const view = renderPeople({ ...props, membersOnly: iosApp(request), scope, ...ai, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
             journey(response, view, props.importJob, '', result ? 200 : 503); return
           }
           const account = createAccountNetwork({ owner: session.owner, getBackend, complete })
           const result = await account.search({ query: input.get('query'), signal: controller.signal })
+          searchActivity().result(result)
           const props = jobProps(await jobResources())
           // Picks carry only the assertion; its source row says where the public profile is.
           const sources = result.matches.length ? new Map((await account.readNetwork()).assertions.map(row => [row.id, row])) : new Map()
@@ -3179,6 +3198,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           return { ...value, assertions: withoutSuspendedRows(value.assertions, suppressions) }
         }
         if (url.pathname === '/search') {
+          searchActivity().input({ query: input.get('query'), scope: 'import' })
           if (input.getAll('query').length !== 1 || typeof complete !== 'function') throw new Error('private_search_consent_required')
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
@@ -3212,6 +3232,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   }
   const serve = async (request, response) => {
     const path = new URL(request.url, base).pathname
+    if (request.method === 'GET' && path === '/profile') {
+      const trace = { start: performance.now(), steps: {} }
+      ownProfileTiming.set(response, trace)
+      response.once('finish', () => {
+        void recordAudit({ event: 'own_profile_timing', status: response.statusCode, duration_ms: Math.round(performance.now() - trace.start), steps_ms: trace.steps })
+      })
+    }
     if (path.startsWith('/messages/person/') || isGroupPath(path)) {
       response.setHeader('Cache-Control', 'no-store, private')
       response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')

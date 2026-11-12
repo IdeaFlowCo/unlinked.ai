@@ -1,3 +1,4 @@
+import { searchActivity } from './search-activity.mjs'
 import { bulkExportInput } from './bulk-exports.mjs'
 import { scopeAllowsPrivateNotes, scopeCoversPublic } from './account-grants.mjs'
 export function createBulkExportHttp({ origin, authenticateGrant, exports, service }) {
@@ -9,6 +10,7 @@ export function createBulkExportHttp({ origin, authenticateGrant, exports, servi
     let grant
     try{grant=await authenticateGrant(request)}catch{response.writeHead(503).end();return}
     if(!grant){response.writeHead(401).end();return}
+    searchActivity().authenticated(grant.ownerId)
     const controller=new AbortController();response.once('close',()=>{if(!response.writableFinished)controller.abort()})
     const authorize=async()=>{const current=await authenticateGrant(request);if(!current||current.grantId!==grant.grantId||current.ownerId!==grant.ownerId||current.userId!==grant.userId||current.scope!==grant.scope||!current.tools.includes('unlinked_export_network'))throw Object.assign(Error('Export permission was removed.'),{code:'grant_revoked'})}
     try{

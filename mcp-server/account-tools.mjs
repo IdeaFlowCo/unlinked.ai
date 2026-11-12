@@ -1,6 +1,8 @@
 import { EXPORT_FIELDS } from './bulk-export-format.mjs'
 export const INTERNAL_BULK_READ = Symbol('unlinked-internal-bulk-read')
+import { reportIndexError } from '../src/utils/public-people/error-report.mjs'
 import { INVESTOR_TOOLS, INVESTOR_MUTATING, INVESTOR_SCHEMAS, INVESTOR_DESCRIPTIONS } from './investor-tools.mjs'
+import { searchActivity } from './search-activity.mjs'
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
@@ -167,9 +169,63 @@ const cursorOffset = (cursor, binding, length) => {
 // data only: no contact email/phone, raw archives or credential URLs ever leave.
 // `overlay` + `identityFor` (optional) enable the private-notes tools: the Noos
 // people overlay client (private-context.mjs) and the owner identity bridge.
+// lookup_contact failures name the step that failed and the index's fixed
+// reason (request diagnostics failure_stage / index_failure); no message or data.
+const stageOf = (error, stage) => Object.assign(error, { stage })
+const indexReasonOf = (stage, error) => {
+  if (typeof error?.reason === 'string') return error.reason
+  if (error instanceof PublicPeopleReaderError) return error.status === 400 ? 'input_invalid' : 'reader_refused'
+  // Not from the reader at all: this tool's own candidate code threw.
+  reportIndexError('tool', stage, error)
+  return 'tool_exception'
+}
+const indexFailure = (stage, error) => Object.assign(new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.'), { stage, indexReason: indexReasonOf(stage, error) })
 export function createAccountToolService({ exportManifest, isVerified = async () => false, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
+  // list_connections and lookup_contact share one bounded read per owner. It
+  // runs independently of each caller's signal so cancellation cannot discard
+  // useful work; mutating tools invalidate it and reuse rechecks import IDs.
+  // Freshness and lookup-miss retry semantics are owned by docs/agent-api.md.
+  // list_person_targets keeps its own live read on purpose.
+  const networkFreshMs = limits.networkFreshMs ?? 30000
+  if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('account_tool_service_configuration_required')
+  const networkCache = new Map(), NETWORK_CACHE_CAPACITY = 64
+  // `served.held` tells the caller the read predates this call (lookup_contact re-reads once on a miss).
+  const ownerNetwork = async (who, signal, served = {}) => {
+    signal?.throwIfAborted()
+    served.held = false
+    const now = Date.now()
+    for (const [key, held] of networkCache) if (!held.pending && now - held.at >= networkFreshMs) networkCache.delete(key)
+    const key = `${who.ownerId}\u0000${who.userId}`
+    let entry = networkFreshMs > 0 ? networkCache.get(key) : null
+    // Reuse fails closed: the owner's import list must still be readable (an
+    // outage throws here) and unchanged, so a new or removed import is never
+    // served from a held read. One cheap call instead of the whole network.
+    if (entry && !entry.pending) {
+      const ids = await (await getBackend(who)).listImportIds()
+      const held = entry.value.imports ?? []
+      if (!Array.isArray(ids) || ids.length !== held.length || [...ids].sort().some((id, index) => id !== [...held].sort()[index])) { networkCache.delete(key); entry = null }
+    }
+    if (!entry) {
+      entry = { pending: null, value: null, at: 0 }
+      entry.pending = createAccountNetwork({ owner: who, getBackend }).readNetwork().then(
+        value => { Object.assign(entry, { value, at: Date.now(), pending: null }); if (networkFreshMs === 0) networkCache.delete(key); return value },
+        error => { if (networkCache.get(key) === entry) networkCache.delete(key); throw error })
+      entry.pending.catch(() => {})
+      networkCache.delete(key); networkCache.set(key, entry)
+      while (networkCache.size > NETWORK_CACHE_CAPACITY) networkCache.delete(networkCache.keys().next().value)
+    }
+    served.held = !entry.pending && entry.at > 0
+    const work = entry.pending ?? Promise.resolve(entry.value)
+    if (!signal) return work
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason ?? new Error('aborted'))
+      signal.addEventListener('abort', abort, { once: true })
+      work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+    })
+  }
+  const dropOwnerNetwork = ownerId => { for (const key of [...networkCache.keys()]) if (key.startsWith(ownerId + '\u0000')) networkCache.delete(key) }
   // Write tools use the same rules as the site's Connect button.
   const connectionActions = memberConnections && typeof accountForProfile === 'function' && typeof readPublishedSnapshot === 'function'
     ? createConnectionActions({ memberConnections, accountForProfile, ownProfileId, memberInvitations, readPublishedSnapshot }) : null
@@ -423,7 +479,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       // Degree 1 includes owner-imported contacts even without a confirmed
       // legacy anchor; anchored recorded public paths join the same listing.
       let network
-      try { network = await createAccountNetwork({ owner, getBackend }).readNetwork(undefined, { signal }) }
+      try { network = await ownerNetwork(owner, signal) }
       catch { throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
       const normalized = q.normalize('NFKC').trim().toLowerCase()
       const rows = network.assertions.filter(row => row.category === 'connections'), entries = rows.map(connectionEntry)
@@ -456,7 +512,18 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       return { kind: 'unlinked_list_connections', degree: 1, grouping, sort, revision, total: ordered.length, connections: selected,
         ...(offset + selected.length < ordered.length ? { nextCursor: opaqueCursor(binding, offset + selected.length) } : {}) }
     },
+    // A miss against a held read re-reads live once, so a just-added contact is
+    // never reported missing; removals show within networkFreshMs, as in the browser.
     async unlinked_lookup_contact(grant, input, signal) {
+      const served = {}
+      try { return await lookupContactOnce(grant, input, signal, served) }
+      catch (error) {
+        if (error?.code !== 'not_found' || !served.held) throw error
+        dropOwnerNetwork(grant.ownerId)
+        return lookupContactOnce(grant, input, signal, {})
+      }
+    },
+    async unlinked_lookup_contact_once(grant, input, signal, served) {
       const modes = ['connectionId', 'linkedinUrl', 'profileId', 'refHashes'].filter(key => input[key] !== undefined)
       if (modes.length !== 1) throw new AccountToolError('invalid_input', 'Give exactly one of connectionId, linkedinUrl, profileId or refHashes.')
       const mode = modes[0]
@@ -471,18 +538,18 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       if (mode === 'profileId') {
         if (!reader) throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
         try { published = (await reader.lookup({ ids: [input.profileId], signal })).get(input.profileId) ?? null }
-        catch (error) { throw error instanceof PublicPeopleReaderError && error.status === 400 ? new AccountToolError('not_found', 'No published public profile has that id.') : new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+        catch (error) { throw error instanceof PublicPeopleReaderError && error.status === 400 ? new AccountToolError('not_found', 'No published public profile has that id.') : indexFailure('index_profile_lookup', error) }
         if (!published) throw new AccountToolError('not_found', 'No published public profile has that id.')
       }
       // The owner's own connection rows; never anyone else's.
       let rows
-      try { rows = (await createAccountNetwork({ owner: owner(grant), getBackend }).readNetwork(undefined, { signal })).assertions.filter(row => row.category === 'connections') }
-      catch { throw new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.') }
+      try { rows = (await ownerNetwork(owner(grant), signal, served)).assertions.filter(row => row.category === 'connections') }
+      catch { throw stageOf(new AccountToolError('upstream_unavailable', 'The owner network is unavailable right now.'), 'owner_network') }
       // A row without its own LinkedIn address uses the one the owner attached
       // to that contact privately (contact enrichment), so the owner's private
       // card can be keyed linkedin:in:<hash>. Only the hash leaves this tool.
       let attached = new Map()
-      if (typeof contactAddresses === 'function') { try { attached = await contactAddresses(owner(grant)) } catch { throw new AccountToolError('upstream_unavailable', 'The owner contact addresses are unavailable right now.') } }
+      if (typeof contactAddresses === 'function') { try { attached = await contactAddresses(owner(grant)) } catch { throw stageOf(new AccountToolError('upstream_unavailable', 'The owner contact addresses are unavailable right now.'), 'contact_addresses') } }
       const privateSlug = row => { const value = attached.get(row.id); return value && value.fingerprint === contactFingerprint(row) ? rowSlug({ fields: { url: value.address } }) : null }
       const ordered = rows.map(row => ({ row, entry: connectionEntry(row), slug: rowSlug(row) ?? privateSlug(row) }))
         .sort((a, b) => a.entry.name.localeCompare(b.entry.name) || a.entry.id.localeCompare(b.entry.id))
@@ -491,20 +558,24 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
         if (!reader || !candidates.length) return candidates.map(() => [])
         try {
           await reader.lookup({ ids: [], signal })
+          // One row whose id or address the index refuses as malformed (e.g. a
+          // LinkedIn export slug it cannot parse) has no published evidence; it
+          // must not fail every lookup for the owner (outage of 2026-11-10).
+          const evidence = async read => { try { return await read() } catch (error) { if (error instanceof PublicPeopleReaderError && error.status === 400) return null; throw error } }
           return await Promise.all(candidates.map(async candidate => {
             const target = usableProfileId(rowPublicTarget(candidate.row))
-            const explicit = target ? (await reader.lookup({ ids: [target], signal })).get(target) : null
-            const byAddress = candidate.slug ? await reader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(candidate.slug)}`, signal }) : null
+            const explicit = target ? await evidence(async () => (await reader.lookup({ ids: [target], signal })).get(target)) : null
+            const byAddress = candidate.slug ? await evidence(() => reader.lookupLinkedin({ address: `https://www.linkedin.com/in/${encodeURIComponent(candidate.slug)}`, signal })) : null
             return [...new Map([explicit, byAddress].filter(Boolean).map(summary => [summary.id, summary])).values()]
           }))
-        } catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+        } catch (error) { throw indexFailure('index_published_lookup', error) }
       }
       const contactOf = async (candidate, summary) => {
         const sourceRef = linkedinRefHash(candidate.slug)
         let publicRef = null
         if (summary) {
           try { publicRef = await reader.linkedinRef({ id: summary.id, signal }) }
-          catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+          catch (error) { throw indexFailure('index_linkedin_ref', error) }
         }
         return { ...profileStatus(summary), connectionId: candidate.entry.id, name: candidate.entry.name,
           ...(candidate.entry.headline ? { headline: candidate.entry.headline } : {}), ...(candidate.entry.company ? { company: candidate.entry.company } : {}),
@@ -530,7 +601,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       let candidate = null
       if (mode === 'linkedinUrl' && reader) {
         try { published = await reader.lookupLinkedin({ address: input.linkedinUrl, signal }) }
-        catch { throw new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.') }
+        catch (error) { throw indexFailure('index_refhash_lookup', error) }
       }
       if (mode === 'connectionId') candidate = ordered.find(value => value.entry.id === input.connectionId) ?? null
       else if (mode === 'linkedinUrl' && !published) candidate = ordered.find(value => value.slug === wantedSlug) ?? null
@@ -643,6 +714,9 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       catch (error) { throw askFailure(error, signal) }
     },
   }
+  // Internal step of unlinked_lookup_contact, never a callable tool.
+  const lookupContactOnce = tools.unlinked_lookup_contact_once
+  delete tools.unlinked_lookup_contact_once
 
   Object.assign(tools, createPrivateNotesTools({ overlay, identityFor, getBackend, createError: (code, message, details) => new AccountToolError(code, message, details),
     lookupContact: (grant, input, signal) => tools.unlinked_lookup_contact(grant, input, signal) }))
@@ -666,6 +740,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     if (!grant.tools.includes(name)) throw new AccountToolError('scope_not_granted', `This grant does not include ${name}.`)
     if (WRITE_TOOLS.has(name) && !scopeAllowsConnectionActions(grant.scope)) throw new AccountToolError('scope_not_granted', 'Connection actions require an explicit opt-in grant.')
     if (PRIVATE_NOTES_TOOL_SET.has(name) && !scopeAllowsPrivateNotes(grant.scope)) throw new AccountToolError('scope_not_granted', 'Private people notes & relations are switched off for this key (Settings) or not consented for this app.')
+    searchActivity().tool(name, input)
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
     const release = admission === INTERNAL_BULK_READ && DETERMINISTIC_TOOLS.has(name) || await isVerified(grant) ? null : DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
@@ -680,12 +755,13 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
         const current = await revalidate()
         if (name === 'unlinked_whoami' && current) result.grant = { ...result.grant, scope: current.scope, version: current.version, tools: [...current.tools] }
       }
+      searchActivity().result(result, name)
       const text = JSON.stringify(result)
       if (Buffer.byteLength(text) > 1024 * 1024) throw new AccountToolError('result_too_large', 'The result exceeded 1 MiB; narrow the query or lower the page size.')
       return { result, text }
       }
       return coordination && MUTATING_TOOLS.has(name) ? await coordination.run(['owner:' + grant.ownerId], execute) : await execute()
-    } finally { release?.() }
+    } finally { release?.(); if (MUTATING_TOOLS.has(name)) dropOwnerNetwork(grant.ownerId) }
   }
 
   // Hosted launch tools preserve their historical result/page shape while

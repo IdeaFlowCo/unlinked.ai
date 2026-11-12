@@ -15,8 +15,8 @@ the person's handle when they have one; see docs/contact-slugs.md.
 ## Who gets one
 
 Members (presence `member`: an active account stands behind the profile) and
-imported profiles alike: the copies member uploads mint (`public-<row>`) and
-unclaimed legacy profiles. A handle opens only a published profile: if the
+nonmember profiles alike: the copies member uploads mint (`public-<row>`),
+unclaimed legacy profiles and [independently published professional profiles](professional-profile-publication.md). A handle opens only a published profile: if the
 profile is suspended (docs/profile-suspension.md) or removed
 (docs/removal-requests.md), every address for it, handle or id, answers 404
 exactly as before, and a removed or suspended profile's handle is never handed
@@ -49,7 +49,7 @@ the index folds them into one (`linkedinIdentityMerges` in
 `src/utils/public-people/url-identity.mjs`, applied after every stored
 decision):
 
-- A member's profile absorbs every imported copy of itself and keeps only its
+- A member's profile absorbs every imported or professional-source copy of itself and keeps only its
   own fields, when the member's address is verified: it comes from their own
   uploaded archive or a confirmed recovered account. A URL typed at signup, or
   a self-asserted claim, absorbs nothing, so typing someone's URL can never
@@ -58,10 +58,17 @@ decision):
 - The copies several imports mint fold into one survivor: a copy an operator
   removed (so the person stays removed), else the copy that already holds the
   person's address, else the smallest id.
+- Professional-source copies also fold into existing imported or legacy
+  survivors, following explicit merges and preferring an existing readable
+  handle. Without that preference, an existing non-professional copy wins over
+  a new professional-source id. Operator-named profiles and explicit merge
+  targets anchor these folds; conflicting named decisions and distinct members
+  remain separate. A removed profile absorbs new copies so it stays removed;
+  address-wide suspensions still apply.
 
 Legacy profiles already absorb their copies by address
 (docs/profile-decisions.md). Other profiles named by an operator decision, and
-addresses shared by two members, are left alone. Names alone never merge
+addresses shared by two members, are never merged away. Names alone never merge
 anyone.
 
 A LinkedIn handle follows the person. When an imported profile is claimed it

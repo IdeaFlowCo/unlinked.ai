@@ -1,4 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads'
+import { reportIndexError } from './error-report.mjs'
+import { indexFailureReason } from './failure-reasons.mjs'
 import { getHeapStatistics } from 'node:v8'
 import { createPublicPeopleReader } from './reader.mjs'
 
@@ -39,7 +41,17 @@ const readerFor = (entry, pageSize, limits) => {
   }
   return reader
 }
-const errorOf = error => ({ status: Number.isSafeInteger(error?.status) ? error.status : 503, code: typeof error?.code === 'string' ? error.code : 'public_people_unavailable' })
+// An unexpected exception (not a typed {status, code} refusal) is reported as
+// reason 'exception' plus one fixed stderr line (error-report.mjs).
+const typed = error => Number.isSafeInteger(error?.status) && typeof error?.code === 'string'
+const errorOf = error => typed(error)
+  ? { status: error.status, code: error.code, ...(indexFailureReason(error.reason) ? { reason: error.reason } : {}) }
+  : { status: 503, code: 'public_people_unavailable', reason: 'exception' }
+const report = (message, error) => {
+  if (typed(error)) return
+  const method = message?.type === 'call' && METHODS.has(message.method) ? message.method : (['begin', 'chunk', 'end'].includes(message?.type) ? message.type : 'other')
+  reportIndexError('worker', method, error)
+}
 
 async function handle(message) {
   if (message.type === 'begin') {
@@ -111,5 +123,5 @@ const heap = () => { const stats = heapNow(); return { usedMb: Math.round(stats.
 parentPort.on('message', message => {
   Promise.resolve().then(() => handle(message)).then(
     result => parentPort.postMessage({ id: message.id, result, heap: heap() }),
-    error => parentPort.postMessage({ id: message.id, error: { ...errorOf(error), ...(error?.stale ? { stale: true } : {}) }, heap: heap() }))
+    error => { report(message, error); parentPort.postMessage({ id: message.id, error: { ...errorOf(error), ...(error?.stale ? { stale: true } : {}) }, heap: heap() }) })
 })

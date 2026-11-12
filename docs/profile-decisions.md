@@ -16,7 +16,7 @@ built (`src/utils/public-people/profile-decisions.mjs`, wired through
   separately from current membership; see the [presence contract](public-people-reader.md#historical-membership).
 - **rename** `{profileId, name}`: changes only the published display name, for
   example to mark test accounts.
-- **remove** `{profileId, reason}`: drops an unclaimed (imported or legacy)
+- **remove** `{profileId, reason}`: drops an unclaimed (imported, legacy or independently published professional)
   profile, every edge that touches it and any address merged into it, for
   removal requests ([removal-requests.md](removal-requests.md)). A member's
   profile is never removed; a removal naming a merged address removes the

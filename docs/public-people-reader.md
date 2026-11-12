@@ -64,7 +64,7 @@ Real Noos publication/readback and standalone route integration are covered by t
 
 The shared projection keeps current `members` separate from `legacyMembers`. The standalone provider reads historical evidence only from the pinned production manifest and source digests in `mcp-server/legacy-account-manifest.mjs`, requiring the matching manifest node and non-revoked account rows with neither test nor self-asserted markers. The projection fails closed for more than 81 rows or an unknown profile ID; absence of a historical provider means an empty historical set. No name, extracted contact detail or self-assertion supplies this evidence.
 
-Presence resolves in order: `member` (**On Unlinked**, current membership from the [member identity sources](signup-profile-lookup.md#public-projection-and-export-precedence)), then `legacy` (**Legacy member · awaiting claim**, verified recovered account), otherwise `shadow` (**Not on Unlinked**, imported contact). Historical display records create no owners, sessions, login permissions or member messaging. A legacy profile offers **Sign in to reclaim it** at `/legacy-account`, which still requires verified sign-in and explicit confirmation; its existing profile and connections remain available.
+Presence resolves in order: `member` (**On Unlinked**, current membership from the [member identity sources](signup-profile-lookup.md#public-projection-and-export-precedence)), then `legacy` (**Legacy member · awaiting claim**, verified recovered account), otherwise `shadow` (**Not on Unlinked**, imported contact or independently published professional profile). Historical display records create no owners, sessions, login permissions or member messaging. A legacy profile offers **Sign in to reclaim it** at `/legacy-account`, which still requires verified sign-in and explicit confirmation; its existing profile and connections remain available.
 
 Historical IDs follow [profile merge decisions](profile-decisions.md), including aliases, without becoming current members. Both membership sets contribute to the snapshot revision, so claim or revocation changes invalidate filtered cursors after the existing freshness windows above. Regression coverage: `tests/legacy-membership.test.mjs`; published filter parity: `tests/public-presence-contract.test.mjs`.
 
@@ -76,7 +76,8 @@ is current published enrichment evidence in the composed index; `not_recorded`
 means there is no such evidence, not that the person was never enriched. A
 source without a status yields `unknown`. Evidence includes matching published
 ID-keyed or LinkedIn-keyed enrichment, including matches from every linked owner
-upload even when an older overlay is discarded. Evidence follows profile merges
+upload even when an older overlay is discarded, and profiles from the separate
+[professional publication source](professional-profile-publication.md). Evidence follows profile merges
 and does not imply that enrichment text was applied. The list accepts these three values as an `enrichmentStatus` filter,
 which is bound into the cursor; invalid values are rejected. Contact lookup
 uses `unknown` when public evidence is unavailable. See the
@@ -124,7 +125,7 @@ Still on the main thread: assembling a changed member snapshot (`createMemberPub
 
 Now a due rebuild first computes a fingerprint of everything the build reads:
 
-- the legacy and enrichment revisions;
+- the legacy, enrichment and enabled professional-publication revisions;
 - the discovered imports, plus each import's live resource and legacy link;
 - signups and connection-privacy choices, including how unresolved owners resolve to legacy profiles;
 - invites, members, legacy members and decisions.

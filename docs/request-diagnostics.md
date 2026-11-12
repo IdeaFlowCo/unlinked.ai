@@ -1,5 +1,7 @@
 # Private agent request diagnostics
 
+Query text is stored separately by the [private search query history](search-query-log.md), enabled independently. The content-free diagnostics contract below is unchanged.
+
 The standalone runtime can record bounded request metadata for direct REST
 (`/api/agent/...`), direct MCP (`/mcp`), and the shared gateway's signed downstream
 adapter (`/api/connector/mcp`). Public directory reads produce only the
@@ -45,7 +47,19 @@ timeout and rate-limit flags. Missing fields mean **not observed**, not false or
 zero. A 200 MCP response can still have a typed tool error or `protocol_error`
 (e.g. rejected tool/schema). Provider HTTP/context-limit causes map to fixed
 `failure_stage` values; exception messages, stacks and provider bodies are never
-persisted. Result counts do not prove search completeness. A top-ten AI answer
+persisted.
+
+`unlinked_lookup_contact` failures also name the step that failed in
+`failure_stage` and, for public-index steps, an allowlisted `index_failure`
+reason distinguishing timeouts, cancellation, stale indexes, validation or
+worker/reader refusals, and unexpected exceptions. `STAGES` and `INDEX_REASONS`
+in `mcp-server/request-diagnostics.mjs` own the exact vocabularies.
+An unexpected exception in the lookup tool, index worker or reader also writes
+one fixed stderr line, for example
+`unlinked_public_index_worker_error method=lookup class=TypeError at=reader.mjs:531`:
+the method, the error class and the first public-people source location only,
+never its message or data. Private-notes, investor-import and lookup tools are
+recorded by name instead of `unknown`. Result counts do not prove search completeness. A top-ten AI answer
 is not labeled truncated unless the result contract explicitly says so.
 
 No Authorization, Cookie, credentials, raw query, path ID, URL parameters, RPC
