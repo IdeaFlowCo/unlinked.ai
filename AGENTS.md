@@ -208,6 +208,8 @@ sheet selection, whole-workbook private-retention acknowledgement, bounded
 ZIP/XML parsing, original-byte recovery and provenance: `docs/investor-csv.md`.
 Browser list upload remains CSV-only; XLSX is available through MCP/REST.
 
+Offline professional-profile publication stores only Noos-supported basic fields; its immutable audit manifest supplies validated URLs at runtime. Publisher, hydration, rollback and pending delivery acceptance: `docs/professional-profile-publication.md`.
+
 MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment status) and `docs/agent-api.md`.
 
 Operator-controlled verified entitlements, priority admission, and browser-only visible-network exports are documented in `docs/verified-access.md`.

@@ -13,6 +13,7 @@ import { validTimestamp } from '../src/utils/network-order.mjs'
 import { createMessagingResolver, createMessagingSession, createMessagingRecipient, createMessagingIdentities } from './messaging.mjs'
 
 import { withLegacyProfileDetails } from '../src/utils/public-people/profile-links.mjs'
+import { withProfessionalProfileDetails } from './professional-people-manifest.mjs'
 import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import { createContactEnrichment, createNeo4jContactEnrichmentStore } from './contact-enrichment.mjs'
@@ -192,7 +193,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const publicPeopleStore = typeof dependencies.UnlinkedPublicPeopleStore === 'function' ? new dependencies.UnlinkedPublicPeopleStore(driver, 'neo4j') : null
     await publicPeopleStore?.initialize()
     // Reuses an unchanged published revision instead of re-reading its chunks.
-    const publicPeople = cachePublicPeopleReads(publicPeopleStore, publishedRevisionReader(driver, 'neo4j'))
+    const publicPeople = withProfessionalProfileDetails(cachePublicPeopleReads(publicPeopleStore, publishedRevisionReader(driver, 'neo4j')), root)
     const signupLookupStore = publicPeople ? createNeo4jSignupProfileStore(driver) : null
     await signupLookupStore?.initialize()
     // The adapter loads once; any failed check leaves lookups off while
