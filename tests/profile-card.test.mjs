@@ -50,7 +50,7 @@ function harness(t, overrides = {}) {
       complete: async () => ({ matches: [] }),
       ownProfileId: overrides.ownProfileId, signupLookup: overrides.signupLookup,
       ...(overrides.cards ? { contactCards: createContactCards({ store: createMemoryContactCardStore() }) } : {}),
-      lookupCompanyFacts: overrides.lookupCompanyFacts,
+      lookupCompanyFacts: overrides.lookupCompanyFacts, audit: overrides.audit,
       issueAccountGrant: async () => ({ accessToken: 'synthetic' }), revokeAccountGrant: async () => {},
       readPublishedSnapshot: async () => { if (!snapshot.current) throw new Error('unavailable'); return snapshot.current },
       mcpEndpoint: `${baseUrl}/mcp` })
@@ -61,6 +61,24 @@ function harness(t, overrides = {}) {
     return { endpoint, baseUrl, cookie, csrf: page.match(/name="csrf" value="([^"]+)"/)[1] }
   } }
 }
+
+test('own profile records bounded stage timings without identity or profile content', async t => {
+  const events = []
+  const fixture = harness(t, { audit: async event => events.push(event), backend: {
+    listImportJobIds: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return [] },
+  } })
+  const signed = await fixture.start()
+  const response = await fetch(`${signed.endpoint}/profile`, { headers: { Cookie: signed.cookie } })
+  assert.equal(response.status, 200)
+  await response.text()
+  const event = events.find(row => row.event === 'own_profile_timing')
+  assert.ok(event)
+  assert.equal(event.status, 200)
+  assert.ok(event.duration_ms >= 20)
+  assert.ok(event.steps_ms.jobs >= 20)
+  assert.ok(Number.isFinite(event.steps_ms.own_card))
+  assert.doesNotMatch(JSON.stringify(event), /synthetic-card-owner|Card Owner|__Host-ul-session/)
+})
 
 test('the card page is owner-only, linked from the profile, and shows a decodable QR only for a verified public target', async t => {
   const fixture = harness(t)
