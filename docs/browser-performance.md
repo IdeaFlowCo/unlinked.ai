@@ -53,3 +53,11 @@ start-kind counts, success p50/p95/p99/max, over-two-second counts, TTFB/render 
 errors, cancellations, capped durations and observed time coverage. HTTP error pages and typed People fallback states (including HTTP 200) count as errors. Failed enhanced searches preserve the previous result set and offer a native retry. Failures are
 not mixed into successful-load percentiles. No public diagnostics endpoint exists.
 The script validates ownership, permissions, symlinks, hard links and file bounds.
+
+Own-profile server requests also emit `own_profile_timing` to the existing private,
+rotating browser audit log. Each completed GET `/profile` records status, total
+server duration and fixed-name stage durations in milliseconds. Stages can overlap;
+missing stages were not reached. The total includes session and coordination wait.
+Records contain no account, profile, URL, cookie or content. A disconnected or
+crashed request may not produce a record. Compare the receipt timestamp with a
+known test visit; it does not prove a visitor's identity.
