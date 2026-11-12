@@ -22,6 +22,17 @@ A tombstoned publication cannot be reopened by a delayed writer.
 Indexed counts appear only at final publication and equal all accepted observations. Background progress counts describe durably staged observations; they are not indexed/searchable counts until the final fence.
 Rejected/malformed records remain reported and may make an import partial.
 
+The scoped reader can reuse verified observation rows from `indexed` imports,
+or from terminal `partial` imports with `phase: private_observation_index_ready`,
+`indexGate: null` and `indexVersion: observation-v1`. Other partial imports bypass
+the cache. Entries require a safe-integer source revision and are keyed by owner,
+import, revision and manifest fingerprint; each use checks the live owner/import
+fence before and after row retrieval. Republication or a tombstone prevents reuse.
+Account erasure bypasses the cache and invalidates in-flight fills. The bounded
+cache in `src/utils/private-import/import-row-cache.mjs` avoids repeated
+per-observation reads without changing receipt counts or publishing private rows;
+`tests/import-row-cache.test.mjs` covers terminal partial reuse and live guards.
+
 There is no 500-row truncation or rejection gate.
 Parser limits remain unchanged; the authoritative bounds are `LIMITS` in `src/utils/private-import/archive.mjs`, as described in the [parser contract](private-archive-import.md#parser-and-receipts).
 The final manifest references bounded source/chunk IDs rather than every row.
