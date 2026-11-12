@@ -55,9 +55,11 @@ not mixed into successful-load percentiles. No public diagnostics endpoint exist
 The script validates ownership, permissions, symlinks, hard links and file bounds.
 
 Own-profile server requests also emit `own_profile_timing` to the existing private,
-rotating browser audit log. Each completed GET `/profile` records status, total
+rotating `audit/browser-events.jsonl` log, independently of the browser collector
+switch. A completed GET `/profile` queues status, total
 server duration and fixed-name stage durations in milliseconds. Stages can overlap;
-missing stages were not reached. The total includes session and coordination wait.
+missing stages were not reached or had not finished when the response completed.
+The total includes session and coordination wait.
 Records contain no account, profile, URL, cookie or content. A disconnected or
-crashed request may not produce a record. Compare the receipt timestamp with a
+crashed request or an unavailable audit sink may not produce a record. Compare the receipt timestamp with a
 known test visit; it does not prove a visitor's identity.
