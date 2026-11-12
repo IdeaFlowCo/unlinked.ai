@@ -1406,23 +1406,28 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       // account or a signed-out visitor gets nothing.
       if (url.pathname === '/api/private-context' || url.pathname.startsWith('/api/private-context/')) {
         const send = (status, value) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store, private', Vary: 'Cookie', 'X-Robots-Tag': 'noindex, nofollow, noarchive', 'Cross-Origin-Resource-Policy': 'same-origin' }); response.end(JSON.stringify(value)) }
-        const match = url.pathname.match(/^\/api\/private-context\/(people|contacts|entities)\/([^/]{1,480})(\/neighbourhood)?$/)
+        const searching = url.pathname === '/api/private-context/search'
+        const match = url.pathname.match(/^\/api\/private-context\/(people|contacts|entities|records)\/([^/]{1,480})(\/neighbourhood)?$/)
         if (request.method !== 'GET') { send(405, { error: 'method_not_allowed' }); return }
         if (!viewer) { send(401, { error: 'sign_in_required' }); return }
         if (request.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(request.headers['sec-fetch-site'])) { send(403, { error: 'same_origin_required' }); return }
-        if (!match || (match[1] === 'entities') !== Boolean(match[3])) { send(404, { error: 'not_found' }); return }
+        if (!searching && (!match || (match[1] === 'entities') !== Boolean(match[3]))) { send(404, { error: 'not_found' }); return }
         if (!privateContext) { send(503, { state: 'unavailable' }); return }
         const depthValues = url.searchParams.getAll('depth')
-        if ([...url.searchParams.keys()].some(key => key !== 'depth') || depthValues.length > 1 || (depthValues.length && !['1', '2'].includes(depthValues[0]))) { send(400, { error: 'invalid_input' }); return }
+        const queryValues = url.searchParams.getAll('q')
+        if (searching ? ([...url.searchParams.keys()].some(key => key !== 'q') || queryValues.length !== 1 || queryValues[0].trim().length < 2 || queryValues[0].length > 120 || /[\x00-\x1f\x7f]/.test(queryValues[0]))
+          : ([...url.searchParams.keys()].some(key => key !== 'depth') || depthValues.length > 1 || (depthValues.length && !['1', '2'].includes(depthValues[0])))) { send(400, { error: 'invalid_input' }); return }
         const now = Date.now(), budget = contextBudgets.get(viewer.owner.ownerId) ?? { window: now, count: 0 }
         if (now - budget.window >= 60000) { budget.window = now; budget.count = 0 }
         if (++budget.count > 60 && !await isVerified(viewer.owner)) { send(429, { error: 'rate_limited' }); return }
         if (contextBudgets.size > 5000) contextBudgets.clear()
         contextBudgets.set(viewer.owner.ownerId, budget)
         let id
-        try { id = decodeURIComponent(match[2]) } catch { send(400, { error: 'invalid_input' }); return }
+        try { if (!searching) id = decodeURIComponent(match[2]) } catch { send(400, { error: 'invalid_input' }); return }
         try {
-          const value = match[1] === 'people' ? await privateContext.forProfile(viewer.owner, id)
+          const value = searching ? await privateContext.search(viewer.owner, queryValues[0])
+            : match[1] === 'records' ? await privateContext.forEntity(viewer.owner, id)
+            : match[1] === 'people' ? await privateContext.forProfile(viewer.owner, id)
             : match[1] === 'contacts' ? await privateContext.forContact(viewer.owner, id)
             : await privateContext.neighbourhood(viewer.owner, id, depthValues[0] === '2' ? 2 : 1)
           if (value) send(200, value); else send(404, { error: 'not_found' })
