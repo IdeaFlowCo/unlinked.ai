@@ -41,6 +41,8 @@ Signed-in People rows offer state-aware connection controls. Open
 for your connections who have joined Unlinked. See the [member connection guide](docs/member-connections.md)
 for controls, confirmed removal and preservation of imported observations. For live filtering and ordering in People, see [People filtering and ordering](docs/network-controls.md).
 
+For community introductions, reviewed context imports and personal ask tracking, see [Community introductions and asks](docs/community-intake.md).
+
 ## Core Features & Technologies
 
 - Next.js web application with React for a modern, fast user interface

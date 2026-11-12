@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { groupActorKey } from './collective-groups-store.mjs'
+import { concurrentMap } from './concurrent-map.mjs'
 
 export const GROUP_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 export const groupInvitePath = (groupId, inviteId) => `/groups/${groupId}/invites/${inviteId}`
@@ -98,6 +99,13 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
             requests: group.flyer.requests.map(person),
           } } : {}),
       }
+    },
+    async roster(actor, id) {
+      const { group } = await authorized(actor, id)
+      const candidates = [{ actor: group.organizer, profileId: group.organizerProfileId, name: 'Organizer', role: 'Organizer' }, ...group.members.map(row => ({ actor: row.actor, profileId: row.profileId, name: row.name, role: 'Member' }))]
+      const visible = (await concurrentMap(candidates, async row => await live(row.actor) && (same(row.actor, actor) || !await blocked(actor, row.actor)) ? row : null)).filter(Boolean)
+      const { group: latest } = await authorized(actor, id)
+      return visible.filter(row => same(row.actor, latest.organizer) || seat(latest, row.actor))
     },
     async invite(actor, id, recipient, profile) {
       await authorized(actor, id, true)
