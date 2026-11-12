@@ -88,7 +88,7 @@ export function createCommunityIntakeBrowser({client,groups,body}) {
     if(!Number.isSafeInteger(count)||count<1||count>30||new Set(selected).size!==selected.length)throw new IntakeError('Review up to 30 entries at a time.')
     if(edit&&input.get('audience-0')==='group'&&input.get('groupId'))group=await groups.detail(actor,input.get('groupId'))
     rows=Array.from({length:count},(_,i)=>({title:input.get('title-'+i)||'',body:input.get('body-'+i)||'',kind:input.get('kind-'+i),source:input.get('source-'+i),audience:input.get('audience-'+i),selected:selected.includes(String(i))}))
-    const entries=rows.filter(e=>e.selected).map(({selected,...e})=>({...e,...(e.audience==='group'&&group?{groupId:group.id}:{})}))
+    const entries=rows.filter(e=>e.selected).map(e=>{const entry={...e,...(e.audience==='group'&&group?{groupId:group.id}:{})};delete entry.selected;return entry})
     if(!entries.length)throw new IntakeError('Select an entry to save, or go back without saving.')
     if(entries.some(e=>e.audience==='group'&&!group))throw new IntakeError('Choose an active group before sharing an entry.')
     if(edit){if(count!==1)throw new IntakeError('Edit one entry at a time.');await client.update(actor,{id:Number(edit[1]),revision:input.get('revision'),entry:entries[0],status:input.get('status')});return redirect('/asks')}
