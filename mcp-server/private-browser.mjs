@@ -688,7 +688,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
-  const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), origin: base.origin }) } catch { /* Audit availability never changes identity authority. */ } }
+  const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), ...(event.event === 'own_profile_timing' ? {} : { origin: base.origin }) }) } catch { /* Audit availability never changes identity authority. */ } }
   // The signed-in reader of each in-flight response, so every page's Me menu can
   // show the headline once this session has read the member's profile.
   const readers = new WeakMap()
@@ -704,6 +704,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   // Per-response route stage durations for Server-Timing on rendered pages:
   // fixed stage names and whole milliseconds only, never identifiers or paths.
   const responseTimings = new WeakMap()
+  // Private operational timing, scoped to the own-profile page. No identity or content.
+  const ownProfileTiming = new WeakMap()
+  const profileStep = async (response, name, work) => {
+    const trace = ownProfileTiming.get(response)
+    if (!trace) return work()
+    const start = performance.now()
+    try { return await work() } finally { trace.steps[name] = Math.round(performance.now() - start) }
+  }
   const STAGES = new Set(['alerts', 'company', 'facts'])
   const mark = (response, stage, begunMs) => {
     if (!STAGES.has(stage)) return
@@ -2303,7 +2311,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       }
       if (signup && ((request.method === 'GET' && ['/profile', '/card', '/scan'].includes(url.pathname)) || ((request.method === 'GET' && url.pathname === '/profile/handle/check') || (request.method === 'POST' && ['/profile/links', '/profile/handle', '/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname))))) {
         let hidden
-        try { hidden = await ownSuspension(session.owner, backend) } catch {
+        try { hidden = await profileStep(response, 'suspension', () => ownSuspension(session.owner, backend)) } catch {
           // The server could not confirm the profile's status (usually the
           // minute after a restart while the people index warms). Not an
           // import failure and not a suspension: say so, and keep an import's
@@ -2319,23 +2327,23 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         if (hidden) { render(response, 'Profile hidden', '<p>Your Unlinked profile is hidden by Unlinked support. Your account, sign-in and imports are unaffected. Email <a href="mailto:support@ideaflow.app">support@ideaflow.app</a> to ask why or to have it restored.</p>', 404); return }
       }
       if (signup && request.method === 'GET' && url.pathname === '/profile') {
-        const jobs = await jobResources(), props = jobProps(jobs)
+        const jobs = await profileStep(response, 'jobs', () => jobResources()), props = jobProps(jobs)
         if (props.importJob && ['uploaded', 'parsing', 'indexing'].includes(props.importJob.status) && !props.importJob.profileReady) { journey(response, renderImporting(props), props.importJob); return }
-        const summary = await importSummary(jobs)
+        const summary = await profileStep(response, 'import_summary', () => importSummary(jobs))
         // Reuse the card's snapshot-verified public context; private rows and
         // imported contact details never establish a cross-product recipient.
-        const { profile, hasStoredProfile, publicProfileUrl } = await readOwnCard(jobs)
+        const { profile, hasStoredProfile, publicProfileUrl } = await profileStep(response, 'own_card', () => readOwnCard(jobs))
         const offerLookup = Boolean(selfClaims && session.selfClaim && !hasStoredProfile)
         let testClaim = null
-        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await backend.readTestProfileClaim() } catch { testClaim = null } }
+        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await profileStep(response, 'test_claim', () => backend.readTestProfileClaim()) } catch { testClaim = null } }
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
         // Start reading the public index now; the contact lookup below joins it.
-        const warming = typeof readPublishedSnapshot === 'function' ? readerFor(request).lookup({ ids: [] }).catch(() => null) : null
+        const warming = typeof readPublishedSnapshot === 'function' ? profileStep(response, 'index_wait', () => readerFor(request).lookup({ ids: [] }).catch(() => null)) : null
         try {
-          const connections = (await accountNetwork(session.owner)).assertions.filter(row => row.category === 'connections')
+          const connections = (await profileStep(response, 'network', () => accountNetwork(session.owner))).assertions.filter(row => row.category === 'connections')
           // One card per person, so the count and the preview never repeat someone.
-          const cards = await personCards(connections, readerFor(request))
+          const cards = await profileStep(response, 'person_cards', () => personCards(connections, readerFor(request)))
           connectionCount = cards.length
           contacts = cards.slice(0, 10)
         } catch { /* The profile stands on its own while the network is still being read. */ }
@@ -2343,13 +2351,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // The photo published for this member's public profile, when there is one.
         let mine = null, profileHandleView = null
         if (typeof ownProfileId === 'function') {
-          mine = await ownProfileId(session.owner).catch(() => null)
+          mine = await profileStep(response, 'own_profile_id', () => ownProfileId(session.owner).catch(() => null))
           const photo = mine ? profilePhotos?.urlFor(mine) : null
           if (photo) profile.photo = photo
-          const published = mine ? await publicReader.profile({ id: mine, viewer: selfViewer(mine) }).catch(() => null) : null
+          const published = mine ? await profileStep(response, 'public_profile', () => publicReader.profile({ id: mine, viewer: selfViewer(mine) }).catch(() => null)) : null
           // The member's handle (docs/profile-handles.md): given on first view, editable here.
           if (profileHandles && published?.profile?.presence === 'member') {
-            const current = profileHandles.handleFor(published.profile.id) ?? await bounded(() => ensureHandle(published.profile), null)
+            const current = profileHandles.handleFor(published.profile.id) ?? await profileStep(response, 'ensure_handle', () => bounded(() => ensureHandle(published.profile), null))
             const notice = url.searchParams.get('handle')
             if (current) profileHandleView = { handle: current, ...(['saved', 'taken', 'invalid', 'length', 'reserved', 'limit', 'unavailable'].includes(notice) ? { notice } : {}) }
           }
@@ -2361,8 +2369,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // the current public profile id, like /card's identity sync.
         let socialLinks
         if (profileSocialLinks) {
-          const saved = await bounded(() => profileSocialLinks.get(session.owner), null)
-          if (saved?.links?.length && mine && saved.profileId !== mine) await profileSocialLinks.rebind(session.owner, { profileId: mine, observed: saved }).catch(() => {})
+          const saved = await profileStep(response, 'social_links', () => bounded(() => profileSocialLinks.get(session.owner), null))
+          if (saved?.links?.length && mine && saved.profileId !== mine) await profileStep(response, 'social_rebind', () => profileSocialLinks.rebind(session.owner, { profileId: mine, observed: saved }).catch(() => {}))
           if (saved?.links?.length) profile.socialLinks = saved.links
           const notice = url.searchParams.get('links')
           const line = Number.parseInt(url.searchParams.get('line') ?? '', 10)
@@ -3204,6 +3212,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   }
   const serve = async (request, response) => {
     const path = new URL(request.url, base).pathname
+    if (request.method === 'GET' && path === '/profile') {
+      const trace = { start: performance.now(), steps: {} }
+      ownProfileTiming.set(response, trace)
+      response.once('finish', () => {
+        void recordAudit({ event: 'own_profile_timing', status: response.statusCode, duration_ms: Math.round(performance.now() - trace.start), steps_ms: trace.steps })
+      })
+    }
     if (path.startsWith('/messages/person/') || isGroupPath(path)) {
       response.setHeader('Cache-Control', 'no-store, private')
       response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')

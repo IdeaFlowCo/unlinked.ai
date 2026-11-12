@@ -48,9 +48,9 @@ function harness(t, overrides = {}) {
       resolveOwner: async () => owner, signup: async () => owner,
       getBackend: async value => { assert.deepEqual(value, owner); return backend },
       complete: async () => ({ matches: [] }),
-      ownProfileId: overrides.ownProfileId, signupLookup: overrides.signupLookup,
+      ownProfileId: overrides.ownProfileId, signupLookup: overrides.signupLookup, profileSocialLinks: overrides.profileSocialLinks,
       ...(overrides.cards ? { contactCards: createContactCards({ store: createMemoryContactCardStore() }) } : {}),
-      lookupCompanyFacts: overrides.lookupCompanyFacts,
+      lookupCompanyFacts: overrides.lookupCompanyFacts, audit: overrides.audit,
       issueAccountGrant: async () => ({ accessToken: 'synthetic' }), revokeAccountGrant: async () => {},
       readPublishedSnapshot: async () => { if (!snapshot.current) throw new Error('unavailable'); return snapshot.current },
       mcpEndpoint: `${baseUrl}/mcp` })
@@ -61,6 +61,30 @@ function harness(t, overrides = {}) {
     return { endpoint, baseUrl, cookie, csrf: page.match(/name="csrf" value="([^"]+)"/)[1] }
   } }
 }
+
+test('own profile records bounded stage timings without identity or profile content', async t => {
+  const events = []
+  const fixture = harness(t, { audit: async event => events.push(event), ownProfileId: async () => 'test-profile', profileSocialLinks: { set: async () => {}, forProfile: async () => [], removeOwner: async () => {}, get: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return { profileId: 'old', links: ['https://example.com/'] } }, rebind: async () => { await new Promise(resolve => setTimeout(resolve, 25)) } }, backend: {
+    readSuppressions: async () => null,
+    listImportJobIds: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return [] },
+  } })
+  const signed = await fixture.start()
+  const response = await fetch(`${signed.endpoint}/profile?private_marker=synthetic-secret`, { headers: { Cookie: signed.cookie } })
+  assert.equal(response.status, 200)
+  const document = await response.text()
+  const event = events.find(row => row.event === 'own_profile_timing')
+  assert.ok(event)
+  assert.deepEqual(Object.keys(event).sort(), ['at', 'duration_ms', 'event', 'status', 'steps_ms'])
+  assert.equal(event.status, 200)
+  assert.ok(event.duration_ms >= 20)
+  assert.ok(event.steps_ms.jobs >= 20)
+  assert.ok(Number.isFinite(event.steps_ms.own_card))
+  assert.ok(event.steps_ms.social_links >= 20)
+  assert.ok(event.steps_ms.social_rebind >= 20)
+  assert.doesNotMatch(JSON.stringify(event), /synthetic-card-owner|synthetic-card-user|Card Owner|__Host-ul-session|synthetic-secret|private_marker/)
+  await profileEvidence('own-profile.html', document)
+  await profileEvidence('own-profile-timing.json', JSON.stringify(event, null, 2) + '\n')
+})
 
 test('the card page is owner-only, linked from the profile, and shows a decodable QR only for a verified public target', async t => {
   const fixture = harness(t)
