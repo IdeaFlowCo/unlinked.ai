@@ -12,9 +12,6 @@ import { createMemoryNotificationStore } from '../mcp-server/member-notification
 import { createCollectiveGroups } from '../mcp-server/collective-groups.mjs'
 import { createMemoryCollectiveGroupsStore } from '../mcp-server/collective-groups-store.mjs'
 
-import { createCollectiveGroups } from '../mcp-server/collective-groups.mjs'
-import { createMemoryCollectiveGroupsStore } from '../mcp-server/collective-groups-store.mjs'
-
 const require = createRequire(new URL('../mcp-server/package.json', import.meta.url))
 const { importSPKI, jwtVerify } = await import(require.resolve('jose'))
 const configuration = { issuer: 'https://identity.invalid/api/auth', clientId: 'private-test-client',
