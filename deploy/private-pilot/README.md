@@ -189,7 +189,7 @@ Standalone `verify` requires the exact single-label checkpoint ID, manifest hash
 
 ## Search query history
 
-The standalone composition enables the separate private search query stream unless `UNLINKED_SEARCH_LOG=off`. See [coverage, storage and operator verification](../../docs/search-query-log.md). Deploying this version begins collection; query history has no age expiry, a 1 GiB cap and a 1 GiB free-disk reserve; the existing M4 ops monitor warns at 80% and at the cap. Release/rollback backups omit query files. Metadata diagnostics remains independently controlled.
+Before deploying or rolling back, follow the [search query history contract](../../docs/search-query-log.md) for collection defaults, storage, backup exclusions, old-writer compatibility, ops warnings and live verification. Metadata diagnostics remains independently controlled.
 
 ## Optional request diagnostics
 

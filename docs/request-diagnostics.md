@@ -50,13 +50,12 @@ zero. A 200 MCP response can still have a typed tool error or `protocol_error`
 persisted.
 
 `unlinked_lookup_contact` failures also name the step that failed in
-`failure_stage` (`owner_network`, `contact_addresses`, `index_profile_lookup`,
-`index_published_lookup`, `index_linkedin_ref`, `index_refhash_lookup`) and, for
-public-index steps, a fixed `index_failure` reason: `build_timeout`, `aborted`,
-`stale`, `worker_timeout`, `install_timeout`, `worker_unavailable`,
-`worker_refused`, `clone_failed`, `snapshot_invalid`, `exception` (the index
-worker threw) or `reader_exception`. An unexpected exception in the index worker
-or reader also writes one fixed stderr line, for example
+`failure_stage` and, for public-index steps, an allowlisted `index_failure`
+reason distinguishing timeouts, cancellation, stale indexes, validation or
+worker/reader refusals, and unexpected exceptions. `STAGES` and `INDEX_REASONS`
+in `mcp-server/request-diagnostics.mjs` own the exact vocabularies.
+An unexpected exception in the lookup tool, index worker or reader also writes
+one fixed stderr line, for example
 `unlinked_public_index_worker_error method=lookup class=TypeError at=reader.mjs:531`:
 the method, the error class and the first public-people source location only,
 never its message or data. Private-notes, investor-import and lookup tools are

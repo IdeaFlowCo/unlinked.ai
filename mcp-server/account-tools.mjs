@@ -183,13 +183,10 @@ const indexFailure = (stage, error) => Object.assign(new AccountToolError('upstr
 export function createAccountToolService({ exportManifest, isVerified = async () => false, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
-  // An owner's whole network read (every published import, the legacy link,
-  // invites, accepted requests) takes 15-25 s on large accounts: longer than the
-  // gateway or OpenChat waits, so every lookup_contact timed out (2026-11-10).
-  // list_connections and lookup_contact share one read per owner while younger
-  // than `networkFreshMs`. The read runs detached from any one caller, so an
-  // abandoned call still warms the next; any mutating tool by that owner drops
-  // it. Same contract as the signed-in browser cache (private-browser.mjs).
+  // list_connections and lookup_contact share one bounded read per owner. It
+  // runs independently of each caller's signal so cancellation cannot discard
+  // useful work; mutating tools invalidate it and reuse rechecks import IDs.
+  // Freshness and lookup-miss retry semantics are owned by docs/agent-api.md.
   // list_person_targets keeps its own live read on purpose.
   const networkFreshMs = limits.networkFreshMs ?? 30000
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('account_tool_service_configuration_required')

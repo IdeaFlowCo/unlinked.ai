@@ -41,8 +41,8 @@ export async function createDiagnosticsStore({ directory, now = () => new Date()
   return {
     emit(record) {
       if (closed || pending >= maxQueue) { dropped++; stats.dropped++; return }
-      // Each private stream supplies its fixed schema projection (diagnostics
-      // by default; query history uses a separate directory and projection).
+      // Re-project before persistence, using the diagnostics schema by default.
+      // Query history has its own non-expiring store in search-log-store.mjs.
       const snapshot = project(record)
       if (!snapshot) { dropped++; stats.dropped++; return }
       pending++

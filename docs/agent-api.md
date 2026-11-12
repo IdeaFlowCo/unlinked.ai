@@ -394,6 +394,14 @@ row's own published profile, or one with the same LinkedIn address).
 contacts and `public` when only a published profile matched. Only the caller's
 own imports are ever read; nothing matching is typed `not_found`.
 
+Degree-one `unlinked_list_connections` and `unlinked_lookup_contact` share a
+short-lived owner-network read. The service's `limits.networkFreshMs` defaults
+to 30,000 ms (zero disables reuse; maximum 300,000 ms). Reuse requires a readable,
+unchanged import-ID list; a mutating tool call drops that owner's held read.
+A lookup miss against a held read retries once with a live read, while changes
+inside an existing import may remain visible only after the freshness window.
+`unlinked_list_person_targets` keeps its separate live read.
+
 Notes and relations an agent saves about these people through the shared
 Ideaflow connector (OpenChat private-people tools, keyed by the same refs) are
 shown to the owner, and only the owner, on Unlinked person and contact pages;
