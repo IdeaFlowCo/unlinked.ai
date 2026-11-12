@@ -2640,14 +2640,15 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           if (!privateLists) { journey(response, renderPrivateList({ ...chrome, error: 'Private lists are unavailable right now. Please try again later.' }), null, '', 503); return }
           try {
             const result = await privateLists.get(session.owner, privateListMatch[1], after)
+            const view = url.searchParams.get('view') === 'table' ? 'table' : 'list'
             const queryValues = url.searchParams.getAll('q'), query = queryValues[0] ?? ''
             if (queryValues.length > 1 || query.length > 200) throw Object.assign(Error('Invalid search.'), {code:'invalid_input'})
             if (query.trim() && bulkExports) {
               const controller=new AbortController();response.once('close',()=>{if(!response.writableFinished)controller.abort()})
               const found=await bulkExports.manifest(session.owner,{scope:'list',listId:'private:'+privateListMatch[1],query,inline:true,fields:['id','profileId','name','headline','company','linkedinUrl'],format:'csv'},{publicAllowed:true,privateAllowed:true,browser:true,membersOnly:iosApp(request)},controller.signal,()=>authorizeDownloadSession(request,session))
-              journey(response,renderPrivateList({...chrome,list:result.list,members:found.rows.slice(0,100).map(row=>({...row,description:[row.headline,row.company].filter(Boolean).join(' · ')})),query,matchedTotal:found.total})); return
+              journey(response,renderPrivateList({...chrome,view,after,list:result.list,members:found.rows.slice(0,100).map(row=>({...row,description:[row.headline,row.company].filter(Boolean).join(' · ')})),query,matchedTotal:found.total})); return
             }
-            journey(response, renderPrivateList({ ...chrome, ...result })); return
+            journey(response, renderPrivateList({ ...chrome, ...result, view, after })); return
           } catch (error) {
             if (error?.code === 'not_found') { journey(response, renderNotFound(chrome), null, '', 404); return }
             const badPage = error?.code === 'invalid_input' || error?.code === 'invalid_cursor'

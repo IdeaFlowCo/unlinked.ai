@@ -690,20 +690,34 @@ test('unsupported jobs report once', async () => {
   assert.equal(events.filter(event => event.event === 'import_job_not_runnable').length, 1)
 })
 
-test('a single slow run reports once and stops reporting after completion', async () => {
+test('a single slow run reports once and stops reporting after completion', async t => {
+  // Advance the deadline and elapsed-time clock together, independent of host scheduling.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 })
   const events = []
-  let release
+  let release, started
   const blocked = new Promise(resolve => { release = resolve })
+  const running = new Promise(resolve => { started = resolve })
   const worker = createArchiveWorker({ listPendingImports: async () => [{ id: 'job-slow', owner: { ownerId: 'owner-a' } }],
-    getBackend: async () => { await blocked; return { adapter: { withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ status: 'indexed', phase: 'private_observation_index_ready' }) }) } } },
+    getBackend: async () => { started(); await blocked; return { adapter: { withImport: async (_owner, _id, fn) => fn({ getJob: async () => ({ status: 'indexed', phase: 'private_observation_index_ready' }) }) } } },
     slowAfterMs: 20, onError: event => events.push(event) })
   const run = worker.tick()
-  await new Promise(resolve => setTimeout(resolve, 70))
-  release(); await run; await worker.stop()
-  const slow = events.filter(event => event.event === 'import_job_running_long')
-  assert.equal(slow.length, 1)
-  assert.equal(slow[0].importId, 'job-slow')
-  assert.ok(slow[0].elapsedMs >= 20)
+  try {
+    await running
+    t.mock.timers.tick(19)
+    await Promise.resolve()
+    assert.deepEqual(events, [], 'no warning before the deadline')
+    t.mock.timers.tick(1)
+    await Promise.resolve()
+    assert.deepEqual(events, [{ event: 'import_job_running_long', importId: 'job-slow', elapsedMs: 20 }])
+    t.mock.timers.tick(100)
+    await Promise.resolve()
+    assert.equal(events.length, 1, 'a blocked run reports only once')
+    release(); await run
+    const completed = [...events]
+    t.mock.timers.tick(100)
+    await Promise.resolve()
+    assert.deepEqual(events, completed, 'no more reports after completion')
+  } finally { release(); await run; await worker.stop() }
 })
 
 

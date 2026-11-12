@@ -6,10 +6,10 @@ export function enhancePrivateList(win = window) {
   const rows = root.querySelector('[data-list-members]'), link = root.querySelector('[data-load-members]'), status = root.querySelector('[data-member-status]');
   if (!rows || !link || !status) return;
   const listPath = win.location.pathname;
-  let busy = false, pages = [], next = link.getAttribute('href');
+  let busy = false, switching = false, pages = [], next = link.getAttribute('href');
   const seen = new Set([...rows.children].map(el => el.dataset.memberId));
   const visited = new Set([win.location.href]);
-  const safeUrl = value => { const url = new URL(value, win.location.href); if (url.origin !== win.location.origin || url.pathname !== listPath || [...url.searchParams.keys()].some(key => key !== 'after')) throw Error(); return url.href; };
+  const safeUrl = value => { const url = new URL(value, win.location.href); if (url.origin !== win.location.origin || url.pathname !== listPath || (url.searchParams.get('view') || 'list') !== (root.dataset.listView || 'list') || (url.searchParams.get('q') || '') !== (new URL(win.location.href).searchParams.get('q') || '') || [...url.searchParams.keys()].some(key => !['after', 'view', 'q'].includes(key))) throw Error(); return url.href; };
   const save = () => { try { win.history.replaceState({ ...win.history.state, privateList: { path: listPath, pages, scroll: win.scrollY } }, ''); } catch {} };
   async function load(restore = false) {
     if (busy || !next) return false;
@@ -21,7 +21,7 @@ export function enhancePrivateList(win = window) {
       if (!response.ok || response.redirected || safeUrl(response.url) !== target) throw Error();
       const page = new win.DOMParser().parseFromString(await response.text(), 'text/html');
       const incoming = page.querySelector('[data-private-list]');
-      if (!incoming || incoming.dataset.privateList !== root.dataset.privateList) throw Error();
+      if (!incoming || incoming.dataset.privateList !== root.dataset.privateList || incoming.dataset.listView !== root.dataset.listView) throw Error();
       const batch = incoming.querySelector('[data-list-members]');
       if (!batch) throw Error();
       const candidates = [...batch.children];
@@ -44,7 +44,24 @@ export function enhancePrivateList(win = window) {
     finally { busy = false; rows.removeAttribute('aria-busy'); link.removeAttribute('aria-disabled'); }
   }
   link.addEventListener('click', event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); void load(); });
-  win.addEventListener('pagehide', save);
+  for (const control of root.querySelectorAll('.list-view-switch a')) control.addEventListener('click', event => {
+    if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !pages.length || busy) return;
+    const target = new URL(control.getAttribute('href'), win.location.href);
+    if (target.origin !== win.location.origin || target.pathname !== listPath || !['list', 'table'].includes(target.searchParams.get('view'))) return;
+    const converted = pages.map(page => { const url = new URL(page); url.searchParams.set('view', target.searchParams.get('view')); return url.href; });
+    try {
+      save();
+      win.history.pushState({ ...win.history.state, privateList: { path: listPath, pages: converted, scroll: win.scrollY } }, '', target.href);
+      switching = true; event.preventDefault(); win.location.reload();
+    } catch { /* Keep the native link available. */ }
+  });
+  win.addEventListener('pagehide', () => { if (!switching) save(); });
+  win.addEventListener('popstate', () => {
+    if ((new URL(win.location.href).searchParams.get('view') || 'list') !== (root.dataset.listView || 'list')) {
+      switching = true;
+      win.location.reload();
+    }
+  });
   const saved = win.history.state?.privateList;
   if (saved?.path === listPath && Array.isArray(saved.pages) && saved.pages.length <= 100) {
     void (async () => { for (const target of saved.pages) { if (!next || safeUrl(next) !== target || !await load(true)) break; } win.requestAnimationFrame(() => win.scrollTo(0, Number.isFinite(saved.scroll) ? saved.scroll : 0)); })();
