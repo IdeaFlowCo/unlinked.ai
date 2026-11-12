@@ -127,15 +127,3 @@ and a smaller inventory reader. Disable its query collector before any future
 rollback to that code, or retain the v0.6.109 storage adapter. Do not let an old
 collector prune retained legacy daily files. Other diagnostic streams keep their
 existing expiry policy.
-
-## Repeated owner searches after a partial import
-
-A completed archive can have `status: partial` because records were rejected,
-even when every accepted observation is indexed. Once the publisher records
-`phase: private_observation_index_ready`, `indexGate: null` and
-`indexVersion: observation-v1`, its verified rows use the same bounded
-owner/import/revision cache as an indexed archive. Gated or unfinished partial
-imports still read live. Every use rechecks the live manifest before and after;
-republication and account erasure retain their existing invalidation rules.
-This avoids repeating a per-observation HTTP/graph read for each directory
-search. It does not change accepted/rejected counts or publish private rows.
