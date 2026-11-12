@@ -56,7 +56,12 @@ export async function writeProfessionalAudit(root, name, bytes) {
 // installed Noos validator supports. URLs belong to the immutable source file.
 export function professionalStorageSnapshot(snapshot) {
   const validated = validateProfessionalSnapshot(snapshot)
-  return { ...validated, profiles: validated.profiles.map(({ linkedinUrl, website, ...basic }) => basic) }
+  return { ...validated, profiles: validated.profiles.map(profile => {
+    const basic = { ...profile }
+    delete basic.linkedinUrl
+    delete basic.website
+    return basic
+  }) }
 }
 export async function writeProfessionalManifest(root, snapshot) {
   const validated = validateProfessionalSnapshot(snapshot)
