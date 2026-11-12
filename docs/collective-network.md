@@ -34,7 +34,8 @@ An interrupted signup can resume for 24 hours using an HttpOnly return cookie
 containing the validated flyer destination and source query. An expired OIDC
 transaction restarts sign-in with a fresh state and PKCE exchange.
 
-The group page shows membership after joining. The flyer landing also shows
+For the optional introduction and post-join destination, see
+[Community introductions and asks](community-intake.md). The flyer landing shows
 membership or pending-request state when reopened by the signed-in applicant.
 An account removed after joining through that flyer cannot reuse the same
 link. Flyer membership retains the group's existing selected-list ACL boundary.

@@ -1,3 +1,4 @@
+import { createCommunityIntakeClient } from './community-intake.mjs'
 import { createCollectiveGroups } from './collective-groups.mjs'
 import { createNeo4jCollectiveGroupsStore } from './collective-groups-store.mjs'
 import { createBrowserPerformanceRecorder } from './browser-performance.mjs'
@@ -742,6 +743,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       connectionPrivacy,
       savedSearchLists,
       collectiveGroups,
+      communityIntake: createCommunityIntakeClient({ identityForOwner, secret: process.env.UNLINKED_SOCIAL_INTAKE_SECRET, origin: process.env.UNLINKED_SOCIAL_INTAKE_ORIGIN || 'https://social.ideaflow.app' }),
       profileSocialLinks,
       profileHandles,
       contactSlugs,

@@ -88,7 +88,7 @@ export function renderGroup(chrome, group, origin) {
   }).join('') : ''
   const members = group.organizer ? group.members.map(member => `<article><h3>${profileLink(member.profileId, member.name)}</h3>${form(`${base}/members/${member.id}/remove`, csrf, 'Remove member', '', 'quiet')}</article>`).join('') : ''
   return shell(chrome, group.name, back('/groups', 'Collective network') + title(group.name, 'Private group · ' + (group.organizer ? 'Organizer' : 'Member')) +
-    list + (group.organizer ? renderFlyerManagement(group, csrf, origin) + card('Members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
+    card('Your community', `<p><a class="button" href="${base}/community">People, asks and offers →</a></p><p><a href="${base}/welcome">Add or update your introduction</a></p>`) + list + (group.organizer ? renderFlyerManagement(group, csrf, origin) + card('Members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
     card('Invite a member', '<p class="small">Use the profile link of an existing Unlinked member. Creating an invitation sends nothing. To share the link, copy it into an OpenChat conversation.</p>' + inviteForm +
       (invites ? `<div class="panel list">${invites}</div>` : '')) : `<p>${chat(group.organizerProfileId, 'Message the organizer')}</p>`))
 }
