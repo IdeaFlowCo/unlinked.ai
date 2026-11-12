@@ -71,6 +71,37 @@ test('partial (still publishing) imports are not cached', async () => {
   assert.equal(cache.stats().entries, 0)
 })
 
+test('a completed partial archive reuses verified rows while preserving rejected-row counts and live guards', async () => {
+  // The reported owner archive: all 3,140 accepted rows are indexed; 54
+  // rejected records make its final status partial. A repeated search used
+  // to perform every HTTP/graph row read again, even with a warm cache.
+  const f = fixture({ rows: 3140, status: 'partial' }), cache = createImportRowCache()
+  const resource = f.resources.get(f.importId)
+  Object.assign(resource.payload, { phase: 'private_observation_index_ready', indexGate: null, indexVersion: 'observation-v1' })
+  resource.payload.counts.rejected = 54
+  const cold = await network(f, cache).readNetwork()
+  const before = { ...f.reads }
+  const warm = await network(f, cache).readNetwork()
+  assert.deepEqual(warm.assertions, cold.assertions)
+  assert.equal(warm.indexed, 3140)
+  assert.equal(resource.payload.counts.rejected, 54)
+  assert.equal(f.reads.assertion, before.assertion, 'a repeat search does not refetch 3,140 observations')
+  assert.equal(f.reads.import - before.import, 2, 'live manifest rechecks remain')
+  resource.sourceRevision++
+  await network(f, cache).readNetwork()
+  assert.equal(f.reads.assertion, before.assertion + 3140, 'republication cannot reuse old rows')
+  f.resources.set(f.importId, { ...resource, deleted: true, payload: null })
+  await assert.rejects(network(f, cache).readNetwork(), /private_import_not_found/)
+})
+
+test('a partial archive still behind an index gate never uses the terminal cache', async () => {
+  const f = fixture({ rows: 10, status: 'partial' }), cache = createImportRowCache()
+  Object.assign(f.resources.get(f.importId).payload, { phase: 'private_observation_index_ready', indexVersion: 'observation-v1', indexGate: 'index_not_connected' })
+  await network(f, cache).readNetwork(); await network(f, cache).readNetwork()
+  assert.equal(f.reads.assertion, 20)
+  assert.equal(cache.stats().entries, 0)
+})
+
 test('account erase drops cached rows, and an in-flight fill cannot re-insert them', async () => {
   const f = fixture({ rows: 40, delayMs: 2 }), cache = createImportRowCache()
   await network(f, cache).readNetwork()
