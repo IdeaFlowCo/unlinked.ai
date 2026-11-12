@@ -1,3 +1,4 @@
+import { PROFESSIONAL_PEOPLE_DATASET, validateProfessionalSnapshot } from './professional-profiles.mjs'
 import { createHash } from 'node:crypto'
 import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
 import { PUBLIC_UPLOAD_CONSENT } from '../private-import/consent.mjs'
@@ -119,7 +120,7 @@ const validEnrichmentDatasets = datasets => Array.isArray(datasets) && datasets.
 const IMPORT_PREFETCH = 4
 const detailKey = item => JSON.stringify([item.id, item.owner.ownerId, item.owner.userId, item.revision])
 const sourceValid = (resource, item) => Boolean(resource) && !resource.deleted && resource.sourceOwnerId === item.owner.ownerId && resource.sourceRevision === item.revision && resource.payload?.ownerId === item.owner.ownerId && resource.payload.id === item.id && permitted(resource.payload)
-export function createMemberPublicIndex({ log = line => console.error(line), discover, getBackend, publicPeople, readLegacy, readLegacyRevision, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, readConnectionPrivacy, onMemberPhotos, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
+export function createMemberPublicIndex({ log = line => console.error(line), discover, getBackend, publicPeople, readLegacy, readLegacyRevision, readMembers, readLegacyMembers, readDecisions, readInviteEdges, readSignupProfiles, readConnectionPrivacy, onMemberPhotos, includeDetails = false, enrichmentDatasets = [ENRICHMENT_DATASET], linkedinEnrichmentDatasets = [], linkedinEnrichmentTextBudget = LINKEDIN_ENRICHMENT_TEXT_BUDGET, mergeSameLinkedin = false, professionalProfiles = false, preferSurvivor = () => null, freshMs = 0, staleMs = 0, now = Date.now }) {
   if (!validEnrichmentDatasets(enrichmentDatasets)) throw Error('public_enrichment_datasets_invalid')
   if (!Array.isArray(linkedinEnrichmentDatasets) || !linkedinEnrichmentDatasets.every((value, index) => LINKEDIN_ENRICHMENT_DATASETS.includes(value) && linkedinEnrichmentDatasets.indexOf(value) === index) || typeof mergeSameLinkedin !== 'boolean' || typeof preferSurvivor !== 'function') throw Error('public_enrichment_datasets_invalid')
   if (!Number.isSafeInteger(linkedinEnrichmentTextBudget) || linkedinEnrichmentTextBudget < 0 || linkedinEnrichmentTextBudget > LINKEDIN_ENRICHMENT_TEXT_BUDGET) throw Error('public_enrichment_text_budget_invalid')
@@ -184,6 +185,16 @@ export function createMemberPublicIndex({ log = line => console.error(line), dis
     // confirmed recovered account, never from a URL typed at signup.
     const verified = new Set()
     const evidence = new Set(), curated = new Map()
+    // Separate source publication can introduce people without importing a private
+    // class list, account identity, owner record or relationship edge.
+    if (professionalProfiles) {
+      const source = await publicPeople.read(PROFESSIONAL_PEOPLE_DATASET)
+      if (source) {
+        const publication = validateProfessionalSnapshot(source)
+        for (const profile of publication.profiles) { profiles.push(profile); evidence.add(profile.id) }
+        revisions.push(publication.revision)
+      }
+    }
     const positions = new Map()
     for (const [index, value] of profiles.entries()) { positions.set(value.id, index); if (index % 4096 === 4095) await turn() }
     // One unreadable or malformed enrichment dataset is skipped (never applied),
@@ -466,6 +477,7 @@ export function createMemberPublicIndex({ log = line => console.error(line), dis
     const items = await discover()
     if (!Array.isArray(items) || items.length > 1000) return null
     const parts = [legacyIdentity]
+    if (professionalProfiles) parts.push(await datasetIdentity(PROFESSIONAL_PEOPLE_DATASET))
     for (const dataset of [...enrichmentDatasets, ...linkedinEnrichmentDatasets]) parts.push(await datasetIdentity(dataset))
     const signups = typeof readSignupProfiles === 'function' ? await readSignupProfiles() : []
     if (!Array.isArray(signups)) return null
