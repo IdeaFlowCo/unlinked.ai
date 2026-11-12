@@ -5,9 +5,9 @@ const props = { list: { id:'list1', name:'Example <list>' }, csrf:'test', member
 test('table uses explicit cells, escaped text, links, view title and scoped continuation', () => {
  const view=renderPrivateList({...props, view:'table'})
  assert.equal(view.title,'Example <list> · Table')
- assert.match(view.content, /<table class="private-members-table">/)
- assert.match(view.content, /<th scope="col">Person<\/th><th scope="col">Context/)
- assert.match(view.content, /<th scope="row"><a href="\/people\/ada">Ada &lt;sample&gt;/)
+ assert.match(view.content, /<table role="table" class="private-members-table">/)
+ assert.match(view.content, /<th role="columnheader" scope="col">Person<\/th><th role="columnheader" scope="col">Context/)
+ assert.match(view.content, /<th role="rowheader" scope="row"><a href="\/people\/ada">Ada &lt;sample&gt;/)
  assert.match(view.content, /Private context &lt;script&gt;sample&lt;\/script&gt;/)
  assert.match(view.content, /href="\/lists\/private\/list1\?view=table&amp;after=next"/)
  assert.doesNotMatch(view.content, /never-render|Never project|<script>sample/)

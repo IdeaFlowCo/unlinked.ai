@@ -88,7 +88,7 @@ test('HTTP lists require sign-in, isolate owners, preserve empty-page cursors, e
   const table = await tableResponse.text()
   assert.equal(tableResponse.status, 200)
   assert.match(table, /<title>Private investors · Table · Unlinked<\/title>/)
-  assert.match(table, /<table class="private-members-table">/)
+  assert.match(table, /<table role="table" class="private-members-table">/)
   assert.match(table, /&lt;img src=x&gt;/)
   assert.equal((await get('/lists/private/list1?view=table', other)).status, 404)
   assert.notEqual((await get('/lists/private/list1?view=table')).status, 200)

@@ -767,7 +767,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .private-members article{padding:12px 0;border-bottom:1px solid var(--line)}
 .unlinked-onboarding .private-members article:last-child{border-bottom:0}
 .unlinked-onboarding .private-members h2{font-size:15px;line-height:1.5;margin:0 0 4px;font-weight:600}
-.unlinked-onboarding .list-context{font-size:14px;line-height:1.5;overflow-wrap:anywhere;min-width:0}
+.unlinked-onboarding .list-context{margin:0;font-size:14px;line-height:1.5;overflow-wrap:anywhere;min-width:0}
 .unlinked-onboarding .list-context summary{cursor:pointer;min-height:44px;padding:10px 0;color:var(--muted)}
 .unlinked-onboarding .list-context summary span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .unlinked-onboarding .list-context[open] summary span{-webkit-line-clamp:1}
@@ -779,5 +779,11 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .private-members-table th:first-child{width:30%}
 .unlinked-onboarding .private-members-table tbody th{font-weight:600;line-height:1.5;padding-top:18px}
 .unlinked-onboarding .private-list-page a:focus-visible,.unlinked-onboarding .private-list-page summary:focus-visible,.unlinked-onboarding .private-table-wrap:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
-@media(max-width:767px){.unlinked-onboarding .private-members-table th,.unlinked-onboarding .private-members-table td{padding-left:10px;padding-right:10px}.unlinked-onboarding .private-members-table th:first-child{width:36%}}
+@media(max-width:767px){
+.unlinked-onboarding .private-members-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.unlinked-onboarding .private-members-table tbody tr{display:grid;grid-template-columns:minmax(0,1fr);padding:12px 16px;border-bottom:1px solid var(--line)}
+.unlinked-onboarding .private-members-table tbody th,.unlinked-onboarding .private-members-table tbody td{display:block;width:auto;padding:0;border:0}
+.unlinked-onboarding .private-members-table tbody th{font-size:15px}
+.unlinked-onboarding .private-members-table tbody th a{display:inline-flex;align-items:center;min-height:44px}
+}
 `
