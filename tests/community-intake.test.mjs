@@ -102,6 +102,7 @@ test('partner conflicts map known attached-content errors without exposing upstr
  for(const [status,body,message] of [
   [409,JSON.stringify({error:'entry_has_children'}),attached],
   [409,JSON.stringify({error:'entry_has_children',message:privateDetail,url:'https://untrusted.invalid/private'}),attached],
+  [409,JSON.stringify({error:'entry_visibility_conflict',message:privateDetail,url:'https://untrusted.invalid/private'}),'Review this entry’s visibility in Social before editing it through Unlinked. Open My asks and offers to find its Social link.'],
   [409,JSON.stringify({error:'entry_changed'}),stale],
   [409,JSON.stringify({error:'request_changed'}),stale],
   [409,JSON.stringify({error:privateDetail}),stale],
@@ -488,4 +489,21 @@ test('HTTP walkthrough reviews private drafts, saves through the Social partner 
  assert.equal(entries.length,1,'unsaved import reviews create no entries')
  transcript.push({step:'Status Done removes the ask from the open community; task, Goodreads and assistant drafts all require review and default to Only me',entryStatus:entries[0].status,unsavedImports:3,canonicalFixtureEntries:entries.length,scope:'HTTP integration with synthetic Social protocol fixture; live Social persistence and browser pixels are not exercised'})
  if(evidenceDir)await writeFile(join(evidenceDir,'walkthrough.json'),JSON.stringify(transcript,null,2)+'\n')
+})
+
+
+test('owner entries needing Social visibility review never default to an editable Only me form',async t=>{
+ for(const entry of [
+  {id:42,title:'Unlisted context',kind:'note',status:'open',audience:'unlisted',visibility:'unlisted',requiresSocialReview:true},
+  {id:42,title:'Conflicting visibility',kind:'ask',status:'open',audience:'only_me',visibility:'public',requiresSocialReview:true},
+ ]) {
+  const b=await browser(t,{communityIntake:{list:async()=>({entries:[entry]})}})
+  const member=await b.login('alice')
+  const listing=await (await b.get('/asks',member.cookie)).text()
+  assert.match(listing,/https:\/\/social.ideaflow.app\/n\/42/)
+  assert.doesNotMatch(listing,/note · open · Only me|ask · open · Only me/)
+  const editing=await (await b.get('/asks/42',member.cookie)).text()
+  assert.match(editing,/Review visibility in Social/)
+  assert.doesNotMatch(editing,/name="audience-0"|action="\/asks\/42"/)
+ }
 })
