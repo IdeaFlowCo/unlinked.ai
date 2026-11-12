@@ -2354,7 +2354,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const { profile, hasStoredProfile, publicProfileUrl } = await profileStep(response, 'own_card', () => readOwnCard(jobs))
         const offerLookup = Boolean(selfClaims && session.selfClaim && !hasStoredProfile)
         let testClaim = null
-        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await backend.readTestProfileClaim() } catch { testClaim = null } }
+        if (typeof backend.readTestProfileClaim === 'function') { try { testClaim = await profileStep(response, 'test_claim', () => backend.readTestProfileClaim()) } catch { testClaim = null } }
         if (!profile.name) profile.name = session.displayName
         let contacts = [], connectionCount
         // Start reading the public index now; the contact lookup below joins it.
@@ -2376,7 +2376,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           const published = mine ? await profileStep(response, 'public_profile', () => publicReader.profile({ id: mine, viewer: selfViewer(mine) }).catch(() => null)) : null
           // The member's handle (docs/profile-handles.md): given on first view, editable here.
           if (profileHandles && published?.profile?.presence === 'member') {
-            const current = profileHandles.handleFor(published.profile.id) ?? await bounded(() => ensureHandle(published.profile), null)
+            const current = profileHandles.handleFor(published.profile.id) ?? await profileStep(response, 'ensure_handle', () => bounded(() => ensureHandle(published.profile), null))
             const notice = url.searchParams.get('handle')
             if (current) profileHandleView = { handle: current, ...(['saved', 'taken', 'invalid', 'length', 'reserved', 'limit', 'unavailable'].includes(notice) ? { notice } : {}) }
           }
@@ -2388,8 +2388,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // the current public profile id, like /card's identity sync.
         let socialLinks
         if (profileSocialLinks) {
-          const saved = await bounded(() => profileSocialLinks.get(session.owner), null)
-          if (saved?.links?.length && mine && saved.profileId !== mine) await profileSocialLinks.rebind(session.owner, { profileId: mine, observed: saved }).catch(() => {})
+          const saved = await profileStep(response, 'social_links', () => bounded(() => profileSocialLinks.get(session.owner), null))
+          if (saved?.links?.length && mine && saved.profileId !== mine) await profileStep(response, 'social_rebind', () => profileSocialLinks.rebind(session.owner, { profileId: mine, observed: saved }).catch(() => {}))
           if (saved?.links?.length) profile.socialLinks = saved.links
           const notice = url.searchParams.get('links')
           const line = Number.parseInt(url.searchParams.get('line') ?? '', 10)
