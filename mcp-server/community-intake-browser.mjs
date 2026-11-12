@@ -45,8 +45,10 @@ export function createCommunityIntakeBrowser({client,groups,body}) {
       }
       const edit=/^\/asks\/(\d+)$/.exec(url.pathname)
       if(edit){const mine=await client.list(actor),e=mine.entries.find(e=>e.id===Number(edit[1]));if(!e)throw new IntakeError('This entry is unavailable.')
-        const directory=await groups.directory(actor),choices=directory.groups;const target=choices.length?{name:'the selected community'}:null
-        return render(shell(chrome,'Edit '+e.title,`<h1 class="hq">Edit entry</h1>${requestForm(url.pathname,chrome.csrf,field('revision',e.revision)+field('count',1)+entryFields(e,0,target,true)+`<label>Status<select name="status">${options([['open','Open'],['done','Done'],['paused','Paused'] ],e.status)}</select></label>`+(choices.length?`<label>Community (used when audience is members)<select name="groupId">${options(choices.map(g=>[g.id,g.name]),e.groupId||choices[0].id)}</select></label>`:'')+'<button type="submit">Save changes</button>')}<p><a href="/asks">Back to my asks</a></p>`))}
+        const directory=await groups.directory(actor),choices=directory.groups;const target=choices.length||e.audience==='group'?{name:'the selected community'}:null
+        const selectedGroup=choices.some(g=>g.id===e.groupId)?e.groupId:''
+        const communityOptions=[['','Choose a community'],...choices.map(g=>[g.id,g.name])]
+        return render(shell(chrome,'Edit '+e.title,`<h1 class="hq">Edit entry</h1>${requestForm(url.pathname,chrome.csrf,field('revision',e.revision)+field('count',1)+entryFields(e,0,target,true)+`<label>Status<select name="status">${options([['open','Open'],['done','Done'],['paused','Paused'] ],e.status)}</select></label>`+(choices.length?`<label>Community (used when audience is members)<select name="groupId">${options(communityOptions,selectedGroup)}</select></label>`:'')+(e.audience==='group'&&!selectedGroup?'<p role="alert">Your previous community is unavailable. Choose a community explicitly to share there, or change who can see this entry.</p>':'')+'<button type="submit">Save changes</button>')}<p><a href="/asks">Back to my asks</a></p>`))}
       return render(intake(chrome,group,path))
     }
     if(request.method!=='POST')throw new IntakeError('Use a supported action.')

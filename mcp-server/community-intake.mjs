@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { concurrentMap } from './concurrent-map.mjs'
 export const COMMUNITY_PATH = /^\/(?:profile\/context|asks)(?:\/(?:preview|save|\d+))?$/
 export const COMMUNITY_GROUP_PATH = /^\/groups\/([0-9a-f-]{36})\/(welcome|community)(?:\/(preview|save))?$/
 export const isCommunityPath = path => COMMUNITY_PATH.test(path) || COMMUNITY_GROUP_PATH.test(path)
@@ -72,8 +73,10 @@ export function createCommunityIntakeClient({identityForOwner,secret,origin='htt
     save:(owner,data)=>call(owner,'intake',data),
     update:(owner,data)=>call(owner,'entry',data),
     async group(owner,groupId,roster){
-      const members=[]
-      for(const row of roster){const id=await identityForOwner(row.actor);if(id?.issuer===issuer&&id.subject)members.push(id)}
+      const members=(await concurrentMap(roster,async row=>{
+        const id=await identityForOwner(row.actor)
+        return id?.issuer===issuer&&id.subject?id:null
+      })).filter(Boolean)
       const result=await call(owner,'group',{groupId,members})
       // Keep opaque identity keys inside this server; expose only roster-bound people and their entries.
       const allowed=new Set(members.map(identityKey))
