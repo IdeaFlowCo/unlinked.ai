@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createAccountToolService } from '../mcp-server/account-tools.mjs'
-import { createOverlayClient, createPrivateContext, OverlayUnavailable, OVERLAY_AUDIENCE, provenanceLabel, signOverlayAssertion, PRIVATE_CONTEXT_SCRIPT } from '../mcp-server/private-context.mjs'
+import { createOverlayClient, createPrivateContext, privateSourceSummary, OverlayUnavailable, OVERLAY_AUDIENCE, provenanceLabel, signOverlayAssertion, PRIVATE_CONTEXT_SCRIPT } from '../mcp-server/private-context.mjs'
 import { privateOverlay } from '../mcp-server/private-composition.mjs'
 
 const { jwtVerify } = await import(createRequire(new URL('../mcp-server/package.json', import.meta.url)).resolve('jose'))
@@ -49,6 +49,8 @@ function fakeOverlay() {
   const calls = []
   return {
     calls,
+    async search(identity, query) { calls.push(['search', identity.subject, query]); return { entities: (data.get(identity.subject) ?? []).filter(entity => entity.name.includes(query)), nextCursor: null } },
+    async get(identity, id) { calls.push(['get', identity.subject, id]); return (data.get(identity.subject) ?? []).find(entity => entity.id === id) ?? null },
     async lookup(identity, ref) { calls.push(['lookup', identity.subject, ref]); return (data.get(identity.subject) ?? []).find(entity => entity.refs.includes(ref)) ?? null },
     async neighbourhood(identity, id, depth) {
       calls.push(['neighbourhood', identity.subject, id, depth])
@@ -160,6 +162,47 @@ test('no identity and a failing overlay are distinct from empty', async () => {
 test('the panel renderer builds DOM from text, never markup', () => {
   assert.doesNotMatch(PRIVATE_CONTEXT_SCRIPT, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/)
   assert.match(PRIVATE_CONTEXT_SCRIPT, /cache:'no-store'/)
+})
+
+test('source summaries expose bounded provenance and safe links without raw private fields', () => {
+  const source = privateSourceSummary({ source: 'matrix-retained:whatsapp', updatedAt: '2026-11-12T00:00:00Z', data: {
+    schemaVersion: 1, sourceArchive: '/private/path', sourceParticipantId: 'private-id', messageBody: NOTE,
+    lastObservedAtNs: 1e100, needsIdentityReview: true, coverage: 'Partial retained history',
+    details: [{kind:'phone',value:'+15555550100'},{kind:'social',label:'Unsafe',value:'javascript:alert(1)'},{kind:'social',label:'Unsafe',value:'https://secret@example.test/'},{kind:'social',label:'Profile',value:'https://example.test/person'}]
+  } })
+  assert.equal(source.label, 'WhatsApp archive'); assert.equal(source.observedAt, null)
+  assert.equal(source.needsIdentityReview, true); assert.deepEqual(source.links, [{label:'Profile',href:'https://example.test/person'}])
+  assert.doesNotMatch(JSON.stringify(source), /private-id|private\/path|Synthetic secret|15555550100/)
+})
+
+test('name search finds owner-only candidates without linking or disclosing their private notes', async () => {
+  const overlay = fakeOverlay(), context = createPrivateContext({overlay,identityFor:async who=>identities.get(who.ownerId),lookupContact})
+  const value = await context.search(owner,'Ada')
+  assert.deepEqual(value.candidates.map(x=>x.id),['ent-ada'])
+  assert.doesNotMatch(JSON.stringify(value), /Synthetic secret|linkedin:in:|owner-subject/)
+  assert.deepEqual((await context.search(stranger,'Ada')).candidates,[])
+  assert.equal(await context.search(owner,''),null)
+  assert.equal(await context.forEntity(stranger,'ent-ada'),null)
+  assert.equal((await context.forEntity(owner,'ent-ada')).entities[0].notes[0].text,NOTE)
+  assert.ok(!overlay.calls.some(x=>x[0]==='lookup'),'search never creates or binds an identity')
+})
+
+test('private candidate search and records keep browser owner and same-origin boundaries', async t => {
+  const context=createPrivateContext({overlay:fakeOverlay(),identityFor:async who=>identities.get(who.ownerId),lookupContact})
+  const {request,signIn}=await site(t,{privateContext:context})
+  assert.equal((await request('/api/private-context/search?q=Ada')).status,401)
+  assert.equal((await request('/api/private-context/records/ent-ada')).status,401)
+  const mine=await signIn('owner-subject')
+  const answer=await request('/api/private-context/search?q=Ada',{headers:{Cookie:mine}})
+  assert.equal(answer.headers.get('cache-control'),'no-store, private')
+  assert.equal((await answer.json()).candidates[0].id,'ent-ada')
+  assert.equal((await request('/api/private-context/search?q=Ada',{headers:{Cookie:mine,'Sec-Fetch-Site':'cross-site'}})).status,403)
+  assert.equal((await request('/api/private-context/search?q=A',{headers:{Cookie:mine}})).status,400)
+  assert.equal((await request('/api/private-context/search?q=Ada&q=Bo',{headers:{Cookie:mine}})).status,400)
+  assert.equal((await request('/api/private-context/records/ent-ada',{headers:{Cookie:mine}})).status,200)
+  const theirs=await signIn('stranger-subject')
+  assert.deepEqual((await (await request('/api/private-context/search?q=Ada',{headers:{Cookie:theirs}})).json()).candidates,[])
+  assert.equal((await request('/api/private-context/records/ent-ada',{headers:{Cookie:theirs}})).status,404)
 })
 
 async function site(t, { privateContext, complete }) {

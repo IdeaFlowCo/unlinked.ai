@@ -24,6 +24,24 @@ Each entity shows:
 
 The panel is a `<details>` that is open by default. The open or closed choice is kept per browser (`localStorage`). The empty state tells the owner how to add context: through their agent with the Ideaflow connector, or in OpenChat. Editing inside Unlinked is deferred.
 
+### Additional private sources
+
+The collapsed **More context across your records** section searches the owner's
+People records only when opened. It shows at most eight name-search candidates.
+These are possible matches, never identity bindings; opening one reads that exact
+owner-private record without merging or attaching it to the public profile.
+Sources on a record expand separately, with a source label, original observation
+date when known, coverage limitations, identity-review status and safe HTTPS
+profile links. At most 16 sources are displayed. Raw source payloads, message
+bodies, account identifiers and local archive paths are not returned.
+
+The browser uses `GET /api/private-context/search?q=…` and
+`GET /api/private-context/records/:entityId`, under the same authenticated,
+same-origin, no-store rules below. Search has a 2–120 character bound and does
+not send private records to a model. Original archive references remain pointers;
+this panel does not dereference or expose raw archive nodes. A future archive
+reader must independently authorize the referenced record before returning it.
+
 States, as in the design: anonymous visitors get nothing at all, not even an empty shell. Signed-in members see a loading line, then `ready`, `empty` (distinct from a failure), `unavailable` ("Your private context is unavailable right now"), or `no_identity`. The public page never waits on the panel.
 
 ## Privacy boundaries
@@ -81,7 +99,7 @@ Without the secret, or with one shorter than 32 characters, the feature is off. 
 - Editing in Unlinked.
 - A per-row context strip on `/network`.
 - The "My knowledge" browser from RELATIONSHIP-MEMORY.md.
-- Search across the overlay in Unlinked.
+- A general cross-overlay search page in Unlinked (profile candidate search is available).
 - Purge-ref on profile removal.
 
 ## Private prospects before a public profile
