@@ -1,6 +1,6 @@
 {
   "name": "aili3",
-  "version": "0.6.110",
+  "version": "0.6.111",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
