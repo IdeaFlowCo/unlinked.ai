@@ -102,6 +102,7 @@ test('partner conflicts map known attached-content errors without exposing upstr
  for(const [status,body,message] of [
   [409,JSON.stringify({error:'entry_has_children'}),attached],
   [409,JSON.stringify({error:'entry_has_children',message:privateDetail,url:'https://untrusted.invalid/private'}),attached],
+  [409,JSON.stringify({error:'entry_visibility_conflict',message:privateDetail,url:'https://untrusted.invalid/private'}),'Review this entry’s visibility in Social before editing it through Unlinked. Open My asks and offers to find its Social link.'],
   [409,JSON.stringify({error:'entry_changed'}),stale],
   [409,JSON.stringify({error:'request_changed'}),stale],
   [409,JSON.stringify({error:privateDetail}),stale],
@@ -488,4 +489,52 @@ test('HTTP walkthrough reviews private drafts, saves through the Social partner 
  assert.equal(entries.length,1,'unsaved import reviews create no entries')
  transcript.push({step:'Status Done removes the ask from the open community; task, Goodreads and assistant drafts all require review and default to Only me',entryStatus:entries[0].status,unsavedImports:3,canonicalFixtureEntries:entries.length,scope:'HTTP integration with synthetic Social protocol fixture; live Social persistence and browser pixels are not exercised'})
  if(evidenceDir)await writeFile(join(evidenceDir,'walkthrough.json'),JSON.stringify(transcript,null,2)+'\n')
+})
+
+
+test('owner entries needing Social visibility review never default to an editable Only me form',async t=>{
+ for(const entry of [
+  {id:42,title:'Unlisted context',kind:'note',status:'open',audience:'unlisted',visibility:'unlisted',requiresSocialReview:true},
+  {id:42,title:'Conflicting visibility',kind:'ask',status:'open',audience:'only_me',visibility:'public',requiresSocialReview:true},
+  {id:42,title:'Unlisted without review flag',kind:'note',status:'open',audience:'unlisted',visibility:'unlisted'},
+  {id:42,title:'Unknown audience',kind:'note',status:'open',audience:'future-audience'},
+ ]) {
+  const b=await browser(t,{communityIntake:{list:async()=>({entries:[entry]})}})
+  const member=await b.login('alice')
+  const response=await b.get('/asks',member.cookie)
+  assert.equal(response.status,200)
+  const listing=await response.text()
+  assert.match(listing,/https:\/\/social.ideaflow.app\/n\/42/)
+  assert.doesNotMatch(listing,/note · open · Only me|ask · open · Only me/)
+  const editResponse=await b.get('/asks/42',member.cookie)
+  assert.equal(editResponse.status,200)
+  const editing=await editResponse.text()
+  assert.match(editing,/Review visibility in Social/)
+  assert.match(editing,/https:\/\/social.ideaflow.app\/n\/42/)
+  assert.match(editing,/<title>Review /)
+  assert.doesNotMatch(editing,/name="audience-0"|action="\/asks\/42"/)
+  await paginationEvidence({['social-'+entry.title.replaceAll(' ','-').toLowerCase()+'-listing.html']:listing,['social-'+entry.title.replaceAll(' ','-').toLowerCase()+'-manage.html']:editing})
+ }
+})
+
+test('HTTP stale visibility conflict shows fixed guidance without exposing partner text or changing audience',async t=>{
+ const entry=intakeEntry(42),updates=[]
+ const client=createCommunityIntakeClient({secret:'fixture-secret-'.repeat(4),identityForOwner:async()=>({issuer:'https://id.ideaflow.app/api/auth',subject:alice.userId}),fetchImpl:async(url,opts)=>{
+  if(url.endsWith('/entries'))return Response.json({entries:[entry]})
+  updates.push(JSON.parse(opts.body))
+  return Response.json({error:'entry_visibility_conflict',message:'PRIVATE UPSTREAM TEXT',url:'https://untrusted.invalid/private'},{status:409})
+ }})
+ const b=await browser(t,{communityIntake:client}),member=await b.login('alice')
+ const form=editForm(await (await b.get('/asks/42',member.cookie)).text())
+ assert.equal(form.get('audience-0'),'only_me')
+ const response=await b.post('/asks/42',member.cookie,form)
+ assert.equal(response.status,400)
+ assert.match(response.headers.get('cache-control'),/no-store/)
+ const html=await response.text()
+ assert.match(html,/Review this entry’s visibility in Social before editing it through Unlinked\. Open My asks and offers to find its Social link\./)
+ assert.doesNotMatch(html,/PRIVATE UPSTREAM TEXT|untrusted\.invalid/)
+ assert.equal(updates.length,1)
+ assert.equal(updates[0].entry.audience,'only_me')
+ assert.equal(entry.audience,'only_me')
+ await paginationEvidence({'social-visibility-conflict.html':html,'social-visibility-conflict.json':JSON.stringify({status:response.status,audience:entry.audience,message:'Review this entry’s visibility in Social before editing it through Unlinked. Open My asks and offers to find its Social link.',upstreamDetailsExposed:false},null,2)+'\n'})
 })
