@@ -7,13 +7,11 @@ import { join } from 'node:path'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createMemorySavedSearchLists } from '../mcp-server/saved-search-lists.mjs'
 import { createCollectiveGroups, GROUP_LIMITS } from '../mcp-server/collective-groups.mjs'
-import { createCollectiveListProjection } from '../mcp-server/collective-group-lists.mjs'
 import { createMemoryCollectiveGroupsStore } from '../mcp-server/collective-groups-store.mjs'
 
 const account = id => ({ ownerId: id, userId: id + '-user' })
 const alice = account('alice'), bob = account('bob'), carol = account('carol')
 const profiles = ['alice', 'bob', 'carol', 'public-a', 'public-b'].map(id => ({ id, name: id, headline: 'Public bio', positions: [], education: [], skills: [] }))
-const recipient = { id: 'bob', name: 'Bob' }
 const secret = 'Private fixture contact and query'
 
 async function browser(t, extra = {}, groupOptions = {}) {
@@ -95,6 +93,26 @@ test('unverified identities fail closed before any Social partner request',async
    await assert.rejects(call,/verified Ideaflow identity is unavailable/)
  }
  assert.equal(requests,0)
+})
+test('partner conflicts map known attached-content errors without exposing upstream details',async()=>{
+ const stale='This entry changed. Reload it before saving again.'
+ const unavailable='Your Ideaflow profile could not be reached. Nothing new was confirmed saved; retry this same review to recover a completed save.'
+ const attached='This entry has attached content. Manage its audience and attached content in Social before changing its sharing here.'
+ const privateDetail='Private upstream detail https://untrusted.invalid/private'
+ for(const [status,body,message] of [
+  [409,JSON.stringify({error:'entry_has_children'}),attached],
+  [409,JSON.stringify({error:'entry_has_children',message:privateDetail,url:'https://untrusted.invalid/private'}),attached],
+  [409,JSON.stringify({error:'entry_changed'}),stale],
+  [409,JSON.stringify({error:'request_changed'}),stale],
+  [409,JSON.stringify({error:privateDetail}),stale],
+  [409,JSON.stringify({error:{code:'entry_has_children',message:privateDetail}}),stale],
+  [409,'null',stale],
+  [409,privateDetail,stale],
+  [500,JSON.stringify({error:'entry_has_children',message:privateDetail}),unavailable],
+ ]) {
+  const client=createCommunityIntakeClient({secret:'fixture-secret-'.repeat(4),identityForOwner:async()=>({issuer:'https://id.ideaflow.app/api/auth',subject:alice.userId}),fetchImpl:async()=>new Response(body,{status,headers:{'content-type':'application/json'}})})
+  await assert.rejects(()=>client.update(alice,{id:7,revision:'a'.repeat(64),entry:{title:'Need a collaborator',body:'',kind:'ask',source:'manual',audience:'only_me'},status:'open'}),{message})
+ }
 })
 test('one flyer signup reaches introduction, review saves only selections and group removal revokes read access',async t=>{
  const saved=[]
@@ -446,7 +464,7 @@ test('HTTP walkthrough reviews private drafts, saves through the Social partner 
  assert.match(community,/<title>Boulder Tech Builders · Community · Unlinked<\/title>/)
  const listing=await capture('06-my-asks',await b.get('/asks',member.cookie))
  assert.match(listing,/joining a community here does not automatically join a Superconnector network/)
- transcript.push({step:'Only the selected ask is stored under the verified identity; Only me stays out of community until explicitly shared',saved:entries.map(({ownerKey,...entry})=>entry),partnerRequests:calls.map(c=>({path:c.path,issuer:c.data.issuer,subject:c.data.subject,groupId:c.data.groupId,entry:c.data.entry}))})
+ transcript.push({step:'Only the selected ask is stored under the verified identity; Only me stays out of community until explicitly shared',saved:entries.map(e=>{const entry={...e};delete entry.ownerKey;return entry}),partnerRequests:calls.map(c=>({path:c.path,issuer:c.data.issuer,subject:c.data.subject,groupId:c.data.groupId,entry:c.data.entry}))})
  edit.set('status','done')
  assert.equal((await b.post('/asks/1',member.cookie,edit)).status,303)
  const done=await capture('07-completed-ask',await b.get('/asks',member.cookie))

@@ -65,7 +65,15 @@ export function createCommunityIntakeClient({identityForOwner,secret,origin='htt
     const id=await identityForOwner(owner)
     if(id?.issuer!==issuer||!id.subject)throw new IntakeError('Your verified Ideaflow identity is unavailable. Please sign in again.')
     const r=await fetchImpl(`${origin}/api/partners/unlinked/${route}`,{method:'POST',headers:{authorization:`Bearer ${secret}`,'content-type':'application/json'},body:JSON.stringify({...data,issuer:id.issuer,subject:id.subject}),signal:AbortSignal.timeout(8000),redirect:'error'})
-    if(!r.ok)throw new IntakeError(r.status===409?'This entry changed. Reload it before saving again.':'Your Ideaflow profile could not be reached. Nothing new was confirmed saved; retry this same review to recover a completed save.')
+    if(!r.ok) {
+      if(r.status===409) {
+        let code
+        try { code=(await r.json())?.error } catch { /* Keep the fixed conflict fallback for non-JSON errors. */ }
+        if(code==='entry_has_children')throw new IntakeError('This entry has attached content. Manage its audience and attached content in Social before changing its sharing here.')
+        throw new IntakeError('This entry changed. Reload it before saving again.')
+      }
+      throw new IntakeError('Your Ideaflow profile could not be reached. Nothing new was confirmed saved; retry this same review to recover a completed save.')
+    }
     return r.json()
   }
   return {
@@ -80,7 +88,7 @@ export function createCommunityIntakeClient({identityForOwner,secret,origin='htt
       const result=await call(owner,'group',{...page,groupId,members})
       // Keep opaque identity keys inside this server; expose only roster-bound people and their entries.
       const allowed=new Set(members.map(identityKey))
-      return {entries:(result.entries||[]).filter(e=>allowed.has(e.ownerKey)).map(({ownerKey,...entry})=>entry),nextCursor:result.nextCursor}
+      return {entries:(result.entries||[]).filter(e=>allowed.has(e.ownerKey)).map(e=>{const entry={...e};delete entry.ownerKey;return entry}),nextCursor:result.nextCursor}
     },
   }
 }
