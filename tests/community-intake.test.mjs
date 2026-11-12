@@ -170,6 +170,12 @@ function paginatedPartner(entries, onGroup = async () => {}) {
 }
 const nextPage = html => decodeForm(html.match(/<a[^>]*href="([^"]+)"[^>]*rel="next"[^>]*>/)?.[1]??'')
 const intakeEntry = id => ({id,title:`Entry ${id}`,body:'',kind:'ask',source:'manual',audience:'only_me',status:'open',revision:'a'.repeat(64),ownerKey:identityKey({issuer:'https://id.ideaflow.app/api/auth',subject:alice.userId})})
+async function paginationEvidence(files) {
+ const dir=process.env.COMMUNITY_INTAKE_EVIDENCE_DIR
+ if(!dir)return
+ await mkdir(dir,{recursive:true})
+ for(const [name,content] of Object.entries(files))await writeFile(join(dir,name),content)
+}
 
 test('personal pagination reaches older entries and editing targets their exact revision',async t=>{
  const entries=Array.from({length:103},(_,i)=>intakeEntry(i+1)),{client,calls}=paginatedPartner(entries)
@@ -181,10 +187,17 @@ test('personal pagination reaches older entries and editing targets their exact 
  const older=await second.text();assert.match(older,/Entry 3<\/h2>/);assert.match(older,/Entry 1<\/h2>/);assert.equal(nextPage(older),'')
  assert.equal(calls[1].cursor,4);assert.equal(calls[1].limit,100)
  const editing=await b.get('/asks/1',owner.cookie);assert.equal(editing.status,200)
- const edit=editForm(await editing.text());assert.equal(edit.get('revision'),entries[0].revision)
+ const editHtml=await editing.text(),edit=editForm(editHtml);assert.equal(edit.get('revision'),entries[0].revision)
  edit.set('status','done');assert.equal((await b.post('/asks/1',owner.cookie,edit)).status,303)
  assert.equal(calls.at(-1).id,1);assert.equal(calls.at(-1).status,'done')
  assert.equal(calls.at(-1).revision,entries[0].revision)
+ const newest=decodeForm(older.match(/href="([^"]+)">Newest entries/)[1])
+ assert.equal(newest,'/asks?limit=100')
+ const returned=await b.get(newest,owner.cookie);assert.equal(returned.status,200)
+ assert.match(await returned.text(),/Entry 103<\/h2>/)
+ const update=calls.find(call=>call.route==='entry')
+ const visibleIds=html=>[...html.matchAll(/Entry (\d+)<\/h2>/g)].map(match=>Number(match[1]))
+ await paginationEvidence({'11-asks-older-page.html':older,'12-edit-oldest-entry.html':editHtml,'personal-pagination.json':JSON.stringify({fixture:'Synthetic Social partner protocol',steps:[{action:'Open My asks',visibleIds:visibleIds(html),olderLink:next},{action:'Follow Older entries',visibleIds:visibleIds(older),newestLink:newest},{action:'Edit oldest entry and mark Done',id:update.id,status:update.status,revision:update.revision}]},null,2)+'\n'})
 })
 
 test('group pagination retains cursors through filtered pages and revalidates live rosters',async t=>{
@@ -208,6 +221,7 @@ test('group pagination retains cursors through filtered pages and revalidates li
  blocked=false
  onGroup=async()=>{const seat=(await b.store.get(group.id)).members[0];await b.groups.revoke(alice,group.id,'member',seat.id)}
  const removed=await b.get(next,member.cookie);assert.equal(removed.status,400);assert.doesNotMatch(await removed.text(),/Entry 3/)
+ await paginationEvidence({'13-community-filtered-page.html':html,'14-community-older-page.html':older,'group-pagination.json':JSON.stringify({fixture:'Synthetic Social partner protocol',firstPage:{url:path+'?limit=2',visibleEntries:[],olderLink:next},olderPage:{url:next,visibleEntries:[3,2],olderLink:nextPage(older)},blockChangeStatus:changed.status,removedViewerStatus:removed.status},null,2)+'\n'})
 })
 
 test('pagination rejects unsupported, repeated and out-of-bounds query parameters before partner reads',async t=>{

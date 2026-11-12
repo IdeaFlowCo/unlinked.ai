@@ -43,6 +43,7 @@ for your connections who have joined Unlinked. See the [member connection guide]
 for controls, confirmed removal and preservation of imported observations. For live filtering and ordering in People, see [People filtering and ordering](docs/network-controls.md).
 
 For private collections, see [Lists and their List/Table controls](docs/private-list-presentation.md).
+For community introductions, reviewed context imports and personal ask tracking, see [Community introductions and asks](docs/community-intake.md).
 
 ## Core Features & Technologies
 
