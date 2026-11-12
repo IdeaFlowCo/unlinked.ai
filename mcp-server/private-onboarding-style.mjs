@@ -768,9 +768,13 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:#16181d;font:17
 .unlinked-onboarding .private-members article:last-child{border-bottom:0}
 .unlinked-onboarding .private-members h2{font-size:15px;line-height:1.5;margin:0 0 4px;font-weight:600}
 .unlinked-onboarding .list-context{margin:0;font-size:14px;line-height:1.5;overflow-wrap:anywhere;min-width:0}
-.unlinked-onboarding .list-context summary{cursor:pointer;min-height:44px;padding:10px 0;color:var(--muted)}
-.unlinked-onboarding .list-context summary span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
-.unlinked-onboarding .list-context[open] summary span{-webkit-line-clamp:1}
+.unlinked-onboarding .list-context summary{cursor:pointer;display:flex;align-items:baseline;gap:6px;list-style:none;min-height:44px;padding:10px 0;color:var(--muted)}
+.unlinked-onboarding .list-context summary::-webkit-details-marker{display:none}
+.unlinked-onboarding .list-context-arrow{flex:none}
+.unlinked-onboarding .list-context-arrow::before{content:'▸'}
+.unlinked-onboarding .list-context[open] .list-context-arrow::before{content:'▾'}
+.unlinked-onboarding .list-context-preview{min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.unlinked-onboarding .list-context[open] .list-context-preview{-webkit-line-clamp:1}
 .unlinked-onboarding .list-context p{white-space:pre-wrap;margin:8px 0;max-width:80ch}
 .unlinked-onboarding .private-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r);margin-top:16px}
 .unlinked-onboarding .private-members-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:14px}

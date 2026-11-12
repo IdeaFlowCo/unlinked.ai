@@ -9,18 +9,20 @@ class Element {
   addEventListener(k,fn) { this.listeners[k]=fn } querySelector() { return null }
 }
 function fixture({pages, saved, initial=['a'], view}) {
-  const rows=new Element(), link=new Element(), status=new Element(), root=new Element(), empty=new Element();
+  const rows=new Element(), link=new Element(), status=new Element(), root=new Element(), empty=new Element(), switchLink=new Element();
+  switchLink.attrs.href='/lists/private/list1?view=table';
   rows.children=initial.map(id=>new Element(id)); root.dataset.privateList='list1'; if(view)root.dataset.listView=view; link.attrs.href='/lists/private/list1?after=one'+(view?'&view='+view:'');
   root.querySelector=selector=>({'[data-list-members]':rows,'[data-load-members]':link,'[data-member-status]':status,'[data-members-empty]':empty})[selector];
+  root.querySelectorAll=selector=>selector==='.list-view-switch a'?[switchLink]:[];
   const events={}, requests=[], win={location:new URL('https://example.test/lists/private/list1'),scrollY:42,
     document:{querySelector:()=>root,importNode:el=>new Element(el.dataset.memberId)},
-    history:{state:saved?{privateList:saved}:null,replaceState(value){this.state=value}},
+    history:{state:saved?{privateList:saved}:null,replaceState(value){this.state=value},pushState(value,unused,url){this.previous=this.state;this.state=value;win.location=new URL(url)}},
     addEventListener:(k,fn)=>events[k]=fn, requestAnimationFrame:fn=>fn(),scrollTo:(x,y)=>{win.restoredY=y},
     async fetch(url){requests.push(url);const page=pages.shift();if(page instanceof Error)throw page;return {ok:true,redirected:false,url,text:async()=>page}},
     DOMParser:class {parseFromString(page){const batch=new Element();batch.children=page.ids.map(id=>new Element(id));const more=new Element();more.attrs.href=page.next;return {querySelector:()=>({dataset:{privateList:page.list||'list1', listView:page.view},querySelector:selector=>selector==='[data-list-members]'?batch:page.next?more:null})}}}}
   enhancePrivateList(win);
   const click=()=>link.listeners.click({button:0,preventDefault(){}});
-  return {win,rows,link,status,requests,click,events,empty};
+  return {win,rows,link,status,requests,click,events,empty,switchLink};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 test('append bounded pages once, deduplicate boundary overlap, preserve fallback and announce end',async()=>{
@@ -31,6 +33,19 @@ test('append bounded pages once, deduplicate boundary overlap, preserve fallback
   f.click();await settle();assert.deepEqual(f.rows.children.map(x=>x.dataset.memberId),['a','b','c']);assert.equal(f.link.hidden,true);
   assert.match(f.status.textContent,/End of list/);assert.equal(f.rows.children.at(-1).focused,true);
   assert.ok(!JSON.stringify(f.win.history.state).includes('memberId'));
+});
+
+test('presentation switch and Back restore loaded pages without storing members',async()=>{
+  const f=fixture({pages:[{ids:['b']} ]}); f.click(); await settle();
+  f.win.location.reload=()=>{};
+  f.switchLink.listeners.click?.({button:0,preventDefault(){}});
+  assert.equal(f.win.history.state.privateList.pages[0], 'https://example.test/lists/private/list1?after=one&view=table');
+  assert.equal(f.win.history.previous.privateList.pages[0], 'https://example.test/lists/private/list1?after=one');
+  assert.ok(!JSON.stringify(f.win.history).includes('memberId'));
+  const table=fixture({view:'table',saved:f.win.history.state.privateList,pages:[{ids:['b'],view:'table'}]});
+  await settle(); assert.deepEqual(table.rows.children.map(x=>x.dataset.memberId),['a','b']);
+  const back=fixture({saved:f.win.history.previous.privateList,pages:[{ids:['b']}]});
+  await settle(); assert.deepEqual(back.rows.children.map(x=>x.dataset.memberId),['a','b']);
 });
 test('failure retains rows and cursor for retry; cross-list and looping cursors rejected',async()=>{
   for(const bad of [new Error('offline'),{ids:['b'],list:'other'},{ids:['b'],next:'/lists/private/list1?after=one'}]){
