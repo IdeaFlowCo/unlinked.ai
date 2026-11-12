@@ -44,7 +44,7 @@ const messages = {
   review_changed: 'The list changed since you reviewed it. Review the list again before sharing.',
 }
 
-export function createGroupBrowser({ groups, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body }) {
+export function createGroupBrowser({ groups, welcome = false, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body }) {
   if (typeof accountForProfile !== 'function') throw new TypeError('collective_groups_account_resolution_required')
   return async ({ request, url, session, lookup, render, redirect }) => {
     const { pathname, searchParams, origin } = url
@@ -86,10 +86,10 @@ export function createGroupBrowser({ groups, privateLists, savedSearchLists, acc
         } catch { /* Verified account consent remains usable while People is unavailable. */ }
         const state = await groups.joinFlyer(actor, join.groupId, join.inviteId, {
           profileId: profile?.id ?? null,
-          name: profile?.name ?? 'Member without a public profile',
+          name: profile?.name ?? session.displayName ?? 'Member without a public profile',
           source: join.source,
         })
-        if (state === 'member') return redirect('/groups/' + join.groupId)
+        if (state === 'member') return redirect('/groups/' + join.groupId + (welcome ? '/welcome' : ''))
         const preview = await groups.previewFlyer(join.groupId, join.inviteId)
         return render(renderFlyerInvitation(chrome, preview, join.path, 'pending'))
       }
@@ -155,7 +155,7 @@ export function createGroupBrowser({ groups, privateLists, savedSearchLists, acc
         const input = await fields('decision')
         const decision = input.get('decision')
         await groups.respond(actor, groupId, target, decision)
-        return redirect(decision === 'accept' ? base : '/groups')
+        return redirect(decision === 'accept' ? base + (welcome ? '/welcome' : '') : '/groups')
       }
       if (collection === 'lists' && !mutation && get) return render(renderGroupSharedList(chrome, await groups.readShare(actor, groupId, target, projection.project)))
       if (!get && ((collection === 'invites' || collection === 'lists') && mutation === 'revoke' || collection === 'members' && mutation === 'remove')) {
