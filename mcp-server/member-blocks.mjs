@@ -114,18 +114,19 @@ export function createNeo4jBlockStore(driver, database = 'neo4j') {
 // The service the browser and the connection rules use.
 export function createMemberBlocks({ store, now = Date.now, onChange = async () => {} } = {}) {
   if (!store || ['initialize', 'add', 'list', 'remove', 'between', 'removeOwner'].some(name => typeof store[name] !== 'function')) throw new Error('block_store_required')
+  const notifyChange = async member => { try { await onChange(member) } catch {} }
   return {
     initialize: () => store.initialize(),
     async block(blocker, target) {
       const result = await store.add(blockRecord(blocker, target, { now }))
-      await onChange(blocker)
+      await notifyChange(blocker)
       return result
     },
     list: member => valid(member) ? store.list(member) : [],
     async unblock(member, id) {
       if (!valid(member) || typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id)) return null
       const result = await store.remove(member, id)
-      await onChange(member)
+      await notifyChange(member)
       return result
     },
     // Either direction: a block stops connection requests both ways.

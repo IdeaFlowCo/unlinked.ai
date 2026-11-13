@@ -186,8 +186,11 @@ Group seats grant chat participation subject to the existing safety exceptions:
 inactive or unresolvable accounts and members blocked either way with the
 organizer have no effective group access and are excluded from chat. Member-to-
 member blocks do not remove group seats. Block/unblock enqueue new revisions at
-the member-block service boundary. Account deletion removes participation before
-the identity is deleted. External identity/account changes and interrupted
+the member-block service boundary. A reconciliation callback failure does not
+discard the committed block/unblock record or its OpenChat peer identity, so
+downstream safety actions still run. Actual block-store failures still reject;
+the periodic audit repairs roster changes whose callback failed. Account deletion
+removes participation before the identity is deleted. External identity/account changes and interrupted
 boundary callbacks are rechecked by a separate audit timer: one completed
 managed roster per 60 seconds, rotating through the directory. A full sweep takes
 one audit interval per candidate group. Audit work does not hold the delivery

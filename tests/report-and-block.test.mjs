@@ -49,9 +49,9 @@ function fakeOpenChat() {
   return { calls, blocks, fetchImpl }
 }
 
-async function site(t, { reports = true, blocks = true, onProfileLookup, identityLookup } = {}) {
+async function site(t, { reports = true, blocks = true, onProfileLookup, identityLookup, onBlockChange } = {}) {
   const openChat = fakeOpenChat()
-  const blockService = blocks ? createMemberBlocks({ store: createMemoryBlockStore() }) : undefined
+  const blockService = blocks ? createMemberBlocks({ store: createMemoryBlockStore(), onChange: onBlockChange }) : undefined
   const notifications = createNotifications({ store: createMemoryNotificationStore() })
   const memberConnections = createConnectionRequests({ store: createMemoryConnectionStore(), notifications, ...(blockService ? { blocked: (a, b) => blockService.between(a, b) } : {}) })
   const reportStore = createMemorySafetyReportStore()
@@ -340,4 +340,53 @@ test('real Neo4j blocks: one per person, merge of what is known, both-direction 
   assert.equal((await blocks.list(x)).length, 1)
   await blocks.removeOwner(y)
   assert.deepEqual(await blocks.list(x), [])
+})
+
+test('rejecting roster reconciliation preserves browser block and unblock OpenChat safety actions',async t=>{
+ const changes=[],app=await site(t,{onBlockChange:async actor=>{changes.push(actor);throw Error('roster unavailable')}})
+ const alex=await app.signIn('alex')
+ await app.memberConnections.send({sender:B,senderName:'Blake',senderProfileId:BLAKE,recipient:A,recipientName:'Alex',recipientProfileId:ALEX})
+ assert.equal(await app.memberConnections.pendingCount(A),1)
+ const confirm=await app.page(`/people/${BLAKE}/block`,alex)
+ const blocked=await app.post(`/people/${BLAKE}/block`,{csrf:app.csrfOf(confirm.body)},alex)
+ assert.equal(blocked.status,200)
+ const [record]=await app.blockService.list(A)
+ assert.equal(record.openChatUserId,'oc_blake');assert.deepEqual(record.blocked,B)
+ assert.equal(await app.blockService.between(A,B),true)
+ assert.equal(app.openChat.blocks.has('oc_blake'),true)
+ assert.ok(app.openChat.calls.some(call=>call.method==='POST'&&call.path==='/api/chat/users/oc_blake/block'))
+ assert.equal((await app.memberConnections.between(A,B)).state,'none')
+ const settings=await app.page('/settings',alex)
+ const unblocked=await app.post('/blocks/unblock',{csrf:app.csrfOf(settings.body),id:record.id,next:'/settings#blocked'},alex)
+ assert.equal(unblocked.status,303)
+ assert.equal(unblocked.headers.get('location'),'/settings?blocks=unblocked#blocked')
+ assert.deepEqual(await app.blockService.list(A),[])
+ assert.equal(await app.blockService.between(A,B),false)
+ assert.equal(app.openChat.blocks.has('oc_blake'),false)
+ const remoteUnblocks=app.openChat.calls.filter(call=>call.method==='DELETE'&&call.path==='/api/chat/users/oc_blake/block')
+ assert.equal(remoteUnblocks.length,1)
+ assert.equal(remoteUnblocks[0].token,'Bearer token-'+A.ownerId)
+ assert.deepEqual(changes,[A,A])
+})
+
+test('roster callback errors preserve committed peer records while block store failures reject',async()=>{
+ const memory=createMemoryBlockStore(),failure=Error('store unavailable');let failAdd=true,failRemove=true,changes=0
+ const store={...memory,
+  add:async record=>{if(failAdd)throw failure;return memory.add(record)},
+  remove:async(member,id)=>{if(failRemove)throw failure;return memory.remove(member,id)},
+ }
+ const blocks=createMemberBlocks({store,onChange:()=>{changes++;throw Error('roster unavailable')}})
+ await assert.rejects(blocks.block(A,{blocked:B,openChatUserId:'oc_blake'}),error=>error===failure)
+ assert.equal(changes,0);assert.deepEqual(await blocks.list(A),[])
+ failAdd=false
+ const record=await blocks.block(A,{blocked:B,openChatUserId:'oc_blake'})
+ assert.equal(record.openChatUserId,'oc_blake');assert.equal(changes,1)
+ assert.equal(await blocks.between(A,B),true)
+ await assert.rejects(blocks.unblock(A,record.id),error=>error===failure)
+ assert.equal(changes,1);assert.equal(await blocks.between(A,B),true)
+ failRemove=false
+ const removed=await blocks.unblock(A,record.id)
+ assert.equal(removed.id,record.id);assert.equal(removed.openChatUserId,'oc_blake')
+ assert.deepEqual(removed.blocked,B);assert.equal(changes,2)
+ assert.deepEqual(await blocks.list(A),[])
 })

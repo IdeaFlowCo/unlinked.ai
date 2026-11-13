@@ -285,3 +285,29 @@ test('delivery prioritizes due transitions while completed roster audits are slo
  assert.equal(reads.filter(id=>id==='large-owner').length,3)
  await sync.stop()
 })
+
+test('periodic roster auditing recovers block and unblock when transition callbacks reject',async()=>{
+ const store=createMemoryCollectiveGroupsStore(),sent=[];let clock=1
+ const blocks=createMemberBlocks({store:createMemoryBlockStore(),onChange:async()=>{throw Error('reconciliation unavailable')}})
+ const groups=createCollectiveGroups({store,active:identityForOwner,blocked:blocks.between})
+ const group=await groups.create(owner,'Audit recovery'),flyer=await groups.createFlyer(owner,group.id,{capacity:10,approval:false})
+ await groups.joinFlyer(member,group.id,flyer.id,{name:'Member',profileId:null})
+ const sync=createOpenChatGroupSync({store,identityForOwner,blocked:blocks.between,secret:'x'.repeat(32),now:()=>clock,
+  fetchImpl:async(_,opts)=>{const snapshot=JSON.parse(opts.body);sent.push(snapshot);return receiptFor(snapshot)}})
+ await sync.runOnce();assert.equal(sent.at(-1).members.length,1)
+ const initialRevision=sent.at(-1).revision
+ const block=await blocks.block(member,{blocked:owner,openChatUserId:'oc_organizer'})
+ assert.equal(block.openChatUserId,'oc_organizer')
+ await assert.rejects(groups.detail(member,group.id),/not_found/)
+ assert.equal((await store.chatJob(group.id)).revision,initialRevision)
+ clock+=60000;await sync.auditOnce();await sync.runOnce()
+ assert.equal(sent.at(-1).members.length,0);assert.ok(sent.at(-1).revision>initialRevision)
+ const blockedRevision=sent.at(-1).revision
+ const removed=await blocks.unblock(member,block.id)
+ assert.equal(removed.openChatUserId,'oc_organizer')
+ assert.equal((await groups.detail(member,group.id)).id,group.id)
+ assert.equal((await store.chatJob(group.id)).revision,blockedRevision)
+ clock+=60000;await sync.auditOnce();await sync.runOnce()
+ assert.equal(sent.at(-1).members.length,1);assert.ok(sent.at(-1).revision>blockedRevision)
+ await sync.stop()
+})
