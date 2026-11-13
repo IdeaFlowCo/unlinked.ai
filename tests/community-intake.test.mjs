@@ -932,3 +932,48 @@ test('group detail keeps core actions before a five-member preview and offers th
  assert.equal([...roster.matchAll(/class="group-member"/g)].length,5);assert.match(body,/See all 7 members/);assert.match(body,/community#members/);assert.ok(body.indexOf('Add an ask')<body.indexOf('class="group-members"'));assert.doesNotMatch(body,/<h2>Your community<\/h2>/)
  assert.match(roster,/<div class="group-member-main"><a href="\/groups\/[^\"]+\/community\/[^\"]+">Builder 0<\/a>/)
 })
+
+test('fresh signup retains a private messageable group profile when Social is disabled or unavailable',async t=>{
+ for(const mode of ['disabled','unavailable']) {
+  const resolutions=[],writes=[]
+  const communityIntake=mode==='disabled'?undefined:{group:async()=>{throw Error('synthetic Social outage')}}
+  const b=await browser(t,{communityIntake,
+   createMessagingSession:async()=>({token:'fixture-session',user:{userId:'chat-alice'}}),
+   resolveCardMessagingRecipient:async owner=>{resolutions.push(owner);return{id:'chat-'+owner.ownerId}},
+   messagingOptions:{fetchImpl:async(url,options)=>{if(options.body)writes.push({path:new URL(url).pathname,body:JSON.parse(options.body)});return Response.json(url.endsWith('/api/chat/conversations')?{id:'fresh-member-dm',type:'direct',participants:[]}:{count:0})}},
+  })
+  const organizer=await b.login('alice'),outsider=await b.login('carol')
+  const group=await b.groups.create(alice,'New builders '+mode),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false})
+  const invite=`/groups/${group.urlKey}/join/${flyer.id}`,name='fresh-'+mode,member=await b.login(name,invite)
+  assert.equal(member.destination,invite)
+  assert.equal((await b.store.get(group.id)).members.length,0,'signup alone never joins a group')
+  assert.equal(writes.length,0)
+  const joined=await b.post(invite,member.cookie,{csrf:member.csrf,decision:'join'})
+  assert.equal(joined.status,303)
+  assert.equal(joined.headers.get('location'),`/groups/${group.id}`+(communityIntake?'/welcome':''))
+  const seat=(await b.groups.roster(alice,group.id)).find(row=>row.actor.ownerId===name)
+  assert.ok(seat);assert.equal(seat.profileId,null,'joining does not publish a public profile')
+  const path=`/groups/${group.urlKey}/community/${seat.id}`
+  const board=await b.get(`/groups/${group.urlKey}/community`,member.cookie)
+  assert.equal(board.status,200);assert.ok((await board.text()).includes(path))
+  const profile=await b.get(path,organizer.cookie),html=await profile.text()
+  assert.equal(profile.status,200);assert.match(profile.headers.get('cache-control'),/no-store/)
+  assert.ok(html.includes(`<title>${name} · New builders ${mode} · Community · Unlinked</title>`))
+  assert.match(html,/Group profile · Shared with/);assert.match(html,/Only group members can see this profile/)
+  assert.match(html,/Shared entries could not be loaded/);assert.ok(html.includes(`Message ${name} on OpenChat`))
+  assert.doesNotMatch(html.match(/<main[^>]*>([\s\S]*?)<\/main>/)[1],/unclaimed|Not on Unlinked|Public profile ↗/)
+  assert.equal((await b.get(path)).status,401)
+  assert.notEqual((await b.get(path,outsider.cookie)).status,200)
+  assert.equal((await b.get('/people/'+name)).status,404)
+  assert.equal((await b.get('/api/people/'+name)).status,404)
+  assert.deepEqual(resolutions,[]);assert.deepEqual(writes,[],'viewing never starts a conversation or sends a message')
+  const opened=await b.post(`/groups/${group.urlKey}/members/${seat.id}/message`,organizer.cookie,{csrf:organizer.csrf})
+  assert.equal(opened.status,303);assert.equal(opened.headers.get('location'),'/messages/c/fresh-member-dm')
+  assert.deepEqual(resolutions,[account(name)])
+  assert.deepEqual(writes,[{path:'/api/chat/conversations',body:{participantIds:['chat-'+name],type:'direct'}}])
+  if(process.env.GROUP_UX_EVIDENCE_DIR) {
+   await writeFile(join(process.env.GROUP_UX_EVIDENCE_DIR,`fresh-member-social-${mode}.html`),html)
+   await writeFile(join(process.env.GROUP_UX_EVIDENCE_DIR,`fresh-member-social-${mode}.json`),JSON.stringify({fixture:'Synthetic verified signup, no imported or published profile',social:mode,join:{status:joined.status,location:joined.headers.get('location')},privateProfile:{path,status:profile.status},publicProfileStatus:404,anonymousGroupProfileStatus:401,explicitMessage:{status:opened.status,location:opened.headers.get('location'),writes},messageSends:0},null,2)+'\n')
+  }
+ }
+})

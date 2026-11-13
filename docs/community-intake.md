@@ -33,7 +33,8 @@ the group and community pages link each member’s name to this page,
 even without an introduction, LinkedIn import or published public profile.
 **Group profile** describes the audience, not an unclaimed account. A separate
 public profile link is shown when available. Group-local content is not added
-to the public profile or anonymous link previews.
+to the public profile or anonymous link previews; joining never publishes a
+public profile.
 
 With messaging configured, **Message** on a roster or group-local profile uses a
 same-origin, CSRF-protected POST to `/groups/:id/members/:memberId/message`.
@@ -42,9 +43,10 @@ OpenChat's owner resolver, reusing or creating a direct conversation inside
 Unlinked. It never sends a message; the existing inbox draft behavior applies.
 Removed or blocked members cannot use a stale action to resolve a recipient.
 
-**Groups in common** appears on another member's group-local profile and on their
-published profile for a signed-in viewer. It shows only groups both accounts are
-currently authorized to access, honoring blocks; it never lists the other
+When the intersection is nonempty, **Groups in common** appears on another
+member's group-local profile and on their published profile for a signed-in
+viewer. It shows only groups both accounts are currently authorized to access,
+honoring blocks; it never lists the other
 person's full membership. This viewer-only section is excluded from public APIs
 and anonymous previews.
 
@@ -59,9 +61,12 @@ results invite a more specific ask/offer and browsing the member list.
 
 **Add an ask** opens a focused title/details/audience form at
 `/groups/<group>/asks/new`, with the current group visibly selected.
+**Add an offer** uses the same focused flow at `/groups/<group>/offers/new`.
 `/asks/new`, reached from **My asks and offers**, instead defaults to **Only me**.
-Group membership is rechecked at save. Choosing **Only me** saves a private draft;
-The focused group form offers group visibility or Only me. Public sharing remains a separate explicit choice in entry editing and other supported review forms.
+Group membership is rechecked at save. Choosing **Only me** saves a private draft.
+The focused group form offers group visibility or Only me. The personal form
+also offers Public; entry editing and introduction review support explicit
+public sharing as well. Existing private entries are never automatically shared.
 Introduction and batch-import defaults are described above.
 
 If saving an ask or offer fails, its focused form retains the title, details,
@@ -75,13 +80,6 @@ mixed-audience saves return to **My asks and offers**, where the saved entries
 and their audiences remain visible and editable. The redirect adds `saved=1`
 for the confirmation notice; it does not change visibility.
 
-The welcome page suggests LinkedIn import and the normal profile page without
+The welcome page leads with group participation and places optional LinkedIn
+import and the normal profile link after the quick introduction, without
 blocking group use.
-
-The group detail page keeps **Message the group**, **Add an ask**, and **Asks and
-offers** above a five-member preview; **See all members** opens the full community
-roster. Names are the profile links and Message has a 44px touch target. **Add an
-offer** uses the same focused flow. Quick introductions typed in a group's welcome
-form visibly preselect that group at review; pasted/imported drafts retain Only me.
-Existing private entries are never automatically shared. The welcome page leads
-with group participation and places optional LinkedIn import after the quick intro.
