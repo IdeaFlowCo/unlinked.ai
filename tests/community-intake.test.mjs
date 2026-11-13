@@ -442,7 +442,7 @@ test('HTTP walkthrough reviews private drafts, saves through the Social partner 
  const review=await capture('02-private-review',await b.post(groupPath+'/welcome/preview',member.cookie,quick))
  const form=htmlForm(review,groupPath+'/welcome/save')
  assert.equal(form.get('count'),'3')
- for(let i=0;i<3;i++)assert.equal(form.get('audience-'+i),'only_me')
+ for(let i=0;i<3;i++){assert.equal(form.get('audience-'+i),'group');form.set('audience-'+i,'only_me')}
  assert.equal(calls.length,0,'preview does not send drafts to Social or a model')
  form.delete('selected');form.append('selected','1')
  const saved=await b.post(groupPath+'/welcome/save',member.cookie,form)
@@ -848,4 +848,23 @@ test('focused ask save rechecks live membership and CSRF before calling Social',
  assert.equal(personal.get('audience-0'),'only_me');personal.set('title-0','Private draft')
  assert.equal((await b.post('/asks/save',a.cookie,personal)).headers.get('location'),'/asks?saved=1')
  assert.equal(writes[1].body.entries[0].audience,'only_me');assert.equal(writes[1].body.entries[0].groupId,undefined)
+})
+
+test('offers and quick introductions share visibly with the group while imported drafts stay private',async t=>{
+ const saved=[],client={save:async(actor,data)=>{saved.push(...data.entries);return{}},group:async()=>({entries:[]})}
+ const b=await browser(t,{communityIntake:client}),owner=await b.login('alice'),group=await b.groups.create(alice,'Builders'),base='/groups/'+group.urlKey
+ for(const section of ['asks','offers'])assert.equal((await b.get(base+'/'+section,owner.cookie)).headers.get('location'),base+'/community')
+ const formHtml=await(await b.get(base+'/offers/new',owner.cookie)).text(),fields=htmlForm(formHtml,base+'/offers/save');assert.equal(fields.get('kind-0'),'offer');assert.equal(fields.get('audience-0'),'group');assert.doesNotMatch(formHtml.match(/<main[^>]*>([\s\S]*?)<\/main>/)[1],/value="public"/)
+ fields.set('title-0','I can review accessible React');assert.equal((await b.post(base+'/offers/save',owner.cookie,fields)).status,303);assert.equal(saved[0].kind,'offer')
+ const quick=await b.post(base+'/welcome/preview',owner.cookie,{csrf:owner.csrf,source:'quick',about:'I build tools',ask:'Need a reviewer',offer:''});const q=htmlForm(await quick.text(),base+'/welcome/save');assert.equal(q.get('audience-0'),'group');assert.equal(q.get('audience-1'),'group')
+ const imported=await b.post(base+'/welcome/preview',owner.cookie,{csrf:owner.csrf,source:'ideas',text:'Personal project notes'});assert.equal(htmlForm(await imported.text(),base+'/welcome/save').get('audience-0'),'only_me')
+ const welcome=await(await b.get(base+'/welcome',owner.cookie)).text();assert.ok(welcome.indexOf('You’ve joined the group')<welcome.indexOf('Import LinkedIn'));assert.ok(welcome.indexOf('Review my introduction')<welcome.indexOf('Import LinkedIn'))
+})
+
+test('group detail keeps core actions before a five-member preview and offers the full roster',async t=>{
+ const b=await browser(t,{}, {active:async()=>true}),owner=await b.login('alice'),group=await b.groups.create(alice,'Builders'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false})
+ for(let i=0;i<6;i++)await b.groups.joinFlyer(account('extra'+i),group.id,flyer.id,{name:'Builder '+i,profileId:null,source:{}})
+ const body=await(await b.get('/groups/'+group.urlKey,owner.cookie)).text(),roster=body.match(/<ul class="group-members">([\s\S]*?)<\/ul>/)[1]
+ assert.equal([...roster.matchAll(/class="group-member"/g)].length,5);assert.match(body,/See all 7 members/);assert.match(body,/community#members/);assert.ok(body.indexOf('Add an ask')<body.indexOf('class="group-members"'));assert.doesNotMatch(body,/<h2>Your community<\/h2>/)
+ assert.match(roster,/<div class="group-member-main"><a href="\/groups\/[^\"]+\/community\/[^\"]+">Builder 0<\/a>/)
 })
