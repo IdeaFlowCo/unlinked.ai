@@ -580,7 +580,8 @@ test('organizer edits independent chat invitations without leaking member-only g
   const anonymous=await b.get(route);assert.equal(anonymous.status,401);assert.doesNotMatch(await anonymous.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
  }
  const editHtml=await (await b.get(base,owner.cookie)).text()
- assert.ok(editHtml.includes(`name="openChatUrl" type="url" maxlength="500" value="${openChatUrl}"`))
+ assert.ok(editHtml.includes(`name="chatUrl" type="text" inputmode="url" maxlength="500"`))
+ assert.ok(editHtml.includes(`name="openChatUrl" type="text" inputmode="url" maxlength="500" value="${openChatUrl}"`))
  assert.match(editHtml,/Each chat link opens a separate invitation you can choose to accept/)
  for(const cookie of [undefined,stranger.cookie]) {
   const invitation=await b.get(base+'/join/'+flyer.id,cookie);assert.equal(invitation.status,200);assert.doesNotMatch(await invitation.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
@@ -644,4 +645,44 @@ test('matching excludes self, closed requests and same-kind pairs, and normalize
  {id:5,memberId:'d',title:'Postgres queries',kind:'ask',status:'paused'}]
  const matches=communityMatches(rows,'a');assert.equal(matches.length,1);assert.equal(matches[0].memberId,'b');assert.deepEqual(matches[0].topics,['postgres','query'])
  assert.deepEqual(communityMatches(rows,'absent'),[])
+})
+
+test('matching keeps the best pair per member and direction with stable relevance ties',()=>{
+ const entry=(id,memberId,kind,title)=>({id,memberId,kind,title,status:'open'})
+ const rows=[entry('mine-1','me','ask','React accessibility'),entry('mine-2','me','ask','PostgreSQL queries'),
+  entry('mine-3','me','offer','React accessibility'),entry('mine-4','me','ask','React accessibility'),
+  entry('20','bob','offer','React accessibility'),entry('10','bob','offer','React accessibility'),
+  entry('01','bob','offer','React'),entry('10','carol','offer','Postgres queries'),
+  entry('10','dave','offer','React accessibility'),entry('05','bob','ask','React accessibility')]
+ const matches=communityMatches(rows,'me',20)
+ assert.deepEqual(matches.map(m=>[m.memberId,m.mine.id,m.other.id,m.topics]),[
+  ['bob','mine-3','05',['accessibility','react']],
+  ['bob','mine-1','10',['accessibility','react']],
+  ['dave','mine-1','10',['accessibility','react']],
+  ['carol','mine-2','10',['postgres','query']],
+ ])
+ assert.deepEqual(communityMatches(rows,'me',3),matches.slice(0,3))
+ assert.deepEqual(communityMatches(rows,'me',0),[])
+})
+
+test('matching preserves pair order when a later ask improves an earlier member’s match',()=>{
+ const rows=[
+  {id:1,memberId:'me',kind:'ask',title:'React design'},
+  {id:2,memberId:'me',kind:'ask',title:'Postgres design'},
+  {id:3,memberId:'postgres',kind:'offer',title:'Postgres design'},
+  {id:3,memberId:'react',kind:'offer',title:'React design'},
+ ].map(e=>({...e,status:'open'}))
+ assert.deepEqual(communityMatches(rows,'me').map(m=>[m.memberId,m.mine.id]),[['react',1],['postgres',2]])
+})
+
+test('matching bounds topic reads on a maximum 500-entry page', {timeout:10000},()=>{
+ let titleReads=0,bodyReads=0
+ const rows=Array.from({length:500},(_,i)=>({
+  id:String(i).padStart(4,'0'),memberId:i<250?'me':'member-'+i,kind:i<250?'ask':'offer',status:'open',
+  get title(){titleReads++;return 'Postgres queries'},get body(){bodyReads++;return 'React accessibility'},
+ }))
+ const matches=communityMatches(rows,'me')
+ assert.equal(titleReads,500);assert.equal(bodyReads,500)
+ assert.deepEqual(matches.map(m=>m.memberId),Array.from({length:6},(_,i)=>'member-'+(250+i)))
+ assert.ok(matches.every(m=>m.mine===rows[0]&&m.topics.join(',')==='accessibility,postgres,query,react'))
 })
