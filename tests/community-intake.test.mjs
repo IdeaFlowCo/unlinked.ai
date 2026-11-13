@@ -576,6 +576,7 @@ test('organizer edits independent chat invitations without leaking member-only g
   assert.ok(html.includes(`href="${openChatUrl}" target="_blank" rel="noopener noreferrer">Join the OpenChat group chat`))
   assert.doesNotMatch(html,/name="openChatUrl"/)
   assert.match(response.headers.get('cache-control'),/no-store/)
+  await paginationEvidence({[route===base?'group-member-settings.html':route.endsWith('/welcome')?'group-welcome.html':route.endsWith('/community')?'group-community-metadata.html':'group-member-metadata.html']:html})
   const denied=await b.get(route,stranger.cookie);assert.notEqual(denied.status,200);assert.doesNotMatch(await denied.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
   const anonymous=await b.get(route);assert.equal(anonymous.status,401);assert.doesNotMatch(await anonymous.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
  }
@@ -583,6 +584,7 @@ test('organizer edits independent chat invitations without leaking member-only g
  assert.ok(editHtml.includes(`name="chatUrl" type="text" inputmode="url" maxlength="500"`))
  assert.ok(editHtml.includes(`name="openChatUrl" type="text" inputmode="url" maxlength="500" value="${openChatUrl}"`))
  assert.match(editHtml,/Each chat link opens a separate invitation you can choose to accept/)
+ await paginationEvidence({'group-organizer-settings.html':editHtml})
  for(const cookie of [undefined,stranger.cookie]) {
   const invitation=await b.get(base+'/join/'+flyer.id,cookie);assert.equal(invitation.status,200);assert.doesNotMatch(await invitation.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
  }
@@ -629,6 +631,7 @@ test('group member profiles bind entries to roster identities and explain matche
  assert.match(html,/Suggested connections/);assert.match(html,/Shared topics: accessibility, react/);assert.match(html,new RegExp(base+'/'+bobId));assert.doesNotMatch(html,/PRIVATE outsider|Untrusted name|ownerKey|bob-user/)
  const profile=await b.get(base+'/'+bobId,owner.cookie),profileHtml=await profile.text();assert.equal(profile.status,200)
  assert.match(profileHtml,/<title>Bob · Builders · Community/);assert.match(profileHtml,/I offer React accessibility reviews/);assert.doesNotMatch(profileHtml,/Need React accessibility advice|PRIVATE outsider/)
+ await paginationEvidence({'community-suggested-connections.html':html,'community-member-profile.html':profileHtml})
  assert.notEqual((await b.get(base+'/'+bobId,stranger.cookie)).status,200)
  assert.equal((await b.get(base+'/'+bobId)).status,401)
  await b.groups.revoke(alice,group.id,'member',bobId)
