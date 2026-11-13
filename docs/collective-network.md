@@ -130,7 +130,7 @@ content to either service.
 
 ## Community chat and addresses
 
-With the existing trusted OpenChat messaging integration configured, each group
+With the existing trusted OpenChat messaging integration configured, each managed group
 has one shared conversation. Joining (or organizer approval) queues chat membership;
 leaving/removal queues its removal. The durable outbox retries transient failures
 without duplicate conversations or messages. Delivery normally follows within a
@@ -140,11 +140,75 @@ edits are disabled for managed conversations. WhatsApp remains optional and sepa
 
 The primary **Message the group** action opens the native Unlinked inbox in the
 same tab. **Open separately in OpenChat** opens that same conversation externally.
-Existing conversations can be bound by an operator using `chatConversationId`;
-this preserves their history. Never change that binding after successful sync.
+Existing conversations are bound through the verified activation service below;
+this preserves their history. Never change that binding after activation.
 
 New groups get stable readable URLs (name plus a short disambiguating suffix).
 Organizers can choose **Opaque ID** in group information; readable aliases stop
 resolving while this mode is selected. Original UUID routes and invitations stay
 valid in both modes. A readable name is not an authorization grant: private group
 content still requires membership, and anonymous invitations omit private metadata.
+
+### Activation and safety boundaries
+
+New groups are `chatManaged: true` from creation. Existing groups without that
+flag remain on their original invitation action, including after initialization,
+metadata edits and restarts. Initialization creates constraints only; it never
+queues or activates legacy groups. Native actions require both managed status and
+the configured messaging integration.
+
+After the reviewed backend is deployed and the native Unlinked release passes
+health checks, a trusted operator calls the domain service
+`groups.activateChat(organizer, groupId, { existingConversationId })`. The service
+requires the live organizer and an injected `verifyChatActivation` adapter. The
+adapter receives the server-resolved organizer, group ID and conversation ID and
+must independently verify current chat ownership and backend/native health,
+returning `{ healthy: true, organizerVerified: true, conversationId }`. There is no
+browser or agent-grant activation endpoint and no new credential. Runtime
+composition accepts this trusted adapter as `verifyCommunityChatActivation`;
+without it activation fails closed. The group and organizer are checked again
+after verification, and a concurrent group edit requires fresh review. Repeating
+the same activation is harmless; changing an established binding is refused.
+Boulder's existing conversation must remain `44HsMDzl6YZ7l1AdNusAT`, preserving
+history and all 12 verified current members. Activation itself does not edit the
+Unlinked flyer or UUID invitations. OpenChat retires its standalone invite on the
+first acknowledged managed snapshot. After activation, rollback must retain the
+binding, native entry and managed authorization; do not restore obsolete chat
+invites or participant writes. Prefer a forward correction.
+
+Group seats grant chat participation subject to the existing safety exceptions:
+inactive or unresolvable accounts and members blocked either way with the
+organizer have no effective group access and are excluded from chat. Member-to-
+member blocks do not remove group seats. Block/unblock enqueue new revisions at
+the member-block service boundary. Account deletion removes participation before
+the identity is deleted. External identity/account changes and interrupted
+boundary callbacks are rechecked by a bounded, rotating scan of 20 managed
+groups per worker pass, including completed jobs; changed access enqueues a new
+revision. Operators changing bindings outside the app should also call
+`groups.reconcileActor(actor)`. A missing or changed organizer identity closes
+the chat under its original organizer binding, never transfers ownership. Remote
+access changes remain pending during outages; existing block rules stay in force
+in Unlinked.
+
+### Durable recovery and minimization
+
+`UnlinkedGroupChatJob` and its unique `id` constraint are part of the actual
+`graph-migration.mjs` export/shared-export/import/verification domain. Recover
+this outbox with the group documents, not as an optional cache. Pending jobs
+contain only `id`, monotonic `revision`, a chat-only `document` (name, organizer
+binding and accepted roster), `deleted`, `done`, retry fields, an organizer
+identity binding, `fingerprint` and an optional `lastSnapshot`. Descriptions,
+invitation URLs, pending invitees, profile IDs and list selections never enter
+the job. A prepared snapshot is compare-and-set once per revision and is replayed
+unchanged after an acknowledgement loss. Access changes get a higher revision;
+an older receipt cannot complete it.
+
+Acknowledgement removes the document, snapshot and retry data. An active receipt
+retains only `id`, revision, done, the access fingerprint and original organizer
+identity needed for a future deletion. Deletion immediately replaces any pending
+roster with a minimal tombstone (group ID, optional bound conversation ID, neutral
+name, original organizer identity), and acknowledgement drops that identity too.
+If no snapshot was ever prepared, no remote request could have been sent and
+deletion can retain just the revision fence. Pending tombstones retry until
+acknowledged. The recovery integration test exercises native snapshots, shared
+export, import/verification, deletion and acknowledgement minimization.

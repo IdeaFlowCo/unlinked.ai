@@ -112,13 +112,22 @@ export function createNeo4jBlockStore(driver, database = 'neo4j') {
 }
 
 // The service the browser and the connection rules use.
-export function createMemberBlocks({ store, now = Date.now } = {}) {
+export function createMemberBlocks({ store, now = Date.now, onChange = async () => {} } = {}) {
   if (!store || ['initialize', 'add', 'list', 'remove', 'between', 'removeOwner'].some(name => typeof store[name] !== 'function')) throw new Error('block_store_required')
   return {
     initialize: () => store.initialize(),
-    block: (blocker, target) => store.add(blockRecord(blocker, target, { now })),
+    async block(blocker, target) {
+      const result = await store.add(blockRecord(blocker, target, { now }))
+      await onChange(blocker)
+      return result
+    },
     list: member => valid(member) ? store.list(member) : [],
-    unblock: (member, id) => valid(member) && typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id) ? store.remove(member, id) : null,
+    async unblock(member, id) {
+      if (!valid(member) || typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id)) return null
+      const result = await store.remove(member, id)
+      await onChange(member)
+      return result
+    },
     // Either direction: a block stops connection requests both ways.
     between: (a, b) => valid(a) && valid(b) && !same(a, b) ? store.between(a, b) : false,
     // The OpenChat users and public profiles this member blocked.

@@ -1,0 +1,161 @@
+TAP version 13
+# Subtest: readable stable addresses, opaque choice and existing UUID lookup
+ok 1 - readable stable addresses, opaque choice and existing UUID lookup
+  ---
+  duration_ms: 5.09772
+  type: 'test'
+  ...
+# Subtest: durable roster includes accepted members, excludes pending, removes departures and deletes
+ok 2 - durable roster includes accepted members, excludes pending, removes departures and deletes
+  ---
+  duration_ms: 7.37554
+  type: 'test'
+  ...
+# Subtest: delivery retries and an older receipt cannot mark a newer membership change complete
+ok 3 - delivery retries and an older receipt cannot mark a newer membership change complete
+  ---
+  duration_ms: 1.65148
+  type: 'test'
+  ...
+# Subtest: real Neo4j outbox survives restart, serialized changes and deletion
+ok 4 - real Neo4j outbox survives restart, serialized changes and deletion
+  ---
+  duration_ms: 1227.362201
+  type: 'test'
+  ...
+# Subtest: outbox excludes private metadata and scrubs acknowledged roster and deletion bindings
+ok 5 - outbox excludes private metadata and scrubs acknowledged roster and deletion bindings
+  ---
+  duration_ms: 5.82187
+  type: 'test'
+  ...
+# Subtest: ack loss replays an immutable revision and identity changes enqueue a higher revision
+ok 6 - ack loss replays an immutable revision and identity changes enqueue a higher revision
+  ---
+  duration_ms: 3.61623
+  type: 'test'
+  ...
+# Subtest: block and unblock change effective chat access and completed jobs reconcile account changes
+ok 7 - block and unblock change effective chat access and completed jobs reconcile account changes
+  ---
+  duration_ms: 8.20314
+  type: 'test'
+  ...
+# Subtest: legacy groups stay unmanaged through restart and edits until verified organizer activation
+ok 8 - legacy groups stay unmanaged through restart and edits until verified organizer activation
+  ---
+  duration_ms: 3.40158
+  type: 'test'
+  ...
+# Subtest: community outbox pending snapshots and minimal receipts survive actual shared recovery
+ok 9 - community outbox pending snapshots and minimal receipts survive actual shared recovery
+  ---
+  duration_ms: 38155.848312
+  type: 'test'
+  ...
+# Subtest: one flyer signup reaches introduction, review saves only selections and group removal revokes read access
+ok 10 - one flyer signup reaches introduction, review saves only selections and group removal revokes read access
+  ---
+  duration_ms: 133.551808
+  type: 'test'
+  ...
+# Subtest: organizer edits independent chat invitations without leaking member-only group context
+ok 11 - organizer edits independent chat invitations without leaking member-only group context
+  ---
+  duration_ms: 3133.612552
+  type: 'test'
+  ...
+# Subtest: HTTP group metadata accepts maximum CJK descriptions and bounds encoded bodies by route
+ok 12 - HTTP group metadata accepts maximum CJK descriptions and bounds encoded bodies by route
+  ---
+  duration_ms: 21.5578
+  type: 'test'
+  ...
+# Subtest: native group chat is same-tab with a separate optional app and readable authenticated routes
+ok 13 - native group chat is same-tab with a separate optional app and readable authenticated routes
+  ---
+  duration_ms: 3101.401453
+  type: 'test'
+  ...
+# Subtest: readable flyer sign-in and signup callbacks retain invitation and source before explicit join
+ok 14 - readable flyer sign-in and signup callbacks retain invitation and source before explicit join
+  ---
+  duration_ms: 34.928429
+  type: 'test'
+  ...
+# Subtest: flyer HTTP: preview, sign-in and signup preserve the exact invite without joining; two accounts opt in; revoke rejects new joins
+ok 15 - flyer HTTP: preview, sign-in and signup preserve the exact invite without joining; two accounts opt in; revoke rejects new joins
+  ---
+  duration_ms: 131.199438
+  type: 'test'
+  ...
+# Subtest: flyer capacity and organizer approval are applied before a seat grants access
+ok 16 - flyer capacity and organizer approval are applied before a seat grants access
+  ---
+  duration_ms: 80.525798
+  type: 'test'
+  ...
+# Subtest: capacity reservations apply to direct acceptance as well as flyer approval
+ok 17 - capacity reservations apply to direct acceptance as well as flyer approval
+  ---
+  duration_ms: 1.534759
+  type: 'test'
+  ...
+# Subtest: an interrupted signup restarts verified sign-in with the retained flyer context and zero memberships
+ok 18 - an interrupted signup restarts verified sign-in with the retained flyer context and zero memberships
+  ---
+  duration_ms: 56.412409
+  type: 'test'
+  ...
+# Subtest: blocking a member: confirm, then connection requests are refused both ways, Messages hides them, and OpenChat blocks too
+ok 19 - blocking a member: confirm, then connection requests are refused both ways, Messages hides them, and OpenChat blocks too
+  ---
+  duration_ms: 75.852798
+  type: 'test'
+  ...
+# Subtest: notifications from a blocked member are hidden; account deletion removes blocks both ways
+ok 20 - notifications from a blocked member are hidden; account deletion removes blocks both ways
+  ---
+  duration_ms: 23.21088
+  type: 'test'
+  ...
+# Subtest: block records, the memory store and the Messages client
+ok 21 - block records, the memory store and the Messages client
+  ---
+  duration_ms: 1.46125
+  type: 'test'
+  ...
+# Subtest: production dispatcher carries community intake through flyer join, review, save and personal asks
+ok 22 - production dispatcher carries community intake through flyer join, review, save and personal asks
+  ---
+  duration_ms: 204.359877
+  type: 'test'
+  ...
+# Subtest: standalone launcher connects community intake to asks, introductions and group joins
+    # Subtest: configured
+    ok 1 - configured
+      ---
+      duration_ms: 52.027679
+      type: 'test'
+      ...
+    # Subtest: unconfigured
+    ok 2 - unconfigured
+      ---
+      duration_ms: 115.510368
+      type: 'test'
+      ...
+    1..2
+ok 23 - standalone launcher connects community intake to asks, introductions and group joins
+  ---
+  duration_ms: 168.516107
+  type: 'test'
+  ...
+1..23
+# tests 25
+# suites 0
+# pass 25
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 46610.724532

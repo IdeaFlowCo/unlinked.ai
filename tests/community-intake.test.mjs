@@ -713,3 +713,25 @@ test('native group chat is same-tab with a separate optional app and readable au
  const job=await b.store.chatJob(group.id);assert.equal(job.group.members.length,0)
  assert.equal((await b.get(base,owner.cookie)).status,200)
 })
+
+test('readable flyer sign-in and signup callbacks retain invitation and source before explicit join',async t=>{
+ const b=await browser(t),g=await b.groups.create(alice,'Readable flyer'),f=await b.groups.createFlyer(alice,g.id,{capacity:10,approval:false})
+ const path=`/groups/${g.urlKey}/join/${f.id}?src=paper&utm_campaign=builders`
+ const preview=await b.get(path);assert.equal(preview.status,200)
+ assert.match(await preview.text(),/Sign in|Continue|Join/)
+ for(const who of ['bob','new-builder']) {
+  const logged=await b.login(who,path)
+  assert.equal(logged.destination,path)
+  assert.equal((await b.store.get(g.id)).members.length,who==='bob'?0:1)
+  assert.equal((await b.get(path,logged.cookie)).status,200)
+  const joined=await b.post(path,logged.cookie,{csrf:logged.csrf,decision:'join'})
+  assert.equal(joined.status,303)
+  assert.equal(joined.headers.get('location'),`/groups/${g.id}`)
+ }
+ const stored=await b.store.get(g.id)
+ assert.equal(stored.members.length,2)
+ assert.deepEqual(stored.members.map(m=>m.flyer.inviteId),[f.id,f.id])
+ assert.deepEqual(stored.members.map(m=>m.flyer.source),Array(2).fill({src:'paper',utm_campaign:'builders'}))
+ const anonymous=await (await b.get(path)).text()
+ assert.doesNotMatch(anonymous,/bob-user|new-builder-user/)
+})
