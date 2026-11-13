@@ -533,7 +533,7 @@ test('standalone launcher connects community intake to asks, introductions and g
     const origin = `https://127.0.0.1:${port}`
     const organizer = { ownerId: 'organizer', userId: 'organizer-user' }
     const member = { ownerId: 'member', userId: 'member-user' }
-    const groups = createCollectiveGroups({ store: createMemoryCollectiveGroupsStore(), active: async () => true })
+    const groups = createCollectiveGroups({ store: createMemoryCollectiveGroupsStore(), active: async () => true, chatEnabled: true })
     const group = await groups.create(organizer, 'Launcher community')
     const flyer = await groups.createFlyer(organizer, group.id, { capacity: 10, approval: false })
     const calls = []
@@ -550,10 +550,11 @@ test('standalone launcher connects community intake to asks, introductions and g
     })
     t.after(pilot.stop)
     const request = (path, options = {}) => fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual', ...options })
-    const started = await request('/login')
+    const started = await request('/login?next='+encodeURIComponent(`/groups/${group.urlKey}/join/${flyer.id}`))
     const loginCookie = started.headers.getSetCookie().find(v => v.startsWith('__Host-ul-login=')).split(';')[0]
     const finished = await request('/auth/callback/ideaflow?state=s&code=c', { headers: { Cookie: loginCookie } })
     assert.equal(finished.status, 303)
+    assert.equal(finished.headers.get('location'),`/groups/${group.urlKey}/join/${flyer.id}`)
     const cookie = finished.headers.getSetCookie().find(v => v.startsWith('__Host-ul-session=')).split(';')[0]
     const headers = { Cookie: cookie }
     const asks = await request('/asks', { headers })
@@ -564,7 +565,7 @@ test('standalone launcher connects community intake to asks, introductions and g
     const introduction = await request('/profile/context', { headers })
     assert.equal(introduction.status, 200)
     assert.match(await introduction.text(), enabled ? /Review my introduction/ : /Profile connection unavailable/)
-    const joinPath = `/groups/${group.id}/join/${flyer.id}`
+    const joinPath = `/groups/${group.urlKey}/join/${flyer.id}`
     const invite = await request(joinPath, { headers })
     assert.equal(invite.status, 200)
     const csrf = /name="csrf" value="([^"]+)"/.exec(await invite.text())[1]
@@ -574,6 +575,11 @@ test('standalone launcher connects community intake to asks, introductions and g
     })
     assert.equal(joined.status, 303)
     assert.equal(joined.headers.get('location'), `/groups/${group.id}${enabled ? '/welcome' : ''}`)
+    const detail = await request(`/groups/${group.urlKey}`, { headers })
+    assert.equal(detail.status,200)
+    const detailHtml=await detail.text(),chatId=(await groups.detail(member,group.id)).chatConversationId
+    assert.ok(detailHtml.includes(`<a class="button" href="/messages/c/${chatId}">Message the group</a>`))
+    assert.match(detailHtml,/Open separately in OpenChat/)
     const welcome = await request(`/groups/${group.id}/welcome`, { headers })
     assert.equal(welcome.status, 200)
     assert.match(await welcome.text(), enabled ? /Review my introduction/ : /Profile connection unavailable/)

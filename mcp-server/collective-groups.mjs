@@ -40,7 +40,7 @@ const seatLimit = group => group.capacity ?? GROUP_LIMITS.seats + 1
 const memberCount = group => group.members.length + 1
 const publicFlyer = ({ id, expiresAt, approval }) => ({ id, expiresAt, approval })
 
-export function createCollectiveGroups({ store, active, blocked = async () => false, now = Date.now, chatEnabled=false }) {
+export function createCollectiveGroups({ store, active, blocked = async () => false, now = Date.now, chatEnabled=false, verifyChatActivation }) {
   const live = async actor => Boolean(actor?.ownerId && actor.userId && await active(binding(actor)))
   const requireLive = async actor => { if (!await live(actor)) fail() }
   const canMeet = async (organizer, actor) => same(organizer, actor) || !await blocked(organizer, actor)
@@ -92,11 +92,35 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       await requireLive(actor)
       name = cleanName(name)
       if (!name) fail('invalid_name')
-      const group = { id: randomUUID(), name, organizer: binding(actor), organizerProfileId: organizerProfileId ?? null, members: [], invites: [], shares: [] }
+      const group = { id: randomUUID(), name, organizer: binding(actor), organizerProfileId: organizerProfileId ?? null, chatManaged: true, members: [], invites: [], shares: [] }
       group.urlMode=urlMode==='opaque'?'opaque':'readable'
       group.slug=readableGroupSlug(name,group.id)
       await store.create(group)
       return summary(group)
+    },
+    async activateChat(actor, id, { existingConversationId }) {
+      const { group: before } = await authorized(actor, id, true)
+      if (!chatEnabled || typeof verifyChatActivation !== 'function' || !/^[A-Za-z0-9_-]{1,80}$/.test(existingConversationId ?? '')) fail('chat_activation_unavailable')
+      if (before.chatManaged === true) {
+        if (before.chatConversationId !== existingConversationId) fail('chat_binding_conflict')
+        return this.detail(actor, id)
+      }
+      const proof = await verifyChatActivation({ actor: binding(actor), groupId: id, conversationId: existingConversationId })
+      if (proof?.healthy !== true || proof?.organizerVerified !== true || proof?.conversationId !== existingConversationId) fail('chat_activation_unavailable')
+      await authorized(actor, id, true)
+      await update(id, group => {
+        own(actor, group)
+        if (group.chatManaged === true && group.chatConversationId !== existingConversationId) fail('chat_binding_conflict')
+        if (JSON.stringify(group) !== JSON.stringify(before)) fail('review_changed')
+        return { ...group, chatManaged: true, chatConversationId: existingConversationId }
+      })
+      return this.detail(actor, id)
+    },
+    async reconcileActor(actor) {
+      for (const row of await store.forActor(actor)) {
+        if (row.chatManaged !== true || !access(row, actor)) continue
+        await store.change(row.id, group => group)
+      }
     },
     async updateMetadata(actor, id, { description, chatUrl, openChatUrl = '', urlMode }) {
       await authorized(actor, id, true)
@@ -123,7 +147,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
     async detail(actor, id) {
       const { group, role } = await authorized(actor, id)
       const organizer = role === 'organizer'
-      return { ...summary(group), ...metadata(group), urlMode:group.urlMode??"readable", chatConversationId:chatEnabled?communityChatId(group):null, organizer, organizerProfileId: group.organizerProfileId,
+      return { ...summary(group), ...metadata(group), urlMode:group.urlMode??"readable", chatConversationId:chatEnabled && group.chatManaged===true?communityChatId(group):null, organizer, organizerProfileId: group.organizerProfileId,
         shares: group.shares.map(summary),
         ...(organizer ? { members: group.members.map(person), invites: pending(group).map(row => ({ ...person(row), expiresAt: row.expiresAt })),
           capacity: seatLimit(group), flyer: group.flyer && {
