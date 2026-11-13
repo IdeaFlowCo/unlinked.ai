@@ -32,8 +32,8 @@ test('cold account hydration uses 25 bounded reads for 3,140 rows and preserves 
   console.log(JSON.stringify({ kind: 'cold-account-synthetic', rows: network.assertions.length, calls: f.calls, ms: Math.round(performance.now() - start) }))
 })
 
-test('actual signed-in directory route cold-loads the batched owner network and renders the matching private person', async t => {
-  const f = fixture(3141); let handler
+for (const connected of [false, true]) test('actual signed-in directory route cold-loads the batched owner network: ' + (connected ? 'My connections' : 'Everyone'), async t => {
+  const f = fixture(connected ? 3141 : 3142); let handler
   const server = createServer((req, res) => void handler(req, res))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   t.after(() => new Promise(resolve => server.close(resolve)))
@@ -47,12 +47,12 @@ test('actual signed-in directory route cold-loads the batched owner network and 
   const login = await go('/login'), transaction = login.headers.getSetCookie()[0].split(';')[0]
   const callback = await go('/auth/callback/ideaflow?state=cold&code=cold', transaction)
   const cookie = callback.headers.getSetCookie().find(value => value.startsWith('__Host-ul-session=')).split(';')[0]
-  const start = performance.now(), response = await go('/network?connected=1&q=Cold%203140&mode=exact', cookie), html = await response.text()
+  const start = performance.now(), response = await go((connected ? '/network?connected=1&' : '/network?') + 'q=Cold%203140&mode=exact', cookie), html = await response.text()
   assert.equal(response.status, 200); assert.match(html, /Cold 3140/)
   assert.equal(f.calls.single, 0, 'signed-in directory must receive the batch capability')
   assert.equal(f.calls.batch, 25); assert.equal(f.calls.largest, 128)
   assert.match(html, /<title>[^<]*People[^<]*Unlinked/)
-  console.log(JSON.stringify({ kind: 'cold-signed-directory-synthetic', rows: 3141, calls: f.calls, ms: Math.round(performance.now() - start) }))
+  console.log(JSON.stringify({ kind: 'cold-signed-directory-synthetic', scope: connected ? 'connections' : 'everyone', rows: f.ids.length, calls: f.calls, ms: Math.round(performance.now() - start) }))
   const anonymous = await go('/network?q=Cold%203140&mode=exact')
   assert.equal(anonymous.status, 200); assert.doesNotMatch(await anonymous.text(), /href="\/network\/contacts\//)
 })
