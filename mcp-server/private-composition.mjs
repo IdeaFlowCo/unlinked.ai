@@ -19,6 +19,7 @@ import { createLegacyProfileBoundary } from './profile-source-boundary.mjs'
 import { createSignupProfileLookup, createNeo4jSignupProfileStore, loadProfileLookupAdapter, prepareProfileLookup } from './signup-profile-lookup.mjs'
 import { createContactEnrichment, createNeo4jContactEnrichmentStore } from './contact-enrichment.mjs'
 import { createContactSlugs, createNeo4jContactSlugStore } from './contact-slugs.mjs'
+import { createOwnerResourceBatchReader } from './owner-resource-batch.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { publishedPeopleFor } from './connection-identity.mjs'
 import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
@@ -408,7 +409,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         const test = link ? testProfile(link.profileId) : null
         return test ? { profileId: test.id, name: test.name, headline: test.headline, receiptId: link.receiptId } : null
       }
-      return { ...backend,readLegacyProfile,readTestProfileClaim,...(readInviteConnections ? { readInviteConnections } : {}),...(readMemberConnections ? { readMemberConnections } : {}),
+      return { ...backend, readResources: createOwnerResourceBatchReader({ driver, authorizeOwner: store.authorizeOwner.bind(store), owner, isClosed: () => closed }), readLegacyProfile,readTestProfileClaim,...(readInviteConnections ? { readInviteConnections } : {}),...(readMemberConnections ? { readMemberConnections } : {}),
         ...(recovery?{readLegacyFiles:recovery.list,readLegacyOriginal:recovery.readOriginal,readLegacyObservations:recovery.observations}:{}),
         listImportIds: () => store.listImportIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),
         listImportJobIds: () => store.listImportJobIds({ userId: owner.userId, namespaces: ['unlinked'] }, owner.ownerId),

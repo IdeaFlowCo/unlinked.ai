@@ -58,3 +58,7 @@ Shared pages are no-store, noindex and no-referrer. No list is shared by saving 
 These browser routes do not add agent tools or expand existing agent grants.
 
 Profile headers also show **1st · Your connection** to the signed-in viewer when the same exact-identity network read recognizes the person, or an accepted Unlinked connection exists without an import. **Date added** is the earliest known import date; **Connected on** stays separate and is omitted when unknown. These are private viewer context, never public API fields. The existing bounded owner cache supplies the header; if unavailable, no relationship is inferred. Self and blocked profiles suppress this context. Metadata rows have vertical spacing; removal stays available in More and below profile content.
+
+### Cold owner reads
+
+Cold owner observation reads use the shared [publication reader contract](private-noos-staging.md#publication-and-scale), which owns batch bounds, authorization, fallback behavior and regression coverage.
