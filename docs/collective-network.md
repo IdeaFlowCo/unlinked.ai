@@ -240,6 +240,8 @@ acknowledged. The recovery integration test exercises native snapshots, shared
 export, import/verification, deletion and acknowledgement minimization.
 
 OpenChat owns the separate `UnlinkedGroupSync` receipt ledger and its `groupId`
-constraint in the shared graph. Unlinked shared backup, verification, and rollback
-exclude and preserve that ledger; `UnlinkedGroupChatJob` remains Unlinked-owned
-and is included in recovery. Unknown prefixed labels are still rejected.
+constraint in the shared graph. Shared exports exclude both; import, verification
+and rollback preserve them, even when the constraint exists before the first
+receipt. Unknown prefixed labels are still rejected. The schema-only and rollback
+preservation cases are covered in
+[`tests/community-chat-recovery.test.mjs`](../tests/community-chat-recovery.test.mjs).
