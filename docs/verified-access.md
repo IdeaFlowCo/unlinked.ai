@@ -8,7 +8,9 @@ Priority means immediate admission ahead of quota-controlled pools. It cannot pr
 
 ## Download
 
-Verified users see **Settings → Verified access → Download network**. The browser-session-only `GET /network/export` accepts `scope=everyone|mine`, optional `q` (200 characters), and comma/whitespace-separated `ids` (10,000 characters). Empty filters export the full scope; a query and IDs intersect. IDs are public profile IDs for everyone, and contact/observation IDs or published target profile IDs for mine.
+Verified users see **Settings → Verified access → Download the visible network**, opening `/downloads?scope=all`. The [network and list download contract](bulk-exports.md) owns the browser and scoped-agent workflow.
+
+The earlier browser-session-only `GET /network/export` remains supported. It accepts `scope=everyone|mine`, optional `q` (200 characters), and comma/whitespace-separated `ids` (10,000 characters). Empty filters export the full scope; a query and IDs intersect. IDs are public profile IDs for everyone, and contact/observation IDs or published target profile IDs for mine.
 
 `everyone` pages the same sanitized published index as browsing, with the authenticated viewer's connection-privacy policy and server-resolved unlisted group. Both endpoints of each returned edge must be included in the selected export. It cannot read another owner's private imports, contact addresses or notes. `mine` includes that owner's visible imported/legacy/member-connection observations, with suspension filtering. Existing **Download everything (JSON)** remains available to every signed-in account for account records, private notes and source data.
 

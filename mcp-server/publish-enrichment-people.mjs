@@ -25,6 +25,7 @@ export function prepareEnrichmentSnapshot(bytes, dataset = ENRICHMENT_DATASET) {
   const ids = new Set()
   for (const row of rows) {
     if (row === null || typeof row !== 'object' || Object.getPrototypeOf(row) !== Object.prototype || Object.keys(row).some(key => !['id','name','headline','location','about','company','website','positions','education','skills'].includes(key)) || ids.has(row.id)) throw new Error('enrichment_rows_invalid')
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Exclude structured fields from scalar validation; validate their contents separately below.
     const { positions, education, skills, ...scalars } = row
     if (!allow(scalars, ['id','name','headline','location','about','company','website'], ['id','name'])) throw new Error('enrichment_rows_invalid')
     if (linkedinKeyed(dataset) !== LINKEDIN_ENRICHMENT_ID.test(row.id)) throw new Error('enrichment_rows_invalid')

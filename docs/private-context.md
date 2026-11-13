@@ -55,7 +55,7 @@ States, as in the design: anonymous visitors get nothing at all, not even an emp
   - Not GET: 405.
   - Cross-site fetch (`Sec-Fetch-Site`): 403.
   - Another owner's contact or entity: 404, the same answer as missing.
-  - Over 60 requests per minute per owner: 429.
+  - Over 60 requests per minute per ordinary owner: 429; the [verified-account exemption](verified-access.md) applies.
 - Every answer carries `Cache-Control: no-store, private`, `Vary: Cookie` and `Cross-Origin-Resource-Policy: same-origin`. The service worker never caches API responses.
 - The panel script builds DOM with `textContent` only.
 - Overlay data is never placed in public HTML, `/api/people*`, `/search-public`, the public projection, the published People index, or any model or AI-search input. The only agent tools that return it are the owner's own private-notes tools (separate permission, owner-scoped). `tests/private-context.test.mjs` checks this for anonymous visitors, another account, the public pages and APIs, and AI search.

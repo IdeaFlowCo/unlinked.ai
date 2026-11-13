@@ -13,6 +13,10 @@ Jacob's November 10 direction: Unlinked should be at least as useful as querying
 - The same service enforces filters, field presets, consent, active ownership, private-notes permission, publication fences and cancellation for browser, REST and MCP. No new public share capability or store.
 - Large downloads stream with backpressure. JSON/JSONL carries a successful completion marker; an interrupted stream is not reported complete. CSV cells neutralize spreadsheet formulas without changing stored source data.
 
+Exports read the live authorized projection and refuse completion if its
+publication revision changes. They do not retain historical snapshots that
+could resurrect deleted profiles.
+
 The homepage was checked live before work: its lead already mentions asking an AI agent, and its dedicated section says “Built for AI agents too”, with an MCP setup guide. The requested conditional rewrite is unnecessary. Its original HTML was saved; the available browser host timed out when asked for a screenshot, and no screenshot is claimed.
 
 ## Agent contract and real bounds

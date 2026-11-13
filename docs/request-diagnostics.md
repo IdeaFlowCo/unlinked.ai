@@ -52,11 +52,10 @@ persisted.
 `unlinked_lookup_contact` failures also name the step that failed in
 `failure_stage` (`owner_network`, `contact_addresses`, `index_profile_lookup`,
 `index_published_lookup`, `index_linkedin_ref`, `index_refhash_lookup`) and, for
-public-index steps, a fixed `index_failure` reason: `build_timeout`, `aborted`,
-`stale`, `worker_timeout`, `install_timeout`, `worker_unavailable`,
-`worker_refused`, `clone_failed`, `snapshot_invalid`, `exception` (the index
-worker threw) or `reader_exception`. An unexpected exception in the index worker
-or reader also writes one fixed stderr line, for example
+public-index steps, a fixed `index_failure` reason allowlisted by `INDEX_REASONS`
+in `mcp-server/request-diagnostics.mjs`. That implementation owns the reason
+vocabulary, including typed reader refusals and unexpected tool exceptions.
+An unexpected exception in the index worker, reader or tool also writes one fixed stderr line, for example
 `unlinked_public_index_worker_error method=lookup class=TypeError at=reader.mjs:531`:
 the method, the error class and the first public-people source location only,
 never its message or data. Private-notes, investor-import and lookup tools are
@@ -169,7 +168,7 @@ release source/version and rollback before declaring live diagnostic coverage.
 
 ## Public directory admission aggregates
 
-The same default-off collection gate also records `public_admission` schema-1 aggregates: UTC minute, lane (`anonymous`/`arrival`/`viewer`/`preview`; `arrival` = a light visitor or card scan admitted ahead of the shared fuse; `preview` = a link unfurler on its own small profile lane, [docs/link-previews.md](link-previews.md)), route family (`profile`/`connections`/`company`/`search`), reason (`admitted`/`minute`/`capacity`/`cancelled`) and count. At most 51 rows per completed minute, flushed on the next admission; the current partial minute may be lost on shutdown. No account, IP, user agent, handle or query is collected; the per-visitor budget key lives only in process memory. Retention, file size and queue bounds are identical to agent diagnostics. This distinguishes minute exhaustion from concurrency pressure without enabling access logs.
+The same default-off collection gate also records `public_admission` schema-1 aggregates: UTC minute, lane (`anonymous`/`arrival`/`viewer`/`verified`/`preview`; `verified` = the operator-granted immediate lane ([verified access](verified-access.md)); `arrival` = a light visitor or card scan admitted ahead of the shared fuse; `preview` = a link unfurler on its own small profile lane, [docs/link-previews.md](link-previews.md)), route family (`profile`/`connections`/`company`/`search`), reason (`admitted`/`minute`/`capacity`/`cancelled`) and count. Fixed lane/route/reason combinations bound the rows per completed minute, flushed on the next admission; the current partial minute may be lost on shutdown. No account, IP, user agent, handle or query is collected; the per-visitor budget key lives only in process memory. Retention, file size and queue bounds are identical to agent diagnostics. This distinguishes minute exhaustion from concurrency pressure without enabling access logs.
 
 Read only aggregate counters with `node scripts/read-request-diagnostics.mjs --directory /absolute/private/audit/requests --event public_admission --since 2026-10-24T00:00:00Z`. The explicit UTC time boundary is required. This mode excludes agent request rows and cannot be combined with account/request filters; those retain their existing exact-filter requirement. All file ownership, mode, link and 500-record bounds remain in force.
 
