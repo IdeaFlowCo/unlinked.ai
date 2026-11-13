@@ -38,3 +38,23 @@ aliases. Each suggestion shows both entry titles and the overlapping topics; it 
 not an AI endorsement or a compatibility score. Suggestions use the current
 page of authorized entries, not private imports or hidden personal asks. Empty
 results invite a more specific ask/offer and browsing the member list.
+
+
+## Member profiles and everyday asks
+
+Groups is a primary signed-in navigation link and **Me → My groups** also opens
+`/groups`. Each current member has a private group profile, including members who
+have not imported LinkedIn or published a public profile. The name and View profile
+open it; **Group profile** describes its audience, not an unclaimed account.
+Message uses the current authorized roster identity, with CSRF and the existing
+OpenChat owner resolver. It opens an empty composer and never sends a message.
+Removed or blocked members cannot use a stale action to resolve a recipient.
+Groups in common are a signed-in intersection, never the other person's full
+membership list, and are omitted from public APIs and previews.
+
+**Add an ask** opens a focused title/details/audience form at
+`/groups/<group>/asks/new`. Group membership is rechecked at save. The group is
+visibly selected; Only me saves a private draft and returns to My asks, so a private
+save does not appear to disappear from the group board. Existing introduction and
+batch-import drafts retain their existing private defaults. The welcome page
+suggests LinkedIn import and the normal profile page without blocking group use.
