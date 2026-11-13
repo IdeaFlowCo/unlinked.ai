@@ -64,6 +64,11 @@ Group membership is rechecked at save. Choosing **Only me** saves a private draf
 The focused group form offers group visibility or Only me. Public sharing remains a separate explicit choice in entry editing and other supported review forms.
 Introduction and batch-import defaults are described above.
 
+If saving an ask or offer fails, its focused form retains the title, details,
+kind, selected audience and request receipt for a safe retry. Group forms keep
+the same group/Only me choices after a failure; they do not return to profile
+onboarding or introduce Public sharing.
+
 A save containing only entries for the current group returns to its community
 board with confirmation that the entries are shared there. Private, public or
 mixed-audience saves return to **My asks and offers**, where the saved entries
