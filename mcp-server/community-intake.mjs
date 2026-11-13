@@ -2,7 +2,7 @@ import { GROUP_KEY } from './community-chat-id.mjs'
 import { createHash } from 'node:crypto'
 import { concurrentMap } from './concurrent-map.mjs'
 export const COMMUNITY_PATH = /^\/(?:profile\/context|asks)(?:\/(?:preview|save|new|\d+))?$/
-export const COMMUNITY_GROUP_PATH = new RegExp(`^/groups/(${GROUP_KEY})/(welcome|community|asks|offers)(?:/(new|preview|save|organizer|[0-9a-f-]{36}))?$`)
+export const COMMUNITY_GROUP_PATH = new RegExp(`^/groups/(${GROUP_KEY})/(welcome|community|asks|offers|matches)(?:/(new|preview|save|organizer|search|[0-9a-f-]{36}))?$`)
 export const isCommunityPath = path => COMMUNITY_PATH.test(path) || COMMUNITY_GROUP_PATH.test(path)
 const issuer = 'https://id.ideaflow.app/api/auth'
 export const identityKey = i => createHash('sha256').update(`${i.issuer}\n${i.subject}`).digest('hex')
