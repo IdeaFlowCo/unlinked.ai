@@ -21,7 +21,7 @@ const concepts = [
  ['ios', /\b(?:ios|iphone|ipad)\b/g],
  ['prototype', /\b(?:prototypes?|prototyping)\b/g],
 ]
-const aliases = new Map([['apis','api'],['queries','query'],['tests','testing'],['test','testing'],['testers','testing'],['volunteers','volunteer'],['designers','design'],['designer','design'],['designing','design'],['designs','design'],['engineers','engineering'],['engineer','engineering'],['mentors','mentor'],['mentoring','mentor'],['introductions','introduction'],['intro','introduction'],['intros','introduction'],['databases','database'],['optimizing','optimization'],['optimisation','optimization']])
+const aliases = new Map([['apis','api'],['queries','query'],['tests','testing'],['test','testing'],['testers','testing'],['volunteers','volunteer'],['designers','design'],['designer','design'],['designing','design'],['designs','design'],['engineers','engineering'],['engineer','engineering'],['mentors','mentor'],['mentoring','mentor'],['introductions','introduction'],['intro','introduction'],['intros','introduction'],['meeting','meet'],['meetings','meet'],['meets','meet'],['chats','chat'],['chatting','chat'],['calls','call'],['feedbacks','feedback'],['databases','database'],['optimizing','optimization'],['optimisation','optimization']])
 function topics(entry) {
  let text = `${entry.title ?? ''} ${entry.body ?? ''}`.normalize('NFKC').toLowerCase()
  const found = new Set()
@@ -32,6 +32,7 @@ function topics(entry) {
  }
  return found
 }
+const generic = new Set(['introduction','feedback','meet','chat','call'])
 const stable = (a,b) => b.score-a.score || String(a.other.id).localeCompare(String(b.other.id)) || String(a.mine.id).localeCompare(String(b.mine.id)) || a.memberId.localeCompare(b.memberId)
 
 export async function matchGroupMembers(entries, memberId, limit=12) {
@@ -59,46 +60,59 @@ export async function matchGroupMembers(entries, memberId, limit=12) {
   work+=row.set.terms.length+1
   if(work>=16384){work=0;await yieldToEventLoop()}
  }
- const labels=[...frequency.keys()].sort(),index=new Map(labels.map((topic,i)=>[topic,i])),weights=new Float64Array(labels.length)
- labels.forEach((topic,i)=>{weights[i]=1+Math.log((members.size+1)/(frequency.get(topic).size+1))})
+ const labels=[...frequency.keys()].sort(),index=new Map(labels.map((topic,i)=>[topic,i])),weights=new Float64Array(labels.length),specific=new Uint8Array(labels.length)
+ labels.forEach((topic,i)=>{weights[i]=1+Math.log((members.size+1)/(frequency.get(topic).size+1));specific[i]=generic.has(topic)?0:1})
  for(const set of topicSets.values()){
   set.ids=Int32Array.from(set.terms,topic=>index.get(topic))
   set.weight=set.ids.reduce((sum,id)=>sum+weights[id],0)
  }
- const byMember=new Map(),comparisons=new Map()
+ const sharedTopics=(a,b)=>{
+  const shared=[]
+  for(let i=0,j=0;i<a.length&&j<b.length;){
+   if(a[i]<b[j])i++
+   else if(a[i]>b[j])j++
+   else {shared.push(labels[a[i]]);i++;j++}
+  }
+  return shared
+ }
+ const byMember=new Map(),comparisons=new Map(),probe={score:0,mine:null,other:null,memberId:''}
  for (const {entry:mine,set:mineSet} of own) for (const {entry:other,set:theirSet} of others) {
   if(++work>=16384){work=0;await yieldToEventLoop()}
   if (mine.kind===other.kind || !mineSet.weight || !theirSet.weight) continue
   const key=Math.min(mineSet.id,theirSet.id)*topicSets.size+Math.max(mineSet.id,theirSet.id)
-  let comparison=comparisons.get(key)
-  if (!comparison) {
-   const a=mineSet.ids,b=theirSet.ids,shared=[]
-   let sharedWeight=0,i=0,j=0
-   while(i<a.length&&j<b.length){
+  let score=comparisons.get(key)
+  if (score===undefined) {
+   const a=mineSet.ids,b=theirSet.ids
+   let sharedWeight=0,count=0,specificCount=0
+   for(let i=0,j=0;i<a.length&&j<b.length;){
     if(a[i]<b[j])i++
     else if(a[i]>b[j])j++
-    else {shared.push(labels[a[i]]);sharedWeight+=weights[a[i]];i++;j++}
+    else {sharedWeight+=weights[a[i]];count++;specificCount+=specific[a[i]];i++;j++}
    }
-   comparison={topics:shared,score:sharedWeight/Math.sqrt(mineSet.weight*theirSet.weight)+Math.min(shared.length,4)*0.1}
+   score=specificCount?sharedWeight/Math.sqrt(mineSet.weight*theirSet.weight)+Math.min(count,4)*0.1:0
    if(mineSet.count>1 || theirSet.count>1){
     if(comparisons.size>=4096)comparisons.delete(comparisons.keys().next().value)
-    comparisons.set(key,comparison)
+    comparisons.set(key,score)
    }
    work+=a.length+b.length
    if(work>=16384){work=0;await yieldToEventLoop()}
   }
-  if (!comparison.topics.length) continue
-  const pair={memberId:other.memberId,mine,other,...comparison,direction:mine.kind==='ask'?'receive':'give'}
-  const member=byMember.get(other.memberId)||{memberId:other.memberId,name:other.name,pairs:[]}
-  const index=member.pairs.findIndex(p=>p.direction===pair.direction)
-  if(index<0)member.pairs.push(pair)
-  else if(stable(pair,member.pairs[index])<0)member.pairs[index]=pair
-  byMember.set(other.memberId,member)
+  if (!score) continue
+  const direction=mine.kind==='ask'?'receive':'give'
+  let member=byMember.get(other.memberId)
+  if(!member){member={memberId:other.memberId,name:other.name,pairs:[]};byMember.set(other.memberId,member)}
+  const existing=member.pairs.findIndex(p=>p.direction===direction)
+  probe.score=score;probe.mine=mine;probe.other=other;probe.memberId=other.memberId
+  if(existing>=0&&stable(probe,member.pairs[existing])>=0)continue
+  const pair={memberId:other.memberId,mine,other,score,direction,ids:[mineSet.ids,theirSet.ids]}
+  if(existing<0)member.pairs.push(pair)
+  else member.pairs[existing]=pair
  }
  return [...byMember.values()].map(member=>{
   member.pairs.sort(stable)
   return {...member,reciprocal:member.pairs.length===2,score:member.pairs[0].score+(member.pairs.length===2?0.15:0)}
  }).sort((a,b)=>b.score-a.score||a.memberId.localeCompare(b.memberId)).slice(0,Math.min(limit,50))
+  .map(member=>({...member,pairs:member.pairs.map(({ids,...pair})=>({...pair,topics:sharedTopics(...ids)}))}))
 }
 
 export const MATCH_SCAN_LIMIT = 2000

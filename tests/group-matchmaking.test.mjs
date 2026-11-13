@@ -105,3 +105,12 @@ test('distinct topic comparisons also yield and preserve deterministic evidence'
  assert.ok(matches.every(m=>m.pairs[0].mine.id===1))
  assert.deepEqual(matches[0].pairs[0].topics,common)
 })
+
+test('introduction, feedback, meeting, chat and call wording needs a concrete shared topic',async()=>{
+ for(const [ask,offer] of [['Intro to a designer','Intros to investors'],['Feedback on my pitch','Feedback on resumes'],['Meet founders','Meetings with mentors'],['Quick chat','Chats with operators'],['Sales call','Calls with buyers'],['Introduction, feedback and a call','Intros, feedback, meetings and chats']])
+  assert.deepEqual(await matchGroupMembers([entry(1,'me','ask',ask),entry(2,'b','offer',offer)],'me'),[],ask)
+ const matches=await matchGroupMembers([entry(1,'me','ask','Intro to a fundraising mentor'),entry(2,'b','offer','Introductions for raising capital')],'me')
+ assert.deepEqual(matches[0].pairs[0].topics,['fundraising','introduction'])
+ const feedback=await matchGroupMembers([entry(1,'me','ask','Feedback on my React accessibility'),entry(2,'b','offer','WCAG feedback')],'me')
+ assert.deepEqual(feedback[0].pairs[0].topics,['accessibility','feedback'])
+})

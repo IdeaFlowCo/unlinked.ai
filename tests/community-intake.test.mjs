@@ -990,3 +990,51 @@ test('matchmaking revalidates blocks after yielding during comparisons',async t=
  assert.equal(response.status,400)
  assert.doesNotMatch(await response.text(),/React accessibility|data-match-card/)
 })
+
+test('transient match search compares one viewer need with other members’ shared offers only',async t=>{
+ let blocked=false,blockOnRead=false,reads=0,saves=0,seatId
+ const b=await browser(t,{communityIntake:{
+  group:async(actor,id)=>{reads++;if(blockOnRead)blocked=true;return {entries:[
+   {id:5,memberId:seatId,title:'Customer interviews for SaaS',body:'',kind:'offer',status:'open',audience:'group',groupId:id},
+   {id:4,memberId:seatId,title:'User research',body:'',kind:'ask',status:'open',audience:'group',groupId:id},
+   {id:3,memberId:'organizer',title:'User research mentoring',body:'',kind:'offer',status:'open',audience:'group',groupId:id},
+  ],nextCursor:null}},
+  save:async()=>{saves++},update:async()=>{saves++},
+ }},{blocked:async()=>blocked})
+ const owner=await b.login('alice'),outsider=await b.login('carol'),group=await b.groups.create(alice,'Search builders'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false})
+ await b.groups.joinFlyer(bob,group.id,flyer.id,{name:'Bob Builder',profileId:null,source:{}})
+ seatId=(await b.groups.roster(alice,group.id)).find(r=>r.actor.ownerId==='bob').id
+ const base='/groups/'+group.urlKey,path=base+'/matches/search'
+ const page=await(await b.get(base+'/matches',owner.cookie)).text()
+ assert.match(page,/<label for="match-query">What do you need\?<\/label>/);assert.match(page,new RegExp(`action="${path}"`));assert.doesNotMatch(page,/Your search<\/dt>/)
+ const response=await b.post(path,owner.cookie,{csrf:owner.csrf,query:'  Need user research <script>q</script>  '}),html=await response.text()
+ assert.equal(response.status,200);assert.match(response.headers.get('cache-control'),/no-store/)
+ assert.equal(html.match(/data-match-card/g)?.length,1);assert.match(html,/Bob Builder/);assert.match(html,/<dt>Your search<\/dt><dd>Need user research &lt;script&gt;q&lt;\/script&gt;<\/dd>/)
+ assert.match(html,/Customer interviews for SaaS/);assert.doesNotMatch(html,/User research mentoring|You may be able to help them|<script>q/)
+ assert.match(html,/value="Need user research &lt;script&gt;q&lt;\/script&gt;"/);assert.match(html,/not saved or shared with the group/)
+ assert.ok(html.includes(`href="${base}/matches">Show matches for my saved asks and offers`));assert.ok(html.includes(`href="${base}/asks/new"`))
+ const none=await(await b.post(path,owner.cookie,{csrf:owner.csrf,query:'Intro and feedback call'})).text()
+ assert.doesNotMatch(none,/data-match-card/);assert.match(none,/No shared offer matches your search yet/)
+ if(process.env.MATCHMAKING_EVIDENCE_DIR){await mkdir(process.env.MATCHMAKING_EVIDENCE_DIR,{recursive:true});await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'search.html'),html)}
+ const before=reads
+ for(const [label,request] of [
+  ['wrong csrf',()=>b.post(path,owner.cookie,{csrf:'wrong',query:'User research'})],
+  ['duplicate query',()=>b.post(path,owner.cookie,[['csrf',owner.csrf],['query','User research'],['query','React']])],
+  ['extra field',()=>b.post(path,owner.cookie,{csrf:owner.csrf,query:'User research',memberId:'organizer'})],
+  ['empty query',()=>b.post(path,owner.cookie,{csrf:owner.csrf,query:'   '})],
+  ['long query',()=>b.post(path,owner.cookie,{csrf:owner.csrf,query:'x'.repeat(301)})],
+  ['query parameter',()=>b.post(path+'?query=User+research',owner.cookie,{csrf:owner.csrf,query:'User research'})],
+  ['GET',()=>b.get(path,owner.cookie)],
+  ['other kind',()=>b.post(base+'/asks/search',owner.cookie,{csrf:owner.csrf,query:'User research'})],
+  ['cross origin',()=>b.post(path,owner.cookie,{csrf:owner.csrf,query:'User research'},'https://evil.invalid')],
+  ['anonymous',()=>b.post(path,undefined,{query:'User research'})],
+  ['outsider',()=>b.post(path,outsider.cookie,{csrf:outsider.csrf,query:'User research'})],
+ ]) {
+  const r=await request();assert.notEqual(r.status,200,label);assert.doesNotMatch(await r.text(),/Customer interviews|data-match-card/,label)
+ }
+ assert.equal(reads,before)
+ blockOnRead=true
+ const stale=await b.post(path,owner.cookie,{csrf:owner.csrf,query:'User research'})
+ assert.equal(blocked,true);assert.equal(stale.status,400);assert.doesNotMatch(await stale.text(),/Customer interviews|data-match-card/)
+ assert.equal(saves,0)
+})
