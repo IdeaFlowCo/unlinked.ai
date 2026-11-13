@@ -1,12 +1,21 @@
 # Collective network
 
-In the standalone Unlinked web runtime, open **Lists → Collective network** to
-create a private group. From the group, create an invitation for a member by
-pasting their published Unlinked profile link. This verifies an existing
+In the standalone Unlinked web runtime, open **Groups** in the signed-in main
+navigation or **Me → My groups** (`/groups`) to find or create a private group.
+From the group, create an invitation for a member by pasting their published
+Unlinked profile link. This verifies an existing
 Unlinked account binding. The organizer can copy the invitation link and open
 the existing OpenChat composer for that profile; creating or opening the
 invitation sends no message. The recipient can also find it on their own
-Collective network page.
+**My groups** page.
+
+The group detail page places **Message the group** (when available), **Add an
+ask**, and **Asks and offers** before a preview of up to five members. Larger
+rosters have a **See all … members** link to the community board's full member
+list. Each name links to a private group profile, and **Message** has a 44px
+minimum touch target. Profile access, direct messaging and shared context are
+owned by [Community member context](community-intake.md#member-context-and-suggested-connections);
+the focused entry forms are documented under [Add an ask](community-intake.md#add-an-ask-and-confirm-its-destination).
 
 Opening a direct invitation displays a review page only to the signed-in intended recipient.
 They must choose **Accept invitation** to join, or **Decline** to retire the
@@ -159,8 +168,9 @@ pending. Group membership is authoritative; standalone chat invites and particip
 edits are disabled for managed conversations. WhatsApp remains optional and separate.
 
 The primary **Message the group** action opens the native Unlinked inbox in the
-same tab, just below the group heading and before the description. After roster
-delivery, the conversation appears in the member’s normal **Messages** inbox.
+same tab. For its placement on the group detail page, see the overview above.
+After roster delivery, the conversation appears in the member’s normal
+**Messages** inbox.
 **Open separately in OpenChat** is a secondary link to that same conversation.
 **Join the WhatsApp group chat** is a separate optional link. For unmanaged groups
 or when messaging is unconfigured, a saved OpenChat invitation remains the

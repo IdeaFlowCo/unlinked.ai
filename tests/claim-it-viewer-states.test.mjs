@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
+import { createCollectiveGroups } from '../mcp-server/collective-groups.mjs'
+import { createMemoryCollectiveGroupsStore } from '../mcp-server/collective-groups-store.mjs'
 
 // "Is this you? Claim it" on an imported (shadow) profile must lead somewhere
 // this viewer can actually claim (docs/internal-links.md#claim-it). Before
@@ -26,6 +28,10 @@ async function start(t, { mine = null, sessionStore } = {}) {
     baseUrl: endpoint.replace('http:', 'https:'),
     login: { begin: async () => ({ location: 'https://idp.invalid/login', transaction: { state: 'state' } }), finish: async () => ({ issuer: 'https://idp.invalid', subject: 'subject-a', clientId: 'client', verifiedAt: Date.now(), displayName: 'Viewer Example' }) },
     resolveOwner: async () => owner, signup: async () => owner,
+    // The signed-in Me menu links to My groups; mount its real service so the
+    // page-wide link check exercises that destination as well as claim links.
+    collectiveGroups: createCollectiveGroups({ store: createMemoryCollectiveGroupsStore(), active: async actor => actor.ownerId === owner.ownerId && actor.userId === owner.userId }),
+    accountForProfile: async id => id === 'member-me' ? owner : null,
     issueAccountGrant: async () => ({ token: 'grant' }), revokeAccountGrant: async () => {},
     selfClaims: { lookupSlug: async () => null, lookupName: async () => null, claimable: async id => id === 'legacy-row', claim: async () => ({ profileId: 'legacy-row', receiptId: 'r' }) },
     ownProfileId: async () => typeof mine === 'function' ? mine() : mine,

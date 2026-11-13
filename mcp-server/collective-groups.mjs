@@ -170,6 +170,21 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       await authorized(actor,id)
       await update(id,group=>{if(same(actor,group.organizer))fail('organizer_cannot_leave');if(!seat(group,actor))fail();group.members=group.members.filter(row=>!same(row.actor,actor));group.shares=group.shares.filter(row=>!same(row.actor,actor));return group})
     },
+    // Signed-in intersection only: never list the other member's nonshared groups.
+    async inCommon(actor, other) {
+      await requireLive(actor)
+      if (!await live(other) || !await canMeet(actor, other)) return []
+      const common = []
+      for (const candidate of await store.forActor(actor)) {
+        if (!access(candidate, actor) || !access(candidate, other)) continue
+        try {
+          await authorized(other, candidate.id)
+          const { group } = await authorized(actor, candidate.id)
+          if (access(group, other)) common.push(summary(group))
+        } catch (error) { if (!(error instanceof GroupError)) throw error }
+      }
+      return common
+    },
     async invite(actor, id, recipient, profile) {
       await authorized(actor, id, true)
       if (!await live(recipient) || same(actor, recipient) || !await canMeet(actor, recipient)) fail('invalid_recipient')

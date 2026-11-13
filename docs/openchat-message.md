@@ -8,6 +8,8 @@ conversations, history, unread state and realtime events through Unlinked's
 server, so the standalone OpenChat apps show the same inbox.
 Member profiles open their direct conversation inside Unlinked; unclaimed
 profiles show **Not on Unlinked yet** and an invitation.
+For private group member profiles and their roster-based Message action, see
+[Community member context](community-intake.md#member-context-and-suggested-connections).
 For managed community chats and their release gates, see
 [Collective network](collective-network.md#community-chat-and-addresses).
 

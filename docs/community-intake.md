@@ -2,7 +2,7 @@
 
 [Collective network](collective-network.md) owns group admission and signup return behavior. With the Social intake connection configured, explicit Join or acceptance of a direct invitation leads to `/groups/:id/welcome`. The introduction is optional; membership does not require an import. `/profile/context` and `/asks` remain available from Me afterward.
 
-Quick introductions, task/idea lists, Goodreads CSV, and an assistant-produced JSON draft are posted to Unlinked for deterministic parsing into a review form. Unlinked sends none of this input to a model. The optional assistant prompt is copied into an assistant you already use; choose what context to give that assistant, then paste its JSON back for review. Tasks are unselected by default unless recognized as asks/offers. Every draft entry has an explicit audience, default Only me; selecting a group or Public is an affirmative choice. Only selected entries are saved. Existing X/GitHub/website links and LinkedIn import remain separate supported screens. Photo/live bookshelf sync and X scraping are not implemented.
+Quick introductions, task/idea lists, Goodreads CSV, and an assistant-produced JSON draft are posted to Unlinked for deterministic parsing into a review form. Unlinked sends none of this input to a model. The optional assistant prompt is copied into an assistant you already use; choose what context to give that assistant, then paste its JSON back for review. Tasks are unselected by default unless recognized as asks/offers. Every draft entry has a visible audience selector. A quick introduction typed in a group’s welcome form preselects that group at review; personal introductions and batch-import drafts default to Only me. The member reviews the audience before saving. Only selected entries are saved. Existing X/GitHub/website links and LinkedIn import remain separate supported screens. Photo/live bookshelf sync and X scraping are not implemented.
 
 Social stores the canonical nodes and their owner under the exact verified Ideaflow issuer and subject. First save explicitly consents to a Social profile and this narrow Unlinked connection. A dedicated partner secret enables read/update of intake-created entries only; it does not grant access to existing private Social data. Social's durable request receipt makes retry safe; edit revisions reject stale writes. `/asks/:id` supports status and audience changes, including sharing a previously private entry with a current community. When the saved community is unavailable, group-audience edits require an explicit current community selection or a change of audience; the form never substitutes another community.
 
@@ -10,11 +10,11 @@ Entries with `requiresSocialReview: true` or an audience outside `only_me`, `gro
 
 Unlinked owns membership and blocking. Before showing a group projection it obtains live authorized members, resolves their persisted identities, requests only exact-group placements, and verifies the roster again. Live member/block checks and persisted identity resolution run with at most eight concurrent operations per pass and retain roster order; lookup failures deny the projection. Removed members and blocked pairs are excluded. No membership is copied to Social or Superconnector. Joining Unlinked does not join a Superconnector network; the handoff uses the same Ideaflow ID.
 
-`/asks` and `/groups/:id/community` show one bounded Social page at a time, with Older entries and Newest entries links. They accept only a positive integer `cursor` and `limit` (default 100, maximum 500), with entries ordered by descending id below the cursor. Only Open entries appear in group views; Done and Paused entries stay in personal tracking. Group pages repeat live roster validation on every request, even when filtering leaves a page empty. Editing a saved entry uses its id to fetch the exact position in the owner's paginated entries, retaining revision checks for saves.
+`/asks` and `/groups/:id/community` show one bounded Social page at a time, with Older entries and Newest entries links. Pagination accepts only a positive integer `cursor` and `limit` (default 100, maximum 500), with entries ordered by descending id below the cursor. Only Open entries appear in group views; Done and Paused entries stay in personal tracking. Group pages repeat live roster validation on every request, even when filtering leaves a page empty. Editing a saved entry uses its id to fetch the exact position in the owner's paginated entries, retaining revision checks for saves.
 
 ## Configuration and release
 
-Set `UNLINKED_SOCIAL_INTAKE_SECRET` to the dedicated value configured as Social's `IDEANETWORK_UNLINKED_SECRET` (at least 32 characters), using protected service environment files. `UNLINKED_SOCIAL_INTAKE_ORIGIN` defaults to `https://social.ideaflow.app`. Deploy the compatible Social partner routes before enabling Unlinked. No provider/model credential is required. When disabled, group signup still works and profile pages explain the unavailable connection.
+Set `UNLINKED_SOCIAL_INTAKE_SECRET` to the dedicated value configured as Social's `IDEANETWORK_UNLINKED_SECRET` (at least 32 characters), using protected service environment files. `UNLINKED_SOCIAL_INTAKE_ORIGIN` defaults to `https://social.ideaflow.app`. Deploy the compatible Social partner routes before enabling Unlinked. No provider/model credential is required. When disabled or Social reads fail, authorized group rosters and group-local profiles remain usable; shared-entry sections explain the unavailable connection. Adding or editing entries requires the connection.
 
 All intake routes use authenticated sessions, same-origin POSTs and CSRF; group routes also enforce live membership. Responses are no-store/noindex with neutral anonymous metadata. Inputs, prompts and profile entries are never placed in invite URLs. Do not put the partner secret into a browser bundle, logs or repository.
 
@@ -28,9 +28,27 @@ shared with that community, with the same pagination and live access checks as
 the community board. Pagination selects a community-wide page before filtering
 for the member, so a member page can be empty while older entries remain.
 Names and member IDs come from the authorized roster;
-identity hashes and operational owner IDs stay server-side. A separate public
-profile link is shown when available. Group-local content is not added to the
-public profile or anonymous link previews.
+identity hashes and operational owner IDs stay server-side. Compact rosters on
+the group and community pages link each member’s name to this page,
+even without an introduction, LinkedIn import or published public profile.
+**Group profile** describes the audience, not an unclaimed account. A separate
+public profile link is shown when available. Group-local content is not added
+to the public profile or anonymous link previews; joining never publishes a
+public profile.
+
+With messaging configured, **Message** on a roster or group-local profile uses a
+same-origin, CSRF-protected POST to `/groups/:id/members/:memberId/message`.
+The server resolves the recipient from the current authorized roster through
+OpenChat's owner resolver, reusing or creating a direct conversation inside
+Unlinked. It never sends a message; the existing inbox draft behavior applies.
+Removed or blocked members cannot use a stale action to resolve a recipient.
+
+When the intersection is nonempty, **Groups in common** appears on another
+member's group-local profile and on their published profile for a signed-in
+viewer. It shows only groups both accounts are currently authorized to access,
+honoring blocks; it never lists the other
+person's full membership. This viewer-only section is excluded from public APIs
+and anonymous previews.
 
 Suggested connections compare open asks with offers from other current members,
 in both directions, using explicit shared words and a small set of topic
@@ -38,3 +56,30 @@ aliases. Each suggestion shows both entry titles and the overlapping topics; it 
 not an AI endorsement or a compatibility score. Suggestions use the current
 page of authorized entries, not private imports or hidden personal asks. Empty
 results invite a more specific ask/offer and browsing the member list.
+
+## Add an ask and confirm its destination
+
+**Add an ask** opens a focused title/details/audience form at
+`/groups/<group>/asks/new`, with the current group visibly selected.
+**Add an offer** uses the same focused flow at `/groups/<group>/offers/new`.
+`/asks/new`, reached from **My asks and offers**, instead defaults to **Only me**.
+Group membership is rechecked at save. Choosing **Only me** saves a private draft.
+The focused group form offers group visibility or Only me. The personal form
+also offers Public; entry editing and introduction review support explicit
+public sharing as well. Existing private entries are never automatically shared.
+Introduction and batch-import defaults are described above.
+
+If saving an ask or offer fails, its focused form retains the title, details,
+kind, selected audience and request receipt for a safe retry. Group forms keep
+the same group/Only me choices after a failure; they do not return to profile
+onboarding or introduce Public sharing.
+
+A save containing only entries for the current group returns to its community
+board with confirmation that the entries are shared there. Private, public or
+mixed-audience saves return to **My asks and offers**, where the saved entries
+and their audiences remain visible and editable. The redirect adds `saved=1`
+for the confirmation notice; it does not change visibility.
+
+The welcome page leads with group participation and places optional LinkedIn
+import and the normal profile link after the quick introduction, without
+blocking group use.
