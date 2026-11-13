@@ -628,7 +628,7 @@ test('group member profiles bind entries to roster identities and explain matche
  const roster=await b.groups.roster(alice,group.id),bobId=roster.find(r=>r.name==='Bob').id,base='/groups/'+group.id+'/community'
  entries=[{id:1,title:'Need React accessibility advice',kind:'ask',status:'open',ownerKey:identityKey(identity(alice))},{id:2,title:'I offer React accessibility reviews',kind:'offer',status:'open',ownerKey:identityKey(identity(bob)),name:'Untrusted name'},{id:3,title:'PRIVATE outsider detail',kind:'offer',status:'open',ownerKey:identityKey(identity(carol))}]
  const community=await b.get(base,owner.cookie),html=await community.text();assert.equal(community.status,200)
- assert.match(html,/Suggested connections/);assert.match(html,/Shared topics: accessibility, react/);assert.match(html,new RegExp('/groups/'+group.urlKey+'/community/'+bobId));assert.doesNotMatch(html,/PRIVATE outsider|Untrusted name|ownerKey|bob-user/)
+ assert.match(html,/Find matches/);assert.match(html,new RegExp('/groups/'+group.urlKey+'/community/'+bobId));assert.doesNotMatch(html,/PRIVATE outsider|Untrusted name|ownerKey|bob-user/)
  const profile=await b.get(base+'/'+bobId,owner.cookie),profileHtml=await profile.text();assert.equal(profile.status,200)
  assert.match(profileHtml,/<title>Bob · Builders · Community/);assert.match(profileHtml,/I offer React accessibility reviews/);assert.doesNotMatch(profileHtml,/Need React accessibility advice|PRIVATE outsider/)
  await paginationEvidence({'community-suggested-connections.html':html,'community-member-profile.html':profileHtml})
@@ -637,57 +637,6 @@ test('group member profiles bind entries to roster identities and explain matche
  await b.groups.revoke(alice,group.id,'member',bobId)
  assert.notEqual((await b.get(base+'/'+bobId,owner.cookie)).status,200)
  assert.notEqual((await b.get(base,member.cookie)).status,200)
-})
-
-import { communityMatches } from '../mcp-server/community-matches.mjs'
-test('matching excludes self, closed requests and same-kind pairs, and normalizes explicit topics',()=>{
- const rows=[{id:1,memberId:'a',title:'Need PostgreSQL queries',kind:'ask',status:'open'},
- {id:2,memberId:'b',title:'Can help with Postgres queries',kind:'offer',status:'open'},
- {id:3,memberId:'a',title:'Postgres queries',kind:'offer',status:'open'},
- {id:4,memberId:'c',title:'Postgres queries',kind:'offer',status:'done'},
- {id:5,memberId:'d',title:'Postgres queries',kind:'ask',status:'paused'}]
- const matches=communityMatches(rows,'a');assert.equal(matches.length,1);assert.equal(matches[0].memberId,'b');assert.deepEqual(matches[0].topics,['postgres','query'])
- assert.deepEqual(communityMatches(rows,'absent'),[])
-})
-
-test('matching keeps the best pair per member and direction with stable relevance ties',()=>{
- const entry=(id,memberId,kind,title)=>({id,memberId,kind,title,status:'open'})
- const rows=[entry('mine-1','me','ask','React accessibility'),entry('mine-2','me','ask','PostgreSQL queries'),
-  entry('mine-3','me','offer','React accessibility'),entry('mine-4','me','ask','React accessibility'),
-  entry('20','bob','offer','React accessibility'),entry('10','bob','offer','React accessibility'),
-  entry('01','bob','offer','React'),entry('10','carol','offer','Postgres queries'),
-  entry('10','dave','offer','React accessibility'),entry('05','bob','ask','React accessibility')]
- const matches=communityMatches(rows,'me',20)
- assert.deepEqual(matches.map(m=>[m.memberId,m.mine.id,m.other.id,m.topics]),[
-  ['bob','mine-3','05',['accessibility','react']],
-  ['bob','mine-1','10',['accessibility','react']],
-  ['dave','mine-1','10',['accessibility','react']],
-  ['carol','mine-2','10',['postgres','query']],
- ])
- assert.deepEqual(communityMatches(rows,'me',3),matches.slice(0,3))
- assert.deepEqual(communityMatches(rows,'me',0),[])
-})
-
-test('matching preserves pair order when a later ask improves an earlier member’s match',()=>{
- const rows=[
-  {id:1,memberId:'me',kind:'ask',title:'React design'},
-  {id:2,memberId:'me',kind:'ask',title:'Postgres design'},
-  {id:3,memberId:'postgres',kind:'offer',title:'Postgres design'},
-  {id:3,memberId:'react',kind:'offer',title:'React design'},
- ].map(e=>({...e,status:'open'}))
- assert.deepEqual(communityMatches(rows,'me').map(m=>[m.memberId,m.mine.id]),[['react',1],['postgres',2]])
-})
-
-test('matching bounds topic reads on a maximum 500-entry page', {timeout:10000},()=>{
- let titleReads=0,bodyReads=0
- const rows=Array.from({length:500},(_,i)=>({
-  id:String(i).padStart(4,'0'),memberId:i<250?'me':'member-'+i,kind:i<250?'ask':'offer',status:'open',
-  get title(){titleReads++;return 'Postgres queries'},get body(){bodyReads++;return 'React accessibility'},
- }))
- const matches=communityMatches(rows,'me')
- assert.equal(titleReads,500);assert.equal(bodyReads,500)
- assert.deepEqual(matches.map(m=>m.memberId),Array.from({length:6},(_,i)=>'member-'+(250+i)))
- assert.ok(matches.every(m=>m.mine===rows[0]&&m.topics.join(',')==='accessibility,postgres,query,react'))
 })
 
 test('native group chat is same-tab with a separate optional app and readable authenticated routes',async t=>{
@@ -931,4 +880,47 @@ test('group detail keeps core actions before a five-member preview and offers th
  const body=await(await b.get('/groups/'+group.urlKey,owner.cookie)).text(),roster=body.match(/<ul class="group-members">([\s\S]*?)<\/ul>/)[1]
  assert.equal([...roster.matchAll(/class="group-member"/g)].length,5);assert.match(body,/See all 7 members/);assert.match(body,/community#members/);assert.ok(body.indexOf('Add an ask')<body.indexOf('class="group-members"'));assert.doesNotMatch(body,/<h2>Your community<\/h2>/)
  assert.match(roster,/<div class="group-member-main"><a href="\/groups\/[^\"]+\/community\/[^\"]+">Builder 0<\/a>/)
+})
+
+test('matchmaking scans beyond the first page, links verified member actions, and preserves private previews',async t=>{
+ let entries=[],calls=0
+ const identity=actor=>({issuer:'https://id.ideaflow.app/api/auth',subject:actor.userId})
+ const client=createCommunityIntakeClient({secret:'fixture-secret-'.repeat(4),identityForOwner:async actor=>identity(actor),fetchImpl:async(url,opts)=>{
+  calls++;const p=JSON.parse(opts.body),rows=p.cursor?entries.filter(e=>e.id<p.cursor):entries
+  return new Response(JSON.stringify({entries:rows.slice(0,500),nextCursor:rows.length>500?rows[499].id:null}),{status:200})
+ }})
+ const b=await browser(t,{communityIntake:client,createMessagingSession:async()=>({token:'fixture',user:{userId:'a'}})}),owner=await b.login('alice'),outsider=await b.login('carol')
+ const group=await b.groups.create(alice,'Match builders'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false})
+ await b.groups.joinFlyer(bob,group.id,flyer.id,{name:'Bob Builder',profileId:null,source:{}})
+ const seat=(await b.groups.roster(alice,group.id)).find(r=>r.actor.ownerId==='bob'),base='/groups/'+group.urlKey
+ const row=(id,actor,kind,title)=>({id,ownerKey:identityKey(identity(actor)),kind,title,body:'Shared context',status:'open',audience:'group',groupId:group.id})
+ entries=Array.from({length:500},(_,i)=>row(1000-i,alice,'note','Introduction')).concat([row(2,alice,'ask','Need user research'),row(1,account('bob'),'offer','Customer interviews <script>bad</script>')])
+ calls=0
+ const response=await b.get(base+'/matches',owner.cookie),html=await response.text()
+ assert.equal(response.status,200);assert.equal(calls,2);assert.match(html,/Find matches · Match builders/);assert.match(html,/data-match-card/);assert.match(html,/user research/);assert.match(html,/&lt;script&gt;bad&lt;\/script&gt;/);assert.doesNotMatch(html,/<script>bad/)
+ assert.ok(html.includes(base+'/community/'+seat.id));assert.ok(html.includes(base+'/members/'+seat.id+'/message'));assert.match(html,/Message Bob Builder on OpenChat/)
+ assert.match(response.headers.get('cache-control'),/no-store/);assert.match(response.headers.get('x-robots-tag'),/noindex/)
+ if(process.env.MATCHMAKING_EVIDENCE_DIR){await mkdir(process.env.MATCHMAKING_EVIDENCE_DIR,{recursive:true});await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'matches.html'),html);await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'group.html'),await(await b.get(base,owner.cookie)).text());await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'welcome.html'),await(await b.get(base+'/welcome',owner.cookie)).text());await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'community.html'),await(await b.get(base+'/community',owner.cookie)).text())}
+ for(const cookie of [undefined,outsider.cookie]){const r=await b.get(base+'/matches',cookie);assert.notEqual(r.status,200);assert.doesNotMatch(await r.text(),/Customer interviews|Need user research/)}
+ const before=calls
+ for(const suffix of ['?cursor=1','?member=organizer','/preview','/organizer'])assert.equal((await b.get(base+'/matches'+suffix,owner.cookie)).status,400)
+ assert.equal(calls,before)
+ assert.equal((await b.post(base+'/matches',owner.cookie,{csrf:owner.csrf})).status,400)
+})
+
+test('matchmaking rechecks blocks and stale membership after all pages; upstream failure emits no partial suggestions',async t=>{
+ let blocked=false,read=0,afterRead=async()=>{}
+ const b=await browser(t,{communityIntake:{group:async(actor,id,roster)=>{
+  await afterRead(++read)
+  return {entries:[{id:1,memberId:'organizer',title:'React accessibility',body:'',kind:'ask',status:'open',audience:'group',groupId:id}],nextCursor:read===1?100:null}
+ }}},{blocked:async()=>blocked})
+ const owner=await b.login('alice'),member=await b.login('bob'),group=await b.groups.create(alice,'Private matches'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false})
+ await b.groups.joinFlyer(bob,group.id,flyer.id,{name:'Bob',profileId:null,source:{}})
+ const path='/groups/'+group.urlKey+'/matches'
+ afterRead=async n=>{if(n===2)blocked=true}
+ const changed=await b.get(path,owner.cookie);assert.equal(changed.status,400);assert.doesNotMatch(await changed.text(),/React accessibility|data-match-card/)
+ blocked=false;read=0;afterRead=async n=>{if(n===2)throw Error('SECRET partner failure')}
+ const failed=await b.get(path,owner.cookie),html=await failed.text();assert.equal(failed.status,200);assert.match(html,/Matches could not be loaded/);assert.doesNotMatch(html,/SECRET|React accessibility|No complementary match/)
+ read=0;afterRead=async n=>{if(n===2)await b.groups.leave(bob,group.id)}
+ const removed=await b.get(path,member.cookie);assert.notEqual(removed.status,200);assert.doesNotMatch(await removed.text(),/React accessibility|data-match-card/)
 })
