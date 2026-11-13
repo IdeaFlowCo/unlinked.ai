@@ -62,8 +62,8 @@ export function createCommunityIntakeBrowser({client,groups,messagingAvailable=f
       let result
       try { result=client?await loadGroupMatchEntries(client,actor,groupId,roster):{unavailable:true} }
       catch { result={unavailable:true} }
+      const matches=result.unavailable?[]:await matchGroupMembers(result.entries,own?.id)
       if(JSON.stringify(await groups.roster(actor,groupId))!==signature)throw new IntakeError('Group membership changed. Reload this page.')
-      const matches=result.unavailable?[]:matchGroupMembers(result.entries,own?.id)
       return render(shell(chrome,`Find matches · ${group.name}`,renderGroupMatchmaking({chrome,group,roster,ownId:own?.id,result,matches,messagingAvailable})))
     }
     if(!client&&match?.[2]!=='community')return render(shell(chrome,'Profile connection unavailable','<h1>Profile connection unavailable</h1><p>You can still use your groups. Please try adding your introduction again later.</p>'),request.method==='GET'?200:503)

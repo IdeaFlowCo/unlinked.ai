@@ -104,7 +104,12 @@ owned Superconnector Noos migration does not change this contract.
 
 A deterministic topic matcher normalizes a small explicit set of related terms
 (e.g. JavaScript/JS, accessibility/WCAG, user research/customer interviews).
-Generic request language such as help, review and advice is not evidence.
+Compound names such as Node.js/Nodejs and React.js/React are consumed before
+standalone JS. Generic request and connection language such as help, review,
+advice, connect, shared context and details is not evidence. Topic weights and
+repeated topic-set comparisons are cached only within the request, with bounded
+comparison retention. Large workloads yield to the event loop; the route awaits
+matching and then rechecks the live roster before rendering.
 Specific topic overlap, coverage and member-level topic frequency rank pairs;
 only complementary ask/offer pairs qualify. One card per person retains the
 strongest pair in each direction. Reciprocal opportunities receive a modest
@@ -118,4 +123,6 @@ Validation: `tests/group-matchmaking.test.mjs` executes matching and bounded
 page loading; `tests/community-intake.test.mjs` exercises real browser HTTP
 routes for multi-page matches, escaping, anonymous/outsider access, unsupported
 queries/actions, stale membership/blocks and failure without partial leakage.
-Use phone/desktop rendered checks for card layout, titles and44px actions.
+Maximum 2,000-entry fixtures check heartbeat progress, cached operation counts
+and unique comparisons; HTTP coverage revalidates blocks changed during a yield.
+Use phone/desktop rendered checks for card layout, titles and 44px actions.
