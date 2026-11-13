@@ -1,11 +1,9 @@
 import { createHash } from 'node:crypto'
-import { communityChatId } from './community-chat-id.mjs'
-import { IDEAFLOW_ISSUER } from './messaging.mjs'
+import { communityChatId, validCommunityIdentity as valid } from './community-chat-id.mjs'
 const ENDPOINT = 'https://chat.ideaflow.app/api/unlinked/groups/sync'
-const valid = i => i?.issuer === IDEAFLOW_ISSUER && typeof i.subject === 'string' && /^[^\s\x00-\x1f\x7f]{1,512}$/.test(i.subject)
 const fingerprint = ({ revision, ...snapshot }) => createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
-export function createOpenChatGroupSync({ store, identityForOwner, blocked = async () => false, secret, fetchImpl = fetch, now = Date.now, intervalMs = 1000 }) {
-  let running = null, timer = null, stopped = false, cursor = ''
+export function createOpenChatGroupSync({ store, identityForOwner, blocked = async () => false, secret, fetchImpl = fetch, now = Date.now, intervalMs = 1000, auditIntervalMs = 60000 }) {
+  let running = null, auditing = null, timer = null, auditTimer = null, stopped = false, cursor = '', nextAuditAt = now() + auditIntervalMs
   const snapshotFor = async (job, group = job.group) => {
     const resolved = job.deleted ? null : await identityForOwner(group.organizer)
     const organizer = job.organizer ?? (valid(resolved) ? { issuer: resolved.issuer, subject: resolved.subject, name: 'Organizer' } : null)
@@ -21,9 +19,9 @@ export function createOpenChatGroupSync({ store, identityForOwner, blocked = asy
     return { groupId: job.id, revision: job.revision, name: deleted ? 'Deleted community' : group.name, organizer, members, deleted,
       ...(group.chatConversationId ? { existingConversationId: group.chatConversationId } : {}) }
   }
-  const reconcile = async id => {
+  const reconcile = async (id, completedOnly = false) => {
     const job = await store.chatJob(id)
-    if (!job?.fingerprint || job.deleted) return
+    if (!job?.fingerprint || job.deleted || (completedOnly && !job.done)) return
     const group = await store.get(id)
     if (group?.chatManaged !== true) return
     const snapshot = await snapshotFor(job, group)
@@ -55,13 +53,35 @@ export function createOpenChatGroupSync({ store, identityForOwner, blocked = asy
     if (stopped || !secret || secret.length < 32) return Promise.resolve()
     if (running) return running
     running = (async () => {
-      const ids = await store.chatCandidates(cursor,20)
-      cursor = ids.length === 20 ? ids.at(-1) : ''
-      for (const id of ids) { if (stopped) break; await reconcile(id).catch(() => {}) }
       for (const id of await store.chatDue(now(),20)) { if (stopped) break; await deliver(id) }
     })().finally(() => { running = null })
     return running
   }
   const wake = () => { void runOnce().catch(() => {}) }
-  return { runOnce, wake, start() { if (timer || stopped || !secret || secret.length < 32) return; timer = setInterval(wake,intervalMs); timer.unref?.(); wake() }, async stop() { stopped = true; clearInterval(timer); await running?.catch(() => {}) } }
+  const auditOnce = () => {
+    if (stopped || !secret || secret.length < 32) return Promise.resolve()
+    if (auditing) return auditing
+    if (now() < nextAuditAt) return Promise.resolve()
+    nextAuditAt = now() + auditIntervalMs
+    auditing = (async () => {
+      const [id,next] = await store.chatCandidates(cursor,2)
+      cursor = next ? id : ''
+      if (id && !stopped) await reconcile(id,true)
+      wake()
+    })().finally(() => { auditing = null })
+    return auditing
+  }
+  const auditWake = () => { void auditOnce().catch(() => {}) }
+  return { runOnce, auditOnce, wake,
+    start() {
+      if (timer || stopped || !secret || secret.length < 32) return
+      timer = setInterval(wake,intervalMs); timer.unref?.()
+      auditTimer = setInterval(auditWake,auditIntervalMs); auditTimer.unref?.()
+      wake()
+    },
+    async stop() {
+      stopped = true; clearInterval(timer); clearInterval(auditTimer)
+      await Promise.all([running?.catch(() => {}),auditing?.catch(() => {})])
+    },
+  }
 }

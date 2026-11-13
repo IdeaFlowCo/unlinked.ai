@@ -163,7 +163,13 @@ health checks, a trusted operator calls the domain service
 requires the live organizer and an injected `verifyChatActivation` adapter. The
 adapter receives the server-resolved organizer, group ID and conversation ID and
 must independently verify current chat ownership and backend/native health,
-returning `{ healthy: true, organizerVerified: true, conversationId }`. There is no
+returning `{ healthy: true, organizerVerified: true, conversationId, organizer: { issuer, subject } }`.
+The service independently resolves the organizer’s live immutable identity through
+its configured `active` reader and requires the proof to match that identity.
+An activation caller cannot supply the identity. The normalized organizer binding
+is saved in the outbox in the same transaction as managed status and the existing
+conversation ID, before delivery can run or account deletion can remove the group.
+There is no
 browser or agent-grant activation endpoint and no new credential. Runtime
 composition accepts this trusted adapter as `verifyCommunityChatActivation`;
 without it activation fails closed. The group and organizer are checked again
@@ -182,9 +188,13 @@ organizer have no effective group access and are excluded from chat. Member-to-
 member blocks do not remove group seats. Block/unblock enqueue new revisions at
 the member-block service boundary. Account deletion removes participation before
 the identity is deleted. External identity/account changes and interrupted
-boundary callbacks are rechecked by a bounded, rotating scan of 20 managed
-groups per worker pass, including completed jobs; changed access enqueues a new
-revision. Operators changing bindings outside the app should also call
+boundary callbacks are rechecked by a separate audit timer: one completed
+managed roster per 60 seconds, rotating through the directory. A full sweep takes
+one audit interval per candidate group. Audit work does not hold the delivery
+queue; due membership updates and retries run independently on the one-second
+delivery timer. Pending jobs recheck access before retry; block/unblock and group
+transitions enqueue immediately. Changed access enqueues a new revision, and an
+audit failure waits for its next bounded turn without stopping delivery. Operators changing bindings outside the app should also call
 `groups.reconcileActor(actor)`. A missing or changed organizer identity closes
 the chat under its original organizer binding, never transfers ownership. Remote
 access changes remain pending during outages; existing block rules stay in force
@@ -208,7 +218,11 @@ retains only `id`, revision, done, the access fingerprint and original organizer
 identity needed for a future deletion. Deletion immediately replaces any pending
 roster with a minimal tombstone (group ID, optional bound conversation ID, neutral
 name, original organizer identity), and acknowledgement drops that identity too.
-If no snapshot was ever prepared, no remote request could have been sent and
-deletion can retain just the revision fence. Pending tombstones retry until
+For a new deterministic conversation with no prepared snapshot, no remote request
+could have been sent and deletion can retain just the revision fence. Existing
+bound conversations always retain a pending deletion tombstone, even before their
+first sync. Activation supplies its verified organizer identity atomically; an
+existing conversation with a missing binding remains pending rather than falsely
+claiming deletion is complete. Pending tombstones retry until
 acknowledged. The recovery integration test exercises native snapshots, shared
 export, import/verification, deletion and acknowledgement minimization.
