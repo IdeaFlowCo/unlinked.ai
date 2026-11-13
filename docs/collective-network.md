@@ -1,12 +1,13 @@
 # Collective network
 
-In the standalone Unlinked web runtime, open **Lists → Collective network** to
-create a private group. From the group, create an invitation for a member by
-pasting their published Unlinked profile link. This verifies an existing
+In the standalone Unlinked web runtime, open **Groups** in the signed-in main
+navigation or **Me → My groups** (`/groups`) to find or create a private group.
+From the group, create an invitation for a member by pasting their published
+Unlinked profile link. This verifies an existing
 Unlinked account binding. The organizer can copy the invitation link and open
 the existing OpenChat composer for that profile; creating or opening the
 invitation sends no message. The recipient can also find it on their own
-Collective network page.
+**My groups** page.
 
 Opening a direct invitation displays a review page only to the signed-in intended recipient.
 They must choose **Accept invitation** to join, or **Decline** to retire the
