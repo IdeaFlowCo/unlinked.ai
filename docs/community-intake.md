@@ -19,3 +19,21 @@ Set `UNLINKED_SOCIAL_INTAKE_SECRET` to the dedicated value configured as Social'
 All intake routes use authenticated sessions, same-origin POSTs and CSRF; group routes also enforce live membership. Responses are no-store/noindex with neutral anonymous metadata. Inputs, prompts and profile entries are never placed in invite URLs. Do not put the partner secret into a browser bundle, logs or repository.
 
 Validation: `node --test tests/community-intake.test.mjs tests/collective-group-browser.test.mjs tests/private-composition.test.mjs`; full Node suite on the designated cloud builder. The HTTP fixtures cover signup intent, selected-only save, CSRF/origin rejection, edit-to-group authorization, former-community form submission, Social visibility review and conflict guidance, final no-store headers, bounded 500-seat reads, and membership/block revalidation. Standalone launcher fixtures cover configured and unconfigured intake forwarding plus login, flyer join, welcome, review, CSRF rejection, private save and personal asks. These fixtures use synthetic identities and Social data; production signup, live Social persistence and browser visual verification remain separate.
+
+## Member context and suggested connections
+
+Every current member has a group-local profile at `/groups/:id/community/:memberId`
+(the organizer uses `organizer`). These pages show only open entries already
+shared with that community, with the same pagination and live access checks as
+the community board. Names and member IDs come from the authorized roster;
+identity hashes and operational owner IDs stay server-side. A separate public
+profile link is shown when available. Group-local content is not added to the
+public profile or anonymous link previews.
+
+Suggested connections compare open asks with offers from other current members,
+in both directions, using explicit shared words and a small set of technology
+aliases. Each suggestion shows both entries and the overlapping topics; it is
+not an AI endorsement or a compatibility score. Suggestions use the current
+page of authorized entries, not private imports or hidden personal asks. Empty
+results invite a more specific ask/offer and browsing the member list. Joining
+still does not silently join a separate Superconnector network.

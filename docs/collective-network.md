@@ -126,3 +126,15 @@ account, import, email, OpenChat send, or production graph is needed.
 composition with a public People projection initializes its additive ID
 constraint when the normal release is started. Coordinate any production
 activation separately; no migration or rollout is part of source review.
+
+## Group description and chat
+
+Organizers can edit a plain-text description (up to 2,000 characters) and an
+optional WhatsApp invitation under **About this group**. The group service
+checks organizer authority and updates the existing group document atomically;
+no migration or separate membership store is required. Empty values clear the
+fields. Only validated HTTPS `chat.whatsapp.com` invitation URLs are accepted.
+These fields appear in authenticated group, introduction and community views;
+they are excluded from anonymous flyer previews. Opening the link lets the
+member choose whether to join WhatsApp; saving it sends no message and does not
+synchronize members or content to WhatsApp.

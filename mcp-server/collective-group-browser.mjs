@@ -4,7 +4,7 @@ import { createCollectiveListProjection } from './collective-group-lists.mjs'
 import { renderGroup, renderGroups, renderGroupError, renderGroupInvitation, renderGroupSelection, renderGroupSharedList, renderGroupSharePreview, renderFlyerInvitation } from './collective-group-views.mjs'
 
 const signInRoute = new RegExp(`^/groups/${GROUP_UUID}(?:/invites/${GROUP_UUID}|/lists/${GROUP_UUID})?$`)
-const route = new RegExp(`^/groups/(${GROUP_UUID})(?:/(invite|select)|/(invites|members|lists)/(${GROUP_UUID})(?:/(revoke|remove))?)?$`)
+const route = new RegExp(`^/groups/(${GROUP_UUID})(?:/(invite|select|about)|/(invites|members|lists)/(${GROUP_UUID})(?:/(revoke|remove))?)?$`)
 const flyerRoute = new RegExp(`^/groups/(${GROUP_UUID})/join/(${GROUP_UUID})$`)
 const flyerAdminRoute = new RegExp(`^/groups/(${GROUP_UUID})/flyer(?:/(${GROUP_UUID})/(revoke|requests/(${GROUP_UUID})))?$`)
 const sourceFields = new Set(['src', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'])
@@ -31,6 +31,8 @@ export const groupReturnPath = path => path === '/groups' || signInRoute.test(pa
 const fail = code => { throw new GroupError(code) }
 const messages = {
   invalid_input: 'Refresh this page and try again.',
+  invalid_description: 'Use a group description of up to 2,000 characters.',
+  invalid_chat_url: 'Use a WhatsApp group invitation beginning with https://chat.whatsapp.com/, or leave it blank.',
   invalid_name: 'Enter a group name up to 100 characters.',
   invalid_capacity: 'Choose a capacity between 2 and 500 that includes everyone already in the group.',
   invalid_recipient: 'Use the profile link of an existing Unlinked member you can invite.',
@@ -58,7 +60,7 @@ export function createGroupBrowser({ groups, welcome = false, privateLists, save
     const fields = async (...names) => {
       if (request.headers['content-type']?.split(';')[0] !== 'application/x-www-form-urlencoded') fail('invalid_input')
       let input
-      try { input = new URLSearchParams((await body(request, 4096)).toString('utf8')) } catch { fail('invalid_input') }
+      try { input = new URLSearchParams((await body(request, 16384)).toString('utf8')) } catch { fail('invalid_input') }
       if ([...input.keys()].length !== names.length + 1 || input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || names.some(name => input.getAll(name).length !== 1)) fail('invalid_input')
       return input
     }
@@ -122,6 +124,11 @@ export function createGroupBrowser({ groups, welcome = false, privateLists, save
         return redirect(`/groups/${group.id}`)
       }
       if (!action && !collection && get) return render(renderGroup(chrome, await groups.detail(actor, groupId), origin))
+      if (action === 'about' && request.method === 'POST') {
+        const input = await fields('description', 'chatUrl')
+        await groups.updateMetadata(actor, groupId, { description: input.get('description'), chatUrl: input.get('chatUrl') })
+        return redirect(base)
+      }
       if (action === 'invite' && !get) {
         const input = await fields('profile')
         await organizer()
