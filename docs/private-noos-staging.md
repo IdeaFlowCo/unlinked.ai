@@ -11,7 +11,7 @@ Uploaded/parsing updates each add an immutable revision receipt.
 Immutable batches hold at most 200 rows and one ordinal chunk manifest. Profile-first background imports may add one extra profile boundary chunk so own profile rows can be staged before connection chunks without making those rows searchable.
 Each accepted row is indexed by its owner-derived resource ID in the isolated Noos observation index (`observation-v1`), not a vector index.
 Graph resources remain bounded to 64 KiB and transactions to 600 resources/32 MiB.
-Oversized observations use digest-verified private assets plus graph provenance metadata.
+Observation payloads above 60 KiB use digest-verified private assets plus graph provenance metadata.
 Source receipts store accurate rejection counts; original bytes and parser version retain the exact rejected records for recovery.
 One final CAS-fenced transaction publishes the current job, immutable receipt, source receipts and all ordered chunk references together.
 Tools require this live terminal fence and never enumerate provisional rows.
@@ -32,6 +32,23 @@ Account erasure bypasses the cache and invalidates in-flight fills. The bounded
 cache in `src/utils/private-import/import-row-cache.mjs` avoids repeated
 per-observation reads without changing receipt counts or publishing private rows;
 `tests/import-row-cache.test.mjs` covers terminal partial reuse and live guards.
+
+For cold observation reads, the standalone composition creates a process-only
+assertion batch capability after verified owner resolution; it has no HTTP,
+browser or grant endpoint. `mcp-server/owner-resource-batch.mjs` calls the official
+store's `authorizeOwner` before each batch and again before returning. Each
+read-only transaction fetches at most 128 exact resource IDs, joining the
+`unlinked` namespace, assertion type, user and live active owner binding. Returned
+documents must match the exact namespace, type, source ID and source owner and
+fit the graph resource bound above. Malformed, sparse or duplicate keys and
+invalid or oversized documents are rejected; a missing result becomes `null`
+and fails publication validation.
+
+Cold signed-in directory and account queries share this scoped reader, retaining
+manifest ordering/counts, per-row owner/import checks, before/after publication
+revisions, tombstones and cache-erasure fences. Backends without the batch
+capability retain eight parallel single-resource reads. Private asset hydration
+remains capped at eight concurrent reads on either path.
 
 There is no 500-row truncation or rejection gate.
 Parser limits remain unchanged; the authoritative bounds are `LIMITS` in `src/utils/private-import/archive.mjs`, as described in the [parser contract](private-archive-import.md#parser-and-receipts).
@@ -92,6 +109,13 @@ Any new persistent secret destination requires confirmation before copying; none
 
 Install locked MCP dependencies and run the private AI/browser/grant/hosted/scope/account test files with node --test.
 Signed disposable OIDC responses prove client validation, not an actual provider login.
+`tests/owner-resource-batch.test.mjs` exercises cold account hydration and authenticated
+`/network` Everyone/My connections requests with over 3,000 synthetic observations,
+plus corruption, asset integrity/concurrency and cache-erasure races. Its real
+graph case checks live binding, user isolation, missing rows, tombstones and
+oversized-document refusal; Source CI runs it against the disposable source graph.
+Synthetic browser-session and storage-only measurements do not establish live
+client end-to-end speed.
 Set UNLINKED_NOOS_TEST_CHECKOUT, NOOS_OPERATIONAL_EXTRA_TEST, UNLINKED_NOOS_RECEIPT and NOOS_SIGNED_TEST_EVIDENCE to isolated external-SSD paths, then run the Noos checkout's node scripts/test-operational.mjs.
 Only explicitly authorized UNLINKED_PRIVATE_AI_REMOTE=1 enables synthetic model calls through the existing M5 bridge or the explicit private key-file fallback; ordinary CI has no provider call.
 The runner owns one capped 1 GiB disposable Neo4j and cleans it in finally.
