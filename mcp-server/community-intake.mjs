@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { concurrentMap } from './concurrent-map.mjs'
 export const COMMUNITY_PATH = /^\/(?:profile\/context|asks)(?:\/(?:preview|save|\d+))?$/
-export const COMMUNITY_GROUP_PATH = /^\/groups\/([0-9a-f-]{36})\/(welcome|community)(?:\/(preview|save))?$/
+export const COMMUNITY_GROUP_PATH = /^\/groups\/([0-9a-f-]{36})\/(welcome|community)(?:\/(preview|save|organizer|[0-9a-f-]{36}))?$/
 export const isCommunityPath = path => COMMUNITY_PATH.test(path) || COMMUNITY_GROUP_PATH.test(path)
 const issuer = 'https://id.ideaflow.app/api/auth'
 export const identityKey = i => createHash('sha256').update(`${i.issuer}\n${i.subject}`).digest('hex')
@@ -84,12 +84,12 @@ export function createCommunityIntakeClient({identityForOwner,secret,origin='htt
     async group(owner,groupId,roster,page={}){
       const members=(await concurrentMap(roster,async row=>{
         const id=await identityForOwner(row.actor)
-        return id?.issuer===issuer&&id.subject?id:null
+        return id?.issuer===issuer&&id.subject?{ identity:id, memberId:row.id, name:row.name }:null
       })).filter(Boolean)
-      const result=await call(owner,'group',{...page,groupId,members})
+      const result=await call(owner,'group',{...page,groupId,members:members.map(row=>row.identity)})
       // Keep opaque identity keys inside this server; expose only roster-bound people and their entries.
-      const allowed=new Set(members.map(identityKey))
-      return {entries:(result.entries||[]).filter(e=>allowed.has(e.ownerKey)).map(e=>{const entry={...e};delete entry.ownerKey;return entry}),nextCursor:result.nextCursor}
+      const allowed=new Map(members.map(row=>[identityKey(row.identity),row]))
+      return {entries:(result.entries||[]).filter(e=>allowed.has(e.ownerKey)).map(e=>{const person=allowed.get(e.ownerKey);const entry={...e,memberId:person.memberId,name:person.name};delete entry.ownerKey;return entry}),nextCursor:result.nextCursor}
     },
   }
 }

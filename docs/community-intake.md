@@ -10,7 +10,7 @@ Entries with `requiresSocialReview: true` or an audience outside `only_me`, `gro
 
 Unlinked owns membership and blocking. Before showing a group projection it obtains live authorized members, resolves their persisted identities, requests only exact-group placements, and verifies the roster again. Live member/block checks and persisted identity resolution run with at most eight concurrent operations per pass and retain roster order; lookup failures deny the projection. Removed members and blocked pairs are excluded. No membership is copied to Social or Superconnector. Joining Unlinked does not join a Superconnector network; the handoff uses the same Ideaflow ID.
 
-`/asks` and `/groups/:id/community` show one bounded Social page at a time, with Older entries and Newest entries links. They accept only a positive integer `cursor` and `limit` (default 100, maximum 500), with entries ordered by descending id below the cursor. Entries marked Done or Paused stay in personal tracking but are omitted from the group view. Group pages repeat live roster validation on every request, even when filtering leaves a page empty. Editing a saved entry uses its id to fetch the exact position in the owner's paginated entries, retaining revision checks for saves.
+`/asks` and `/groups/:id/community` show one bounded Social page at a time, with Older entries and Newest entries links. They accept only a positive integer `cursor` and `limit` (default 100, maximum 500), with entries ordered by descending id below the cursor. Only Open entries appear in group views; Done and Paused entries stay in personal tracking. Group pages repeat live roster validation on every request, even when filtering leaves a page empty. Editing a saved entry uses its id to fetch the exact position in the owner's paginated entries, retaining revision checks for saves.
 
 ## Configuration and release
 
@@ -19,3 +19,22 @@ Set `UNLINKED_SOCIAL_INTAKE_SECRET` to the dedicated value configured as Social'
 All intake routes use authenticated sessions, same-origin POSTs and CSRF; group routes also enforce live membership. Responses are no-store/noindex with neutral anonymous metadata. Inputs, prompts and profile entries are never placed in invite URLs. Do not put the partner secret into a browser bundle, logs or repository.
 
 Validation: `node --test tests/community-intake.test.mjs tests/collective-group-browser.test.mjs tests/private-composition.test.mjs`; full Node suite on the designated cloud builder. The HTTP fixtures cover signup intent, selected-only save, CSRF/origin rejection, edit-to-group authorization, former-community form submission, Social visibility review and conflict guidance, final no-store headers, bounded 500-seat reads, and membership/block revalidation. Standalone launcher fixtures cover configured and unconfigured intake forwarding plus login, flyer join, welcome, review, CSRF rejection, private save and personal asks. These fixtures use synthetic identities and Social data; production signup, live Social persistence and browser visual verification remain separate.
+
+## Member context and suggested connections
+
+Every current member has a group-local profile at `/groups/:id/community/:memberId`
+(the organizer uses `organizer`). These pages show only open entries already
+shared with that community, with the same pagination and live access checks as
+the community board. Pagination selects a community-wide page before filtering
+for the member, so a member page can be empty while older entries remain.
+Names and member IDs come from the authorized roster;
+identity hashes and operational owner IDs stay server-side. A separate public
+profile link is shown when available. Group-local content is not added to the
+public profile or anonymous link previews.
+
+Suggested connections compare open asks with offers from other current members,
+in both directions, using explicit shared words and a small set of topic
+aliases. Each suggestion shows both entry titles and the overlapping topics; it is
+not an AI endorsement or a compatibility score. Suggestions use the current
+page of authorized entries, not private imports or hidden personal asks. Empty
+results invite a more specific ask/offer and browsing the member list.

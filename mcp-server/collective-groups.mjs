@@ -18,6 +18,22 @@ const seat = (group, actor) => group?.members.find(row => same(row.actor, actor)
 const access = (group, actor) => group && (same(group.organizer, actor) ? 'organizer' : seat(group, actor)?.id)
 const cleanName = name => typeof name === 'string' && name.trim().length <= 100 ? name.trim() : ''
 const summary = ({ id, name }) => ({ id, name })
+const metadata = group => ({ description: group.description ?? '', chatUrl: group.chatUrl ?? '', openChatUrl: group.openChatUrl ?? '' })
+export function normalizeGroupChatUrl(value) {
+  if (typeof value !== 'string' || value.length > 500) fail('invalid_chat_url')
+  if (!value.trim()) return ''
+  let url
+  try { url = new URL(value.trim()) } catch { fail('invalid_chat_url') }
+  if (url.protocol !== 'https:' || url.hostname !== 'chat.whatsapp.com' || url.port || url.username || url.password || !/^\/[A-Za-z0-9]{16,64}$/.test(url.pathname) || url.hash || [...url.searchParams].some(([k,v]) => k !== 'mode' || v !== 'gi_t') || url.searchParams.getAll('mode').length > 1) fail('invalid_chat_url')
+  return url.href
+}
+export function normalizeGroupOpenChatUrl(value) {
+  if (typeof value !== 'string' || value.length > 500) fail('invalid_openchat_url')
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (!/^https:\/\/chat\.ideaflow\.app(?::443)?\/i\/[A-Za-z0-9_-]{32}$/.test(trimmed)) fail('invalid_openchat_url')
+  return new URL(trimmed).href
+}
 const person = ({ id, name, profileId }) => ({ id, name, profileId })
 const seatLimit = group => group.capacity ?? GROUP_LIMITS.seats + 1
 const memberCount = group => group.members.length + 1
@@ -78,6 +94,17 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       await store.create(group)
       return summary(group)
     },
+    async updateMetadata(actor, id, { description, chatUrl, openChatUrl = '' }) {
+      await authorized(actor, id, true)
+      if (typeof description !== 'string' || description.trim().length > 2000) fail('invalid_description')
+      chatUrl = normalizeGroupChatUrl(chatUrl)
+      openChatUrl = normalizeGroupOpenChatUrl(openChatUrl)
+      await update(id, group => {
+        own(actor, group)
+        return { ...group, description: description.trim(), chatUrl, openChatUrl }
+      })
+      return this.detail(actor, id)
+    },
     async directory(actor) {
       await requireLive(actor)
       const groups = [], invites = []
@@ -91,7 +118,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
     async detail(actor, id) {
       const { group, role } = await authorized(actor, id)
       const organizer = role === 'organizer'
-      return { ...summary(group), organizer, organizerProfileId: group.organizerProfileId,
+      return { ...summary(group), ...metadata(group), organizer, organizerProfileId: group.organizerProfileId,
         shares: group.shares.map(summary),
         ...(organizer ? { members: group.members.map(person), invites: pending(group).map(row => ({ ...person(row), expiresAt: row.expiresAt })),
           capacity: seatLimit(group), flyer: group.flyer && {
@@ -102,7 +129,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
     },
     async roster(actor, id) {
       const { group } = await authorized(actor, id)
-      const candidates = [{ actor: group.organizer, profileId: group.organizerProfileId, name: 'Organizer', role: 'Organizer' }, ...group.members.map(row => ({ actor: row.actor, profileId: row.profileId, name: row.name, role: 'Member' }))]
+      const candidates = [{ id: 'organizer', actor: group.organizer, profileId: group.organizerProfileId, name: 'Organizer', role: 'Organizer' }, ...group.members.map(row => ({ id: row.id, actor: row.actor, profileId: row.profileId, name: row.name, role: 'Member' }))]
       const visible = (await concurrentMap(candidates, async row => await live(row.actor) && (same(row.actor, actor) || !await blocked(actor, row.actor)) ? row : null)).filter(Boolean)
       const { group: latest } = await authorized(actor, id)
       return visible.filter(row => same(row.actor, latest.organizer) || seat(latest, row.actor))
@@ -259,7 +286,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       // Include the organizer's own share selections. A member's export has
       // only their participation; it is never another route to read a list.
       return groups.flatMap(group => {
-        if (same(group.organizer, actor)) return [{ ...summary(group), role: 'organizer', shares: group.shares.map(({ id, name, source, ids }) => ({ id, name, source, ids })) }]
+        if (same(group.organizer, actor)) return [{ ...summary(group), ...metadata(group), role: 'organizer', shares: group.shares.map(({ id, name, source, ids }) => ({ id, name, source, ids })) }]
         if (seat(group, actor)) return [{ groupId: group.id, role: 'member' }]
         if (group.flyer?.requests.some(row => same(row.actor, actor))) return [{ groupId: group.id, role: 'requested' }]
         if (pending(group).some(row => same(row.actor, actor))) return [{ groupId: group.id, role: 'invitee' }]
