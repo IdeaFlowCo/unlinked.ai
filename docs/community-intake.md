@@ -2,7 +2,7 @@
 
 [Collective network](collective-network.md) owns group admission and signup return behavior. With the Social intake connection configured, explicit Join or acceptance of a direct invitation leads to `/groups/:id/welcome`. The introduction is optional; membership does not require an import. `/profile/context` and `/asks` remain available from Me afterward.
 
-Quick introductions, task/idea lists, Goodreads CSV, and an assistant-produced JSON draft are posted to Unlinked for deterministic parsing into a review form. Unlinked sends none of this input to a model. The optional assistant prompt is copied into an assistant you already use; choose what context to give that assistant, then paste its JSON back for review. Tasks are unselected by default unless recognized as asks/offers. Every introduction or batch-import draft entry has an explicit audience, default Only me; selecting a group or Public is an affirmative choice. Only selected entries are saved. Existing X/GitHub/website links and LinkedIn import remain separate supported screens. Photo/live bookshelf sync and X scraping are not implemented.
+Quick introductions, task/idea lists, Goodreads CSV, and an assistant-produced JSON draft are posted to Unlinked for deterministic parsing into a review form. Unlinked sends none of this input to a model. The optional assistant prompt is copied into an assistant you already use; choose what context to give that assistant, then paste its JSON back for review. Tasks are unselected by default unless recognized as asks/offers. Every draft entry has a visible audience selector. A quick introduction typed in a group’s welcome form preselects that group at review; personal introductions and batch-import drafts default to Only me. The member reviews the audience before saving. Only selected entries are saved. Existing X/GitHub/website links and LinkedIn import remain separate supported screens. Photo/live bookshelf sync and X scraping are not implemented.
 
 Social stores the canonical nodes and their owner under the exact verified Ideaflow issuer and subject. First save explicitly consents to a Social profile and this narrow Unlinked connection. A dedicated partner secret enables read/update of intake-created entries only; it does not grant access to existing private Social data. Social's durable request receipt makes retry safe; edit revisions reject stale writes. `/asks/:id` supports status and audience changes, including sharing a previously private entry with a current community. When the saved community is unavailable, group-audience edits require an explicit current community selection or a change of audience; the form never substitutes another community.
 
@@ -29,7 +29,7 @@ the community board. Pagination selects a community-wide page before filtering
 for the member, so a member page can be empty while older entries remain.
 Names and member IDs come from the authorized roster;
 identity hashes and operational owner IDs stay server-side. Compact rosters on
-the group and community pages link the name and **View profile** to this page,
+the group and community pages link each member’s name to this page,
 even without an introduction, LinkedIn import or published public profile.
 **Group profile** describes the audience, not an unclaimed account. A separate
 public profile link is shown when available. Group-local content is not added
@@ -61,7 +61,7 @@ results invite a more specific ask/offer and browsing the member list.
 `/groups/<group>/asks/new`, with the current group visibly selected.
 `/asks/new`, reached from **My asks and offers**, instead defaults to **Only me**.
 Group membership is rechecked at save. Choosing **Only me** saves a private draft;
-**Public on my Ideaflow profile** remains a separate explicit audience.
+The focused group form offers group visibility or Only me. Public sharing remains a separate explicit choice in entry editing and other supported review forms.
 Introduction and batch-import defaults are described above.
 
 A save containing only entries for the current group returns to its community
@@ -72,3 +72,11 @@ for the confirmation notice; it does not change visibility.
 
 The welcome page suggests LinkedIn import and the normal profile page without
 blocking group use.
+
+The group detail page keeps **Message the group**, **Add an ask**, and **Asks and
+offers** above a five-member preview; **See all members** opens the full community
+roster. Names are the profile links and Message has a 44px touch target. **Add an
+offer** uses the same focused flow. Quick introductions typed in a group's welcome
+form visibly preselect that group at review; pasted/imported drafts retain Only me.
+Existing private entries are never automatically shared. The welcome page leads
+with group participation and places optional LinkedIn import after the quick intro.
