@@ -50,12 +50,8 @@ honoring blocks; it never lists the other
 person's full membership. This viewer-only section is excluded from public APIs
 and anonymous previews.
 
-Suggested connections compare open asks with offers from other current members,
-in both directions, using explicit shared words and a small set of topic
-aliases. Each suggestion shows both entry titles and the overlapping topics; it is
-not an AI endorsement or a compatibility score. The Find matches page scans authorized entries independently of board pagination
-with the bounds below, never private imports or hidden personal asks. Empty
-results invite a more specific ask/offer and browsing the member list.
+For personal suggestions from the group's shared asks and offers, see
+[Find matches](#find-matches).
 
 ## Add an ask and confirm its destination
 
@@ -92,7 +88,8 @@ board remains paginated; matching starts from the newest group entries and
 follows up to four 500-entry pages, including empty filtered pages. A non-null
 cursor after that limit produces an explicit partial-results notice, never a
 claim that the full group was searched. A failed page discards the partial
-result and shows an unavailable state. Results are not persisted or cached.
+result and shows an unavailable state. Results are not persisted or cached
+across requests.
 
 The existing Social partner group projection is canonical. Only currently
 roster-bound, explicitly group-shared, open asks and offers are candidates;
@@ -120,6 +117,7 @@ verified expertise. No percentage confidence is shown. Each card quotes the
 supporting entries, explains the matched topics, links the member's private
 group profile and uses the existing CSRF-protected verified Message action.
 It never sends messages or introductions automatically.
+Empty results invite a more specific ask/offer and browsing the member list.
 
 The page also has a labelled **What do you need?** search. It posts one trimmed
 query (1–300 characters, small bounded body, exact `csrf` and `query` fields)
@@ -129,8 +127,8 @@ compares that single transient need with other roster-authorized members'
 group-shared open offers only (never the viewer's own offers or asks) using the
 same scan, matcher, roster/block recheck and unavailable/partial states.
 Evidence is labelled *Your search*, the escaped query stays in the field, and
-the page links back to `GET /matches` (saved asks and offers) and separately to
-Add an ask. Other methods, query parameters, repeated or extra fields, wrong
+the page links back to `GET /groups/:key/matches` (saved asks and offers) and
+separately to Add an ask. Other methods, query parameters, repeated or extra fields, wrong
 CSRF, outsiders and anonymous visitors are refused without reading entries.
 
 Validation: `tests/group-matchmaking.test.mjs` executes matching and bounded
