@@ -765,6 +765,70 @@ test('focused group ask form saves to the selected audience and shows the result
  assert.match(await (await b.get(base+'/welcome',owner.cookie)).text(),/Import LinkedIn/)
 })
 
+test('HTTP focused asks and offers retain their draft and receipt after a transient Social failure',async t=>{
+ const receipts=new Map(),calls=[]
+ const partner=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk
+  const data=JSON.parse(raw)
+  if(req.url.endsWith('/intake')) {
+   calls.push(data)
+   const receipt=receipts.get(data.requestId)
+   if(receipt){res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify(receipt));return}
+   receipts.set(data.requestId,{entries:data.entries.map(e=>({...e,id:receipts.size+1,status:'open',ownerKey:identityKey(data)}))})
+   res.writeHead(503,{'content-type':'application/json'}).end(JSON.stringify({error:'temporary_failure'}));return
+  }
+  const entries=[...receipts.values()].flatMap(r=>r.entries)
+  res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({entries:req.url.endsWith('/group')?entries.filter(e=>e.audience==='group'&&e.groupId===data.groupId):entries}))
+ })
+ await new Promise(resolve=>partner.listen(0,'127.0.0.1',resolve))
+ t.after(()=>new Promise(resolve=>partner.close(resolve)))
+ const client=createCommunityIntakeClient({secret:'fixture-secret-'.repeat(4),origin:`http://127.0.0.1:${partner.address().port}`,identityForOwner:async owner=>({issuer:'https://id.ideaflow.app/api/auth',subject:owner.userId})})
+ const b=await browser(t,{communityIntake:client}),owner=await b.login('alice'),group=await b.groups.create(alice,'Builders')
+ for(const [section,audience,personal] of [['asks','group'],['asks','only_me'],['offers','group'],['offers','only_me'],['asks','only_me',true]]) {
+  const path=personal?'/asks':`/groups/${group.urlKey}/${section}`,kind=section==='offers'?'offer':'ask'
+  const initial=await b.get(path+'/new',owner.cookie),initialHtml=await initial.text()
+  assert.equal(initial.status,200)
+  if(kind==='offer')assert.match(initialHtml,/placeholder="e.g. I can review your prototype"/)
+  const fields=htmlForm(initialHtml,path+'/save')
+  fields.set('title-0',`${kind} ${audience} ${personal?'personal':'group'}: "React" & <accessibility>`)
+  fields.set('body-0','A prototype & its details\nKeep <this> and "that".')
+  fields.set('audience-0',audience)
+  const failed=await b.post(path+'/save',owner.cookie,fields),failedHtml=await failed.text()
+  assert.equal(failed.status,503);assert.match(failed.headers.get('cache-control'),/no-store/)
+  assert.match(failedHtml,new RegExp(`<title>Add an ${kind}`));assert.match(failedHtml,/role="alert"/)
+  assert.doesNotMatch(failedHtml,/Review your profile draft|Save selected entries|name="about"/)
+  if(!personal)assert.doesNotMatch(failedHtml.match(/<main[^>]*>([\s\S]*?)<\/main>/)[1],/value="public"/)
+  const retry=htmlForm(failedHtml,path+'/save')
+  assert.deepEqual([...retry],[...fields])
+  const saved=await b.post(path+'/save',owner.cookie,retry);assert.equal(saved.status,303)
+  assert.equal(saved.headers.get('location'),audience==='group'?`/groups/${group.urlKey}/community?saved=1`:'/asks?saved=1')
+  assert.deepEqual(calls.at(-1),calls.at(-2))
+  assert.equal(calls.at(-1).entries[0].kind,kind)
+  assert.equal(calls.at(-1).entries[0].audience,audience)
+  assert.equal(calls.at(-1).entries[0].groupId,audience==='group'?group.id:undefined)
+  const shown=await b.get(saved.headers.get('location'),owner.cookie)
+  assert.equal(shown.status,200);assert.ok(decodeForm(await shown.text()).includes(fields.get('title-0')))
+ }
+ assert.equal(calls.length,10);assert.equal(receipts.size,5)
+ assert.equal([...receipts.values()].flatMap(r=>r.entries).length,5)
+})
+
+test('HTTP general review retries and entry editing retain explicit public sharing',async t=>{
+ const writes=[],entry={...intakeEntry(7),audience:'public'}
+ const client={list:async()=>({entries:[entry]}),save:async(actor,data)=>{writes.push(data);if(writes.length===1)throw Error('temporary failure');return {entries:data.entries}}}
+ const b=await browser(t,{communityIntake:client}),owner=await b.login('alice')
+ const preview=await b.post('/asks/preview',owner.cookie,{csrf:owner.csrf,source:'quick',about:'I build tools',ask:'Need a reviewer',offer:''})
+ assert.equal(preview.status,200)
+ const fields=htmlForm(await preview.text(),'/asks/save');fields.set('audience-0','public')
+ const failed=await b.post('/asks/save',owner.cookie,fields),html=await failed.text()
+ assert.equal(failed.status,503);assert.match(html,/<title>Review your profile draft/)
+ const retry=htmlForm(html,'/asks/save');assert.deepEqual([...retry],[...fields])
+ assert.equal((await b.post('/asks/save',owner.cookie,retry)).status,303)
+ assert.deepEqual(writes[1],writes[0]);assert.equal(writes[1].entries[0].audience,'public')
+ const edit=await b.get('/asks/7',owner.cookie);assert.equal(edit.status,200)
+ assert.equal(editForm(await edit.text()).get('audience-0'),'public')
+})
+
 test('member roster links blank group profiles and opens verified direct chat; stale membership and forged fields cannot message',async t=>{
  const calls=[],targets=[]
  let blocked=false
