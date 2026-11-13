@@ -138,9 +138,15 @@ fields independently. WhatsApp accepts validated HTTPS `chat.whatsapp.com`
 invitation URLs. OpenChat accepts only `https://chat.ideaflow.app/i/` followed
 by 32 letters, digits, underscores or hyphens, with no credentials, nondefault
 port, query or fragment. The metadata form alone has a 32 KiB encoded-body
-limit, including its CSRF token; other group forms keep their 4 KiB limit.
+limit, including its CSRF token; other group-management forms keep their 4 KiB
+limit. Community introduction and intake forms retain their separate 64 KiB limit.
 These fields appear in authenticated group, introduction, community and
 group-local member views, and the organizer’s export;
-they are excluded from direct and flyer invitation previews. Opening the link
-lets the member choose whether to join that chat; saving it sends no message and does
-not synchronize membership or content to either service.
+they are excluded from direct and flyer invitation previews. When configured,
+**Message the group** is the primary OpenChat button, before the description;
+on the group detail page it appears just below the heading, outside **About this
+group**. It opens the existing chat for people who have already joined;
+otherwise, they review the invitation and choose whether to accept.
+**Join the WhatsApp group chat** remains a separate link when configured.
+Saving either link sends no message and does not synchronize membership or
+content to either service.
