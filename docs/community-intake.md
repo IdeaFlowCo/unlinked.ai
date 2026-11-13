@@ -51,8 +51,8 @@ and anonymous previews.
 Suggested connections compare open asks with offers from other current members,
 in both directions, using explicit shared words and a small set of topic
 aliases. Each suggestion shows both entry titles and the overlapping topics; it is
-not an AI endorsement or a compatibility score. Suggestions use the current
-page of authorized entries, not private imports or hidden personal asks. Empty
+not an AI endorsement or a compatibility score. The Find matches page scans authorized entries independently of board pagination
+with the bounds below, never private imports or hidden personal asks. Empty
 results invite a more specific ask/offer and browsing the member list.
 
 ## Add an ask and confirm its destination
