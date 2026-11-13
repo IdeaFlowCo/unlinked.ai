@@ -83,3 +83,39 @@ for the confirmation notice; it does not change visibility.
 The welcome page leads with group participation and places optional LinkedIn
 import and the normal profile link after the quick introduction, without
 blocking group use.
+
+## Find matches
+
+`/groups/:key/matches` is a signed-in, request-local matchmaking view reached
+from group actions, the community board and the welcome page. The existing
+board remains paginated; matching starts from the newest group entries and
+follows up to four 500-entry pages, including empty filtered pages. A non-null
+cursor after that limit produces an explicit partial-results notice, never a
+claim that the full group was searched. A failed page discards the partial
+result and shows an unavailable state. Results are not persisted or cached.
+
+The existing Social partner group projection is canonical. Only currently
+roster-bound, explicitly group-shared, open asks and offers are candidates;
+private/public entries, other groups, visibility-review entries, notes and
+ideas are excluded. Unlinked rechecks the roster and blocks after the complete
+read. No raw graph queries, private imports, inferred skills from biographies,
+model calls or Superconnector service dependency are introduced. The separately
+owned Superconnector Noos migration does not change this contract.
+
+A deterministic topic matcher normalizes a small explicit set of related terms
+(e.g. JavaScript/JS, accessibility/WCAG, user research/customer interviews).
+Generic request language such as help, review and advice is not evidence.
+Specific topic overlap, coverage and member-level topic frequency rank pairs;
+only complementary ask/offer pairs qualify. One card per person retains the
+strongest pair in each direction. Reciprocal opportunities receive a modest
+ranking boost. This is topic-based suggestion, not semantic understanding or
+verified expertise. No percentage confidence is shown. Each card quotes the
+supporting entries, explains the matched topics, links the member's private
+group profile and uses the existing CSRF-protected verified Message action.
+It never sends messages or introductions automatically.
+
+Validation: `tests/group-matchmaking.test.mjs` executes matching and bounded
+page loading; `tests/community-intake.test.mjs` exercises real browser HTTP
+routes for multi-page matches, escaping, anonymous/outsider access, unsupported
+queries/actions, stale membership/blocks and failure without partial leakage.
+Use phone/desktop rendered checks for card layout, titles and44px actions.
