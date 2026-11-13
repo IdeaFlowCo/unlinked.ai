@@ -56,7 +56,7 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
     let indexed = 0
     for (const id of ids) {
       signal?.throwIfAborted()
-      const readImport = createScopedImportReader({ readResource: backend.readResource, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit', rowCache })
+      const readImport = createScopedImportReader({ readResource: backend.readResource, readResources: backend.readResources, readAsset: backend.readAsset, grant: { ownerId: owner.ownerId, importIds: [id] }, maxAssertions: observationLimit - assertions.length, limitError: 'account_observation_limit', rowCache })
       const publication = await readImport(id, { signal })
       requireCombinedUploadConsent(publication.consent)
       for (const row of publication.assertions) assertions.push({ ...row, ...(publication.importedAt ? { importedAt: publication.importedAt } : {}), ...(connectionDate(row.fields?.['connected on']) ? { connectedAt: connectionDate(row.fields['connected on']) } : {}) })

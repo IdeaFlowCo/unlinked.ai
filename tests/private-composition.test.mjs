@@ -126,6 +126,7 @@ test('private composition connects exact callback, immutable owner resolution an
   const owner = await dependencies.resolveOwner({ issuer: configuration.issuer, subject: 'chosen-subject' })
   const backend = await dependencies.getBackend(owner)
   assert.deepEqual(await backend.readResource('import', 'a'.repeat(64)), state.resource)
+  assert.deepEqual(await backend.readResources('assertion', ['a'.repeat(64)]), [null], 'verified composition wires the process-only batch capability')
   await assert.rejects(dependencies.getBackend({ ...owner, ownerId: 'another-owner' }), /owner_denied/)
   await assert.rejects(dependencies.getBackend({ ...owner, userId: 'another-user' }), /owner_denied/)
   assert.equal((await fetch(`http://127.0.0.1:${port}/v1/unlinked/import/${'a'.repeat(64)}`)).status, 401)
@@ -135,6 +136,7 @@ test('private composition connects exact callback, immutable owner resolution an
   assert.equal(await dependencies.complete(), 'synthetic-response')
   state.active = false
   assert.equal(await backend.readResource('import', 'a'.repeat(64)), null)
+  await assert.rejects(backend.readResources('assertion', ['a'.repeat(64)]), /owner_denied/)
   await assert.rejects(dependencies.getBackend(owner), /owner_denied/)
   await dependencies.close(); await dependencies.close()
   assert.equal(state.closes, 1)
