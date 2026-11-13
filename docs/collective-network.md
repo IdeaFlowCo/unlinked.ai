@@ -138,7 +138,8 @@ fields independently. WhatsApp accepts validated HTTPS `chat.whatsapp.com`
 invitation URLs. OpenChat accepts only `https://chat.ideaflow.app/i/` followed
 by 32 letters, digits, underscores or hyphens, with no credentials, nondefault
 port, query or fragment. The metadata form alone has a 32 KiB encoded-body
-limit, including its CSRF token; other group forms keep their 4 KiB limit.
+limit, including its CSRF token; other group-management forms keep their 4 KiB
+limit. Community introduction and intake forms retain their separate 64 KiB limit.
 These fields appear in authenticated group, introduction, community and
 group-local member views, and the organizer’s export;
 they are excluded from direct and flyer invitation previews. Opening the link
