@@ -78,7 +78,8 @@ export function renderGroups(chrome, { groups, invites }) {
 
 export function renderGroupAbout(group) {
   return (group.description ? `<p class="group-description" style="white-space:pre-wrap;overflow-wrap:anywhere">${h(group.description)}</p>` : '') +
-    (group.chatUrl ? `<p><a class="button sec" href="${h(group.chatUrl)}" target="_blank" rel="noopener noreferrer">Join the WhatsApp group chat ↗</a></p>` : '')
+    (group.chatUrl ? `<p><a class="button sec" href="${h(group.chatUrl)}" target="_blank" rel="noopener noreferrer">Join the WhatsApp group chat ↗</a></p>` : '') +
+    (group.openChatUrl ? `<p><a class="button sec" href="${h(group.openChatUrl)}" target="_blank" rel="noopener noreferrer">Join the OpenChat group chat ↗</a></p>` : '')
 }
 export function renderGroup(chrome, group, origin) {
   const base = pathFor(group.id), csrf = chrome.csrf
@@ -92,7 +93,7 @@ export function renderGroup(chrome, group, origin) {
   }).join('') : ''
   const members = group.organizer ? group.members.map(member => `<article><h3>${profileLink(member.profileId, member.name)}</h3>${form(`${base}/members/${member.id}/remove`, csrf, 'Remove member', '', 'quiet')}</article>`).join('') : ''
   return shell(chrome, group.name, back('/groups', 'Collective network') + title(group.name, 'Private group · ' + (group.organizer ? 'Organizer' : 'Member')) +
-    card('About this group', renderGroupAbout(group) + (group.organizer ? `<details><summary>Edit description and group chat</summary><p class="small">Visible to group members. The WhatsApp link opens a separate chat you can choose to join.</p>${form(base + '/about', csrf, 'Save group information', `<label>Group description<textarea name="description" maxlength="2000" rows="5">${h(group.description)}</textarea></label><label>WhatsApp invitation link<input name="chatUrl" type="url" maxlength="500" value="${h(group.chatUrl)}" placeholder="https://chat.whatsapp.com/…"></label>`)}</details>` : '')) +
+    card('About this group', renderGroupAbout(group) + (group.organizer ? `<details><summary>Edit description and group chat</summary><p class="small">Visible to group members. Each chat link opens a separate invitation you can choose to accept.</p>${form(base + '/about', csrf, 'Save group information', `<label>Group description<textarea name="description" maxlength="2000" rows="5">${h(group.description)}</textarea></label><label>WhatsApp invitation link<input name="chatUrl" type="url" maxlength="500" value="${h(group.chatUrl)}" placeholder="https://chat.whatsapp.com/…"></label><label>OpenChat invitation link<input name="openChatUrl" type="url" maxlength="500" value="${h(group.openChatUrl)}" placeholder="https://chat.ideaflow.app/i/…"></label>`)}</details>` : '')) +
     card('Your community', `<p><a class="button" href="${base}/community">People, asks and offers →</a></p><p><a href="${base}/welcome">Add or update your introduction</a></p>`) + list + (group.organizer ? renderFlyerManagement(group, csrf, origin) + card('Members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
     card('Invite a member', '<p class="small">Use the profile link of an existing Unlinked member. Creating an invitation sends nothing. To share the link, copy it into an OpenChat conversation.</p>' + inviteForm +
       (invites ? `<div class="panel list">${invites}</div>` : '')) : `<p>${chat(group.organizerProfileId, 'Message the organizer')}</p>`))
