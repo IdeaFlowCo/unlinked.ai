@@ -1,3 +1,4 @@
+import { renderGroupMembers } from './group-member-views.mjs'
 import { renderPageShell } from './private-onboarding-views.mjs'
 import { profilePath } from '../src/utils/public-people/profile-handles.mjs'
 import { openChatProfileMessageUrl, unlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
@@ -25,7 +26,7 @@ const style = `<style>
   html:not([data-appearance]) .unlinked-onboarding:has(.collective-groups) .notice.error{color:#ffb4b0;background:#402629;border-color:#ae615f}
 }
 </style>`
-const shell = (chrome, name, content) => renderPageShell(name, `${style}<section class="narrow wide collective-groups">${content}</section>`, { ...chrome, active: 'lists' })
+const shell = (chrome, name, content) => renderPageShell(name, `${style}<section class="narrow wide collective-groups">${content}</section>`, { ...chrome, active: 'groups' })
 const pathFor = id => `/groups/${id}`
 const date = value => new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' }).format(value) + ' UTC'
 const profileLink = (id, name) => id ? `<a href="${h(profilePath(id))}">${h(name)}</a>` : h(name)
@@ -63,14 +64,14 @@ export function renderFlyerInvitation(chrome, invitation, path, state = null, me
       form(path, chrome.csrf, 'Join this group', field('decision', 'join'))
     : `<p>Sign in or create an Unlinked account to decide whether to join.</p><a class="button" href="/login?next=${encodeURIComponent(path)}">Continue with Ideaflow</a>`
   return renderPageShell(invitation.title, `${style}<section class="narrow collective-groups">${title(invitation.title, 'Collective network invitation')}${card('Join the group', content)}</section>`,
-    { ...chrome, active: 'lists', signInInBody: true })
+    { ...chrome, active: 'groups', signInInBody: true })
 }
 
 export function renderGroups(chrome, { groups, invites }) {
   const pending = invites.map(invite => `<article><h3><a href="${groupInvitePath(invite.group.id, invite.id)}">${h(invite.group.name)}</a></h3><p class="small">Review invitation · Expires ${date(invite.expiresAt)}</p></article>`).join('')
   const rows = groups.map(group => `<article><h3><a href="${pathFor(group.urlKey??group.id)}">${h(group.name)}</a></h3><p class="small">${group.organizer ? 'Organizer' : 'Member'}</p></article>`).join('')
   const create = form('/groups', chrome.csrf, 'Create private group', '<label>Group name<input name="name" maxlength="100" required placeholder="e.g. Climate founders"></label>')
-  return shell(chrome, 'Collective network', back('/lists', 'Lists') + title('Collective network', 'Share selected lists with a private group.') +
+  return shell(chrome, 'My groups', title('My groups', 'Find your people, share asks and keep the conversation going.') +
     (pending ? card('Invitations', `<div class="panel list">${pending}</div>`) : '') +
     card('Your groups', rows ? `<div class="panel list">${rows}</div>` : '<p>You aren’t in any groups yet.</p>') +
     card('Start a group', '<p class="small">Invite people individually. They decide whether to join, and every list is shared separately.</p>' + create))
@@ -100,17 +101,18 @@ export function renderGroup(chrome, group, origin) {
     return `<article><h3>${profileLink(invite.profileId, invite.name)}</h3><p class="small">Pending · Expires ${date(invite.expiresAt)}</p><label>Invitation link<input type="text" readonly value="${h(url)}"></label><div class="connection-actions">${chat(invite.profileId, 'Open OpenChat')}${form(`${groupInvitePath(group.id, invite.id)}/revoke`, csrf, 'Cancel invitation', '', 'quiet')}</div></article>`
   }).join('') : ''
   const members = group.organizer ? group.members.map(member => `<article><h3>${profileLink(member.profileId, member.name)}</h3>${form(`${base}/members/${member.id}/remove`, csrf, 'Remove member', '', 'quiet')}</article>`).join('') : ''
-  return shell(chrome, group.name, back('/groups', 'Collective network') + title(group.name, 'Private group · ' + (group.organizer ? 'Organizer' : 'Member')) +
+  return shell(chrome, group.name, back('/groups', 'My groups') + title(group.name, 'Private group · ' + (group.organizer ? 'Organizer' : 'Member')) +
     renderGroupChatActions(group) +
+    (group.roster ? card('Members', renderGroupMembers(chrome, group.urlKey??group.id, group.roster, group.messagingAvailable)) : '') +
     card('About this group', renderGroupDescription(group) + (group.organizer ? `<details><summary>Edit description and group chat</summary><p class="small">Visible to group members. The community chat follows group membership. WhatsApp is a separate optional chat.</p>${form(base + '/about', csrf, 'Save group information', `<label>Group address<select name="urlMode"><option value="readable"${group.urlMode!=='opaque'?' selected':''}>Readable name</option><option value="opaque"${group.urlMode==='opaque'?' selected':''}>Opaque ID</option></select></label><label>Group description<textarea name="description" maxlength="2000" rows="5">${h(group.description)}</textarea></label><label>WhatsApp invitation link<input name="chatUrl" type="text" inputmode="url" maxlength="500" value="${h(group.chatUrl)}" placeholder="https://chat.whatsapp.com/…"></label><label>OpenChat invitation link<input name="openChatUrl" type="text" inputmode="url" maxlength="500" value="${h(group.openChatUrl)}" placeholder="https://chat.ideaflow.app/i/…"></label>`)}</details>` : '')) +
-    card('Your community', `<p><a class="button" href="${base}/community">People, asks and offers →</a></p><p><a href="${base}/welcome">Add or update your introduction</a></p>`) + list + (group.organizer ? renderFlyerManagement(group, csrf, origin) + card('Members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
+    card('Your community', `<p><a class="button" href="${base}/community">People, asks and offers →</a></p><p><a href="${base}/welcome">Add or update your introduction</a></p>`) + list + (group.organizer ? renderFlyerManagement(group, csrf, origin) + card('Manage members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
     card('Invite a member', '<p class="small">Use the profile link of an existing Unlinked member. Creating an invitation sends nothing. To share the link, copy it into an OpenChat conversation.</p>' + inviteForm +
       (invites ? `<div class="panel list">${invites}</div>` : '')) : `<p>${chat(group.organizerProfileId, 'Message the organizer')}</p>`) +
     (!group.organizer ? form(base+'/leave',csrf,'Leave group','<p class="small">Leaving also removes you from the community chat.</p>','quiet') : ''))
 }
 
 export function renderGroupInvitation(chrome, invitation, invitePath) {
-  return shell(chrome, 'Group invitation', back('/groups', 'Collective network') + title(invitation.group.name, 'You have a private group invitation.') +
+  return shell(chrome, 'Group invitation', back('/groups', 'My groups') + title(invitation.group.name, 'You have a private group invitation.') +
     card('Decide whether to join', `<p>Accepting adds you to this group and gives you access to the lists the organizer has chosen to share. Your lists and imported contacts stay private.</p><p class="small">Expires ${date(invitation.expiresAt)}</p><div class="connection-actions">${form(invitePath, chrome.csrf, 'Accept invitation', field('decision', 'accept'))}${form(invitePath, chrome.csrf, 'Decline', field('decision', 'decline'), 'quiet')}</div>`))
 }
 

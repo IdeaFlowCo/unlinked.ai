@@ -436,7 +436,7 @@ export function createMessagingProxy({ isVerified = async () => false, createMes
     return { status: 'ready', conversationId: conversation.id, recipient: { id: value.recipient.id, name: text(value.recipient.name, 160) } }
   }
 
-  // Only the browser handler's live card lookup may supply this owner. Never
+  // Only a browser handler's live card or authorized group roster may supply this owner. Never
   // accept an owner/identity from browser fields, a name or an imported email.
   async function openOwner(session, owner, name) {
     await spend(session, 'write')
