@@ -18,7 +18,7 @@ const seat = (group, actor) => group?.members.find(row => same(row.actor, actor)
 const access = (group, actor) => group && (same(group.organizer, actor) ? 'organizer' : seat(group, actor)?.id)
 const cleanName = name => typeof name === 'string' && name.trim().length <= 100 ? name.trim() : ''
 const summary = ({ id, name }) => ({ id, name })
-const metadata = group => ({ description: group.description ?? '', chatUrl: group.chatUrl ?? '' })
+const metadata = group => ({ description: group.description ?? '', chatUrl: group.chatUrl ?? '', openChatUrl: group.openChatUrl ?? '' })
 export function normalizeGroupChatUrl(value) {
   if (typeof value !== 'string' || value.length > 500) fail('invalid_chat_url')
   if (!value.trim()) return ''
@@ -26,6 +26,13 @@ export function normalizeGroupChatUrl(value) {
   try { url = new URL(value.trim()) } catch { fail('invalid_chat_url') }
   if (url.protocol !== 'https:' || url.hostname !== 'chat.whatsapp.com' || url.port || url.username || url.password || !/^\/[A-Za-z0-9]{16,64}$/.test(url.pathname) || url.hash || [...url.searchParams].some(([k,v]) => k !== 'mode' || v !== 'gi_t') || url.searchParams.getAll('mode').length > 1) fail('invalid_chat_url')
   return url.href
+}
+export function normalizeGroupOpenChatUrl(value) {
+  if (typeof value !== 'string' || value.length > 500) fail('invalid_openchat_url')
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (!/^https:\/\/chat\.ideaflow\.app(?::443)?\/i\/[A-Za-z0-9_-]{32}$/.test(trimmed)) fail('invalid_openchat_url')
+  return new URL(trimmed).href
 }
 const person = ({ id, name, profileId }) => ({ id, name, profileId })
 const seatLimit = group => group.capacity ?? GROUP_LIMITS.seats + 1
@@ -87,13 +94,14 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       await store.create(group)
       return summary(group)
     },
-    async updateMetadata(actor, id, { description, chatUrl }) {
+    async updateMetadata(actor, id, { description, chatUrl, openChatUrl = '' }) {
       await authorized(actor, id, true)
       if (typeof description !== 'string' || description.trim().length > 2000) fail('invalid_description')
       chatUrl = normalizeGroupChatUrl(chatUrl)
+      openChatUrl = normalizeGroupOpenChatUrl(openChatUrl)
       await update(id, group => {
         own(actor, group)
-        return { ...group, description: description.trim(), chatUrl }
+        return { ...group, description: description.trim(), chatUrl, openChatUrl }
       })
       return this.detail(actor, id)
     },

@@ -539,28 +539,80 @@ test('HTTP stale visibility conflict shows fixed guidance without exposing partn
  await paginationEvidence({'social-visibility-conflict.html':html,'social-visibility-conflict.json':JSON.stringify({status:response.status,audience:entry.audience,message:'Review this entry’s visibility in Social before editing it through Unlinked. Open My asks and offers to find its Social link.',upstreamDetailsExposed:false},null,2)+'\n'})
 })
 
-test('organizer edits group context, members read it, anonymous invitations and nonmembers do not',async t=>{
+test('organizer edits independent chat invitations without leaking member-only group context',async t=>{
  const client={group:async()=>({entries:[]})},b=await browser(t,{communityIntake:client}),owner=await b.login('alice'),member=await b.login('bob'),stranger=await b.login('carol')
  const group=await b.groups.create(alice,'Boulder'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false}),base='/groups/'+group.id
  await b.groups.joinFlyer(bob,group.id,flyer.id,{profileId:null,name:'Bob',source:{}})
- const fields={csrf:owner.csrf,description:'Build together. <script>bad</script>\nBring a project.',chatUrl:'https://chat.whatsapp.com/AbCdEf1234567890123456?mode=gi_t'}
+ const memberId=(await b.groups.roster(alice,group.id)).find(row=>row.name==='Bob').id
+ const openChatUrl='https://chat.ideaflow.app/i/'+'Ab0_'.repeat(8)
+ const fields={csrf:owner.csrf,description:'Build together. <script>bad</script>\nBring a project.',chatUrl:'https://chat.whatsapp.com/AbCdEf1234567890123456?mode=gi_t',openChatUrl}
  assert.equal((await b.post(base+'/about',member.cookie,{...fields,csrf:member.csrf})).status,404)
+ assert.equal((await b.post(base+'/about',stranger.cookie,{...fields,csrf:stranger.csrf})).status,404)
  assert.equal((await b.post(base+'/about',owner.cookie,{...fields,csrf:'wrong'})).status,400)
  assert.equal((await b.post(base+'/about',owner.cookie,fields,'https://evil.invalid')).status,403)
  for(const chatUrl of ['javascript:alert(1)','https://chat.whatsapp.com.evil.invalid/AbCdEf1234567890123456','https://name:pass@chat.whatsapp.com/AbCdEf1234567890123456'])assert.equal((await b.post(base+'/about',owner.cookie,{...fields,chatUrl})).status,400)
+ for(const value of [
+  'javascript:alert(1)',openChatUrl.replace('https:','http:'),openChatUrl.replace('.app/','.app.evil.invalid/'),
+  openChatUrl.replace('https://','https://name:pass@'),openChatUrl.replace('https://','https://@'),
+  openChatUrl.replace('.app/','.app:444/'),openChatUrl+'?x=1',openChatUrl+'?',openChatUrl+'#x',openChatUrl+'#',
+  openChatUrl+'/',openChatUrl.slice(0,-1),openChatUrl+'a',openChatUrl.replace('/i/','/I/'),
+  openChatUrl.replace('/i/','/other/../i/'),openChatUrl.replace('/i/','/i%2f'),openChatUrl.replace('/i/','/i/\\'),
+ ])assert.equal((await b.post(base+'/about',owner.cookie,{...fields,openChatUrl:value})).status,400,value)
  assert.equal((await b.post(base+'/about',owner.cookie,{...fields,description:'a'.repeat(2001)})).status,400)
- assert.equal((await b.post(base+'/about',owner.cookie,fields)).status,303)
+ assert.equal((await b.groups.detail(alice,group.id)).description,'')
+ assert.equal((await b.groups.detail(alice,group.id)).chatUrl,'')
+ assert.equal((await b.groups.detail(alice,group.id)).openChatUrl,'')
+ assert.equal((await b.post(base+'/about',owner.cookie,{...fields,openChatUrl:openChatUrl.replace('.app/','.app:443/')})).status,303)
  b.restart()
  Object.assign(owner,await b.login('alice'));Object.assign(member,await b.login('bob'));Object.assign(stranger,await b.login('carol'))
- for(const route of [base,base+'/welcome',base+'/community']) {
+ const persisted=await b.groups.detail(bob,group.id)
+ assert.equal(persisted.chatUrl,fields.chatUrl);assert.equal(persisted.openChatUrl,openChatUrl)
+ const exported=(await b.groups.exportOwner(alice))[0]
+ assert.equal(exported.description,fields.description);assert.equal(exported.chatUrl,fields.chatUrl);assert.equal(exported.openChatUrl,openChatUrl)
+ assert.deepEqual(await b.groups.exportOwner(bob),[{groupId:group.id,role:'member'}])
+ for(const route of [base,base+'/welcome',base+'/community',base+'/community/'+memberId]) {
   const response=await b.get(route,member.cookie),html=await response.text();assert.equal(response.status,200)
   assert.match(html,/Build together/);assert.match(html,/&lt;script&gt;bad&lt;\/script&gt;/);assert.match(html,/Join the WhatsApp group chat/);assert.doesNotMatch(html,/<script>bad/)
+  assert.ok(html.includes(`href="${openChatUrl}" target="_blank" rel="noopener noreferrer">Join the OpenChat group chat`))
+  assert.doesNotMatch(html,/name="openChatUrl"/)
   assert.match(response.headers.get('cache-control'),/no-store/)
-  assert.notEqual((await b.get(route,stranger.cookie)).status,200)
+  const denied=await b.get(route,stranger.cookie);assert.notEqual(denied.status,200);assert.doesNotMatch(await denied.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
+  const anonymous=await b.get(route);assert.equal(anonymous.status,401);assert.doesNotMatch(await anonymous.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
  }
- const invitation=await b.get(base+'/join/'+flyer.id);assert.equal(invitation.status,200);assert.doesNotMatch(await invitation.text(),/Build together|chat.whatsapp/)
- assert.equal((await b.post(base+'/about',owner.cookie,{...fields,csrf:owner.csrf,description:'',chatUrl:''})).status,303)
- assert.equal((await b.groups.detail(bob,group.id)).chatUrl,'')
+ const editHtml=await (await b.get(base,owner.cookie)).text()
+ assert.ok(editHtml.includes(`name="openChatUrl" type="url" maxlength="500" value="${openChatUrl}"`))
+ assert.match(editHtml,/Each chat link opens a separate invitation you can choose to accept/)
+ for(const cookie of [undefined,stranger.cookie]) {
+  const invitation=await b.get(base+'/join/'+flyer.id,cookie);assert.equal(invitation.status,200);assert.doesNotMatch(await invitation.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
+ }
+ const directInvite=await b.groups.invite(alice,group.id,carol,profiles[2])
+ const invited=await b.get(base+'/invites/'+directInvite,stranger.cookie)
+ assert.equal(invited.status,200);assert.doesNotMatch(await invited.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
+ assert.equal((await b.store.get(group.id)).members.length,1)
+ const edit={...fields,csrf:owner.csrf}
+ assert.equal((await b.post(base+'/about',owner.cookie,{...edit,chatUrl:''})).status,303)
+ assert.equal((await b.groups.detail(bob,group.id)).chatUrl,'');assert.equal((await b.groups.detail(bob,group.id)).openChatUrl,openChatUrl)
+ assert.equal((await b.post(base+'/about',owner.cookie,{...edit,openChatUrl:'https://chat.ideaflow.app/i/'+'Cd1-'.repeat(8)})).status,303)
+ assert.equal((await b.groups.detail(bob,group.id)).chatUrl,fields.chatUrl)
+ assert.equal((await b.groups.detail(bob,group.id)).openChatUrl,'https://chat.ideaflow.app/i/'+'Cd1-'.repeat(8))
+ assert.equal((await b.post(base+'/about',owner.cookie,{...edit,openChatUrl:'  '})).status,303)
+ assert.equal((await b.groups.detail(bob,group.id)).chatUrl,fields.chatUrl);assert.equal((await b.groups.detail(bob,group.id)).openChatUrl,'')
+ assert.equal((await b.post(base+'/about',owner.cookie,{...edit,description:'',chatUrl:'',openChatUrl:''})).status,303)
+ const cleared=await b.groups.detail(bob,group.id)
+ assert.equal(cleared.description,'');assert.equal(cleared.chatUrl,'');assert.equal(cleared.openChatUrl,'')
+})
+
+test('HTTP group metadata accepts maximum CJK descriptions and bounds encoded bodies by route',async t=>{
+ const b=await browser(t),owner=await b.login('alice'),group=await b.groups.create(alice,'Encoded metadata'),base='/groups/'+group.id
+ const fields={csrf:owner.csrf,description:'界'.repeat(2000),chatUrl:'https://chat.whatsapp.com/'+'A'.repeat(64)+'?mode=gi_t',openChatUrl:'https://chat.ideaflow.app/i/'+'a'.repeat(32)}
+ assert.ok(new URLSearchParams(fields).toString().length>16384)
+ assert.equal((await b.post(base+'/about',owner.cookie,fields)).status,303)
+ const persisted=await b.groups.detail(alice,group.id)
+ assert.equal(persisted.description,fields.description);assert.equal(persisted.chatUrl,fields.chatUrl);assert.equal(persisted.openChatUrl,fields.openChatUrl)
+ assert.equal((await b.post(base+'/about',owner.cookie,{...fields,description:'界'.repeat(2001)})).status,400)
+ assert.equal((await b.post(base+'/about',owner.cookie,{...fields,description:'界'.repeat(4000)})).status,413)
+ assert.equal((await b.groups.detail(alice,group.id)).description,fields.description)
+ assert.equal((await b.post('/groups',owner.cookie,{csrf:owner.csrf,name:'界'.repeat(500)})).status,413)
 })
 
 test('group member profiles bind entries to roster identities and explain matches without leaking other owners',async t=>{

@@ -2,7 +2,7 @@ import { isCommunityPath } from './community-intake.mjs'
 import { createCommunityIntakeBrowser } from './community-intake-browser.mjs'
 import { bulkExportInput } from './bulk-exports.mjs'
 import { networkExportInput, streamNetworkExport } from './network-export.mjs'
-import { createGroupBrowser, flyerJoinTarget, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
+import { createGroupBrowser, flyerJoinTarget, groupBodyLimit, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
 import { browserPerformanceScript } from './browser-performance.mjs'
 import { PEOPLE_FILTER_KEYS, peopleFilters, matchesPeopleFilters } from '../src/utils/public-people/search-filters.mjs'
 import { readRequestBody, bufferRequestBody } from './request-body.mjs'
@@ -3261,7 +3261,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           pendingMessageOwners.set(ownerId, mine + 1); pendingMessageBodies++
           reserved = () => { pendingMessageBodies--; const left = pendingMessageOwners.get(ownerId) - 1; if (left) pendingMessageOwners.set(ownerId, left); else pendingMessageOwners.delete(ownerId) }
         }
-        const limit = isCommunityPath(path) ? 65536 : path === '/upload' ? LIMITS.archiveBytes + 65536 : path.startsWith('/messages/api/') ? messagingBodyLimit(path, request.headers['content-type']) : isGroupPath(path) ? 4096 : 16384
+        const limit = isCommunityPath(path) ? 65536 : path === '/upload' ? LIMITS.archiveBytes + 65536 : path.startsWith('/messages/api/') ? messagingBodyLimit(path, request.headers['content-type']) : isGroupPath(path) ? groupBodyLimit(path) : 16384
         let bytes
         try { bytes = await bufferRequestBody(request, limit) }
         catch { if (!response.destroyed) response.writeHead(413, path.startsWith('/messages/api/') ? { 'Content-Type': 'application/json' } : {}).end(path.startsWith('/messages/api/') ? JSON.stringify({ error: 'body_too_large' }) : undefined); return }
