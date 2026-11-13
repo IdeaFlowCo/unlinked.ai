@@ -9,6 +9,15 @@ the existing OpenChat composer for that profile; creating or opening the
 invitation sends no message. The recipient can also find it on their own
 **My groups** page.
 
+The group detail page places **Message the group** (when available), **Add an
+ask**, [**Find matches**](community-intake.md#find-matches), and **Asks and offers**
+before a preview of up to five members. Larger rosters have a **See all … members**
+link to the community board's full member
+list. Each name links to a private group profile, and **Message** has a 44px
+minimum touch target. Profile access, direct messaging and shared context are
+owned by [Community member context](community-intake.md#member-context-and-suggested-connections);
+the focused entry forms are documented under [Add an ask](community-intake.md#add-an-ask-and-confirm-its-destination).
+
 Opening a direct invitation displays a review page only to the signed-in intended recipient.
 They must choose **Accept invitation** to join, or **Decline** to retire the
 invitation. Links expire after seven days and cannot be reused after acceptance,
