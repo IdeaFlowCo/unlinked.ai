@@ -339,7 +339,7 @@ test('500-seat rosters bound live checks and preserve order and final membership
  await assert.rejects(groups.roster(alice,id),/identity unavailable/)
 })
 test('Social group identity resolution is bounded, ordered, filtered and fails closed',async()=>{
- const roster=Array.from({length:500},(_,i)=>({actor:account('member-'+i)})),calls=[]
+ const roster=Array.from({length:500},(_,i)=>({id:'seat-'+i,name:'Member '+i,actor:account('member-'+i)})),calls=[]
  let inFlight=0,peak=0,unavailable=false
  const identityForOwner=async owner=>{
   inFlight++;peak=Math.max(peak,inFlight)
@@ -355,7 +355,7 @@ test('Social group identity resolution is bounded, ordered, filtered and fails c
   calls.push(JSON.parse(opts.body))
   return {ok:true,json:async()=>({entries:[{ownerKey:identityKey(identity('member-0-user')),title:'Visible ask'},{ownerKey:identityKey(identity('member-10-user')),title:'Inactive'},{ownerKey:identityKey(identity('member-20-user')),title:'Unverified'},{ownerKey:identityKey(identity('outsider')),title:'Outsider'}]})}
  }})
- assert.deepEqual(await client.group(alice,randomUUID(),roster),{entries:[{title:'Visible ask'}],nextCursor:undefined})
+ assert.deepEqual(await client.group(alice,randomUUID(),roster),{entries:[{title:'Visible ask',memberId:'seat-0',name:'Member 0'}],nextCursor:undefined})
  assert.ok(peak>1)
  assert.ok(peak<=8)
  assert.deepEqual(calls[0].members,roster.filter(row=>!['member-10','member-20'].includes(row.actor.ownerId)).map(row=>identity(row.actor.userId)))
@@ -537,4 +537,59 @@ test('HTTP stale visibility conflict shows fixed guidance without exposing partn
  assert.equal(updates[0].entry.audience,'only_me')
  assert.equal(entry.audience,'only_me')
  await paginationEvidence({'social-visibility-conflict.html':html,'social-visibility-conflict.json':JSON.stringify({status:response.status,audience:entry.audience,message:'Review this entry’s visibility in Social before editing it through Unlinked. Open My asks and offers to find its Social link.',upstreamDetailsExposed:false},null,2)+'\n'})
+})
+
+test('organizer edits group context, members read it, anonymous invitations and nonmembers do not',async t=>{
+ const client={group:async()=>({entries:[]})},b=await browser(t,{communityIntake:client}),owner=await b.login('alice'),member=await b.login('bob'),stranger=await b.login('carol')
+ const group=await b.groups.create(alice,'Boulder'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false}),base='/groups/'+group.id
+ await b.groups.joinFlyer(bob,group.id,flyer.id,{profileId:null,name:'Bob',source:{}})
+ const fields={csrf:owner.csrf,description:'Build together. <script>bad</script>\nBring a project.',chatUrl:'https://chat.whatsapp.com/AbCdEf1234567890123456?mode=gi_t'}
+ assert.equal((await b.post(base+'/about',member.cookie,{...fields,csrf:member.csrf})).status,404)
+ assert.equal((await b.post(base+'/about',owner.cookie,{...fields,csrf:'wrong'})).status,400)
+ assert.equal((await b.post(base+'/about',owner.cookie,fields,'https://evil.invalid')).status,403)
+ for(const chatUrl of ['javascript:alert(1)','https://chat.whatsapp.com.evil.invalid/AbCdEf1234567890123456','https://name:pass@chat.whatsapp.com/AbCdEf1234567890123456'])assert.equal((await b.post(base+'/about',owner.cookie,{...fields,chatUrl})).status,400)
+ assert.equal((await b.post(base+'/about',owner.cookie,{...fields,description:'a'.repeat(2001)})).status,400)
+ assert.equal((await b.post(base+'/about',owner.cookie,fields)).status,303)
+ b.restart()
+ Object.assign(owner,await b.login('alice'));Object.assign(member,await b.login('bob'));Object.assign(stranger,await b.login('carol'))
+ for(const route of [base,base+'/welcome',base+'/community']) {
+  const response=await b.get(route,member.cookie),html=await response.text();assert.equal(response.status,200)
+  assert.match(html,/Build together/);assert.match(html,/&lt;script&gt;bad&lt;\/script&gt;/);assert.match(html,/Join the WhatsApp group chat/);assert.doesNotMatch(html,/<script>bad/)
+  assert.match(response.headers.get('cache-control'),/no-store/)
+  assert.notEqual((await b.get(route,stranger.cookie)).status,200)
+ }
+ const invitation=await b.get(base+'/join/'+flyer.id);assert.equal(invitation.status,200);assert.doesNotMatch(await invitation.text(),/Build together|chat.whatsapp/)
+ assert.equal((await b.post(base+'/about',owner.cookie,{...fields,csrf:owner.csrf,description:'',chatUrl:''})).status,303)
+ assert.equal((await b.groups.detail(bob,group.id)).chatUrl,'')
+})
+
+test('group member profiles bind entries to roster identities and explain matches without leaking other owners',async t=>{
+ const identity=owner=>({issuer:'https://id.ideaflow.app/api/auth',subject:owner.userId})
+ let entries=[]
+ const client=createCommunityIntakeClient({secret:'fixture-secret-'.repeat(4),identityForOwner:async owner=>identity(owner),fetchImpl:async()=>new Response(JSON.stringify({entries}),{status:200})})
+ const b=await browser(t,{communityIntake:client}),owner=await b.login('alice'),member=await b.login('bob'),stranger=await b.login('carol')
+ const group=await b.groups.create(alice,'Builders'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false})
+ await b.groups.joinFlyer(bob,group.id,flyer.id,{name:'Bob',profileId:null,source:{}})
+ const roster=await b.groups.roster(alice,group.id),bobId=roster.find(r=>r.name==='Bob').id,base='/groups/'+group.id+'/community'
+ entries=[{id:1,title:'Need React accessibility advice',kind:'ask',status:'open',ownerKey:identityKey(identity(alice))},{id:2,title:'I offer React accessibility reviews',kind:'offer',status:'open',ownerKey:identityKey(identity(bob)),name:'Untrusted name'},{id:3,title:'PRIVATE outsider detail',kind:'offer',status:'open',ownerKey:identityKey(identity(carol))}]
+ const community=await b.get(base,owner.cookie),html=await community.text();assert.equal(community.status,200)
+ assert.match(html,/Suggested connections/);assert.match(html,/Shared topics: accessibility, react/);assert.match(html,new RegExp(base+'/'+bobId));assert.doesNotMatch(html,/PRIVATE outsider|Untrusted name|ownerKey|bob-user/)
+ const profile=await b.get(base+'/'+bobId,owner.cookie),profileHtml=await profile.text();assert.equal(profile.status,200)
+ assert.match(profileHtml,/<title>Bob · Builders · Community/);assert.match(profileHtml,/I offer React accessibility reviews/);assert.doesNotMatch(profileHtml,/Need React accessibility advice|PRIVATE outsider/)
+ assert.notEqual((await b.get(base+'/'+bobId,stranger.cookie)).status,200)
+ assert.equal((await b.get(base+'/'+bobId)).status,401)
+ await b.groups.revoke(alice,group.id,'member',bobId)
+ assert.notEqual((await b.get(base+'/'+bobId,owner.cookie)).status,200)
+ assert.notEqual((await b.get(base,member.cookie)).status,200)
+})
+
+import { communityMatches } from '../mcp-server/community-matches.mjs'
+test('matching excludes self, closed requests and same-kind pairs, and normalizes explicit topics',()=>{
+ const rows=[{id:1,memberId:'a',title:'Need PostgreSQL queries',kind:'ask',status:'open'},
+ {id:2,memberId:'b',title:'Can help with Postgres queries',kind:'offer',status:'open'},
+ {id:3,memberId:'a',title:'Postgres queries',kind:'offer',status:'open'},
+ {id:4,memberId:'c',title:'Postgres queries',kind:'offer',status:'done'},
+ {id:5,memberId:'d',title:'Postgres queries',kind:'ask',status:'paused'}]
+ const matches=communityMatches(rows,'a');assert.equal(matches.length,1);assert.equal(matches[0].memberId,'b');assert.deepEqual(matches[0].topics,['postgres','query'])
+ assert.deepEqual(communityMatches(rows,'absent'),[])
 })
