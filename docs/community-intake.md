@@ -108,7 +108,9 @@ A deterministic topic matcher normalizes a small explicit set of related terms
 (e.g. JavaScript/JS, accessibility/WCAG, user research/customer interviews).
 Compound names such as Node.js/Nodejs and React.js/React are consumed before
 standalone JS. Generic request and connection language such as help, review,
-advice, connect, shared context and details is not evidence. Topic weights and
+advice, connect, shared context and details is not evidence. Introduction,
+feedback, meeting, chat and call wording may appear in an explanation but never
+creates a match without another concrete shared topic. Topic weights and
 repeated topic-set comparisons are cached only within the request, with bounded
 comparison retention. Large workloads yield to the event loop; the route awaits
 matching and then rechecks the live roster before rendering.
@@ -121,10 +123,23 @@ supporting entries, explains the matched topics, links the member's private
 group profile and uses the existing CSRF-protected verified Message action.
 It never sends messages or introductions automatically.
 
+The page also has a labelled **What do you need?** search. It posts one trimmed
+query (1–300 characters, small bounded body, exact `csrf` and `query` fields)
+to the CSRF-protected same-origin `POST /groups/:key/matches/search`; the query
+never enters the URL and is not saved, logged, shared or sent to a model. Search
+compares that single transient need with other roster-authorized members'
+group-shared open offers only (never the viewer's own offers or asks) using the
+same scan, matcher, roster/block recheck and unavailable/partial states.
+Evidence is labelled *Your search*, the escaped query stays in the field, and
+the page links back to `GET /matches` (saved asks and offers) and separately to
+Add an ask. Other methods, query parameters, repeated or extra fields, wrong
+CSRF, outsiders and anonymous visitors are refused without reading entries.
+
 Validation: `tests/group-matchmaking.test.mjs` executes matching and bounded
 page loading; `tests/community-intake.test.mjs` exercises real browser HTTP
 routes for multi-page matches, escaping, anonymous/outsider access, unsupported
-queries/actions, stale membership/blocks and failure without partial leakage.
+queries/actions, stale membership/blocks and failure without partial leakage,
+plus the transient search route's refusals and no-save behavior.
 Maximum 2,000-entry fixtures check heartbeat progress, cached operation counts
 and unique comparisons; HTTP coverage revalidates blocks changed during a yield.
 Use phone/desktop rendered checks for card layout, titles and 44px actions.

@@ -53,18 +53,32 @@ export function createCommunityIntakeBrowser({client,groups,messagingAvailable=f
   try {
     const saved=url.searchParams.getAll('saved');if(saved.length>1||(saved.length&&saved[0]!=='1'))throw new IntakeError('Invalid saved notice.');const params=new URLSearchParams(url.searchParams);params.delete('saved')
     const page=pagination(params,request.method==='GET'&&(url.pathname==='/asks'||match?.[2]==='community'))
-    if(match?.[2]==='matches'&&(match[3]||request.method!=='GET'))throw new IntakeError('Use the group’s Find matches page.')
+    const matchSearch=match?.[2]==='matches'&&match[3]==='search'
+    if(match?.[3]==='search'&&!matchSearch)throw new IntakeError('Use a supported action.')
+    if(match?.[2]==='matches'&&!matchSearch&&(match[3]||request.method!=='GET'))throw new IntakeError('Use the group’s Find matches page.')
+    if(matchSearch&&(request.method!=='POST'||url.search))throw new IntakeError('Use the Find matches form.')
     if(groupId) {groupId=await groups.resolveKey?.(groupId)??groupId;group=await groups.detail(actor,groupId)}
     if(request.method==='GET'&&['asks','offers'].includes(match?.[2])&&!match?.[3])return redirect(`/groups/${group.urlKey??group.id}/community`)
     if(match?.[2]==='matches') {
+      let search
+      if(matchSearch) {
+        if(request.headers['content-type']?.split(';')[0]!=='application/x-www-form-urlencoded')throw new IntakeError('Refresh this page and try again.')
+        const input=new URLSearchParams((await body(request,4096)).toString('utf8'))
+        if(input.getAll('csrf').length!==1||input.get('csrf')!==session.csrf)throw new IntakeError('Refresh this page and try again.')
+        if([...input.keys()].some(key=>!['csrf','query'].includes(key))||input.getAll('query').length!==1)throw new IntakeError('Use the Find matches form.')
+        search=input.get('query').trim()
+        if(!search||search.length>300)throw new IntakeError('Describe what you need in 1 to 300 characters.')
+      }
       const roster=await groups.roster(actor,groupId),signature=JSON.stringify(roster)
       const own=roster.find(r=>r.actor.ownerId===actor.ownerId&&r.actor.userId===actor.userId)
+      if(matchSearch&&!own)throw new IntakeError('Join this group to find matches.')
       let result
       try { result=client?await loadGroupMatchEntries(client,actor,groupId,roster):{unavailable:true} }
       catch { result={unavailable:true} }
-      const matches=result.unavailable?[]:await matchGroupMembers(result.entries,own?.id)
+      const entries=result.unavailable?[]:matchSearch?[{id:'search',memberId:own.id,name:own.name,title:search,body:'',kind:'ask',status:'open'},...result.entries.filter(e=>e.memberId!==own.id&&e.kind==='offer')]:result.entries
+      const matches=result.unavailable?[]:await matchGroupMembers(entries,own?.id)
       if(JSON.stringify(await groups.roster(actor,groupId))!==signature)throw new IntakeError('Group membership changed. Reload this page.')
-      return render(shell(chrome,`Find matches · ${group.name}`,renderGroupMatchmaking({chrome,group,roster,ownId:own?.id,result,matches,messagingAvailable})))
+      return render(shell(chrome,`Find matches · ${group.name}`,renderGroupMatchmaking({chrome,group,roster,ownId:own?.id,result,matches,messagingAvailable,search})))
     }
     if(!client&&match?.[2]!=='community')return render(shell(chrome,'Profile connection unavailable','<h1>Profile connection unavailable</h1><p>You can still use your groups. Please try adding your introduction again later.</p>'),request.method==='GET'?200:503)
     if(request.method==='GET') {
