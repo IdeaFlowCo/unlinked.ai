@@ -150,3 +150,24 @@ otherwise, they review the invitation and choose whether to accept.
 **Join the WhatsApp group chat** remains a separate link when configured.
 Saving either link sends no message and does not synchronize membership or
 content to either service.
+
+## Community chat and addresses
+
+With the existing trusted OpenChat messaging integration configured, each group
+has one shared conversation. Joining (or organizer approval) queues chat membership;
+leaving/removal queues its removal. The durable outbox retries transient failures
+without duplicate conversations or messages. Delivery normally follows within a
+poll interval; while the chat service is unavailable membership updates remain
+pending. Group membership is authoritative; standalone chat invites and participant
+edits are disabled for managed conversations. WhatsApp remains optional and separate.
+
+The primary **Message the group** action opens the native Unlinked inbox in the
+same tab. **Open separately in OpenChat** opens that same conversation externally.
+Existing conversations can be bound by an operator using `chatConversationId`;
+this preserves their history. Never change that binding after successful sync.
+
+New groups get stable readable URLs (name plus a short disambiguating suffix).
+Organizers can choose **Opaque ID** in group information; readable aliases stop
+resolving while this mode is selected. Original UUID routes and invitations stay
+valid in both modes. A readable name is not an authorization grant: private group
+content still requires membership, and anonymous invitations omit private metadata.

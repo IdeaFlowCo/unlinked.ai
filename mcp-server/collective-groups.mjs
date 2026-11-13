@@ -1,3 +1,4 @@
+import { communityChatId, readableGroupSlug, groupUrlKey } from './community-chat-id.mjs'
 import { randomUUID } from 'node:crypto'
 import { groupActorKey } from './collective-groups-store.mjs'
 import { concurrentMap } from './concurrent-map.mjs'
@@ -17,7 +18,7 @@ const same = (a, b) => Boolean(a?.ownerId && a.userId && b?.ownerId === a.ownerI
 const seat = (group, actor) => group?.members.find(row => same(row.actor, actor))
 const access = (group, actor) => group && (same(group.organizer, actor) ? 'organizer' : seat(group, actor)?.id)
 const cleanName = name => typeof name === 'string' && name.trim().length <= 100 ? name.trim() : ''
-const summary = ({ id, name }) => ({ id, name })
+const summary = group => ({ id:group.id, name:group.name, ...(group.slug?{urlKey:groupUrlKey(group)}:{}) })
 const metadata = group => ({ description: group.description ?? '', chatUrl: group.chatUrl ?? '', openChatUrl: group.openChatUrl ?? '' })
 export function normalizeGroupChatUrl(value) {
   if (typeof value !== 'string' || value.length > 500) fail('invalid_chat_url')
@@ -39,7 +40,7 @@ const seatLimit = group => group.capacity ?? GROUP_LIMITS.seats + 1
 const memberCount = group => group.members.length + 1
 const publicFlyer = ({ id, expiresAt, approval }) => ({ id, expiresAt, approval })
 
-export function createCollectiveGroups({ store, active, blocked = async () => false, now = Date.now }) {
+export function createCollectiveGroups({ store, active, blocked = async () => false, now = Date.now, chatEnabled=false }) {
   const live = async actor => Boolean(actor?.ownerId && actor.userId && await active(binding(actor)))
   const requireLive = async actor => { if (!await live(actor)) fail() }
   const canMeet = async (organizer, actor) => same(organizer, actor) || !await blocked(organizer, actor)
@@ -86,22 +87,26 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
     flyer.accepted.push(groupActorKey(member.actor))
   }
   return {
-    async create(actor, name, organizerProfileId) {
+    async resolveKey(key) { const group=await store.get(key) ?? await store.bySlug?.(key);return group?.id??null },
+    async create(actor, name, organizerProfileId, {urlMode="readable"}={}) {
       await requireLive(actor)
       name = cleanName(name)
       if (!name) fail('invalid_name')
       const group = { id: randomUUID(), name, organizer: binding(actor), organizerProfileId: organizerProfileId ?? null, members: [], invites: [], shares: [] }
+      group.urlMode=urlMode==='opaque'?'opaque':'readable'
+      group.slug=readableGroupSlug(name,group.id)
       await store.create(group)
       return summary(group)
     },
-    async updateMetadata(actor, id, { description, chatUrl, openChatUrl = '' }) {
+    async updateMetadata(actor, id, { description, chatUrl, openChatUrl = '', urlMode }) {
       await authorized(actor, id, true)
       if (typeof description !== 'string' || description.trim().length > 2000) fail('invalid_description')
+      if(urlMode!==undefined && !["readable","opaque"].includes(urlMode))fail("invalid_input")
       chatUrl = normalizeGroupChatUrl(chatUrl)
       openChatUrl = normalizeGroupOpenChatUrl(openChatUrl)
       await update(id, group => {
         own(actor, group)
-        return { ...group, description: description.trim(), chatUrl, openChatUrl }
+        return { ...group, slug:group.slug??readableGroupSlug(group.name,group.id), urlMode:urlMode??group.urlMode??"readable", description: description.trim(), chatUrl, openChatUrl }
       })
       return this.detail(actor, id)
     },
@@ -118,7 +123,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
     async detail(actor, id) {
       const { group, role } = await authorized(actor, id)
       const organizer = role === 'organizer'
-      return { ...summary(group), ...metadata(group), organizer, organizerProfileId: group.organizerProfileId,
+      return { ...summary(group), ...metadata(group), urlMode:group.urlMode??"readable", chatConversationId:chatEnabled?communityChatId(group):null, organizer, organizerProfileId: group.organizerProfileId,
         shares: group.shares.map(summary),
         ...(organizer ? { members: group.members.map(person), invites: pending(group).map(row => ({ ...person(row), expiresAt: row.expiresAt })),
           capacity: seatLimit(group), flyer: group.flyer && {
@@ -133,6 +138,10 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       const visible = (await concurrentMap(candidates, async row => await live(row.actor) && (same(row.actor, actor) || !await blocked(actor, row.actor)) ? row : null)).filter(Boolean)
       const { group: latest } = await authorized(actor, id)
       return visible.filter(row => same(row.actor, latest.organizer) || seat(latest, row.actor))
+    },
+    async leave(actor,id) {
+      await authorized(actor,id)
+      await update(id,group=>{if(same(actor,group.organizer))fail('organizer_cannot_leave');if(!seat(group,actor))fail();group.members=group.members.filter(row=>!same(row.actor,actor));group.shares=group.shares.filter(row=>!same(row.actor,actor));return group})
     },
     async invite(actor, id, recipient, profile) {
       await authorized(actor, id, true)
