@@ -273,3 +273,8 @@ claiming deletion is complete. Pending tombstones retry until
 acknowledged. `tests/community-chat-recovery.test.mjs` exercises native
 snapshots, shared export, import/verification, deletion and acknowledgement
 minimization; `tests/community-chat.test.mjs` covers roster retries and activation.
+
+OpenChat owns the separate `UnlinkedGroupSync` receipt ledger and its `groupId`
+constraint in the shared graph. Unlinked shared backup, verification, and rollback
+exclude and preserve that ledger; `UnlinkedGroupChatJob` remains Unlinked-owned
+and is included in recovery. Unknown prefixed labels are still rejected.

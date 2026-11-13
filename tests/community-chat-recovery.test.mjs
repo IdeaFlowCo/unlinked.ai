@@ -44,6 +44,13 @@ test('community outbox pending snapshots and minimal receipts survive actual sha
  assert.ok(original.schema.some(s=>s.labelsOrTypes[0]==='UnlinkedGroupChatJob'&&s.type==='UNIQUENESS'&&s.properties[0]==='id'))
  await importGraph(target,neo4j,original,'fixture-community-outbox')
  await verifyGraph(target,neo4j,original,'fixture-community-outbox')
+ // OpenChat creates its receipt constraint before any community is activated.
+ await query(target,'CREATE CONSTRAINT unlinked_group_sync_id FOR (n:UnlinkedGroupSync) REQUIRE n.groupId IS UNIQUE')
+ const schemaOnly=await exportSharedGraph(target,neo4j,'fixture-community-outbox')
+ assert.equal(schemaOnly.schema.some(s=>s.labelsOrTypes.includes('UnlinkedGroupSync')),false)
+ await query(target,'CREATE (:UnlinkedGroupSync {groupId:$id,revision:1,fingerprint:"owned-by-openchat"})',{id})
+ await verifyGraph(target,neo4j,original,'fixture-community-outbox')
+
  const recovered=createNeo4jCollectiveGroupsStore(target)
  assert.deepEqual((await recovered.chatJob(id)).lastSnapshot,snapshot)
  await recovered.chatFinish(id,1,{done:true})
@@ -54,6 +61,8 @@ test('community outbox pending snapshots and minimal receipts survive actual sha
  await recovered.chatPrepare(id,2,deletion,'deleted-fingerprint')
  await recovered.chatFinish(id,2,{done:true})
  const shared=JSON.parse(JSON.stringify(await exportSharedGraph(target,neo4j,'fixture-community-outbox')))
+ assert.equal(shared.nodes.some(n=>n.label==='UnlinkedGroupSync'),false)
+ assert.equal(shared.schema.some(s=>s.labelsOrTypes.includes('UnlinkedGroupSync')),false)
  const restored=decode(shared.nodes.find(n=>n.label==='UnlinkedGroupChatJob').properties,neo4j)
  assert.deepEqual(Object.keys(restored).sort(),['done','id','revision'])
  await assert.rejects(rollbackGraph(target,neo4j,original,'fixture-community-outbox'),/rollback_later_edit/)
@@ -63,4 +72,15 @@ test('community outbox pending snapshots and minimal receipts survive actual sha
  const finalReceipt=await createNeo4jCollectiveGroupsStore(source).chatJob(id)
  assert.equal(finalReceipt.revision,2);assert.equal(finalReceipt.done,true)
  assert.equal(finalReceipt.group,undefined);assert.equal(finalReceipt.organizer,undefined)
+ // A successful Unlinked rollback must retain OpenChat's independent receipt.
+ await query(source,'CREATE CONSTRAINT unlinked_group_sync_id FOR (n:UnlinkedGroupSync) REQUIRE n.groupId IS UNIQUE')
+ await query(source,'CREATE (:UnlinkedGroupSync {groupId:$id,revision:9,fingerprint:"retain-external"})',{id})
+ await verifyGraph(source,neo4j,shared,'fixture-community-restored')
+ await rollbackGraph(source,neo4j,shared,'fixture-community-restored')
+ const receipt=(await query(source,'MATCH(n:UnlinkedGroupSync {groupId:$id}) RETURN n.revision AS revision,n.fingerprint AS fingerprint',{id})).records[0]
+ assert.equal(receipt.get('revision').toNumber(),9);assert.equal(receipt.get('fingerprint'),'retain-external')
+ assert.equal((await query(source,'SHOW CONSTRAINTS YIELD name WHERE name="unlinked_group_sync_id" RETURN count(*) AS n')).records[0].get('n').toNumber(),1)
+ await query(source,'CREATE (:UnlinkedGroupSyncFuture {id:"unknown"})')
+ await assert.rejects(exportSharedGraph(source,neo4j,'fixture-community-restored'),/unexpected_private_domain_label/)
+
 })

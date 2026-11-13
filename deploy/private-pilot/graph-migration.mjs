@@ -70,8 +70,9 @@ const METADATA_LABELS = ['UnlinkedGraphMigration', 'UnlinkedGraphMigrationRecord
 // another application. OpenChat's accepted-connection receipt ledger
 // (docs/openchat-accepted-connections.md) keeps the standalone
 // UnlinkedConnectionSync label and its requestId constraint. Unlinked never
-// exports, restores or drops it; shared snapshots stay limited to LABELS.
-export const EXTERNAL_LABELS = Object.freeze(['UnlinkedConnectionSync'])
+// exports, restores or drops it. OpenChat also owns UnlinkedGroupSync and its
+// groupId constraint; shared snapshots stay limited to LABELS.
+export const EXTERNAL_LABELS = Object.freeze(['UnlinkedConnectionSync', 'UnlinkedGroupSync'])
 const privateLabel = label => (label.startsWith('Unlinked') || label.startsWith('Operational')) && !EXTERNAL_LABELS.includes(label)
 const unknownPrivateLabel = label => privateLabel(label) && !LABELS.includes(label) && !METADATA_LABELS.includes(label)
 async function requireBoundedDomain(session, neo4j) {
