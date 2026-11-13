@@ -45,6 +45,20 @@ for controls, confirmed removal and preservation of imported observations. For l
 For private collections, see [Lists and their List/Table controls](docs/private-list-presentation.md).
 For community introductions, reviewed context imports and personal ask tracking, see [Community introductions and asks](docs/community-intake.md).
 
+## Your data
+
+Open **Me → Settings & agent setup → Your data → Alternate viewer** to find
+[Mew Neo4j](https://mew-neo4j.ideaflow.app/), an alternate read-only viewer for
+Noos records available to your account. This is a restricted preview still being
+prepared, with incomplete Unlinked data coverage. The links provide navigation
+only: they do not sync or migrate data or transfer Unlinked credentials.
+
+The same section links to [Social](https://social.ideaflow.app/),
+[Noos](https://globalbr.ai/) and [WikiHub](https://wikihub.md/); each app shows
+the content available to your account there. **Export from Unlinked** retains
+the existing network downloads (see [download options](docs/bulk-exports.md))
+and **Download everything (JSON)** account export.
+
 ## Core Features & Technologies
 
 - Next.js web application with React for a modern, fast user interface
