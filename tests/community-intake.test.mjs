@@ -573,7 +573,7 @@ test('organizer edits independent chat invitations without leaking member-only g
  for(const route of [base,base+'/welcome',base+'/community',base+'/community/'+memberId]) {
   const response=await b.get(route,member.cookie),html=await response.text();assert.equal(response.status,200)
   assert.match(html,/Build together/);assert.match(html,/&lt;script&gt;bad&lt;\/script&gt;/);assert.match(html,/Join the WhatsApp group chat/);assert.doesNotMatch(html,/<script>bad/)
-  assert.ok(html.includes(`href="${openChatUrl}" target="_blank" rel="noopener noreferrer">Join the OpenChat group chat`))
+  assert.ok(html.includes(`href="${openChatUrl}" target="_blank" rel="noopener noreferrer">Message the group`))
   assert.doesNotMatch(html,/name="openChatUrl"/)
   assert.match(response.headers.get('cache-control'),/no-store/)
   await paginationEvidence({[route===base?'group-member-settings.html':route.endsWith('/welcome')?'group-welcome.html':route.endsWith('/community')?'group-community-metadata.html':'group-member-metadata.html']:html})
