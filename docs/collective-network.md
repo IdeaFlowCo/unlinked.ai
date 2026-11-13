@@ -103,3 +103,22 @@ account, import, email, OpenChat send, or production graph is needed.
 composition with a public People projection initializes its additive ID
 constraint when the normal release is started. Coordinate any production
 activation separately; no migration or rollout is part of source review.
+
+## Group description and chat
+
+Organizers can edit a plain-text description (up to 2,000 characters) and
+optional WhatsApp and OpenChat invitations under **About this group**. Descriptions
+render as escaped plain text, preserving line breaks. The group service
+checks organizer authority and updates the existing group document atomically;
+no migration or separate membership store is required. Empty values clear the
+fields independently. WhatsApp accepts validated HTTPS `chat.whatsapp.com`
+invitation URLs. OpenChat accepts only `https://chat.ideaflow.app/i/` followed
+by 32 letters, digits, underscores or hyphens, with no credentials, nondefault
+port, query or fragment. The metadata form alone has a 32 KiB encoded-body
+limit, including its CSRF token; other group-management forms keep their 4 KiB
+limit. Community introduction and intake forms retain their separate 64 KiB limit.
+These fields appear in authenticated group, introduction, community and
+group-local member views, and the organizer’s export;
+they are excluded from direct and flyer invitation previews. Opening the link
+lets the member choose whether to join that chat; saving it sends no message and does
+not synchronize membership or content to either service.
