@@ -56,3 +56,8 @@ rechecks current public listing: removed, suspended and unlisted profiles drop
 out. Turning off sharing invalidates the link; creating another rotates it.
 Shared pages are no-store, noindex and no-referrer. No list is shared by saving it.
 These browser routes do not add agent tools or expand existing agent grants.
+
+
+### Cold owner reads
+
+Cold owner observation reads use the shared [publication reader contract](private-noos-staging.md#publication-and-scale), which owns batch bounds, authorization, fallback behavior and regression coverage.

@@ -191,7 +191,7 @@ export function createNoosOwnerBackend({ baseUrl, accessToken, ownerId, fetchImp
 
 // Agent grants never get the operational token or direct resource/asset access.
 // Every call reads the live publication: retained rows cannot bypass tombstones.
-export function createScopedImportReader({ readResource, readAsset, grant, maxAssertions = PRIVATE_PUBLICATION_ASSERTION_LIMIT, limitError = 'private_publication_support_limit', rowCache = null }) {
+export function createScopedImportReader({ readResource, readResources, readAsset, grant, maxAssertions = PRIVATE_PUBLICATION_ASSERTION_LIMIT, limitError = 'private_publication_support_limit', rowCache = null }) {
   if (!grant || !grant.ownerId || !Array.isArray(grant.importIds) || grant.importIds.length > 32) throw new Error('explicit_import_grant_required')
   if (!Number.isSafeInteger(maxAssertions) || maxAssertions < 0 || maxAssertions > PRIVATE_PUBLICATION_ASSERTION_LIMIT) throw new Error('private_publication_support_limit')
   const ownerId = grant.ownerId, allowed = new Set(grant.importIds)
@@ -218,9 +218,8 @@ export function createScopedImportReader({ readResource, readAsset, grant, maxAs
       const counts = resource.payload.counts
       if (!counts || !['accepted', 'indexed', 'rejected', 'skippedFiles', 'failedFiles'].every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0) ||
           !Array.isArray(ids) || ids.length > PRIVATE_PUBLICATION_ASSERTION_LIMIT || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) || new Set(ids).size !== ids.length || counts.accepted !== ids.length || counts.indexed !== ids.length) throw new Error('private_publication_incomplete')
-      const readRow = async assertionId => {
+      const readRow = async (assertionId, assertion) => {
         signal?.throwIfAborted()
-        const assertion = await readResource('assertion', assertionId)
         if (!assertion || assertion.deleted || assertion.sourceOwnerId !== ownerId || assertion.payload?.id !== assertionId || assertion.payload.ownerId !== ownerId || assertion.payload.importId !== id) throw new Error('private_publication_incomplete')
         let row = assertion.payload
         if (row.fullObservationAsset) {
@@ -231,12 +230,20 @@ export function createScopedImportReader({ readResource, readAsset, grant, maxAs
         signal?.throwIfAborted()
         return row
       }
-      // Eight in-flight immutable observations bound memory/graph pressure while
-      // avoiding one full transport round trip per connection. Preserve manifest
-      // order and fail the whole read if any row or asset fails its owner checks.
-      for (let start = 0; start < ids.length; start += 8) {
+      // A process-only owner backend can read 128 bounded observations in one
+      // graph transaction. Assets still hydrate at most eight at a time. Other
+      // backends retain the existing eight-way single-resource path.
+      const batchSize = typeof readResources === 'function' ? 128 : 8
+      for (let start = 0; start < ids.length; start += batchSize) {
         signal?.throwIfAborted()
-        rows.push(...await Promise.all(ids.slice(start, start + 8).map(readRow)))
+        const batch = ids.slice(start, start + batchSize)
+        const values = typeof readResources === 'function' ? await readResources('assertion', batch)
+          : await Promise.all(batch.map(id => readResource('assertion', id)))
+        if (!Array.isArray(values) || values.length !== batch.length) throw Error('private_publication_incomplete')
+        for (let offset = 0; offset < batch.length; offset += 8) {
+          signal?.throwIfAborted()
+          rows.push(...await Promise.all(batch.slice(offset, offset + 8).map((id, i) => readRow(id, values[offset + i]))))
+        }
       }
       return { ids, rows }
     }
