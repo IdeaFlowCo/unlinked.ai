@@ -337,16 +337,21 @@ check('shared recovery refuses unknown private domains and empty schema instead 
   await assert.rejects(exportSharedGraph(target, neo4j, 'fixture-future-domain'), /unsupported_schema/)
   await assert.rejects(verifyGraph(target, neo4j, snapshot, 'fixture-future-domain'), /target_schema_conflict/)
 })
-check('OpenChat accepted-connection receipts are external: shared export, import and verification ignore and preserve them', async () => {
+check('OpenChat connection and group receipts are external: shared recovery ignores and preserves them', async () => {
   const snapshot = await exportGraph(source, neo4j)
   await importGraph(target, neo4j, snapshot, 'fixture-openchat-receipt')
   await query(target, 'CREATE CONSTRAINT unlinked_connection_sync_request IF NOT EXISTS FOR (receipt:UnlinkedConnectionSync) REQUIRE receipt.requestId IS UNIQUE')
   await query(target, "CREATE (:UnlinkedConnectionSync {requestId:'fixture-request', status:'synced'})")
+  await query(target, 'CREATE CONSTRAINT unlinked_group_sync_id IF NOT EXISTS FOR (receipt:UnlinkedGroupSync) REQUIRE receipt.groupId IS UNIQUE')
+  await query(target, "CREATE (:UnlinkedGroupSync {groupId:'fixture-group', revision:1})")
   const shared = await exportSharedGraph(target, neo4j, 'fixture-openchat-receipt')
   assert.equal(shared.nodes.some(node => node.label === 'UnlinkedConnectionSync'), false)
   assert.equal(shared.schema.some(entry => entry.labelsOrTypes.includes('UnlinkedConnectionSync')), false)
+  assert.equal(shared.nodes.some(node => node.label === 'UnlinkedGroupSync'), false)
+  assert.equal(shared.schema.some(entry => entry.labelsOrTypes.includes('UnlinkedGroupSync')), false)
   assert.equal((await verifyGraph(target, neo4j, snapshot, 'fixture-openchat-receipt')).parity, true)
   assert.equal((await query(target, 'MATCH (n:UnlinkedConnectionSync) RETURN n.requestId AS id')).records[0].get('id'), 'fixture-request')
+  assert.equal((await query(target, 'MATCH (n:UnlinkedGroupSync) RETURN n.groupId AS id')).records[0].get('id'), 'fixture-group')
   // A different unknown Unlinked label is still refused.
   await query(target, 'CREATE (:UnlinkedConnectionSyncFuture {id:"x"})')
   await assert.rejects(exportSharedGraph(target, neo4j, 'fixture-openchat-receipt'), /unexpected_private_domain_label/)
