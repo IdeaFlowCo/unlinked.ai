@@ -170,10 +170,8 @@ tools for each scope; historical entries are immutable.
   A pre-v7 **OAuth connection** keeps exactly its consented scope and needs
   reconnection to consent to `private_notes`. Manual-key permissions
   (connection requests, private notes) are switched in Settings; OAuth apps
-  require actual consent/reconsent for additional permissions. Current issuance follows
-  `CURRENT_ACCOUNT_GRANT_VERSION` in the implementation catalog. See the
-  [investor list workflow](investor-csv.md) and [whole-result queries and downloads](bulk-exports.md)
-  for the added tools within those existing permissions.
+  require actual consent/reconsent for additional permissions. Current issuance is
+  catalog v9; its investor tools are described in the [investor list workflow](investor-csv.md).
 
 OpenChat's production integration — stateless JSON-RPC `tools/call` POSTs to
 `/mcp` invoking `unlinked_search_network` / `unlinked_search_everyone` — is
@@ -225,17 +223,15 @@ This vocabulary may be extended, never renamed.
 - Cursors are opaque strings; treat them as such. They are bound to the
   owner, query, degree and data revision — any change yields `cursor_invalid`.
 - `limit` is 1–50; default and maximum page size is **50**.
-- Tool/JSON responses are capped at **1 MiB**; [streamed export attachments](bulk-exports.md) have no response-size truncation.
+- Every response is capped at **1 MiB**.
 - List responses carry `total`, a `revision` (snapshot or content hash — if it
   changes between pages, restart) and `nextCursor` only when more rows exist.
 
 ## Rate limits and latency
 
 - Deterministic tools (`whoami`, `list_people`, `list_connections`,
-  `get_profile`, `list_connection_requests`, `list_notifications`, contact lookup,
-  private-notes, investor and export tools): 120 requests/min **per grant owner**.
-  Owner-network reads can exceed downstream timeouts on large accounts; the cache
-  below reduces repeated reads but does not guarantee a latency bound.
+  `get_profile`, `list_connection_requests`, `list_notifications`): 120
+  requests/min **per grant owner**; expected well under 1 s p95 at the current index size (~16k profiles, in-memory snapshot).
 - AI tools (`ai_search`, `search_network` free-text mode, `search_everyone`):
   20/min, 2000/day and 2 in flight **per grant owner**, plus a shared ceiling
   of 8 concurrent AI calls per runtime. These budgets are enforced on the
@@ -248,20 +244,6 @@ This vocabulary may be extended, never renamed.
   fails typed `upstream_unavailable` when the budget elapses, so a consumer
   wanting a hard 10 s SLA should send `timeoutMs: 9000` and fall back to the
   deterministic listings. Streamed/async AI results are not offered in v1.
-
-[Verified accounts](verified-access.md) bypass these core request budgets;
-permissions and transport limits still apply. The whole-result export service
-owns its [internal paging admission rules](bulk-exports.md#agent-contract-and-real-bounds).
-
-Degree-one `unlinked_list_connections` and `unlinked_lookup_contact` share a
-bounded account-network cache keyed by owner/user, separate from the browser
-cache. `limits.networkFreshMs` defaults to 30 seconds; zero disables reuse.
-A held read requires the owner's live import-ID list to remain readable and
-unchanged. Mutating tool calls invalidate that owner's entry, and a typed
-`not_found` against a held contact lookup retries once with a fresh read. Other
-changes may take until entry expiry to appear. Canceling one caller does
-not cancel the shared fill. Fresh account-network reads still obey the
-[verified observation-row reuse contract](private-noos-staging.md#publication-and-scale).
 
 ## Privacy and field visibility
 
@@ -594,11 +576,17 @@ add AI-search aliases under an `ask` name.
   LinkedIn URL evidence, never assertion ids. `revision` values are
   snapshot-scoped and must not be used as long-lived identity.
 
-## Whole-result queries and downloads
+## Bulk export (deliberately not offered in v1)
 
-`unlinked_export_network` and its HTTP preparation/download routes are owned by
-the [network and list download contract](bulk-exports.md), including permission,
-completion and publication-revision fences.
+A revision-pinned NDJSON public export (to work around the deterministic
+budget for agent-side full search) was evaluated and **skipped**: the
+published snapshot is computed live and has no persisted revision history, so
+a pinned export would require new storage with expiry guarantees to prove
+that a stale pinned revision can never resurrect a tombstoned (deleted)
+person. Until an expiring, deletion-propagating revision store exists, bulk
+needs are served by `list_people` pagination (50/page inside the 120/min
+budget covers the full ~16k-profile index in ~3 minutes, always at the live
+revision, which is tombstone-safe by construction).
 
 ## Optional connection actions
 

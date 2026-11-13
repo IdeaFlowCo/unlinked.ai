@@ -144,7 +144,7 @@ MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment s
 
 ## Verified account access
 
-See the repository's [verified-access contract](https://github.com/IdeaFlowCo/unlinked.ai/blob/main/docs/verified-access.md) for operator-granted priority admission and quota exemptions. For scoped browser and agent downloads, use the whole-result workflow below.
+Verified accounts receive priority admission and no core Unlinked request quotas. Visible-network downloads are browser-session-only at /network/export; existing agent scopes still apply. External provider allowances and transport bounds remain. See docs/verified-access.md.
 
 ## Whole-result queries and downloads
 

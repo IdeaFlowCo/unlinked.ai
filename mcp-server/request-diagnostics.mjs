@@ -174,8 +174,7 @@ export function safeDiagnosticRecord(value) {
   return result
 }
 
-// Fixed lane/route/reason combinations bound aggregate rows per completed minute,
-// flushed on the next read.
+// At most 51 aggregate rows per completed minute, flushed on the next read.
 // No account identifiers, client addresses, URL parameters or queries enter it.
 export function createPublicAdmissionDiagnostics({ emit, now = () => new Date() }) {
   let window = null

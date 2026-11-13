@@ -32,7 +32,6 @@ const queryMatches=(row,query)=>{
   if(!query.trim())return true
   const cells=[]
   const visit=value=>{if(typeof value==='string'||typeof value==='number')cells.push(String(value));else if(Array.isArray(value))value.forEach(visit);else if(value&&typeof value==='object')Object.values(value).forEach(visit)}
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Omit identity and projection metadata from searchable text; handle source fields separately.
   const {source,sourceRecords,connections,id,profileId,url,detailLevel,enrichmentStatus,notes,...values}=row
   visit(values);visit(notes?.map(note=>typeof note==='string'?note:note.text));visit(sourceRecords?.map(record=>record.fields))
   const haystack=normalized(cells.join('\n')),terms=[...normalized(query).matchAll(/"([^"]+)"|(\S+)/g)].map(match=>match[1]??match[2])
