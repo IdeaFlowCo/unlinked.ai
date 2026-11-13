@@ -58,3 +58,22 @@ Shared pages are no-store, noindex and no-referrer. No list is shared by saving 
 These browser routes do not add agent tools or expand existing agent grants.
 
 Profile headers also show **1st · Your connection** to the signed-in viewer when the same exact-identity network read recognizes the person, or an accepted Unlinked connection exists without an import. **Date added** is the earliest known import date; **Connected on** stays separate and is omitted when unknown. These are private viewer context, never public API fields. The existing bounded owner cache supplies the header; if unavailable, no relationship is inferred. Self and blocked profiles suppress this context. Metadata rows have vertical spacing; removal stays available in More and below profile content.
+
+### Cold owner reads
+
+The standalone composition provides a process-only assertion batch capability
+after verified owner resolution. It reads at most 128 exact resource IDs per
+transaction, joins the live active binding and user, and rechecks authority
+afterward. It has no HTTP, browser or grant endpoint. Immutable observation
+documents are bounded to 64 KiB (the publisher externalizes fields above 60 KiB
+to private digest-verified assets). Assets still hydrate at most eight at a time.
+The scoped import reader retains manifest ordering/counts, per-row owner/import
+checks, before/after publication revisions, tombstones and cache-erasure fences.
+Backends without this capability retain eight parallel single-resource reads.
+
+Cold signed-in directory and account queries share this reader. Batch-call
+regressions execute both account hydration and an authenticated `/network`
+request with over 3,000 synthetic observations; real graph tests verify binding,
+user isolation, missing rows, tombstones and oversized-document refusal. A real
+production read-only comparison is operational evidence, separate from the
+synthetic browser-session fixture and from any claim of client end-to-end speed.
