@@ -1,4 +1,4 @@
-import { communityChatId, readableGroupSlug, groupUrlKey } from './community-chat-id.mjs'
+import { communityChatId, readableGroupSlug, groupUrlKey, validCommunityIdentity } from './community-chat-id.mjs'
 import { randomUUID } from 'node:crypto'
 import { groupActorKey } from './collective-groups-store.mjs'
 import { concurrentMap } from './concurrent-map.mjs'
@@ -56,7 +56,7 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
     }
     return { group, role }
   }
-  const update = async (id, transition) => (await store.change(id, transition)) ?? fail()
+  const update = async (id, transition, chatOrganizer) => (await store.change(id, transition, chatOrganizer)) ?? fail()
   const own = (actor, group) => { if (!same(actor, group.organizer)) fail() }
   const availableInvite = (group, inviteId, actor) => group?.invites.find(row => row.id === inviteId && same(row.actor, actor) && row.expiresAt > now())
   const pending = group => group.invites.filter(row => row.expiresAt > now())
@@ -108,12 +108,15 @@ export function createCollectiveGroups({ store, active, blocked = async () => fa
       const proof = await verifyChatActivation({ actor: binding(actor), groupId: id, conversationId: existingConversationId })
       if (proof?.healthy !== true || proof?.organizerVerified !== true || proof?.conversationId !== existingConversationId) fail('chat_activation_unavailable')
       await authorized(actor, id, true)
+      const identity = await active(binding(actor))
+      if (!validCommunityIdentity(identity) || !validCommunityIdentity(proof.organizer) || proof.organizer.issuer !== identity.issuer || proof.organizer.subject !== identity.subject) fail('chat_activation_unavailable')
+      const chatOrganizer = { issuer: identity.issuer, subject: identity.subject, name: 'Organizer' }
       await update(id, group => {
         own(actor, group)
         if (group.chatManaged === true && group.chatConversationId !== existingConversationId) fail('chat_binding_conflict')
         if (JSON.stringify(group) !== JSON.stringify(before)) fail('review_changed')
         return { ...group, chatManaged: true, chatConversationId: existingConversationId }
-      })
+      }, chatOrganizer)
       return this.detail(actor, id)
     },
     async reconcileActor(actor) {

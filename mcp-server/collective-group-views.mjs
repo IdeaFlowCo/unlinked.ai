@@ -101,11 +101,12 @@ export function renderGroup(chrome, group, origin) {
   }).join('') : ''
   const members = group.organizer ? group.members.map(member => `<article><h3>${profileLink(member.profileId, member.name)}</h3>${form(`${base}/members/${member.id}/remove`, csrf, 'Remove member', '', 'quiet')}</article>`).join('') : ''
   return shell(chrome, group.name, back('/groups', 'Collective network') + title(group.name, 'Private group · ' + (group.organizer ? 'Organizer' : 'Member')) +
-    renderGroupChatActions(group) + (!group.organizer ? form(base+'/leave',csrf,'Leave group','<p class="small">Leaving also removes you from the community chat.</p>') : '') +
+    renderGroupChatActions(group) +
     card('About this group', renderGroupDescription(group) + (group.organizer ? `<details><summary>Edit description and group chat</summary><p class="small">Visible to group members. The community chat follows group membership. WhatsApp is a separate optional chat.</p>${form(base + '/about', csrf, 'Save group information', `<label>Group address<select name="urlMode"><option value="readable"${group.urlMode!=='opaque'?' selected':''}>Readable name</option><option value="opaque"${group.urlMode==='opaque'?' selected':''}>Opaque ID</option></select></label><label>Group description<textarea name="description" maxlength="2000" rows="5">${h(group.description)}</textarea></label><label>WhatsApp invitation link<input name="chatUrl" type="text" inputmode="url" maxlength="500" value="${h(group.chatUrl)}" placeholder="https://chat.whatsapp.com/…"></label><label>OpenChat invitation link<input name="openChatUrl" type="text" inputmode="url" maxlength="500" value="${h(group.openChatUrl)}" placeholder="https://chat.ideaflow.app/i/…"></label>`)}</details>` : '')) +
     card('Your community', `<p><a class="button" href="${base}/community">People, asks and offers →</a></p><p><a href="${base}/welcome">Add or update your introduction</a></p>`) + list + (group.organizer ? renderFlyerManagement(group, csrf, origin) + card('Members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
     card('Invite a member', '<p class="small">Use the profile link of an existing Unlinked member. Creating an invitation sends nothing. To share the link, copy it into an OpenChat conversation.</p>' + inviteForm +
-      (invites ? `<div class="panel list">${invites}</div>` : '')) : `<p>${chat(group.organizerProfileId, 'Message the organizer')}</p>`))
+      (invites ? `<div class="panel list">${invites}</div>` : '')) : `<p>${chat(group.organizerProfileId, 'Message the organizer')}</p>`) +
+    (!group.organizer ? form(base+'/leave',csrf,'Leave group','<p class="small">Leaving also removes you from the community chat.</p>','quiet') : ''))
 }
 
 export function renderGroupInvitation(chrome, invitation, invitePath) {

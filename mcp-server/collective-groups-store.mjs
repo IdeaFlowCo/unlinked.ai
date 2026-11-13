@@ -13,11 +13,12 @@ const chatGroup = (group, deleted) => ({
   ...(group.chatConversationId ? { chatConversationId: group.chatConversationId } : {}),
   ...(!deleted ? { organizer: group.organizer, members: group.members.map(({ actor, name }) => ({ actor, name })) } : {}),
 })
-const nextJob = (old, group, deleted = false) => {
+const nextJob = (old, group, deleted = false, chatOrganizer) => {
+  const organizer = old?.organizer ?? chatOrganizer
   const fence = { id: group.id, revision: (old?.revision ?? 0) + 1 }
-  if (deleted && !old?.organizer) return { ...fence, done: true }
+  if (deleted && !organizer && !group.chatConversationId) return { ...fence, done: true }
   return { ...fence, group: chatGroup(group, deleted), deleted, nextAttemptAt: 0, done: false,
-    ...(old?.organizer ? { organizer: old.organizer } : {}) }
+    ...(organizer ? { organizer: structuredClone(organizer) } : {}) }
 }
 const completedJob = (job, fingerprint) => ({
   id: job.id, revision: job.revision, done: true, ...(!job.deleted ? { fingerprint } : {}),
@@ -26,8 +27,8 @@ const completedJob = (job, fingerprint) => ({
 
 export function createMemoryCollectiveGroupsStore() {
   const rows = new Map(), jobs = new Map()
-  const queue = (group, deleted = false) => {
-    if (group.chatManaged === true) jobs.set(group.id, nextJob(jobs.get(group.id), group, deleted))
+  const queue = (group, deleted = false, chatOrganizer) => {
+    if (group.chatManaged === true) jobs.set(group.id, nextJob(jobs.get(group.id), group, deleted, chatOrganizer))
   }
   return {
     async initialize() {},
@@ -62,12 +63,12 @@ export function createMemoryCollectiveGroupsStore() {
       const key = groupActorKey(actor)
       return structuredClone([...rows.values()].filter(group => actorsOf(group).includes(key)))
     },
-    async change(id, update) {
+    async change(id, update, chatOrganizer) {
       if (!rows.has(id)) return null
       const current = structuredClone(rows.get(id)), next = update(structuredClone(current))
       if (next) rows.set(id, structuredClone(next))
       else rows.delete(id)
-      queue(next ?? current, !next)
+      queue(next ?? current, !next, chatOrganizer)
       return next
     },
   }
@@ -82,13 +83,13 @@ export function createNeo4jCollectiveGroupsStore(driver, database = 'neo4j') {
   const match = 'MATCH (g:UnlinkedCollectiveGroup {id:$id})'
   const fields = group => ({ id: group.id, actors: actorsOf(group), document: JSON.stringify(group), slug: group.slug ?? null, chatManaged: group.chatManaged === true })
   const readJob = r => r ? { ...r, ...(r.document ? { group: JSON.parse(r.document) } : {}), revision: Number(r.revision), attempts: Number(r.attempts ?? 0), ...(r.organizer ? { organizer: JSON.parse(r.organizer) } : {}), ...(r.lastSnapshot ? { lastSnapshot: JSON.parse(r.lastSnapshot) } : {}) } : null
-  const queue = async (tx, group, deleted = false) => {
+  const queue = async (tx, group, deleted = false, chatOrganizer) => {
     if (group.chatManaged !== true) return
     await tx.run(`MERGE (j:UnlinkedGroupChatJob {id:$id})
-      SET j.revision=coalesce(j.revision,0)+1
-      WITH j SET j=CASE WHEN $deleted AND j.organizer IS NULL THEN {id:j.id,revision:j.revision,done:true}
+      SET j.revision=coalesce(j.revision,0)+1,j.organizer=coalesce(j.organizer,$organizer)
+      WITH j SET j=CASE WHEN $deleted AND NOT $existingConversation AND j.organizer IS NULL THEN {id:j.id,revision:j.revision,done:true}
         ELSE {id:j.id,revision:j.revision,document:$document,deleted:$deleted,done:false,nextAttemptAt:0,organizer:j.organizer} END`,
-      { id: group.id, document: JSON.stringify(chatGroup(group, deleted)), deleted })
+      { id: group.id, document: JSON.stringify(chatGroup(group, deleted)), deleted, existingConversation: Boolean(group.chatConversationId), organizer: chatOrganizer ? JSON.stringify(chatOrganizer) : null })
   }
   const lockedGroup = async (tx, id) => documents(await tx.run(match + ' SET g.transitionLock=coalesce(g.transitionLock,0)+1 RETURN g.document AS document', { id }))[0]
   return {
@@ -143,14 +144,14 @@ export function createNeo4jCollectiveGroupsStore(driver, database = 'neo4j') {
     async forActor(actor) {
       return documents(await transaction('READ', tx => tx.run('MATCH (g:UnlinkedCollectiveGroup) WHERE $key IN g.actors RETURN g.document AS document', { key: groupActorKey(actor) })))
     },
-    async change(id, update) {
+    async change(id, update, chatOrganizer) {
       return transaction('WRITE', async tx => {
         const current = await lockedGroup(tx, id)
         if (!current) return null
         const next = update(current)
         if (next) await tx.run(match + ' SET g.document=$document,g.actors=$actors,g.slug=$slug,g.chatManaged=$chatManaged', fields(next))
         else await tx.run(match + ' DETACH DELETE g', { id })
-        await queue(tx, next ?? current, !next)
+        await queue(tx, next ?? current, !next, chatOrganizer)
         return next
       })
     },
