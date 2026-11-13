@@ -8,6 +8,8 @@ conversations, history, unread state and realtime events through Unlinked's
 server, so the standalone OpenChat apps show the same inbox.
 Member profiles open their direct conversation inside Unlinked; unclaimed
 profiles show **Not on Unlinked yet** and an invitation.
+For managed community chats and their release gates, see
+[Collective network](collective-network.md#community-chat-and-addresses).
 
 The public action passes only the canonical public profile URL. OpenChat resolves
 its recipient server-to-server through `POST /api/messaging/v1/recipient`, sending

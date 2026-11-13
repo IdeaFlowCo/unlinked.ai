@@ -583,7 +583,7 @@ test('organizer edits independent chat invitations without leaking member-only g
  const editHtml=await (await b.get(base,owner.cookie)).text()
  assert.ok(editHtml.includes(`name="chatUrl" type="text" inputmode="url" maxlength="500"`))
  assert.ok(editHtml.includes(`name="openChatUrl" type="text" inputmode="url" maxlength="500" value="${openChatUrl}"`))
- assert.match(editHtml,/Each chat link opens a separate invitation you can choose to accept/)
+ assert.match(editHtml,/The community chat follows group membership/)
  await paginationEvidence({'group-organizer-settings.html':editHtml})
  for(const cookie of [undefined,stranger.cookie]) {
   const invitation=await b.get(base+'/join/'+flyer.id,cookie);assert.equal(invitation.status,200);assert.doesNotMatch(await invitation.text(),/Build together|chat.whatsapp|chat.ideaflow.app\/i\//)
@@ -628,7 +628,7 @@ test('group member profiles bind entries to roster identities and explain matche
  const roster=await b.groups.roster(alice,group.id),bobId=roster.find(r=>r.name==='Bob').id,base='/groups/'+group.id+'/community'
  entries=[{id:1,title:'Need React accessibility advice',kind:'ask',status:'open',ownerKey:identityKey(identity(alice))},{id:2,title:'I offer React accessibility reviews',kind:'offer',status:'open',ownerKey:identityKey(identity(bob)),name:'Untrusted name'},{id:3,title:'PRIVATE outsider detail',kind:'offer',status:'open',ownerKey:identityKey(identity(carol))}]
  const community=await b.get(base,owner.cookie),html=await community.text();assert.equal(community.status,200)
- assert.match(html,/Suggested connections/);assert.match(html,/Shared topics: accessibility, react/);assert.match(html,new RegExp(base+'/'+bobId));assert.doesNotMatch(html,/PRIVATE outsider|Untrusted name|ownerKey|bob-user/)
+ assert.match(html,/Suggested connections/);assert.match(html,/Shared topics: accessibility, react/);assert.match(html,new RegExp('/groups/'+group.urlKey+'/community/'+bobId));assert.doesNotMatch(html,/PRIVATE outsider|Untrusted name|ownerKey|bob-user/)
  const profile=await b.get(base+'/'+bobId,owner.cookie),profileHtml=await profile.text();assert.equal(profile.status,200)
  assert.match(profileHtml,/<title>Bob · Builders · Community/);assert.match(profileHtml,/I offer React accessibility reviews/);assert.doesNotMatch(profileHtml,/Need React accessibility advice|PRIVATE outsider/)
  await paginationEvidence({'community-suggested-connections.html':html,'community-member-profile.html':profileHtml})
@@ -688,4 +688,57 @@ test('matching bounds topic reads on a maximum 500-entry page', {timeout:10000},
  assert.equal(titleReads,500);assert.equal(bodyReads,500)
  assert.deepEqual(matches.map(m=>m.memberId),Array.from({length:6},(_,i)=>'member-'+(250+i)))
  assert.ok(matches.every(m=>m.mine===rows[0]&&m.topics.join(',')==='accessibility,postgres,query,react'))
+})
+
+test('native group chat is same-tab with a separate optional app and readable authenticated routes',async t=>{
+ const b=await browser(t,{communityIntake:{group:async()=>({entries:[]})}}, {chatEnabled:true})
+ const owner=await b.login('alice'),member=await b.login('bob'),outsider=await b.login('carol')
+ const group=await b.groups.create(alice,'Boulder Tech Builders'),base='/groups/'+group.urlKey
+ const flyer=await b.groups.createFlyer(alice,group.id,{capacity:20,approval:false})
+ await b.groups.joinFlyer(bob,group.id,flyer.id,{name:'Bob',profileId:null,source:{}})
+ const id=(await b.groups.detail(alice,group.id)).chatConversationId
+ for(const path of [base,base+'/welcome',base+'/community']) {
+  const r=await b.get(path,member.cookie);assert.equal(r.status,200);const html=await r.text()
+  assert.match(html,new RegExp(`<a class="button" href="/messages/c/${id}">Message the group</a>`))
+  assert.match(html,/Open separately in OpenChat/)
+  assert.equal((await b.get(path)).status,401)
+  assert.notEqual((await b.get(path,outsider.cookie)).status,200)
+ }
+ const memberPage=await (await b.get('/groups/'+group.id,member.cookie)).text()
+ const leaveForm=/<form method="post" action="([^"]+\/leave)">([\s\S]*?)<\/form>/.exec(memberPage)
+ assert.ok(leaveForm)
+ assert.equal(leaveForm[1],base+'/leave')
+ assert.match(leaveForm[2],/<button class="sm quiet" type="submit">Leave group<\/button>/)
+ assert.match(leaveForm[2],new RegExp('name="csrf" value="'+member.csrf+'"'))
+ assert.ok(memberPage.indexOf(leaveForm[0])>memberPage.indexOf('<h2>Shared lists</h2>'))
+ assert.ok(memberPage.indexOf(leaveForm[0])>memberPage.indexOf('Message the group</a>'))
+ assert.equal((await b.get(base+'/join/'+flyer.id)).status,200)
+ assert.equal((await b.login('bob',base)).destination,base)
+ assert.equal((await b.post(base+'/leave',member.cookie,{csrf:'wrong'})).status,400)
+ assert.equal((await b.post(base+'/leave',member.cookie,{csrf:member.csrf})).status,303)
+ assert.notEqual((await b.get(base,member.cookie)).status,200)
+ const job=await b.store.chatJob(group.id);assert.equal(job.group.members.length,0)
+ assert.equal((await b.get(base,owner.cookie)).status,200)
+})
+
+test('readable flyer sign-in and signup callbacks retain invitation and source before explicit join',async t=>{
+ const b=await browser(t),g=await b.groups.create(alice,'Readable flyer'),f=await b.groups.createFlyer(alice,g.id,{capacity:10,approval:false})
+ const path=`/groups/${g.urlKey}/join/${f.id}?src=paper&utm_campaign=builders`
+ const preview=await b.get(path);assert.equal(preview.status,200)
+ assert.match(await preview.text(),/Sign in|Continue|Join/)
+ for(const who of ['bob','new-builder']) {
+  const logged=await b.login(who,path)
+  assert.equal(logged.destination,path)
+  assert.equal((await b.store.get(g.id)).members.length,who==='bob'?0:1)
+  assert.equal((await b.get(path,logged.cookie)).status,200)
+  const joined=await b.post(path,logged.cookie,{csrf:logged.csrf,decision:'join'})
+  assert.equal(joined.status,303)
+  assert.equal(joined.headers.get('location'),`/groups/${g.id}`)
+ }
+ const stored=await b.store.get(g.id)
+ assert.equal(stored.members.length,2)
+ assert.deepEqual(stored.members.map(m=>m.flyer.inviteId),[f.id,f.id])
+ assert.deepEqual(stored.members.map(m=>m.flyer.source),Array(2).fill({src:'paper',utm_campaign:'builders'}))
+ const anonymous=await (await b.get(path)).text()
+ assert.doesNotMatch(anonymous,/bob-user|new-builder-user/)
 })

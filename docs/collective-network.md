@@ -22,13 +22,15 @@ joining or organizer approval. Creating again while the link is usable returns
 the existing link. The organizer can revoke it and issue a fresh link.
 
 Visitors can see the group title at
-`/groups/<groupId>/join/<inviteId>`. Sign-in and new-account creation return to
-that invitation. Membership requires the signed-in person's affirmative
-**Join this group** POST with the browser's CSRF token. If approval is enabled,
+`/groups/<groupKey>/join/<inviteId>` (see
+[group addresses](#community-chat-and-addresses)). Sign-in and new-account
+creation return to that invitation. Membership requires the signed-in person’s
+affirmative **Join this group** POST with the browser's CSRF token. If approval is enabled,
 the organizer must approve the request before membership is granted. Group
 capacity includes pending requests. Repeated submissions by one account retain
 one seat. Revoking the link rejects subsequent join requests and clears pending
-requests. Existing accepted members retain their membership until removed.
+requests. Existing accepted members retain their membership until removed or
+they leave.
 
 An interrupted signup can resume for 24 hours using an HttpOnly return cookie
 containing the validated flyer destination and source query. An expired OIDC
@@ -52,9 +54,10 @@ share for everyone. Revoking and sharing again creates a different URL. A member
 removed from the group cannot open any of its list URLs, even with an old link.
 Previously viewed or copied information cannot be recalled.
 
-The group ACL lives in the standalone runtime. OpenChat remains the messenger
-and its existing composer requires an explicit send; it receives no group ACL,
-list contents, or invite URL automatically. Browser mutations use the existing
+The group ACL lives in the standalone runtime. OpenChat remains the messenger;
+[community chat](#community-chat-and-addresses) describes membership delivery.
+List contents and invitation URLs are not sent to OpenChat automatically, and
+its composer still requires an explicit send. Browser mutations use the existing
 origin and CSRF protections. The organizer and recipient are bound by both
 operational owner and user IDs. Invitation and ACL transitions lock one group
 record; list access checks the active account, group membership and exact share
@@ -65,11 +68,11 @@ invitations; exports include the owner's own selections and participation.
 
 ## Attribution interface
 
-The flyer destination is `/groups/<groupId>/join/<inviteId>`. Direct invitations
-retain `/groups/<groupId>/invites/<inviteId>`. Attribution can associate those
-opaque UUIDs with a source in its own store. Flyer destinations accept one each
-of `src`, `utm_source`, `utm_medium`, `utm_campaign`, `utm_content` and
-`utm_term`, using 1–120 URL-safe identifier characters per value. The canonical
+The flyer destination is `/groups/<groupKey>/join/<inviteId>`. Direct invitations
+retain `/groups/<groupKey>/invites/<inviteId>`. Attribution can associate the
+immutable group and invitation UUIDs with a source in its own store, independently
+of readable aliases. Flyer destinations accept one each of `src`, `utm_source`,
+`utm_medium`, `utm_campaign`, `utm_content` and `utm_term`, using 1–120 URL-safe identifier characters per value. The canonical
 invitation and query travel in the existing OIDC transaction's validated
 `next` value. The affirmative join records those source fields on the accepted
 seat or pending request. The fields provide descriptive provenance.
@@ -122,10 +125,9 @@ review; its forms and links do not perform the flow. Open the generated files
 in a browser to review the organizer, invite, review and member views. No real
 account, import, email, OpenChat send, or production graph is needed.
 
-`UnlinkedCollectiveGroup` is in the graph recovery allowlist. Standalone
-composition with a public People projection initializes its additive ID
-constraint when the normal release is started. Coordinate any production
-activation separately; no migration or rollout is part of source review.
+For graph constraints, outbox recovery and production activation gates, see
+[community chat](#activation-and-safety-boundaries) below. No migration or rollout
+is part of source review.
 
 ## Group description and chat
 
@@ -142,11 +144,132 @@ limit, including its CSRF token; other group-management forms keep their 4 KiB
 limit. Community introduction and intake forms retain their separate 64 KiB limit.
 These fields appear in authenticated group, introduction, community and
 group-local member views, and the organizer’s export;
-they are excluded from direct and flyer invitation previews. When configured,
-**Message the group** is the primary OpenChat button, before the description;
-on the group detail page it appears just below the heading, outside **About this
-group**. It opens the existing chat for people who have already joined;
-otherwise, they review the invitation and choose whether to accept.
-**Join the WhatsApp group chat** remains a separate link when configured.
-Saving either link sends no message and does not synchronize membership or
-content to either service.
+they are excluded from direct and flyer invitation previews. Saving either
+invitation link sends no message. Chat actions and membership behavior are owned
+by [Community chat and addresses](#community-chat-and-addresses) below.
+
+## Community chat and addresses
+
+With the existing trusted OpenChat messaging integration configured, each managed group
+has one shared conversation. Joining (or organizer approval) queues chat membership;
+leaving/removal queues its removal. The durable outbox retries transient failures
+without duplicate conversations or messages. Delivery normally follows within a
+poll interval; while the chat service is unavailable membership updates remain
+pending. Group membership is authoritative; standalone chat invites and participant
+edits are disabled for managed conversations. WhatsApp remains optional and separate.
+
+The primary **Message the group** action opens the native Unlinked inbox in the
+same tab, just below the group heading and before the description. After roster
+delivery, the conversation appears in the member’s normal **Messages** inbox.
+**Open separately in OpenChat** is a secondary link to that same conversation.
+**Join the WhatsApp group chat** is a separate optional link. For unmanaged groups
+or when messaging is unconfigured, a saved OpenChat invitation remains the
+external fallback: it opens the existing chat for participants, while others
+review and accept the invitation separately.
+
+Non-organizers can choose **Leave group** below the shared lists and organizer
+contact action; this removes their seat and queues chat removal. The organizer
+cannot leave their own group. Existing conversations are bound through the
+verified activation service below; this preserves their history. Never change
+that binding after activation.
+
+New groups get stable readable URLs (name plus a short disambiguating suffix).
+Existing groups acquire an alias when their organizer first saves group
+information. Organizers can choose **Opaque ID** in group information; readable
+aliases stop resolving while this mode is selected. Original UUID routes and
+invitations stay valid in both modes. A readable name is not an authorization
+grant: private group content still requires membership, and anonymous invitations omit private metadata.
+
+### Activation and safety boundaries
+
+Do not deploy this Unlinked slice until the paired OpenChat membership backend
+has been reviewed and deployed. Its contract is
+`evidence/COMMUNITY-CHAT-CONTRACT.md` in the paired
+`openchat-community-membership-20261113` workspace. The server-only worker
+(`mcp-server/openchat-groups.mjs`) posts versioned snapshots to
+`https://chat.ideaflow.app/api/unlinked/groups/sync` using the existing dedicated
+`UNLINKED_MESSAGING_SECRET` (at least 32 characters). No new credential, browser
+endpoint or agent-grant tool is added.
+
+New groups are `chatManaged: true` from creation. Existing groups without that
+flag remain on their original invitation action, including after initialization,
+metadata edits and restarts. Initialization creates constraints only; it never
+queues or activates legacy groups. Standalone composition with a public People
+projection initializes the additive group ID, unique slug and outbox ID
+constraints. Native actions require both managed status and the configured
+messaging integration.
+
+After the reviewed backend is deployed and the native Unlinked release passes
+health checks, a trusted operator calls the domain service
+`groups.activateChat(organizer, groupId, { existingConversationId })`. The service
+requires the live organizer and an injected `verifyChatActivation` adapter. The
+adapter receives the server-resolved organizer, group ID and conversation ID and
+must independently verify current chat ownership and backend/native health,
+returning `{ healthy: true, organizerVerified: true, conversationId, organizer: { issuer, subject } }`.
+The service independently resolves the organizer’s live immutable identity through
+its configured `active` reader and requires the proof to match that identity.
+An activation caller cannot supply the identity. The normalized organizer binding
+is saved in the outbox in the same transaction as managed status and the existing
+conversation ID, before delivery can run or account deletion can remove the group.
+There is no browser or agent-grant activation endpoint. Runtime
+composition accepts this trusted adapter as `verifyCommunityChatActivation`;
+without it activation fails closed. The group and organizer are checked again
+after verification, and a concurrent group edit requires fresh review. Repeating
+the same activation is harmless; changing an established binding is refused.
+Boulder's existing conversation must remain `44HsMDzl6YZ7l1AdNusAT`, preserving
+history and all 12 verified current members. Activation itself does not edit the
+Unlinked flyer or UUID invitations. OpenChat retires its standalone invite on the
+first acknowledged managed snapshot. After activation, rollback must retain the
+binding, native entry and managed authorization; do not restore obsolete chat
+invites or participant writes. Prefer a forward correction.
+
+Group seats grant chat participation subject to the existing safety exceptions:
+inactive or unresolvable accounts and members blocked either way with the
+organizer have no effective group access and are excluded from chat. Member-to-
+member blocks do not remove group seats. Block/unblock enqueue new revisions at
+the member-block service boundary. A reconciliation callback failure does not
+discard the committed block/unblock record or its OpenChat peer identity, so
+downstream safety actions still run. Actual block-store failures still reject;
+the periodic audit repairs roster changes whose callback failed. Account deletion
+queues participation removal before the identity is deleted; remote removal
+remains pending until acknowledged. External identity/account changes and
+interrupted boundary callbacks are rechecked by a separate audit timer: one
+completed managed roster per 60 seconds, rotating through the directory. A full
+sweep takes one audit interval per candidate group. Audit work does not hold the delivery
+queue; due membership updates and retries run independently on the one-second
+delivery timer. Pending jobs recheck access before retry; block/unblock and group
+transitions enqueue immediately. Changed access enqueues a new revision, and an
+audit failure waits for its next bounded turn without stopping delivery.
+Operators changing bindings outside the app should also call
+`groups.reconcileActor(actor)`. A missing or changed organizer identity closes
+the chat under its original organizer binding, never transfers ownership. Remote
+access changes remain pending during outages; existing block rules stay in force
+in Unlinked.
+
+### Durable recovery and minimization
+
+`UnlinkedGroupChatJob` and its unique `id` constraint are part of the actual
+`graph-migration.mjs` export/shared-export/import/verification domain. Recover
+this outbox with the group documents, not as an optional cache. Pending jobs
+contain only `id`, monotonic `revision`, a chat-only `document` (name, organizer
+binding and accepted roster), `deleted`, `done`, retry fields, an organizer
+identity binding, `fingerprint` and an optional `lastSnapshot`. Descriptions,
+invitation URLs, pending invitees, profile IDs and list selections never enter
+the job. A prepared snapshot is compare-and-set once per revision and is replayed
+unchanged after an acknowledgement loss. Access changes get a higher revision;
+an older receipt cannot complete it.
+
+Acknowledgement removes the document, snapshot and retry data. An active receipt
+retains only `id`, revision, done, the access fingerprint and original organizer
+identity needed for a future deletion. Deletion immediately replaces any pending
+roster with a minimal tombstone (group ID, optional bound conversation ID, neutral
+name, original organizer identity), and acknowledgement drops that identity too.
+For a new deterministic conversation with no prepared snapshot, no remote request
+could have been sent and deletion can retain just the revision fence. Existing
+bound conversations always retain a pending deletion tombstone, even before their
+first sync. Activation supplies its verified organizer identity atomically; an
+existing conversation with a missing binding remains pending rather than falsely
+claiming deletion is complete. Pending tombstones retry until
+acknowledged. `tests/community-chat-recovery.test.mjs` exercises native
+snapshots, shared export, import/verification, deletion and acknowledgement
+minimization; `tests/community-chat.test.mjs` covers roster retries and activation.

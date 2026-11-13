@@ -1,3 +1,4 @@
+import { createOpenChatGroupSync } from './openchat-groups.mjs'
 import { createCommunityIntakeClient } from './community-intake.mjs'
 import { createCollectiveGroups } from './collective-groups.mjs'
 import { createNeo4jCollectiveGroupsStore } from './collective-groups-store.mjs'
@@ -133,7 +134,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // so page views do not each rebuild the index. Revocations and publications
   // reach anonymous and member pages within the window plus one build.
   // UNLINKED_PUBLIC_INDEX_FRESH_MS=0 restores next-request rebuilds.
-  publicIndexEnv = process.env }) {
+  publicIndexEnv = process.env, verifyCommunityChatActivation }) {
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : ((networkMode === 'isolated-container' && bolt.hostname === 'graph') || (networkMode === 'shared-noos' && bolt.hostname === 'noos_neo4j')) && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -150,7 +151,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   const dependencies = modules ?? loadNoos(root)
   const driver = dependencies.neo4j.driver(boltUrl, dependencies.neo4j.auth.basic('neo4j', config.graphPassword),
     { connectionTimeout: 3000, connectionAcquisitionTimeout: 5000, maxTransactionRetryTime: 10000 })
-  let server, worker, memberEmail, diagnosticsStore, searchLogStore, browserPerformanceStore, connectionSync, indexWarmKeeper, contactEnrichment, closed = false
+  let server, worker, memberEmail, diagnosticsStore, searchLogStore, browserPerformanceStore, connectionSync, groupChatSync, indexWarmKeeper, contactEnrichment, closed = false
   const close = async () => {
     if (closed) return
     closed = true
@@ -160,6 +161,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     await searchLogStore?.close()
     await browserPerformanceStore?.close()
     await connectionSync?.stop()
+    await groupChatSync?.stop()
     await worker?.stop()
     await memberEmail?.stop()
     if (server?.listening) {
@@ -287,7 +289,8 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // Member blocks (docs/report-and-block.md): refuse connection requests either way.
     const blockStore = typeof dependencies.createBlockStore === 'function' ? dependencies.createBlockStore(driver, 'neo4j') : null
     await blockStore?.initialize()
-    const memberBlocks = blockStore ? createMemberBlocks({ store: blockStore }) : undefined
+    let collectiveGroups
+    const memberBlocks = blockStore ? createMemberBlocks({ store: blockStore, onChange: async actor => { await collectiveGroups?.reconcileActor(actor); groupChatSync?.wake() } }) : undefined
     const connectionStore = typeof dependencies.createMemberConnectionStore === 'function' ? dependencies.createMemberConnectionStore(driver, 'neo4j') : null
     await connectionStore?.initialize()
     const memberConnections = connectionStore ? createConnectionRequests({ isVerified, store: connectionStore, notifications: notifications ?? null, coordination: coordinatorFor(sessionStore), validateParticipant: async member => { await getBackend(member) }, onAccepted: () => connectionSync?.wake(), ...(memberBlocks ? { blocked: (a, b) => memberBlocks.between(a, b) } : {}) }) : undefined
@@ -679,9 +682,13 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     }
     const collectiveGroupsStore = publicPeople ? dependencies.createCollectiveGroupsStore?.(driver, 'neo4j') : null
     await collectiveGroupsStore?.initialize()
-    const collectiveGroups = collectiveGroupsStore ? createCollectiveGroups({
-      store: collectiveGroupsStore, active: identityForOwner, ...(memberBlocks ? { blocked: memberBlocks.between } : {}),
+    collectiveGroups = collectiveGroupsStore ? createCollectiveGroups({
+      store: collectiveGroupsStore, active: identityForOwner, verifyChatActivation: verifyCommunityChatActivation, chatEnabled:(process.env.UNLINKED_MESSAGING_SECRET?.length ?? 0)>=32, ...(memberBlocks ? { blocked: memberBlocks.between } : {}),
     }) : undefined
+    if (collectiveGroupsStore && typeof collectiveGroupsStore.chatDue === 'function') {
+      groupChatSync=createOpenChatGroupSync({store:collectiveGroupsStore,identityForOwner,secret:process.env.UNLINKED_MESSAGING_SECRET,blocked:memberBlocks ? (a,b)=>memberBlocks.between(a,b) : undefined})
+      groupChatSync.start()
+    }
     if (connectionStore) {
       connectionSync = createOpenChatConnectionSync({ store: createNeo4jOpenChatSyncStore(driver), identityForOwner, secret: process.env.UNLINKED_MESSAGING_SECRET })
       connectionSync.start()

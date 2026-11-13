@@ -38,7 +38,7 @@ const card = (heading, content) => `<section class="card sec"><h2>${h(heading)}<
 const approvalFields = '<label>Join policy<select name="mode"><option value="join">Join after confirmation</option><option value="approval">Organizer approval</option></select></label>'
 
 function renderFlyerManagement(group, csrf, origin) {
-  const base = pathFor(group.id) + '/flyer'
+  const base = pathFor(group.urlKey??group.id) + '/flyer'
   const flyer = group.flyer
   if (!flyer?.active) {
     const capacity = `<label>Group capacity (including you)<input name="capacity" type="number" min="${Math.max(2, group.members.length + 1)}" max="${FLYER_LIMITS.seats}" value="${Math.max(group.capacity ?? 0, 100)}" required></label>`
@@ -68,7 +68,7 @@ export function renderFlyerInvitation(chrome, invitation, path, state = null, me
 
 export function renderGroups(chrome, { groups, invites }) {
   const pending = invites.map(invite => `<article><h3><a href="${groupInvitePath(invite.group.id, invite.id)}">${h(invite.group.name)}</a></h3><p class="small">Review invitation · Expires ${date(invite.expiresAt)}</p></article>`).join('')
-  const rows = groups.map(group => `<article><h3><a href="${pathFor(group.id)}">${h(group.name)}</a></h3><p class="small">${group.organizer ? 'Organizer' : 'Member'}</p></article>`).join('')
+  const rows = groups.map(group => `<article><h3><a href="${pathFor(group.urlKey??group.id)}">${h(group.name)}</a></h3><p class="small">${group.organizer ? 'Organizer' : 'Member'}</p></article>`).join('')
   const create = form('/groups', chrome.csrf, 'Create private group', '<label>Group name<input name="name" maxlength="100" required placeholder="e.g. Climate founders"></label>')
   return shell(chrome, 'Collective network', back('/lists', 'Lists') + title('Collective network', 'Share selected lists with a private group.') +
     (pending ? card('Invitations', `<div class="panel list">${pending}</div>`) : '') +
@@ -81,15 +81,16 @@ function renderGroupDescription(group) {
 }
 
 function renderGroupChatActions(group) {
-  return (group.openChatUrl ? `<p><a class="button" href="${h(group.openChatUrl)}" target="_blank" rel="noopener noreferrer">Message the group ↗</a></p><p class="small">OpenChat opens your existing group chat if you’ve already joined. Otherwise, review the invitation and choose whether to accept.</p>` : '') +
-    (group.chatUrl ? `<p><a class="button sec" href="${h(group.chatUrl)}" target="_blank" rel="noopener noreferrer">Join the WhatsApp group chat ↗</a></p>` : '')
+  const native=group.chatConversationId ? `/messages/c/${encodeURIComponent(group.chatConversationId)}` : null
+  return (native ? `<p><a class="button" href="${h(native)}">Message the group</a></p><p class="small">Everyone in this community is in this chat. <a href="https://chat.ideaflow.app/app/chat/${encodeURIComponent(group.chatConversationId)}" target="_blank" rel="noopener noreferrer">Open separately in OpenChat ↗</a></p>` : group.openChatUrl ? `<p><a class="button" href="${h(group.openChatUrl)}" target="_blank" rel="noopener noreferrer">Message the group</a></p>` : '') +
+    (group.chatUrl ? `<p><a href="${h(group.chatUrl)}" target="_blank" rel="noopener noreferrer">Join the WhatsApp group chat ↗</a></p>` : '')
 }
 
 export function renderGroupAbout(group) {
   return renderGroupChatActions(group) + renderGroupDescription(group)
 }
 export function renderGroup(chrome, group, origin) {
-  const base = pathFor(group.id), csrf = chrome.csrf
+  const base = pathFor(group.urlKey??group.id), csrf = chrome.csrf
   const shares = group.shares.map(share => `<article><h3><a href="${base}/lists/${share.id}">${h(share.name)}</a></h3>${group.organizer ? form(`${base}/lists/${share.id}/revoke`, csrf, 'Revoke list access', '', 'quiet') : ''}</article>`).join('')
   const list = card('Shared lists', (shares ? `<div class="panel list">${shares}</div>` : '<p>No lists have been shared yet.</p>') +
     (group.organizer ? `<p><a class="button sec sm" href="${base}/select">Choose a list to share</a></p>` : ''))
@@ -101,10 +102,11 @@ export function renderGroup(chrome, group, origin) {
   const members = group.organizer ? group.members.map(member => `<article><h3>${profileLink(member.profileId, member.name)}</h3>${form(`${base}/members/${member.id}/remove`, csrf, 'Remove member', '', 'quiet')}</article>`).join('') : ''
   return shell(chrome, group.name, back('/groups', 'Collective network') + title(group.name, 'Private group · ' + (group.organizer ? 'Organizer' : 'Member')) +
     renderGroupChatActions(group) +
-    card('About this group', renderGroupDescription(group) + (group.organizer ? `<details><summary>Edit description and group chat</summary><p class="small">Visible to group members. Each chat link opens a separate invitation you can choose to accept.</p>${form(base + '/about', csrf, 'Save group information', `<label>Group description<textarea name="description" maxlength="2000" rows="5">${h(group.description)}</textarea></label><label>WhatsApp invitation link<input name="chatUrl" type="text" inputmode="url" maxlength="500" value="${h(group.chatUrl)}" placeholder="https://chat.whatsapp.com/…"></label><label>OpenChat invitation link<input name="openChatUrl" type="text" inputmode="url" maxlength="500" value="${h(group.openChatUrl)}" placeholder="https://chat.ideaflow.app/i/…"></label>`)}</details>` : '')) +
+    card('About this group', renderGroupDescription(group) + (group.organizer ? `<details><summary>Edit description and group chat</summary><p class="small">Visible to group members. The community chat follows group membership. WhatsApp is a separate optional chat.</p>${form(base + '/about', csrf, 'Save group information', `<label>Group address<select name="urlMode"><option value="readable"${group.urlMode!=='opaque'?' selected':''}>Readable name</option><option value="opaque"${group.urlMode==='opaque'?' selected':''}>Opaque ID</option></select></label><label>Group description<textarea name="description" maxlength="2000" rows="5">${h(group.description)}</textarea></label><label>WhatsApp invitation link<input name="chatUrl" type="text" inputmode="url" maxlength="500" value="${h(group.chatUrl)}" placeholder="https://chat.whatsapp.com/…"></label><label>OpenChat invitation link<input name="openChatUrl" type="text" inputmode="url" maxlength="500" value="${h(group.openChatUrl)}" placeholder="https://chat.ideaflow.app/i/…"></label>`)}</details>` : '')) +
     card('Your community', `<p><a class="button" href="${base}/community">People, asks and offers →</a></p><p><a href="${base}/welcome">Add or update your introduction</a></p>`) + list + (group.organizer ? renderFlyerManagement(group, csrf, origin) + card('Members', (members ? `<div class="panel list">${members}</div>` : '<p>You’re the only member so far.</p>')) +
     card('Invite a member', '<p class="small">Use the profile link of an existing Unlinked member. Creating an invitation sends nothing. To share the link, copy it into an OpenChat conversation.</p>' + inviteForm +
-      (invites ? `<div class="panel list">${invites}</div>` : '')) : `<p>${chat(group.organizerProfileId, 'Message the organizer')}</p>`))
+      (invites ? `<div class="panel list">${invites}</div>` : '')) : `<p>${chat(group.organizerProfileId, 'Message the organizer')}</p>`) +
+    (!group.organizer ? form(base+'/leave',csrf,'Leave group','<p class="small">Leaving also removes you from the community chat.</p>','quiet') : ''))
 }
 
 export function renderGroupInvitation(chrome, invitation, invitePath) {
@@ -113,7 +115,7 @@ export function renderGroupInvitation(chrome, invitation, invitePath) {
 }
 
 export function renderGroupSelection(chrome, group, choices) {
-  const base = pathFor(group.id), path = base + '/select'
+  const base = pathFor(group.urlKey??group.id), path = base + '/select'
   const rows = choices.choices.map(list => `<article><h3><a href="${path}?source=${encodeURIComponent(list.source)}">${h(list.name)}</a></h3><p class="small">${h(list.type)} · Review what will be shared</p></article>`).join('')
   return shell(chrome, 'Choose a list', back(base, group.name) + title('Choose a list', 'Review one list before giving group members access.') +
     (rows ? `<div class="panel list">${rows}</div>` : '<p>No lists to choose from. <a href="/lists">Open Lists</a>.</p>') +
@@ -121,14 +123,14 @@ export function renderGroupSelection(chrome, group, choices) {
 }
 
 export function renderGroupSharePreview(chrome, group, selection) {
-  const path = pathFor(group.id) + '/select'
+  const path = pathFor(group.urlKey??group.id) + '/select'
   return shell(chrome, 'Review list access', back(path, 'Choose another list') + title(selection.name, 'Review what members of ' + group.name + ' will see.') +
     card('Visible to this group', '<p>The list name and the listed public profiles shown here are shared. The original search, private contacts, notes, and future additions stay private.</p>' +
       profiles(selection.profiles) + (selection.profiles.length ? form(path, chrome.csrf, 'Share with this group', field('source', selection.source) + field('proof', selection.proof)) : '<p>Choose a list with listed public profiles to share.</p>')))
 }
 
 export function renderGroupSharedList(chrome, { group, share, profiles: rows }) {
-  return shell(chrome, share.name, back(pathFor(group.id), group.name) + title(share.name, 'Shared with ' + group.name) +
+  return shell(chrome, share.name, back(pathFor(group.urlKey??group.id), group.name) + title(share.name, 'Shared with ' + group.name) +
     card('People in this list', profiles(rows)))
 }
 

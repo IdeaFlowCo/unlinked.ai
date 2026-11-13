@@ -1,13 +1,14 @@
+import { GROUP_KEY } from './community-chat-id.mjs'
 import { parseUnlinkedProfileContext } from '../src/utils/openchat-profile-context.mjs'
 import { flyerInvitePath, GROUP_UUID, GroupError } from './collective-groups.mjs'
 import { createCollectiveListProjection } from './collective-group-lists.mjs'
 import { renderGroup, renderGroups, renderGroupError, renderGroupInvitation, renderGroupSelection, renderGroupSharedList, renderGroupSharePreview, renderFlyerInvitation } from './collective-group-views.mjs'
 
-const signInRoute = new RegExp(`^/groups/${GROUP_UUID}(?:/invites/${GROUP_UUID}|/lists/${GROUP_UUID})?$`)
-const route = new RegExp(`^/groups/(${GROUP_UUID})(?:/(invite|select|about)|/(invites|members|lists)/(${GROUP_UUID})(?:/(revoke|remove))?)?$`)
-const flyerRoute = new RegExp(`^/groups/(${GROUP_UUID})/join/(${GROUP_UUID})$`)
-const flyerAdminRoute = new RegExp(`^/groups/(${GROUP_UUID})/flyer(?:/(${GROUP_UUID})/(revoke|requests/(${GROUP_UUID})))?$`)
-const metadataRoute = new RegExp(`^/groups/${GROUP_UUID}/about$`)
+const signInRoute = new RegExp(`^/groups/${GROUP_KEY}(?:/invites/${GROUP_UUID}|/lists/${GROUP_UUID})?$`)
+const route = new RegExp(`^/groups/(${GROUP_KEY})(?:/(invite|select|about|leave)|/(invites|members|lists)/(${GROUP_UUID})(?:/(revoke|remove))?)?$`)
+const flyerRoute = new RegExp(`^/groups/(${GROUP_KEY})/join/(${GROUP_UUID})$`)
+const flyerAdminRoute = new RegExp(`^/groups/(${GROUP_KEY})/flyer(?:/(${GROUP_UUID})/(revoke|requests/(${GROUP_UUID})))?$`)
+const metadataRoute = new RegExp(`^/groups/${GROUP_KEY}/about$`)
 export const groupBodyLimit = path => metadataRoute.test(path) ? 32768 : 4096
 const sourceFields = new Set(['src', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'])
 export const isGroupPath = path => path === '/groups' || path.startsWith('/groups/')
@@ -52,7 +53,14 @@ const messages = {
 export function createGroupBrowser({ groups, welcome = false, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body }) {
   if (typeof accountForProfile !== 'function') throw new TypeError('collective_groups_account_resolution_required')
   return async ({ request, url, session, lookup, render, redirect }) => {
-    const { pathname, searchParams, origin } = url
+    let { pathname } = url
+    const { searchParams, origin } = url
+    const key=/^\/groups\/([^/]+)/.exec(pathname)?.[1]
+    if(key && !new RegExp(`^${GROUP_UUID}$`).test(key)) {
+      const id=await groups.resolveKey(key)
+      if(!id)return render(renderGroupError({},'Group not found.'),404)
+      pathname=pathname.replace(`/groups/${key}`,`/groups/${id}`)
+    }
     const actor = session?.owner
     const chrome = { accountLabel: session?.accountLabel, displayName: session?.displayName, csrf: session?.csrf }
     const parsed = route.exec(pathname)
@@ -64,6 +72,7 @@ export function createGroupBrowser({ groups, welcome = false, privateLists, save
       if (request.headers['content-type']?.split(';')[0] !== 'application/x-www-form-urlencoded') fail('invalid_input')
       let input
       try { input = new URLSearchParams((await body(request, groupBodyLimit(pathname))).toString('utf8')) } catch { fail('invalid_input') }
+      if(names.includes('urlMode') && !input.has('urlMode')) names=names.filter(name=>name!=='urlMode')
       if ([...input.keys()].length !== names.length + 1 || input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || names.some(name => input.getAll(name).length !== 1)) fail('invalid_input')
       return input
     }
@@ -73,6 +82,7 @@ export function createGroupBrowser({ groups, welcome = false, privateLists, save
       return group
     }
     try {
+      if(action==='leave' && !get) { await fields();await groups.leave(actor,groupId);return redirect('/groups') }
       if (isFlyerJoinPath(pathname)) {
         const join = flyerJoinTarget(pathname + url.search)
         if (!join) fail('not_found')
@@ -128,8 +138,8 @@ export function createGroupBrowser({ groups, welcome = false, privateLists, save
       }
       if (!action && !collection && get) return render(renderGroup(chrome, await groups.detail(actor, groupId), origin))
       if (action === 'about' && request.method === 'POST') {
-        const input = await fields('description', 'chatUrl', 'openChatUrl')
-        await groups.updateMetadata(actor, groupId, { description: input.get('description'), chatUrl: input.get('chatUrl'), openChatUrl: input.get('openChatUrl') })
+        const input = await fields('description', 'chatUrl', 'openChatUrl', 'urlMode')
+        await groups.updateMetadata(actor, groupId, { description: input.get('description'), chatUrl: input.get('chatUrl'), openChatUrl: input.get('openChatUrl'), urlMode:input.get('urlMode')??undefined })
         return redirect(base)
       }
       if (action === 'invite' && !get) {

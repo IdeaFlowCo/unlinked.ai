@@ -3016,8 +3016,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         if (safetyReports) await safetyReports.forgetReporter(session.owner)
         // Blocks this member made, and blocks of this member.
         if (memberBlocks) await memberBlocks.removeOwner(session.owner)
-        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         if (collectiveGroups) await collectiveGroups.removeOwner(session.owner)
+        const result = await deleteAccountData({ owner: session.owner, backend, jobs, grantIds, signupLookup })
         // Connection requests either way, and notifications to or about this account.
         if (memberConnections) await memberConnections.removeOwner(session.owner)
         if (notifications) await notifications.removeOwner(session.owner)
