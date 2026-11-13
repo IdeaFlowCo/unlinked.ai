@@ -47,7 +47,9 @@ profile), their public profile id and their OpenChat user id. Blocking:
   member) drops messages either way. Unlinked also hides the direct
   conversation from the inbox, serves no history for it, refuses to send to it,
   drops the person's messages from the live stream, and answers a profile
-  Message link with "You blocked …". Group conversations are not hidden.
+  Message link with "You blocked …". This inbox filter applies to direct
+  conversations; managed community access follows the
+  [community chat safety boundaries](collective-network.md#activation-and-safety-boundaries).
 - **Notifications** from the blocked profile are hidden; their profile shows
   "You blocked …" with Unblock instead of Connect and Message.
 - The blocked person is not told. Unblocking reverses all of it (and OpenChat's

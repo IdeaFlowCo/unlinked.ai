@@ -52,10 +52,12 @@ share for everyone. Revoking and sharing again creates a different URL. A member
 removed from the group cannot open any of its list URLs, even with an old link.
 Previously viewed or copied information cannot be recalled.
 
-The group ACL lives in the standalone runtime. OpenChat remains the messenger
-and its existing composer requires an explicit send; it receives no group ACL,
-list contents, or invite URL automatically. Browser mutations use the existing
-origin and CSRF protections. The organizer and recipient are bound by both
+The group ACL lives in the standalone runtime. The managed chat receives only
+the roster projection described under [Community chat and addresses](#community-chat-and-addresses),
+never shared-list contents or invitation URLs. Message sending and the shared
+inbox transport are owned by [Message with OpenChat](openchat-message.md).
+Browser mutations use the existing origin and CSRF protections. The organizer
+and recipient are bound by both
 operational owner and user IDs. Invitation and ACL transitions lock one group
 record; list access checks the active account, group membership and exact share
 again after resolving the projection. Group pages are private, no-store and
@@ -100,9 +102,9 @@ in a browser to review the organizer, invite, review and member views. No real
 account, import, email, OpenChat send, or production graph is needed.
 
 `UnlinkedCollectiveGroup` is in the graph recovery allowlist. Standalone
-composition with a public People projection initializes its additive ID
-constraint when the normal release is started. Coordinate any production
-activation separately; no migration or rollout is part of source review.
+composition with a public People projection initializes the group and chat-outbox
+constraints when the normal release is started; see recovery below. Coordinate
+any production activation separately; no migration or rollout is part of source review.
 
 ## Group description and chat
 
@@ -119,19 +121,20 @@ limit, including its CSRF token; other group-management forms keep their 4 KiB
 limit. Community introduction and intake forms retain their separate 64 KiB limit.
 These fields appear in authenticated group, introduction, community and
 group-local member views, and the organizer’s export;
-they are excluded from direct and flyer invitation previews. When configured,
-**Message the group** is the primary OpenChat button, before the description;
-on the group detail page it appears just below the heading, outside **About this
-group**. It opens the existing chat for people who have already joined;
-otherwise, they review the invitation and choose whether to accept.
-**Join the WhatsApp group chat** remains a separate link when configured.
-Saving either link sends no message and does not synchronize membership or
-content to either service.
+they are excluded from direct and flyer invitation previews. **Message the group**
+appears before the description; on the group detail page it sits just below the
+heading, outside **About this group**. Managed chat behavior is described below.
+When native chat is unavailable, a configured OpenChat invitation remains the
+fallback: it opens separately, and joining that chat requires its own acceptance.
+**Join the WhatsApp group chat** remains a separate optional link. Saving either
+invitation link sends no message; neither link controls managed chat membership
+or synchronizes WhatsApp membership or content.
 
 ## Community chat and addresses
 
 With the existing trusted OpenChat messaging integration configured, each managed group
-has one shared conversation. Joining (or organizer approval) queues chat membership;
+has one shared conversation in members’ normal inboxes, without a second chat
+invitation acceptance. Joining (or organizer approval) queues chat membership;
 leaving/removal queues its removal. The durable outbox retries transient failures
 without duplicate conversations or messages. Delivery normally follows within a
 poll interval; while the chat service is unavailable membership updates remain
@@ -142,6 +145,11 @@ The primary **Message the group** action opens the native Unlinked inbox in the
 same tab. **Open separately in OpenChat** opens that same conversation externally.
 Existing conversations are bound through the verified activation service below;
 this preserves their history. Never change that binding after activation.
+
+Members can choose **Leave group** on the group detail page. Leaving removes
+their group and shared-list access and queues removal from the managed chat.
+The organizer cannot leave their own group; deleting their account removes the
+group and queues closure of its chat.
 
 New groups get stable readable URLs (name plus a short disambiguating suffix).
 Organizers can choose **Opaque ID** in group information; readable aliases stop
@@ -190,7 +198,8 @@ the member-block service boundary. A reconciliation callback failure does not
 discard the committed block/unblock record or its OpenChat peer identity, so
 downstream safety actions still run. Actual block-store failures still reject;
 the periodic audit repairs roster changes whose callback failed. Account deletion
-removes participation before the identity is deleted. External identity/account changes and interrupted
+queues removal before deleting the identity; remote removal remains pending until
+acknowledged. External identity/account changes and interrupted
 boundary callbacks are rechecked by a separate audit timer: one completed
 managed roster per 60 seconds, rotating through the directory. A full sweep takes
 one audit interval per candidate group. Audit work does not hold the delivery

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { communityChatId, validCommunityIdentity as valid } from './community-chat-id.mjs'
 const ENDPOINT = 'https://chat.ideaflow.app/api/unlinked/groups/sync'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Delivery revisions must not change the effective chat-state fingerprint.
 const fingerprint = ({ revision, ...snapshot }) => createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
 export function createOpenChatGroupSync({ store, identityForOwner, blocked = async () => false, secret, fetchImpl = fetch, now = Date.now, intervalMs = 1000, auditIntervalMs = 60000 }) {
   let running = null, auditing = null, timer = null, auditTimer = null, stopped = false, cursor = '', nextAuditAt = now() + auditIntervalMs
