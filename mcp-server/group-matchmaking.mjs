@@ -1,11 +1,13 @@
 // Request-local suggestions over the existing authorized community projection.
 // No private imports, model calls, persisted scores, or copied group membership.
-const stop = new Set(('a an and are as at be been being build building can could demo developer developers do for from get give group help helping i if in into is it looking me my need needs of on or our people please project projects s some someone something that the their them there these they this to use want we what who with working would you your offer offers offering ask asks advice advise review reviews reviewing experience experienced expert expertise interested interest happy available seeking support guidance').split(' '))
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises'
+
+const stop = new Set(('a an and are as at be been being build building can could demo developer developers do for from get give group help helping i if in into is it looking me my need needs of on or our people please project projects s some someone something that the their them there these they this to use want we what who with working would you your offer offers offering ask asks advice advise review reviews reviewing experience experienced expert expertise interested interest happy available seeking support guidance connect connecting connection connections context shared sharing details about').split(' '))
 const concepts = [
- ['javascript', /\b(?:javascript|java\s*script|js)\b/g],
- ['typescript', /\b(?:typescript|type\s*script)\b/g],
  ['react', /\breact(?:\.js|js)?\b/g],
  ['node.js', /\bnode(?:\.js|js)\b/g],
+ ['javascript', /\b(?:javascript|java\s*script|js)\b/g],
+ ['typescript', /\b(?:typescript|type\s*script)\b/g],
  ['postgres', /\b(?:postgresql|postgres)\b/g],
  ['user research', /\b(?:user research|customer research|customer interviews?|user interviews?|customer discovery)\b/g],
  ['accessibility', /\b(?:accessibility|accessible|a11y|wcag)\b/g],
@@ -32,25 +34,61 @@ function topics(entry) {
 }
 const stable = (a,b) => b.score-a.score || String(a.other.id).localeCompare(String(b.other.id)) || String(a.mine.id).localeCompare(String(b.mine.id)) || a.memberId.localeCompare(b.memberId)
 
-export function matchGroupMembers(entries, memberId, limit=12) {
+export async function matchGroupMembers(entries, memberId, limit=12) {
  if (!memberId || !Number.isSafeInteger(limit) || limit<=0) return []
- const open = entries.filter(e=>e.memberId && e.status==='open' && ['ask','offer'].includes(e.kind)).map(entry=>({entry,topics:topics(entry)}))
- const own = open.filter(e=>e.entry.memberId===memberId), others=open.filter(e=>e.entry.memberId!==memberId)
- const members = new Set(open.map(e=>e.entry.memberId)), frequency=new Map()
- for (const row of open) for (const topic of row.topics) {
-  if (!frequency.has(topic)) frequency.set(topic,new Set())
-  frequency.get(topic).add(row.entry.memberId)
+ const open=[],topicSets=new Map()
+ let work=0
+ for (const entry of entries) {
+  if (!entry.memberId || entry.status!=='open' || !['ask','offer'].includes(entry.kind)) continue
+  const terms=[...topics(entry)].sort(),key=JSON.stringify(terms)
+  let set=topicSets.get(key)
+  if (!set) { set={id:topicSets.size,terms,count:0,weight:0};topicSets.set(key,set) }
+  set.count++
+  open.push({entry,set})
+  work+=terms.length+1
+  if(work>=16384){work=0;await yieldToEventLoop()}
  }
- const weight = topic=>1+Math.log((members.size+1)/(frequency.get(topic).size+1))
- const total = terms=>[...terms].reduce((sum,t)=>sum+weight(t),0)
- for(const row of open)row.weight=total(row.topics)
- const byMember=new Map()
- for (const {entry:mine,topics:mineTopics,weight:mineWeight} of own) for (const {entry:other,topics:theirTopics,weight:theirWeight} of others) {
-  if (mine.kind===other.kind) continue
-  const shared=[...mineTopics].filter(t=>theirTopics.has(t)).sort()
-  if (!shared.length) continue
-  const score=total(shared)/Math.sqrt(mineWeight*theirWeight) + Math.min(shared.length,4)*0.1
-  const pair={memberId:other.memberId,mine,other,topics:shared,score,direction:mine.kind==='ask'?'receive':'give'}
+ const own = open.filter(e=>e.entry.memberId===memberId), others=open.filter(e=>e.entry.memberId!==memberId)
+ if(!own.length || !others.length)return []
+ const members = new Set(open.map(e=>e.entry.memberId)), frequency=new Map()
+ for (const row of open) {
+  for (const topic of row.set.terms) {
+   if (!frequency.has(topic)) frequency.set(topic,new Set())
+   frequency.get(topic).add(row.entry.memberId)
+  }
+  work+=row.set.terms.length+1
+  if(work>=16384){work=0;await yieldToEventLoop()}
+ }
+ const labels=[...frequency.keys()].sort(),index=new Map(labels.map((topic,i)=>[topic,i])),weights=new Float64Array(labels.length)
+ labels.forEach((topic,i)=>{weights[i]=1+Math.log((members.size+1)/(frequency.get(topic).size+1))})
+ for(const set of topicSets.values()){
+  set.ids=Int32Array.from(set.terms,topic=>index.get(topic))
+  set.weight=set.ids.reduce((sum,id)=>sum+weights[id],0)
+ }
+ const byMember=new Map(),comparisons=new Map()
+ for (const {entry:mine,set:mineSet} of own) for (const {entry:other,set:theirSet} of others) {
+  if(++work>=16384){work=0;await yieldToEventLoop()}
+  if (mine.kind===other.kind || !mineSet.weight || !theirSet.weight) continue
+  const key=Math.min(mineSet.id,theirSet.id)*topicSets.size+Math.max(mineSet.id,theirSet.id)
+  let comparison=comparisons.get(key)
+  if (!comparison) {
+   const a=mineSet.ids,b=theirSet.ids,shared=[]
+   let sharedWeight=0,i=0,j=0
+   while(i<a.length&&j<b.length){
+    if(a[i]<b[j])i++
+    else if(a[i]>b[j])j++
+    else {shared.push(labels[a[i]]);sharedWeight+=weights[a[i]];i++;j++}
+   }
+   comparison={topics:shared,score:sharedWeight/Math.sqrt(mineSet.weight*theirSet.weight)+Math.min(shared.length,4)*0.1}
+   if(mineSet.count>1 || theirSet.count>1){
+    if(comparisons.size>=4096)comparisons.delete(comparisons.keys().next().value)
+    comparisons.set(key,comparison)
+   }
+   work+=a.length+b.length
+   if(work>=16384){work=0;await yieldToEventLoop()}
+  }
+  if (!comparison.topics.length) continue
+  const pair={memberId:other.memberId,mine,other,...comparison,direction:mine.kind==='ask'?'receive':'give'}
   const member=byMember.get(other.memberId)||{memberId:other.memberId,name:other.name,pairs:[]}
   const index=member.pairs.findIndex(p=>p.direction===pair.direction)
   if(index<0)member.pairs.push(pair)

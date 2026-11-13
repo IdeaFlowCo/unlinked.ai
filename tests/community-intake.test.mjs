@@ -897,7 +897,7 @@ test('matchmaking scans beyond the first page, links verified member actions, an
  entries=Array.from({length:500},(_,i)=>row(1000-i,alice,'note','Introduction')).concat([row(2,alice,'ask','Need user research'),row(1,account('bob'),'offer','Customer interviews <script>bad</script>')])
  calls=0
  const response=await b.get(base+'/matches',owner.cookie),html=await response.text()
- assert.equal(response.status,200);assert.equal(calls,2);assert.match(html,/Find matches · Match builders/);assert.match(html,/data-match-card/);assert.match(html,/user research/);assert.match(html,/&lt;script&gt;bad&lt;\/script&gt;/);assert.doesNotMatch(html,/<script>bad/)
+ assert.equal(response.status,200);assert.equal(calls,2);assert.match(html,/Find matches · Match builders/);assert.match(html,/data-match-card/);assert.match(html,/Why this match: both entries mention user research, using the same or related wording\./);assert.match(html,/&lt;script&gt;bad&lt;\/script&gt;/);assert.doesNotMatch(html,/<script>bad/)
  assert.ok(html.includes(base+'/community/'+seat.id));assert.ok(html.includes(base+'/members/'+seat.id+'/message'));assert.match(html,/Message Bob Builder on OpenChat/)
  assert.match(response.headers.get('cache-control'),/no-store/);assert.match(response.headers.get('x-robots-tag'),/noindex/)
  if(process.env.MATCHMAKING_EVIDENCE_DIR){await mkdir(process.env.MATCHMAKING_EVIDENCE_DIR,{recursive:true});await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'matches.html'),html);await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'group.html'),await(await b.get(base,owner.cookie)).text());await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'welcome.html'),await(await b.get(base+'/welcome',owner.cookie)).text());await writeFile(join(process.env.MATCHMAKING_EVIDENCE_DIR,'community.html'),await(await b.get(base+'/community',owner.cookie)).text())}
@@ -923,4 +923,24 @@ test('matchmaking rechecks blocks and stale membership after all pages; upstream
  const failed=await b.get(path,owner.cookie),html=await failed.text();assert.equal(failed.status,200);assert.match(html,/Matches could not be loaded/);assert.doesNotMatch(html,/SECRET|React accessibility|No complementary match/)
  read=0;afterRead=async n=>{if(n===2)await b.groups.leave(bob,group.id)}
  const removed=await b.get(path,member.cookie);assert.notEqual(removed.status,200);assert.doesNotMatch(await removed.text(),/React accessibility|data-match-card/)
+})
+
+test('matchmaking revalidates blocks after yielding during comparisons',async t=>{
+ let blocked=false,seatId
+ const b=await browser(t,{communityIntake:{group:async(actor,id,roster,{cursor})=>{
+  const start=cursor?2000-cursor+1:0
+  const entries=Array.from({length:500},(_,offset)=>{
+   const i=start+offset
+   return {id:2000-i,memberId:i<1000?'organizer':seatId,title:'React accessibility',body:'',kind:i<1000?'ask':'offer',status:'open',audience:'group',groupId:id}
+  })
+  if(start===1500)setImmediate(()=>{blocked=true})
+  return {entries,nextCursor:start<1500?entries.at(-1).id:null}
+ }}},{blocked:async()=>blocked})
+ const owner=await b.login('alice'),group=await b.groups.create(alice,'Yielding matches'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false})
+ await b.groups.joinFlyer(bob,group.id,flyer.id,{name:'Bob',profileId:null,source:{}})
+ seatId=(await b.groups.roster(alice,group.id)).find(r=>r.actor.ownerId==='bob').id
+ const response=await b.get('/groups/'+group.urlKey+'/matches',owner.cookie)
+ assert.equal(blocked,true)
+ assert.equal(response.status,400)
+ assert.doesNotMatch(await response.text(),/React accessibility|data-match-card/)
 })
