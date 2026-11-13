@@ -9,6 +9,7 @@ const route = new RegExp(`^/groups/(${GROUP_KEY})(?:/(invite|select|about|leave)
 const flyerRoute = new RegExp(`^/groups/(${GROUP_KEY})/join/(${GROUP_UUID})$`)
 const flyerAdminRoute = new RegExp(`^/groups/(${GROUP_KEY})/flyer(?:/(${GROUP_UUID})/(revoke|requests/(${GROUP_UUID})))?$`)
 const metadataRoute = new RegExp(`^/groups/${GROUP_KEY}/about$`)
+const messageRoute = new RegExp(`^/groups/(${GROUP_KEY})/members/(organizer|${GROUP_UUID})/message$`)
 export const groupBodyLimit = path => metadataRoute.test(path) ? 32768 : 4096
 const sourceFields = new Set(['src', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'])
 export const isGroupPath = path => path === '/groups' || path.startsWith('/groups/')
@@ -50,7 +51,7 @@ const messages = {
   review_changed: 'The list changed since you reviewed it. Review the list again before sharing.',
 }
 
-export function createGroupBrowser({ groups, welcome = false, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body }) {
+export function createGroupBrowser({ messaging, groups, welcome = false, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body }) {
   if (typeof accountForProfile !== 'function') throw new TypeError('collective_groups_account_resolution_required')
   return async ({ request, url, session, lookup, render, redirect }) => {
     let { pathname } = url
@@ -128,6 +129,18 @@ export function createGroupBrowser({ groups, welcome = false, privateLists, save
         return redirect('/groups/' + id)
       }
       if (!session) fail('not_found')
+      const message = messageRoute.exec(pathname)
+      if (message) {
+        if (request.method !== 'POST' || url.search) fail('not_found')
+        await fields()
+        const member = (await groups.roster(actor, message[1])).find(row => row.id === message[2])
+        if (!member) fail('not_found')
+        if (member.actor.ownerId === actor.ownerId && member.actor.userId === actor.userId) return redirect(`/groups/${message[1]}/community/${member.id}`)
+        if (!messaging) throw new Error('messaging_unavailable')
+        const result = await messaging.openOwner(session, member.actor, member.name)
+        if (result.status !== 'ready' || !/^[A-Za-z0-9_-]{1,80}$/.test(result.conversationId)) throw new Error('messaging_unavailable')
+        return redirect('/messages/c/' + encodeURIComponent(result.conversationId))
+      }
       if (pathname !== '/groups' && !parsed) fail('not_found')
       if (searchParams.size && !(get && action === 'select')) fail('not_found')
       if (pathname === '/groups') {
@@ -136,7 +149,11 @@ export function createGroupBrowser({ groups, welcome = false, privateLists, save
         const group = await groups.create(actor, input.get('name'), await ownProfileId?.(actor))
         return redirect(`/groups/${group.id}`)
       }
-      if (!action && !collection && get) return render(renderGroup(chrome, await groups.detail(actor, groupId), origin))
+      if (!action && !collection && get) {
+        const group = await groups.detail(actor, groupId)
+        const roster = (await groups.roster(actor, groupId)).map(row => ({ id:row.id, name:row.name, role:row.role, self:row.actor.ownerId === actor.ownerId && row.actor.userId === actor.userId }))
+        return render(renderGroup(chrome, { ...group, roster, messagingAvailable: Boolean(messaging) }, origin))
+      }
       if (action === 'about' && request.method === 'POST') {
         const input = await fields('description', 'chatUrl', 'openChatUrl', 'urlMode')
         await groups.updateMetadata(actor, groupId, { description: input.get('description'), chatUrl: input.get('chatUrl'), openChatUrl: input.get('openChatUrl'), urlMode:input.get('urlMode')??undefined })

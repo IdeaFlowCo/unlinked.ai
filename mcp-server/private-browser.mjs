@@ -1,4 +1,5 @@
 import { isCommunityPath } from './community-intake.mjs'
+import { renderGroupsInCommon } from './group-member-views.mjs'
 import { createCommunityIntakeBrowser } from './community-intake-browser.mjs'
 import { bulkExportInput } from './bulk-exports.mjs'
 import { networkExportInput, streamNetworkExport } from './network-export.mjs'
@@ -208,13 +209,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   if (privateListImports !== undefined && privateListImports !== null && ['stage', 'status', 'resume', 'running'].some(key => typeof privateListImports[key] !== 'function')) throw new Error('private_list_imports_configuration_required')
   if (profileSocialLinks !== undefined && ['get', 'set', 'forProfile', 'removeOwner'].some(key => typeof profileSocialLinks?.[key] !== 'function')) throw new Error('profile_links_configuration_required')
   if (profileHandles !== undefined && ['resolve', 'handleFor', 'ensure', 'availability', 'rename', 'removeProfile'].some(key => typeof profileHandles?.[key] !== 'function')) throw new Error('profile_handles_configuration_required')
-  const communityBrowser = createCommunityIntakeBrowser({ client: communityIntake, groups: collectiveGroups, body })
+  const communityBrowser = createCommunityIntakeBrowser({ client: communityIntake, groups: collectiveGroups, messagingAvailable: Boolean(messaging), body })
   // Every emitted /people/ link prefers the member's handle (docs/profile-handles.md).
   setProfileHandleLookup(profileHandles ? id => profileHandles.handleFor(id) : null)
   // The profile id a /people/ segment names: a handle (any case) or the id itself.
   const handleTarget = segment => profileHandles?.resolve(segment)?.profileId ?? segment
   const groupBrowser = collectiveGroups && createGroupBrowser({
-    groups: collectiveGroups, welcome: Boolean(communityIntake), privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
+    messaging, groups: collectiveGroups, welcome: Boolean(communityIntake), privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
   })
   // A default handle only for a profile an active account still stands behind,
   // so a just-deleted account (still in the published index) never gets one back.
@@ -1769,6 +1770,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
                 const found = await bounded(() => ideaflowProfiles.forProfile(result.profile.id, { viewer: viewer?.owner ?? null, self }), null)
                 ideaflowCard = ideaflowProfileSection(found, { self, csrf: self ? viewer?.csrf : '' })
               }
+            }
+            if (viewer && collectiveGroups && !publicProfile?.[2] && !blocked && result.profile.presence === 'member' && typeof accountForProfile === 'function') {
+              const common = await bounded(async () => {
+                const other = await accountForProfile(result.profile.id)
+                if (!other || (other.ownerId === viewer.owner.ownerId && other.userId === viewer.owner.userId)) return []
+                return collectiveGroups.inCommon(viewer.owner, other)
+              }, [])
+              ideaflowCard += renderGroupsInCommon(common)
             }
             const personView = renderPerson({ ...chrome, ideaflowCard, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim })
             // Signed out, the page is the published profile: its preview may name them.
