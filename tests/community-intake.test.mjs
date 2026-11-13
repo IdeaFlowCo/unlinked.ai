@@ -38,7 +38,7 @@ async function browser(t, extra = {}, groupOptions = {}) {
     signup: async identity => { registered.add(identity.subject); return account(identity.subject) },
     issueAccountGrant: async () => ({}), revokeAccountGrant: async () => {},
     selfClaims: { lookupSlug: async () => null, lookupName: async () => null, claimable: async () => null, claim: async () => null },
-    readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'v1', profiles, connections: [] }),
+    readPublishedSnapshot: extra.readPublishedSnapshot ?? (async () => ({ state: 'published', complete: true, revision: 'v1', profiles, connections: [] })),
     ownProfileId: async owner => owner.ownerId,
     accountForProfile: async id => ['alice', 'bob', 'carol'].includes(id) ? account(id) : null,
     getBackend: async () => ({ adapter: {}, readResource: async () => null, listImportIds: async () => [], listImportJobIds: async () => [] }),
@@ -755,16 +755,20 @@ test('focused group ask form saves to the selected audience and shows the result
  const posted=await b.post(base+'/asks/save',owner.cookie,fields);assert.equal(posted.status,303)
  assert.equal(posted.headers.get('location'),'/groups/'+group.urlKey+'/community?saved=1')
  const board=await (await b.get(posted.headers.get('location'),owner.cookie)).text();assert.match(board,/Saved\. Your entry is shared/);assert.match(board,/Need a React reviewer/)
+ if(process.env.GROUP_UX_EVIDENCE_DIR)await writeFile(join(process.env.GROUP_UX_EVIDENCE_DIR,'ask-group-saved.html'),board)
  const privateFields=htmlForm(await (await b.get(base+'/asks/new',owner.cookie)).text(),base+'/asks/save');privateFields.set('title-0','Private draft');privateFields.set('audience-0','only_me')
  const privateSave=await b.post(base+'/asks/save',owner.cookie,privateFields);assert.equal(privateSave.headers.get('location'),'/asks?saved=1')
- assert.match(await (await b.get('/asks?saved=1',owner.cookie)).text(),/Private draft/)
+ const privateResult=await (await b.get('/asks?saved=1',owner.cookie)).text()
+ assert.match(privateResult,/Private draft/);assert.match(privateResult,/Only me/);assert.match(privateResult,/Saved\. You can see and edit your entry below/)
+ if(process.env.GROUP_UX_EVIDENCE_DIR)await writeFile(join(process.env.GROUP_UX_EVIDENCE_DIR,'ask-private-saved.html'),privateResult)
  assert.doesNotMatch(await (await b.get(base+'/community',owner.cookie)).text(),/Private draft/)
  assert.match(await (await b.get(base+'/welcome',owner.cookie)).text(),/Import LinkedIn/)
 })
 
 test('member roster links blank group profiles and opens verified direct chat; stale membership and forged fields cannot message',async t=>{
  const calls=[],targets=[]
- const b=await browser(t,{communityIntake:{group:async()=>({entries:[]})},createMessagingSession:async()=>({token:'fixture-session',user:{userId:'chat-alice'}}),resolveCardMessagingRecipient:async(owner)=>{targets.push(owner);return{id:'chat-'+owner.ownerId}},messagingOptions:{fetchImpl:async(url,opts)=>{calls.push({url,body:opts.body});return new Response(JSON.stringify(url.endsWith('/api/chat/conversations')?{id:'fixture-dm',type:'direct',participants:[]}:{count:0}),{status:200})}}})
+ let blocked=false
+ const b=await browser(t,{communityIntake:{group:async()=>({entries:[]})},createMessagingSession:async()=>({token:'fixture-session',user:{userId:'chat-alice'}}),resolveCardMessagingRecipient:async(owner)=>{targets.push(owner);return{id:'chat-'+owner.ownerId}},messagingOptions:{fetchImpl:async(url,opts)=>{calls.push({url,body:opts.body});return new Response(JSON.stringify(url.endsWith('/api/chat/conversations')?{id:'fixture-dm',type:'direct',participants:[]}:{count:0}),{status:200})}}},{blocked:async()=>blocked})
  const a=await b.login('alice'),bb=await b.login('bob'),c=await b.login('carol'),group=await b.groups.create(alice,'Builders'),flyer=await b.groups.createFlyer(alice,group.id,{capacity:100,approval:false})
  await b.groups.joinFlyer(bob,group.id,flyer.id,{name:'Bob Builder',profileId:null,source:{}})
  const seat=(await b.groups.roster(alice,group.id)).find(r=>r.actor.ownerId==='bob'),base='/groups/'+group.id,action=base+'/members/'+seat.id+'/message'
@@ -773,7 +777,15 @@ test('member roster links blank group profiles and opens verified direct chat; s
  assert.equal((await b.post(action,a.cookie,{csrf:a.csrf,ownerId:'carol'})).status,400)
  assert.equal((await b.post(action,c.cookie,{csrf:c.csrf})).status,404)
  assert.equal((await b.post(action,a.cookie,{csrf:a.csrf},'https://evil.invalid')).status,403)
+ assert.equal((await b.post(action,a.cookie,{csrf:'wrong'})).status,400)
+ assert.equal((await b.get(action,a.cookie)).status,404)
+ blocked=true
+ assert.equal((await b.post(action,a.cookie,{csrf:a.csrf})).status,404)
+ assert.equal(targets.length,0)
+ blocked=false
  const sent=await b.post(action,a.cookie,{csrf:a.csrf});assert.equal(sent.status,303);assert.equal(sent.headers.get('location'),'/messages/c/fixture-dm');assert.deepEqual(targets,[bob]);assert.equal(calls.filter(c=>c.url.endsWith('/api/chat/conversations')).length,1);assert.ok(!calls.some(c=>/\/messages$/.test(c.url)))
+ assert.deepEqual(JSON.parse(calls.find(c=>c.url.endsWith('/api/chat/conversations')).body),{participantIds:['chat-bob'],type:'direct'})
+ if(process.env.GROUP_UX_EVIDENCE_DIR)await writeFile(join(process.env.GROUP_UX_EVIDENCE_DIR,'message-action.json'),JSON.stringify({action:'Message Bob Builder',response:{status:sent.status,location:sent.headers.get('location')},recipient:targets[0],openChatWrites:calls.filter(c=>c.body).map(c=>({path:new URL(c.url).pathname,body:JSON.parse(c.body)})),messageSends:calls.filter(c=>/\/messages$/.test(c.url)).length,blockedAttempt:{status:404,recipientResolutions:0}},null,2)+'\n')
  await b.groups.leave(bob,group.id)
  assert.equal((await b.post(action,a.cookie,{csrf:a.csrf})).status,404);assert.equal(targets.length,1)
  assert.equal((await b.get(base+'/community/'+seat.id,bb.cookie)).status,400)
@@ -787,4 +799,53 @@ test('groups in common expose only current mutual membership and honor blocks',a
  assert.deepEqual((await groups.inCommon(alice,bob)).map(g=>g.id),[shared.id]);assert.ok(!(await groups.inCommon(alice,bob)).some(g=>g.id===privateGroup.id))
  blocked=true;assert.deepEqual(await groups.inCommon(alice,bob),[])
  blocked=false;await groups.leave(bob,shared.id);assert.deepEqual(await groups.inCommon(alice,bob),[])
+})
+
+test('HTTP shared groups are a signed-in intersection on group and public member profiles, never anonymous previews or APIs',async t=>{
+ const b=await browser(t,{communityIntake:{group:async()=>({entries:[]})},readPublishedSnapshot:async()=>({state:'published',complete:true,revision:'member-fixture',profiles,connections:[],members:['alice','bob','carol']})})
+ const a=await b.login('alice'),c=await b.login('carol')
+ const shared=await b.groups.create(alice,'Mutual builders'),aliceOnly=await b.groups.create(alice,'Alice confidential group'),bobOnly=await b.groups.create(bob,'Bob confidential group')
+ const invite=await b.groups.invite(alice,shared.id,bob,{id:'bob',name:'Bob'})
+ await b.groups.respond(bob,shared.id,invite,'accept')
+ const seat=(await b.groups.roster(alice,shared.id)).find(r=>r.actor.ownerId==='bob')
+ for(const path of ['/groups/'+shared.urlKey+'/community/'+seat.id,'/people/bob']) {
+  const response=await b.get(path,a.cookie);assert.equal(response.status,200,path)
+  const html=await response.text()
+  assert.match(html,/Groups in common/);assert.match(html,/Mutual builders/)
+  for(const hidden of [aliceOnly,bobOnly]) {assert.ok(!html.includes(hidden.name));assert.ok(!html.includes(hidden.id))}
+  if(process.env.GROUP_UX_EVIDENCE_DIR)await writeFile(join(process.env.GROUP_UX_EVIDENCE_DIR,path==='/people/bob'?'member-public-signed-in.html':'member-groups-in-common.html'),html)
+ }
+ for(const [path,cookie] of [['/people/bob',undefined],['/people/bob',c.cookie],['/api/people/bob',a.cookie],['/api/people',a.cookie]]) {
+  const response=await b.get(path,cookie);assert.equal(response.status,200,path)
+  const output=await response.text()
+  for(const hidden of [shared,aliceOnly,bobOnly]) {assert.ok(!output.includes(hidden.name));assert.ok(!output.includes(hidden.id))}
+  assert.doesNotMatch(output,/Groups in common/)
+ }
+ await b.groups.leave(bob,shared.id)
+ assert.doesNotMatch(await (await b.get('/people/bob',a.cookie)).text(),/Groups in common|Mutual builders/)
+})
+
+test('focused ask save rechecks live membership and CSRF before calling Social',async t=>{
+ const writes=[]
+ const client=createCommunityIntakeClient({secret:'fixture-secret-'.repeat(4),identityForOwner:async owner=>({issuer:'https://id.ideaflow.app/api/auth',subject:owner.userId}),fetchImpl:async(url,opts)=>{writes.push({url,body:JSON.parse(opts.body)});return Response.json({entries:[]})}})
+ const b=await browser(t,{communityIntake:client}),a=await b.login('alice'),bb=await b.login('bob'),c=await b.login('carol')
+ const group=await b.groups.create(alice,'Builders'),invite=await b.groups.invite(alice,group.id,bob,{id:'bob',name:'Bob'})
+ await b.groups.respond(bob,group.id,invite,'accept')
+ const base='/groups/'+group.urlKey+'/asks',fields=htmlForm(await (await b.get(base+'/new',bb.cookie)).text(),base+'/save')
+ fields.set('title-0','Find a design reviewer');fields.set('body-0','One prototype screen')
+ assert.equal((await b.post(base+'/save',bb.cookie,{...Object.fromEntries(fields),csrf:'wrong'})).status,400)
+ assert.equal((await b.post(base+'/save',bb.cookie,fields,'https://evil.invalid')).status,403)
+ assert.equal((await b.post(base+'/save',c.cookie,{...Object.fromEntries(fields),csrf:c.csrf})).status,400)
+ assert.equal(writes.length,0)
+ const saved=await b.post(base+'/save',bb.cookie,fields);assert.equal(saved.status,303)
+ assert.deepEqual(writes[0].body.entries,[{title:'Find a design reviewer',body:'One prototype screen',kind:'ask',source:'manual',audience:'group',groupId:group.id}])
+ assert.equal(writes[0].body.subject,'bob-user');assert.equal(writes[0].body.consent,true)
+ assert.equal(saved.headers.get('location'),'/groups/'+group.urlKey+'/community?saved=1')
+ await b.groups.leave(bob,group.id)
+ assert.equal((await b.post(base+'/save',bb.cookie,fields)).status,400);assert.equal(writes.length,1)
+ // Only-me drafts work independently of group membership and carry no group id.
+ const personal=htmlForm(await (await b.get('/asks/new',a.cookie)).text(),'/asks/save')
+ assert.equal(personal.get('audience-0'),'only_me');personal.set('title-0','Private draft')
+ assert.equal((await b.post('/asks/save',a.cookie,personal)).headers.get('location'),'/asks?saved=1')
+ assert.equal(writes[1].body.entries[0].audience,'only_me');assert.equal(writes[1].body.entries[0].groupId,undefined)
 })
