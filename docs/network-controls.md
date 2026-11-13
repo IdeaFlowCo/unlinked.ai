@@ -60,19 +60,4 @@ These browser routes do not add agent tools or expand existing agent grants.
 
 ### Cold owner reads
 
-The standalone composition provides a process-only assertion batch capability
-after verified owner resolution. It reads at most 128 exact resource IDs per
-transaction, joins the live active binding and user, and rechecks authority
-afterward. It has no HTTP, browser or grant endpoint. Immutable observation
-documents are bounded to 64 KiB (the publisher externalizes fields above 60 KiB
-to private digest-verified assets). Assets still hydrate at most eight at a time.
-The scoped import reader retains manifest ordering/counts, per-row owner/import
-checks, before/after publication revisions, tombstones and cache-erasure fences.
-Backends without this capability retain eight parallel single-resource reads.
-
-Cold signed-in directory and account queries share this reader. Batch-call
-regressions execute both account hydration and an authenticated `/network`
-request with over 3,000 synthetic observations; real graph tests verify binding,
-user isolation, missing rows, tombstones and oversized-document refusal. A real
-production read-only comparison is operational evidence, separate from the
-synthetic browser-session fixture and from any claim of client end-to-end speed.
+Cold owner observation reads use the shared [publication reader contract](private-noos-staging.md#publication-and-scale), which owns batch bounds, authorization, fallback behavior and regression coverage.

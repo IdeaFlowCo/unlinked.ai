@@ -57,7 +57,7 @@ Secure HttpOnly SameSite cookies contain random session IDs, not identity/access
 One combined upload disclosure/action authorizes private archive retention and bounded OpenAI processing of queries and observed name/company/position/date fields for browser and search-only scoped agent searches; no separate production consent checkbox is required. New production uploads record `public-professional-archive-openai-v2` for shared People eligibility, while older private-v1 and synthetic imports remain excluded. Immutable import/source receipts retain versioned consent. Older imports without this disclosure fail closed for owner search and grants; replay never upgrades prior consent.
 The [agent API contract](agent-api.md) owns account grant provisioning, Settings/OAuth consent, tools and degree semantics.
 Operational/provider tokens, raw recovery APIs and recovered original-file downloads are never delegated to the agent.
-Scoped publication reads fetch at most eight observations concurrently, preserve manifest order and recheck the live publication fence after all rows so a deletion/revocation race wins.
+Scoped read bounds and live publication fences follow the [publication reader contract](private-noos-staging.md#publication-and-scale).
 Actual real-user delegation must receive its own reviewed approval; synthetic stage issuer behavior is not production provider delegated consent.
 
 ## Proof and activation order
