@@ -1,4 +1,5 @@
 import { EXPORT_FIELDS } from './bulk-export-format.mjs'
+import { ACCESS_TIER, limitsForTier, tierResolver } from './access-tiers.mjs'
 export const INTERNAL_BULK_READ = Symbol('unlinked-internal-bulk-read')
 import { reportIndexError } from '../src/utils/public-people/error-report.mjs'
 import { INVESTOR_TOOLS, INVESTOR_MUTATING, INVESTOR_SCHEMAS, INVESTOR_DESCRIPTIONS } from './investor-tools.mjs'
@@ -106,7 +107,7 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
 })
 
 export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
-  unlinked_export_network: 'Set inline:true to query every matching row in one response when it fits; a real response-size limit returns an explicit incomplete preview plus a full download link. Prepare one complete authenticated download of all matching people, with no manual cursor walking or row/page truncation. scope mine exports your network; list + listId private:<id> or saved:<id> exports a current owned list. Verified accounts with public scope may use everyone or all (own + published). Choose csv for a spreadsheet, json for structured records, or jsonl for streaming; detail headline, summary or full, or select fields. Full includes available profile evidence; private list notes require private-notes scope. Returns browser and bearer-authenticated API links without embedding a token. Fetch the API link with the SAME account bearer in one request; use the browser link while signed in for manual download. The response streams every internal page and confirms completion. No public sharing or privilege expansion.',
+  unlinked_export_network: 'Set inline:true to query every matching row in one response when it fits; a real response-size limit returns an explicit incomplete preview plus a full download link. Prepare one complete authenticated download of all matching people, with no manual cursor walking or row/page truncation. scope mine exports your network; list + listId private:<id> or saved:<id> exports a current owned list. Verified or enhanced-access accounts with public scope may use everyone or all (own + published). Choose csv for a spreadsheet, json for structured records, or jsonl for streaming; detail headline, summary or full, or select fields. Full includes available profile evidence; private list notes require private-notes scope. Returns browser and bearer-authenticated API links without embedding a token. Fetch the API link with the SAME account bearer in one request; use the browser link while signed in for manual download. The response streams every internal page and confirms completion. No public sharing or privilege expansion.',
   unlinked_list_person_targets: 'Read-only current owner-network members with proven active Ideaflow identity, for cross-app person targets. Exact published-profile ownership only; no names/email guesses, contact details, messages, relationship assertions, account creation or sends. Connected does not mean chatted. Cursor pages the current own network, including imported connections.',
   unlinked_whoami: 'Return the authenticated grant owner: the stable Unlinked owner id, grant scope/version/tools, import count and confirmed legacy-profile anchor if any. Linkage is the grant itself — never email matching. No contact email/phone is returned.',
   unlinked_list_people: 'Deterministically list or lexically filter the published public People index; presence=member keeps people who joined, presence=legacy keeps recovered accounts awaiting claim, presence=shadow keeps imported profiles without a recovered account. enrichmentStatus filters enriched, not_recorded (no current published enrichment evidence; not proof of never enriched), or unknown. Enrichment is independent of detailLevel and membership. sort: best (default: relevance with q, else stored name order), name (A–Z by first letter or number, ignoring leading emoji/punctuation, accents and case), name-desc, raw (Unicode code-point order of the name as written). Paginated with an opaque cursor bound to the query and sort, at most 50 per page, with total and snapshot revision. Public fields only.',
@@ -180,9 +181,12 @@ const indexReasonOf = (stage, error) => {
   return 'tool_exception'
 }
 const indexFailure = (stage, error) => Object.assign(new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.'), { stage, indexReason: indexReasonOf(stage, error) })
-export function createAccountToolService({ exportManifest, isVerified = async () => false, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
+export function createAccountToolService({ exportManifest, isVerified = async () => false, accessTier, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
+  // Per-owner allowances follow the operator-held access tier (docs/verified-access.md).
+  const tierOf = tierResolver({ accessTier, isVerified })
+  const standardLimits = { deterministicPerMinute, aiPerMinute, aiPerDay, aiInFlight }
   // list_connections and lookup_contact share one bounded read per owner. It
   // runs independently of each caller's signal so cancellation cannot discard
   // useful work; mutating tools invalidate it and reuse rechecks import IDs.
@@ -249,16 +253,16 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     if (Date.now() - value.writeWindow >= 60000) { value.writeWindow = Date.now(); value.write = 0 }
     if (++value.write > writePerMinute) throw new AccountToolError('rate_limited', 'Connection write budget is exhausted; retry within a minute.')
   }
-  const admitDeterministic = ownerId => {
+  const admitDeterministic = (ownerId, allowed = standardLimits) => {
     const value = bucket(ownerId)
     if (Date.now() - value.window >= 60000) { value.window = Date.now(); value.deterministic = 0 }
-    if (++value.deterministic > deterministicPerMinute) throw new AccountToolError('rate_limited', 'Deterministic tool budget is exhausted; retry within a minute.')
+    if (++value.deterministic > allowed.deterministicPerMinute) throw new AccountToolError('rate_limited', 'Deterministic tool budget is exhausted; retry within a minute.')
   }
-  const admitAi = ownerId => {
+  const admitAi = (ownerId, allowed = standardLimits) => {
     const value = bucket(ownerId), now = Date.now(), day = Math.floor(now / 86400000)
     if (now - value.aiWindow >= 60000) { value.aiWindow = now; value.ai = 0 }
     if (day !== value.aiDay) { value.aiDay = day; value.aiDayCount = 0 }
-    if (value.ai >= aiPerMinute || value.aiDayCount >= aiPerDay || value.aiBusy >= aiInFlight || aiBusyTotal >= aiInFlightTotal) throw new AccountToolError('rate_limited', 'AI tool budget is exhausted; retry within a minute.')
+    if (value.ai >= allowed.aiPerMinute || value.aiDayCount >= allowed.aiPerDay || value.aiBusy >= allowed.aiInFlight || aiBusyTotal >= aiInFlightTotal) throw new AccountToolError('rate_limited', 'AI tool budget is exhausted; retry within a minute.')
     value.ai++; value.aiDayCount++; value.aiBusy++; aiBusyTotal++
     return () => { value.aiBusy--; aiBusyTotal-- }
   }
@@ -743,7 +747,8 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     searchActivity().tool(name, input)
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
-    const release = admission === INTERNAL_BULK_READ && DETERMINISTIC_TOOLS.has(name) || await isVerified(grant) ? null : DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId)
+    const internal = admission === INTERNAL_BULK_READ && DETERMINISTIC_TOOLS.has(name), tier = internal ? null : await tierOf(grant), allowed = limitsForTier(tier, standardLimits)
+    const release = internal || tier === ACCESS_TIER.verified ? null : DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId, allowed) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId, allowed)
     try {
       const execute = async () => {
       if (coordination && MUTATING_TOOLS.has(name) && requestContext?.ownerCheckpoint !== undefined && coordination.version(grant.ownerId) > requestContext.ownerCheckpoint) throw new AccountToolError('grant_revoked', 'The account changed during this request; reconnect and retry.')
@@ -768,7 +773,8 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
   // sharing the same per-owner and process-wide AI admission as REST/tools.
   async function withSearchBudget(grant, name, work) {
     if (!['unlinked_search_network', 'unlinked_search_everyone'].includes(name) || !grant?.tools?.includes(name)) throw new AccountToolError('scope_not_granted', 'This grant does not include the requested search.')
-    const release = await isVerified(grant) ? () => {} : admitAi(grant.ownerId)
+    const tier = await tierOf(grant)
+    const release = tier === ACCESS_TIER.verified ? () => {} : admitAi(grant.ownerId, limitsForTier(tier, standardLimits))
     try { return await work() } finally { release() }
   }
   return { call, withSearchBudget }

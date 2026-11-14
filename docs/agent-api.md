@@ -236,7 +236,11 @@ This vocabulary may be extended, never renamed.
   20/min, 2000/day and 2 in flight **per grant owner**, plus a shared ceiling
   of 8 concurrent AI calls per runtime. These budgets are enforced on the
   HTTP API, shared gateway and all hosted MCP search tools, including the
-  two launch tools. Launch searches retain their historical result shapes
+  two launch tools. Accounts with operator-granted **Enhanced access** get
+  600 deterministic requests/min and 60 AI calls/min, 6000/day and 4 in
+  flight; the shared runtime ceiling and connection-write budgets do not
+  change, and verified accounts bypass these quotas (`docs/verified-access.md`).
+  Launch searches retain their historical result shapes
   and page sizes; text-first searches also consume this AI allowance. **Known conflict with a 10 s consumer
   timeout:** these call a provider with batched ranking rounds; worst case is
   bounded at 40 s and p95 is not guaranteed under 10 s. Mitigations the
@@ -498,8 +502,10 @@ own OIDC session. Keyed strictly on the verified **issuer + subject** binding
   given user to every client (public, not pairwise, subjects). Consumers
   should confirm that for their own client before relying on it, since
   pairwise subjects would make every lookup answer `not_linked`.
-- **Rate limit:** 30 requests/min per client id (`rate_limited`, 429,
-  `Retry-After`).
+- **Rate limit:** 300 requests/min per client id, and 30/min per client and
+  account (150 with Enhanced access; verified accounts are limited only by
+  the client ceiling) (`rate_limited`, 429, `Retry-After`). The response is a
+  reusable key: cache it rather than provisioning before every call.
 - **Request:** `{"issuer": "<https OIDC issuer>", "subject": "<exact opaque
   subject>"}` — the pair the caller verified itself. Unknown fields, non-https
   issuers or malformed subjects are `invalid_input`.
