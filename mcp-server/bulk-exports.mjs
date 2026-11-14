@@ -1,3 +1,4 @@
+import { sharedExportAllowed, tierResolver } from './access-tiers.mjs'
 import { createMembersOnlySnapshotReader } from '../src/utils/public-people/members-only.mjs'
 import { bulkListSources } from './bulk-list-sources.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
@@ -38,11 +39,12 @@ const queryMatches=(row,query)=>{
   return terms.every(term=>haystack.includes(term))
 }
 const summaryOf = row => ({id:row.id,name:row.name,headline:row.headline??'',company:row.company??row.positions?.[0]?.company??'',location:row.location??'',linkedinUrl:row.linkedinUrl??'',url:row.profileId?`https://www.unlinked.ai/people/${encodeURIComponent(row.profileId)}`:row.source?.kind==='own_network'?`https://www.unlinked.ai/network/contacts/${encodeURIComponent(row.id)}`:row.source?.kind==='private_list'?'':row.id?`https://www.unlinked.ai/people/${encodeURIComponent(row.id)}`:'',detailLevel:row.detailLevel??'basic',enrichmentStatus:row.enrichmentStatus??'unknown',...row})
-export function createBulkExports({getBackend,readPublishedSnapshot,lookupSlug,ownProfileId,privateLists,savedSearchLists,isVerified=async()=>false}) {
+export function createBulkExports({getBackend,readPublishedSnapshot,lookupSlug,ownProfileId,privateLists,savedSearchLists,isVerified=async()=>false,accessTier}) {
+  const tierOf=tierResolver({accessTier,isVerified})
   const membersSnapshot=typeof readPublishedSnapshot==='function'?createMembersOnlySnapshotReader(readPublishedSnapshot):undefined
   const check = async(owner,input,policy={})=>{
     await getBackend(owner)
-    if(['everyone','all'].includes(input.scope)&&(!policy.publicAllowed||!await isVerified(owner)))throw fail('scope_not_granted','A verified account with public-network access is required for this download.')
+    if(['everyone','all'].includes(input.scope)&&(!policy.publicAllowed||!sharedExportAllowed(await tierOf(owner))))throw fail('scope_not_granted','A verified or enhanced-access account with public-network access is required for this download.')
     if(input.scope==='list'&&!policy.privateAllowed)throw fail('scope_not_granted','Private people notes & relations permission is required to download private lists.')
   }
   const manifest=async(owner,raw,policy,signal,authorizeCaller)=>{

@@ -24,7 +24,7 @@ import { createOwnerResourceBatchReader } from './owner-resource-batch.mjs'
 import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { publishedPeopleFor } from './connection-identity.mjs'
 import { createPersonLookup, createNeo4jPersonLookupStore } from './person-lookup.mjs'
-import { createVerifiedAccess } from './verified-access.mjs'
+import { createAccessTier, verifiedFromTier } from './verified-access.mjs'
 import {createLegacyStorageReader} from '../src/utils/legacy-import/storage-reader.mjs'
 import { createPublicPeopleReader } from '../src/utils/public-people/reader.mjs'
 import { createIndexWarmKeeper, createMemberPublicIndex, ENRICHMENT_DATASETS, LINKEDIN_ENRICHMENT_DATASETS } from '../src/utils/public-people/member-projection.mjs'
@@ -203,7 +203,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // The adapter loads once; any failed check leaves lookups off while
     // already confirmed sources stay readable.
     const lookup = signupLookupStore ? await prepareProfileLookup({ env: profileLookupEnv, load: profileLookupLoader, log: emailLog }) : null
-    const isVerified = createVerifiedAccess({ driver })
+    const accessTier = createAccessTier({ driver }), isVerified = verifiedFromTier(accessTier)
     const signupLookup = signupLookupStore ? createSignupProfileLookup({ store: signupLookupStore, ...lookup }) : undefined
     const personLookupStore = publicPeople ? createNeo4jPersonLookupStore(driver) : null
     await personLookupStore?.initialize()
@@ -710,7 +710,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       })
       contactEnrichment.start()
     }
-    return { isVerified, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
+    return { isVerified, accessTier, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),

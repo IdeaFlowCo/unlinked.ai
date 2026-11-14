@@ -1,0 +1,28 @@
+{
+  "kind": "unlinked-approved-access-seed",
+  "version": 1,
+  "reviewedAt": "2026-11-14",
+  "requestedBy": "Jacob Cole",
+  "selectionRule": "Approve Jacob Cole and Shan Zhong (named by Jacob), plus published Unlinked members (presence=member, live signed-up account) who are first-degree contacts in Jacob's own Unlinked network by exact identity evidence: either the product's own same-person grouping (published profile id or LinkedIn address, as in mcp-server/connection-identity.mjs) or a member profile handle derived from the same LinkedIn address as one of Jacob's imported LinkedIn connections, with matching name. Name-only matches, different LinkedIn addresses and possible test accounts are left out for Jacob to decide. Each profile is resolved to its one active account at apply time from live source ownership; no email is used.",
+  "approve": [
+    { "name": "Jacob Cole", "profileId": "c2d609ce-fa01-4a8f-8dcc-710292e4a56c", "evidence": "account owner; named by Jacob" },
+    { "name": "Shan Zhong", "profileId": "member-signup-60f594f1ce3e0af01aebcbfa9fa737d12f0296a6222713aa098e3013267af094", "evidence": "named by Jacob; handle matches the LinkedIn address of Jacob's imported connection" },
+    { "name": "Mati Roy", "profileId": "029cc063-3ea5-41ce-9dda-cde12e8b4a69", "evidence": "same-person grouping with Jacob's imported connection" },
+    { "name": "Tanya Grinberg", "profileId": "572e6d30-37fa-4cf2-94ae-588acc2bf36f", "evidence": "same-person grouping with Jacob's imported connection" },
+    { "name": "Roger Cole", "profileId": "fda3008a-5990-4816-86ff-3834cfa6825d", "evidence": "same-person grouping with Jacob's imported connection" },
+    { "name": "Peter Huynh", "profileId": "member-signup-f76ef20c237aab1d8208fe0772daa6bb5826349ce3d8e2bc025c418613b8bc29", "evidence": "same-person grouping with Jacob's imported connection" },
+    { "name": "Ryan Nantell", "profileId": "member-import-74b1b829612684a6d919062a6230aff3fe446dee1852cccba4f95b405c6fb603", "evidence": "same-person grouping with Jacob's imported connection" },
+    { "name": "Hesham Younis", "profileId": "member-import-4ca983af1126b63f2af2618f7d5909496a0faef55e1253eaf96e1f539ed21fbd", "evidence": "same-person grouping with Jacob's imported connection" },
+    { "name": "Cyrus Nouroozi", "profileId": "member-signup-db06c182b5267c0e558360b9970aea460c43a7ff8ea91cfa6e1e3640ab64bd64", "evidence": "handle matches the LinkedIn address of Jacob's imported connection" },
+    { "name": "Daveed Benjamin", "profileId": "member-signup-c764477f3294771c330604ef84dfc47683e914d237f8722f476df5984924b7b9", "evidence": "handle matches the LinkedIn address of Jacob's imported connection" },
+    { "name": "Mareike Jens", "profileId": "member-signup-54f01d1f1c18882a6b0e63004452724ee83b4d31077f6d5d5cd8f7f32ce9bac2", "evidence": "handle matches the LinkedIn address of Jacob's imported connection" }
+  ],
+  "leftOutForJacob": [
+    { "name": "Efe Zaladin", "reason": "Jacob's connection points at a separate recovered (legacy) profile; the member profile is import-based, so the same-person link is not established" },
+    { "name": "Harrison Qian", "reason": "same name and current role, but the member handle is name-derived and Jacob's connection has a different LinkedIn address" },
+    { "name": "Jackson Jesionowski", "reason": "member profile is a different published record from the one Jacob is connected to" },
+    { "name": "Mark Schmidt", "reason": "Jacob's connection with this name is a different person (different LinkedIn address and employer)" },
+    { "name": "J Co", "reason": "looks like a test or secondary account" },
+    { "name": "Other 15 members", "reason": "no match in Jacob's Unlinked network: Abhi Hakhu, Amit Haas, Anran Ye, Anya D., David Liao, Grace Ng, Hudson Mitchell-Pullman, Jo M., Linda Giang, Renz Tumpalan, Rupesh Pednekar, Soul Choi, Steven Gann, Thomas Sloan, Vega Paithankar" }
+  ]
+}
