@@ -39,7 +39,7 @@ function fixture() {
   return { register, getBackend, resolveOwner, resources, beforeWrite: fn => { beforeWrite = fn }, beforeRead: fn => { beforeRead = fn } }
 }
 
-async function launch(t, { clients, perClientPerMinute, coordination, onResolve, beforeResolve } = {}) {
+async function launch(t, { clients, perClientPerMinute, perOwnerPerMinute, accessTier, coordination, onResolve, beforeResolve } = {}) {
   const f = fixture()
   const grants = createAccountGrantService({ issuer: 'https://synthetic-prov.invalid', signingKey: randomBytes(32), getBackend: f.getBackend, publicSearchEnabled: true })
   const service = createAccountToolService({ getBackend: f.getBackend, complete: async () => ({ matches: [] }), readPublishedSnapshot: async () => ({ state: 'published', complete: true, revision: 'prov-v1', profiles: [], connections: [] }) })
@@ -50,7 +50,7 @@ async function launch(t, { clients, perClientPerMinute, coordination, onResolve,
   const origin = `https://127.0.0.1:${server.address().port}`
   const api = createAccountAgentApiHandler({ authenticateGrantDetailed: async request => { const run = beforeVerification; beforeVerification = null; await run?.(); return grants.authenticateGrantDetailed(request) }, authenticateGrant: grants.authenticateGrant, service, origin,
     provisioning: clients === null ? undefined : { clients: clients ?? [{ clientId: CLIENT_ID, secretSha256: createHash('sha256').update(CLIENT_SECRET).digest() }],
-      resolveOwner: async identity => { const owner = await f.resolveOwner(identity); await beforeResolve?.(); onResolve?.(); return owner }, ensureGrant: grants.ensureGrant, audit: async event => audits.push(event), perClientPerMinute, coordination } })
+      resolveOwner: async identity => { const owner = await f.resolveOwner(identity); await beforeResolve?.(); onResolve?.(); return owner }, ensureGrant: grants.ensureGrant, audit: async event => audits.push(event), perClientPerMinute, perOwnerPerMinute, ...(accessTier ? { accessTier } : {}), coordination } })
   server.removeAllListeners('request'); server.on('request', (req, res) => void api(req, res))
   const endpoint = `http://127.0.0.1:${server.address().port}`
   const provision = (body, authorization = basic(CLIENT_ID, CLIENT_SECRET)) => fetch(`${endpoint}/api/agent/v1/provision-grant`, {
@@ -337,4 +337,17 @@ for (const competitor of ['revoke', 'replaceKey', 'setConnectionActions']) test(
   if (competitor === 'replaceKey') assert.equal((await retry.json()).accessToken, replacement.accessToken)
   assert.equal(app.f.resources.size, 2)
   assert.equal((await app.grants.readKey(owner, selected.grantId)).accessToken, selected.accessToken)
+})
+
+test('per-account provisioning budget scales with the access tier and does not starve other accounts on the same client', async t => {
+  const tiers = { 'tier-approved': 'approved', 'tier-verified': 'verified' }
+  const app = await launch(t, { perOwnerPerMinute: 2, accessTier: async owner => tiers[owner.ownerId] ?? 'standard' })
+  for (const name of ['standard', 'approved', 'verified', 'other']) app.f.register({ issuer: ISSUER, subject: name }, { ownerId: `tier-${name}`, userId: `user-${name}` })
+  const statuses = async (subject, n) => { const out = []; for (let i = 0; i < n; i++) out.push((await app.provision({ issuer: ISSUER, subject })).status); return out }
+  assert.deepEqual(await statuses('standard', 3), [200, 200, 429])
+  const limited = await app.provision({ issuer: ISSUER, subject: 'standard' })
+  assert.equal((await limited.json()).error.code, 'rate_limited')
+  assert.deepEqual(await statuses('other', 2), [200, 200], 'one account exhausting its budget leaves the client usable for others')
+  assert.deepEqual(await statuses('approved', 11), [...Array(10).fill(200), 429], 'enhanced access is 5x the standard per-account budget')
+  assert.deepEqual(await statuses('verified', 12), Array(12).fill(200), 'verified accounts are bounded only by the client ceiling')
 })

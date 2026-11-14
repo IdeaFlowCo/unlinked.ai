@@ -1,4 +1,5 @@
 import { searchActivity } from './search-activity.mjs'
+import { ACCESS_TIER, APPROVED_FACTORS } from './access-tiers.mjs'
 import { requestDiagnostic } from './request-diagnostics.mjs'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { AccountToolError } from './account-tools.mjs'
@@ -91,10 +92,30 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
       new Set(provisioning.clients.map(client => client.clientId)).size !== provisioning.clients.length ||
       typeof provisioning.resolveOwner !== 'function' || typeof provisioning.ensureGrant !== 'function' ||
       (provisioning.audit !== undefined && typeof provisioning.audit !== 'function') ||
-      (provisioning.perClientPerMinute !== undefined && !(Number.isSafeInteger(provisioning.perClientPerMinute) && provisioning.perClientPerMinute >= 1 && provisioning.perClientPerMinute <= 600)))) throw new Error('account_agent_provisioning_configuration_required')
-  const provisionBudgets = new Map()
+      (provisioning.perClientPerMinute !== undefined && !(Number.isSafeInteger(provisioning.perClientPerMinute) && provisioning.perClientPerMinute >= 1 && provisioning.perClientPerMinute <= 600)) ||
+      (provisioning.perOwnerPerMinute !== undefined && !(Number.isSafeInteger(provisioning.perOwnerPerMinute) && provisioning.perOwnerPerMinute >= 1 && provisioning.perOwnerPerMinute <= 600)) ||
+      (provisioning.accessTier !== undefined && typeof provisioning.accessTier !== 'function'))) throw new Error('account_agent_provisioning_configuration_required')
+  // Two budgets: a per-client ceiling bounds one confidential client's total
+  // load, and a per-owner budget (scaled by the owner's operator-held access
+  // tier) stops one account's agent from exhausting a shared app client for
+  // everyone else. Reuse of an existing grant is cheap, so the client ceiling
+  // is set well above any single owner's allowance.
+  const provisionBudgets = new Map(), ownerProvisionBudgets = new Map()
+  const spend = (budgets, key, limit) => {
+    const now = Date.now()
+    let value = budgets.get(key)
+    if (!value || now - value.window >= 60000) { if (budgets.size >= 5000) budgets.clear(); value = { window: now, count: 0 }; budgets.set(key, value) }
+    return ++value.count > limit ? Math.max(1, Math.ceil((value.window + 60000 - now) / 1000)) : 0
+  }
+  const admitOwner = async (clientId, owner) => {
+    const tier = provisioning.accessTier ? await provisioning.accessTier(owner) : ACCESS_TIER.standard
+    if (tier === ACCESS_TIER.verified) return
+    const base = provisioning.perOwnerPerMinute ?? 30, limit = tier === ACCESS_TIER.approved ? base * APPROVED_FACTORS.deterministicPerMinute : base
+    const retryAfter = spend(ownerProvisionBudgets, `${clientId}\u0000${owner.ownerId}`, limit)
+    if (retryAfter) throw Object.assign(new AccountToolError('rate_limited', 'Provisioning budget for this account is exhausted; reuse the provisioned key or retry when the window resets.'), { retryAfter })
+  }
   const admitClient = clientId => {
-    const limit = provisioning.perClientPerMinute ?? 30
+    const limit = provisioning.perClientPerMinute ?? 300
     const now = Date.now()
     let value = provisionBudgets.get(clientId)
     if (!value || now - value.window >= 60000) { value = { window: now, count: 0 }; provisionBudgets.set(clientId, value) }
@@ -125,6 +146,7 @@ export function createAccountAgentApiHandler({ authenticateGrantDetailed, authen
     let owner = null
     try { owner = await provisioning.resolveOwner({ issuer, subject }) } catch { throw new AccountToolError('upstream_unavailable', 'The identity binding could not be read right now; retry.') }
     if (!owner || typeof owner.ownerId !== 'string' || !owner.ownerId || typeof owner.userId !== 'string' || !owner.userId) throw new AccountToolError('not_linked', 'No Unlinked account is bound to that verified identity. The person must sign in at /login once; linkage is never established by email matching.')
+    try { await admitOwner(client.clientId, owner) } catch (error) { if (error instanceof AccountToolError) throw error; throw new AccountToolError('upstream_unavailable', 'The account tier could not be read right now; retry.') }
     const release = provisioning.coordination ? await provisioning.coordination.acquire('owner:' + owner.ownerId, false) : () => {}
     try {
     if (provisioning.coordination && provisioning.coordination.version(owner.ownerId) > checkpoint) throw new AccountToolError('not_linked', 'The account changed while provisioning; sign in again.')
