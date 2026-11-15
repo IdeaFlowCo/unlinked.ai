@@ -286,7 +286,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:var(--fg,#16181
 .unlinked-onboarding nav a.button{color:#fff}
 .unlinked-onboarding nav a.button:hover{text-decoration:none}
 .unlinked-onboarding .pill{background:var(--tint);color:var(--brand-d);border:1px solid var(--brand);border-radius:99px;padding:5px 12px;font-size:13px;font-weight:600}
-.unlinked-onboarding .button,.unlinked-onboarding button{display:inline-flex;min-height:46px;align-items:center;justify-content:center;gap:8px;padding:11px 22px;background:var(--brand);border:1px solid var(--brand);border-radius:var(--r);color:#fff;text-decoration:none;font:600 16px "Public Sans",system-ui,sans-serif;cursor:pointer}
+.unlinked-onboarding .button,.unlinked-onboarding button{display:inline-flex;min-height:46px;align-items:center;justify-content:center;gap:8px;padding:11px 22px;background:var(--brand-fill,var(--brand));border:1px solid var(--brand-fill,var(--brand));border-radius:var(--r);color:#fff;text-decoration:none;font:600 16px "Public Sans",system-ui,sans-serif;cursor:pointer}
 .unlinked-onboarding .button.lg{min-height:54px;padding:15px 26px}
 .unlinked-onboarding .button.sm,.unlinked-onboarding button.sm{min-height:38px;padding:8px 14px;font-size:14px}
 .unlinked-onboarding .quiet,.unlinked-onboarding .button.sec{background:var(--surface,#fff);color:var(--fg);border-color:var(--line2)}
@@ -442,14 +442,14 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:var(--fg,#16181
 .unlinked-onboarding .agent-demo h2{font-size:28px;line-height:1.15;letter-spacing:-.025em;margin:0 0 10px}
 .unlinked-onboarding .agent-demo .lead{font-size:16px;margin:0 0 12px}
 .unlinked-onboarding .agent-demo pre{margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere}
-.unlinked-onboarding .claude-demo{margin:0;border:1px solid #e8e4da;border-radius:16px;background:#faf9f5;padding:16px 18px;font-size:14.5px}
+.unlinked-onboarding .claude-demo{margin:0;border:1px solid #e8e4da;border-radius:16px;background:#faf9f5;color:#252b36;padding:16px 18px;font-size:14.5px}
 .unlinked-onboarding .claude-demo figcaption{font-size:12.5px;color:#7a7466;margin-bottom:10px}
 .unlinked-onboarding .demo-user{margin-left:auto;width:fit-content;max-width:80%;background:#efece3;border-radius:14px;padding:9px 13px}
-.unlinked-onboarding .demo-tool{display:inline-block;font-size:12.5px;border:1px solid #e1dccf;background:var(--surface,#fff);border-radius:8px;padding:4px 9px;margin:12px 0 6px;color:#5b5648}
+.unlinked-onboarding .demo-tool{display:inline-block;font-size:12.5px;border:1px solid #e1dccf;background:#fff;border-radius:8px;padding:4px 9px;margin:12px 0 6px;color:#5b5648}
 .unlinked-onboarding .demo-answer{margin:6px 0 0;padding-left:20px}
 .unlinked-onboarding .demo-answer li{margin:5px 0}
 .unlinked-onboarding .demo-answer span{color:#5b5648}
-.unlinked-onboarding .demo-note{margin:8px 0 0}
+.unlinked-onboarding .demo-note{margin:8px 0 0;color:#5b5648}
 @media(max-width:800px){.unlinked-onboarding .agent-demo{grid-template-columns:1fr}}
 .unlinked-onboarding .agentband{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center;background:var(--surface,#fff);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:var(--r);padding:20px 24px;margin-top:44px}
 .unlinked-onboarding .agentband pre{margin:0 0 8px}
@@ -766,7 +766,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:var(--fg,#16181
 .unlinked-onboarding .feedback-status{flex-basis:100%;font-size:12px;color:var(--muted)}
 @media(prefers-color-scheme:dark){
   body:has(.unlinked-onboarding){background:#151925;color:#e7eaf1}
-  .unlinked-onboarding{--brand:#646cde;--brand-d:#b7bdff;--tint:#282e50;--page:#151925;--fg:#e7eaf1;--muted:#b1bacd;--line:#374057;--line2:#5c6680;--surface:#202636;--surface-overlay:#202636a8}
+  .unlinked-onboarding{--brand:#646cde;--brand-fill:#6068d8;--brand-d:#b7bdff;--tint:#282e50;--page:#151925;--fg:#e7eaf1;--muted:#b1bacd;--line:#374057;--line2:#5c6680;--surface:#202636;--surface-overlay:#202636a8}
   .unlinked-onboarding .more-actions summary,.unlinked-onboarding .more-panel{background:var(--surface)}
 }
 `
