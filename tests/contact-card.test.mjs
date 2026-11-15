@@ -365,6 +365,10 @@ test('legacy card bookmarks preserve bounded success notices through sign-in and
   const guest = await signed.get(path, false)
   assert.equal(guest.headers.get('location'), `/login?next=${encodeURIComponent(`/card/edit?done=${done}`)}`)
  }
+ for (const value of ['constructor', 'toString', '__proto__', 'not-a-notice']) {
+  const editor = await (await signed.get(`/card/edit?done=${value}`)).text()
+  assert.doesNotMatch(editor, /class="notice" role="status"/)
+ }
  const unknown = await signed.get('/card?done=not-a-notice')
  assert.match(unknown.headers.get('location'), /^\/c\/[A-Za-z0-9]{24}$/)
 })
