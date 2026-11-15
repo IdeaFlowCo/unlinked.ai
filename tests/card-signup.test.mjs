@@ -166,7 +166,7 @@ test('owner HTTP card defaults to contact details and retains the public-only sw
 
 test('card sign-in callbacks restore the entry, editor and public variant', async t => {
   const s = await site(t, { existing: true, self: true })
-  for (const path of ['/card', '/card/edit', '/card?share=public']) {
+  for (const path of ['/card', '/card/edit', '/card?share=public', '/card/edit?done=saved']) {
     const entry = await s.request(path)
     assert.equal(entry.headers.get('location'), `/login?next=${encodeURIComponent(path)}`)
     const { callback } = await s.finish(await s.request(entry.headers.get('location')))
