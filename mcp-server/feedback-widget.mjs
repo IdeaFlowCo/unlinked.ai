@@ -26,15 +26,34 @@ export const iosAppVersion = userAgent => (typeof userAgent === 'string' && user
 export const feedbackWidgetTag = (nonce, { iosApp = null } = {}) => {
   const app = iosApp ? 'Unlinked iOS' : 'Unlinked'
   const version = iosApp ? `${iosApp} (web ${APP_VERSION})` : APP_VERSION
-  return `<script nonce="${nonce}" src="${FEEDBACK_WIDGET_SCRIPT}" data-tracker-slug="${FEEDBACK_TRACKER_SLUG}" data-trigger="none" data-app="${attr(app)}" data-app-version="${attr(version)}" data-theme="auto" defer></script>`
+  return `<script nonce="${nonce}" type="application/json" data-wit-config data-tracker-slug="${FEEDBACK_TRACKER_SLUG}" data-trigger="none" data-app="${attr(app)}" data-app-version="${attr(version)}" data-theme="auto">{}</script>`
 }
 
-// Runs under each page's nonce, before the deferred loader: calls go through
-// the documented __witFeedbackQueue. Signed-in pages (the Me menu is present)
-// give the widget a token getter; the server returns a short-lived wfb1.
-// feedback token or 204 (anonymous). Pages without the widget send the item
-// to /support instead of a panel that never loads.
-export const FEEDBACK_MENU_SCRIPT = `(()=>{const wf=(m,...a)=>{if(window.WitFeedback)return window.WitFeedback[m](...a);(window.__witFeedbackQueue||=[]).push([m,a])};if(document.querySelector('details.me')){let c=null;wf('setUserToken',async()=>{if(c&&c.expires_at*1000-Date.now()>60000)return c.token;try{const r=await fetch('${FEEDBACK_TOKEN_PATH}',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:'{}'});c=r.status===200?await r.json():null}catch{c=null}return c?.token??null})}document.addEventListener('click',e=>{const b=e.target.closest?.('[data-wit-feedback]');if(!b)return;e.preventDefault();const me=b.closest('details.me');if(me)me.open=false;if(!window.WitFeedback&&!document.querySelector('script[data-tracker-slug]')){location.href='/support';return}wf('open')})})();`
+// First-party code runs under the existing page nonce. The hosted WIT loader
+// is created only by a person tapping Send feedback (including camera pages).
+// The existing session exchange/getter and queued API contract are preserved.
+export const FEEDBACK_MENU_SCRIPT = `(()=>{
+  const wf=(m,...a)=>{if(window.WitFeedback)return window.WitFeedback[m](...a);(window.__witFeedbackQueue||=[]).push([m,a])};
+  let tokenGetter=null;
+  if(document.querySelector('details.me')){let c=null;tokenGetter=async()=>{if(c&&c.expires_at*1000-Date.now()>60000)return c.token;try{const r=await fetch('${FEEDBACK_TOKEN_PATH}',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:'{}'});c=r.status===200?await r.json():null}catch{c=null}return c?.token??null};wf('setUserToken',tokenGetter)}
+  let pending=false,timer=null,lastTrigger=null,status=null;
+  const clear=()=>{clearTimeout(timer);lastTrigger?.removeAttribute('aria-busy')};
+  const fail=()=>{pending=false;clear();if(!status){status=document.createElement('span');status.setAttribute('role','status');status.className='feedback-status';status.append(document.createTextNode('Feedback could not load. '));const retry=document.createElement('button');retry.type='button';retry.className='link-button';retry.textContent='Retry feedback';retry.onclick=()=>launch(lastTrigger);status.append(retry,document.createTextNode(' or '));const board=document.createElement('a');board.href='${FEEDBACK_WIDGET_SITE}/tracker/${FEEDBACK_TRACKER_SLUG}';board.target='_blank';board.rel='noopener noreferrer';board.textContent='open the feedback board';status.append(board);(document.querySelector('footer .foot-meta')||lastTrigger.parentElement).append(status)}status.hidden=false};
+  const ready=()=>{if(!pending||!window.WitFeedback?.ready)return;pending=false;clear();if(status)status.hidden=true;if(tokenGetter)window.WitFeedback.setUserToken(tokenGetter);window.WitFeedback.open()};
+  function launch(trigger){
+    if(pending)return;lastTrigger=trigger;
+    const config=document.querySelector('script[data-wit-config]');
+    if(!config&&!window.WitFeedback?.ready){location.href='/support';return}
+    pending=true;if(window.WitFeedback?.ready){ready();return}
+    trigger?.setAttribute('aria-busy','true');if(status)status.hidden=true;
+    if(!document.getElementById('wit-feedback-widget')){for(const script of document.querySelectorAll('script[src^="${FEEDBACK_WIDGET_SITE}/widget/"]'))script.remove();delete window.WitFeedback;delete window.__witFeedbackLoading;delete window.__witFeedbackInstalled}
+    const loader=document.createElement('script');loader.src='${FEEDBACK_WIDGET_SCRIPT}';loader.nonce=config.nonce;loader.defer=true;
+    Object.assign(loader.dataset,{trackerSlug:'${FEEDBACK_TRACKER_SLUG}',trigger:'none',app:config.dataset.app,appVersion:config.dataset.appVersion,theme:'auto'});
+    loader.onerror=fail;document.body.append(loader);timer=setTimeout(fail,10000);
+  }
+  window.addEventListener('witfeedback:ready',ready);
+  document.addEventListener('click',e=>{const b=e.target.closest?.('[data-wit-feedback]');if(!b)return;e.preventDefault();const me=b.closest('details.me');if(me)me.open=false;launch(b)});
+})();`
 
 // Server side of the exchange: the signed-in member's Ideaflow ID token (held
 // only in the in-memory session) becomes a 15-minute token that can only file

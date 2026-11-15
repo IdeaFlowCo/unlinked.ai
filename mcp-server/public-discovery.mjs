@@ -1,3 +1,4 @@
+import { releaseStampTag } from './release-stamp.mjs'
 import { browserPerformanceScript } from './browser-performance.mjs'
 import { CONNECTION_FEEDBACK_SRC } from './connection-feedback.mjs'
 import { readFileSync } from 'node:fs'
@@ -19,6 +20,8 @@ const jsqrPath = () => requireFromRoot.resolve('jsqr/dist/jsQR.js')
 export const JSQR_VERSION = (() => { try { return createHash('sha256').update(readFileSync(jsqrPath())).digest('hex').slice(0, 16) } catch { return 'unavailable' } })()
 export const JSQR_SRC = `/public-assets/jsqr.js?v=${JSQR_VERSION}`
 const assets = new Map([
+  ['/version.json', ['public/version.json', 'application/json']],
+  ['/public-assets/app-stamp.js', ['public/app-stamp.js', 'text/javascript']],
   ['/public-assets/openchat-card.js', ['src/utils/openchat-card.js', 'text/javascript']],
   ['/public-assets/unlinked-card.js', ['src/utils/unlinked-card.js', 'text/javascript']],
   ['/public-assets/meet-scan.js', ['src/utils/meet-scan.js', 'text/javascript']],
@@ -73,7 +76,7 @@ const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '
 // Every page carries the header's Me-menu script under its own nonce.
 // Header counts (`alerts`) are display-only, like the rest of `chrome`.
 // In the iOS app (`UnlinkediOS/`), pages get iosAppView, the menu-launched feedback widget labelled with the app version, and no analytics.
-const document = (view, { headline, nonce, alerts, ios = false, performance = false, origin = 'https://www.unlinked.ai', path = null }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title>${previewMeta({ title: view.title, description: PAGE_DESCRIPTIONS.get(path), url: path }, origin)}<link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}<script nonce="${nonce}">${performance && !ios ? browserPerformanceScript() : ''}${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? feedbackWidgetTag(nonce, { iosApp: ios }) : feedbackWidgetTag(nonce) + analyticsTag(nonce)}<!--/email_off--></html>`
+const document = (view, { headline, nonce, alerts, ios = false, performance = false, origin = 'https://www.unlinked.ai', path = null }) => `<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(view.title)} · Unlinked</title>${previewMeta({ title: view.title, description: PAGE_DESCRIPTIONS.get(path), url: path }, origin)}<link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${fillNavAlerts(fillMeHeadline(ios ? iosAppView(view.content) : view.content, headline), alerts)}${releaseStampTag(nonce)}<script nonce="${nonce}">${performance && !ios ? browserPerformanceScript() : ''}${TOP_BAR_SCRIPT}</script>${alerts ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${ios ? feedbackWidgetTag(nonce, { iosApp: ios }) : feedbackWidgetTag(nonce) + analyticsTag(nonce)}<!--/email_off--></html>`
 const FONT_SOURCES = "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
 
 // Exact, source-controlled anonymous discovery only. Never resolves an owner,
@@ -89,6 +92,7 @@ export async function servePublicDiscovery(request, response, pathname, chrome =
     const [file, mime] = assets.get(pathname)
     const assetPath = typeof file === 'function' ? file() : new URL(file, root)
     type = mime; content = await readFile(assetPath)
+    if (pathname === '/version.json') response.setHeader('Cache-Control', 'no-store')
     // The service worker runs under ITS OWN response's CSP, not the page's.
     // The caller's default (default-src 'none', no connect-src) would block
     // every fetch inside the worker — precaching the shell and the network

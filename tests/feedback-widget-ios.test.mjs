@@ -17,5 +17,6 @@ test('web keeps the plain Unlinked label; the iOS app is labelled with its versi
   assert.match(web, /data-trigger="none" data-app="Unlinked" data-app-version="\d+\.\d+\.\d+"/)
   const app = feedbackWidgetTag('n', { iosApp: '1.0.3' })
   assert.match(app, /data-tracker-slug="unlinked-feedback" data-trigger="none" data-app="Unlinked iOS" data-app-version="1\.0\.3 \(web \d+\.\d+\.\d+\)"/)
-  assert.match(app, /^<script nonce="n" src="https:\/\/worldissuetracker\.com\/widget\/wit-feedback\.js"/)
+  assert.match(app, /^<script nonce="n" type="application\/json" data-wit-config/);
+  assert.doesNotMatch(app, /\ssrc=/)
 })

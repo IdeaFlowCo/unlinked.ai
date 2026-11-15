@@ -33,7 +33,17 @@ test('anonymous runtime pages expose the app release in their shared footer with
     assert.ok(footer?.includes(`class="app-version">v${appPackage.version}</span>`), path)
     assert.ok(footer.includes('data-wit-feedback>Send feedback</a>'))
     assert.ok(footer.includes('Not affiliated with LinkedIn.'))
+    assert.ok(footer.includes('data-app-stamp data-show="time" data-src="/version.json"'))
   }
+  for (const path of ['/version.json','/public-assets/app-stamp.js']) {
+    for (const method of ['GET','HEAD']) assert.equal((await fetch(endpoint+path,{method})).status,200,path)
+  }
+  const metadataResponse=await fetch(endpoint+'/version.json')
+  assert.equal(metadataResponse.headers.get('cache-control'),'no-store')
+  const metadata=await metadataResponse.json()
+  assert.equal(metadata.version,appPackage.version)
+  assert.ok(['commit','build'].includes(metadata.event))
+  assert.ok(Number.isFinite(Date.parse(metadata.event==='commit'?metadata.commitTime:metadata.buildTime)))
   assert.equal(ownerReads, 0)
 })
 
