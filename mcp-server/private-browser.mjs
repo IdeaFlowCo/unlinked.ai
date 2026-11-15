@@ -2467,7 +2467,9 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           const done = url.searchParams.get('done')
           redirect(response, ['saved', 'reset', 'email'].includes(done) ? `/card/edit?done=${done}` : contact?.shareUrl ? new URL(contact.shareUrl).pathname : '/card/edit'); return
         }
-        const notice = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.', email: 'Your email is on your card.' }[url.searchParams.get('done')]
+        const notices = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.', email: 'Your email is on your card.' }
+        const done = url.searchParams.get('done')
+        const notice = Object.hasOwn(notices, done) ? notices[done] : null
         journey(response, renderCard({ ...card, contact, share: contact && (url.pathname === '/card/edit' || url.searchParams.get('share') !== 'public') ? 'contact' : 'public', notice, accountEmail: accountEmail(session) }), props.importJob); return
       }
       if (signup && contactCards && request.method === 'POST' && ['/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname)) {
