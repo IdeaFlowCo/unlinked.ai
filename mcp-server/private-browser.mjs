@@ -111,7 +111,7 @@ export const autoSignInEnabled = env => !/^(?:off|false|0|no)$/i.test(String(env
 // the sign-in, callback, sign-out, join, invitation, confirmation (legacy
 // account, find-me, claim), unsubscribe or contact-card token routes, assets,
 // photos, APIs, /mcp, /oauth/* or /.well-known/*.
-const AUTO_SIGNIN_PAGES = new Set(['/', '/messages', '/people', '/network', '/profile', '/card', '/settings', '/import', '/invites', '/invitations', '/notifications', '/people/add', '/people/lookup', '/scan', '/meet', '/agents', '/import-linkedin'])
+const AUTO_SIGNIN_PAGES = new Set(['/', '/messages', '/people', '/network', '/profile', '/card', '/card/edit', '/settings', '/import', '/invites', '/invitations', '/notifications', '/people/add', '/people/lookup', '/scan', '/meet', '/agents', '/import-linkedin'])
 export const autoSignInPage = pathname => typeof pathname === 'string' && (AUTO_SIGNIN_PAGES.has(pathname) ||
   /^\/people\/[^/]{1,480}$/.test(pathname) || /^\/companies\/[^/]{1,200}$/.test(pathname))
 // Header guards (server side): a real top-level document navigation asking for
@@ -332,7 +332,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
   const downloadReturn = value => { try { const url=new URL(value,base); if(url.origin!==base.origin||!['/downloads','/downloads/file'].includes(url.pathname))return false; bulkExportInput(url.searchParams); return !url.hash } catch { return false } }
-  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || isCommunityPath(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card(?:\/edit)?|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/card\?share=public$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || isCommunityPath(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -1564,7 +1564,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // Right after joining or adding from a card: the new connection's own card to share back.
         const added = url.searchParams.get('added') === '1' && relation?.state === 'connected'
         const own = added ? await ensureOwnCard(viewer.owner, { name: viewer.displayName }) : null
-        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, canMessage: Boolean(viewer && target && messaging && resolveCardMessagingRecipient), messageError: url.searchParams.get('message'), relation: relation?.state, addError: url.searchParams.get('add') === 'failed', added, own }), null, '', card ? 200 : 404); return
+        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, canMessage: Boolean(viewer && target && messaging && resolveCardMessagingRecipient), messageError: url.searchParams.get('message'), relation: relation?.state, addError: url.searchParams.get('add') === 'failed', added, own, ownerCard: self ? ownContactCard({ token: contactLink[1], card }) : null }), null, '', card ? 200 : 404); return
       }
       // Native header/directory searches accept LinkedIn URLs as well as names.
       // Navigating never spends a provider request; the lookup form does that.
@@ -1998,6 +1998,10 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       if (request.method === 'GET' && url.pathname === '/while-you-wait') { redirect(response, '/'); return }
       const session = sessionFor(request)
       if (!session) {
+        if (request.method === 'GET' && ['/card', '/card/edit'].includes(url.pathname)) {
+          const next = url.pathname === '/card' && url.searchParams.get('share') === 'public' ? '/card?share=public' : url.pathname
+          redirect(response, `/login?next=${encodeURIComponent(next)}`); return
+        }
         if (request.method === 'GET' && url.pathname === '/') journey(response, { ...renderLanding({ inApp: inAppBrowser(request.headers['user-agent']) }), preview: { title: 'Unlinked: your professional profile and network', description: 'Bring your profile and connections from LinkedIn. Explore who knows whom. Ask your AI agent who you need.', url: '/' } })
         else if (request.method === 'GET' && url.pathname === '/join') journey(response, renderJoin())
         else if (request.method === 'GET' && url.pathname === '/scan') journey(response, renderScan({ tab: url.searchParams.get('tab') }))
@@ -2357,7 +2361,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         session.headline = profile.headline
         return { profile, hasStoredProfile, cardUrl, publicProfileUrl: cardId ? unlinkedProfileContext(cardId) : null, identity: { name: profile.name, headline: profile.headline, location: profile.location, ...(profile.linkedinUrl ? { linkedinUrl: profile.linkedinUrl } : {}), ...(indexRead ? { profilePath: cardUrl ? new URL(cardUrl).pathname : null } : {}) } }
       }
-      if (signup && ((request.method === 'GET' && ['/profile', '/card', '/scan'].includes(url.pathname)) || ((request.method === 'GET' && url.pathname === '/profile/handle/check') || (request.method === 'POST' && ['/profile/links', '/profile/handle', '/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname))))) {
+      if (signup && ((request.method === 'GET' && ['/profile', '/card', '/card/edit', '/scan'].includes(url.pathname)) || ((request.method === 'GET' && url.pathname === '/profile/handle/check') || (request.method === 'POST' && ['/profile/links', '/profile/handle', '/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname))))) {
         let hidden
         try { hidden = await profileStep(response, 'suspension', () => ownSuspension(session.owner, backend)) } catch {
           // The server could not confirm the profile's status (usually the
@@ -2464,7 +2468,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const result = await profileHandles.rename(own, input.get('handle')).catch(() => ({ code: 'unavailable' }))
         redirect(response, `/profile?handle=${result.handle ? 'saved' : encodeURIComponent(result.code ?? 'unavailable')}#profile-handle`); return
       }
-      if (signup && request.method === 'GET' && (url.pathname === '/card' || url.pathname === '/scan')) {
+      if (signup && request.method === 'GET' && ['/card', '/card/edit', '/scan'].includes(url.pathname)) {
         const jobs = await jobResources(), props = jobProps(jobs)
         const { profile, cardUrl, identity } = await readOwnCard(jobs)
         // The QR alone carries ?via=card (admission priority for people who
@@ -2477,8 +2481,11 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           contact = await ensureOwnCard(session.owner, identity)
         }
         if (url.pathname === '/scan') { journey(response, renderScan({ ...card, contact, tab: url.searchParams.get('tab') }), props.importJob); return }
+        if (url.pathname === '/card' && url.searchParams.get('share') !== 'public') {
+          redirect(response, contact?.shareUrl ? new URL(contact.shareUrl).pathname : '/card/edit'); return
+        }
         const notice = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.', email: 'Your email is on your card.' }[url.searchParams.get('done')]
-        journey(response, renderCard({ ...card, contact, share: contact && url.searchParams.get('share') !== 'public' ? 'contact' : 'public', notice, accountEmail: accountEmail(session) }), props.importJob); return
+        journey(response, renderCard({ ...card, contact, share: contact && (url.pathname === '/card/edit' || url.searchParams.get('share') !== 'public') ? 'contact' : 'public', notice, accountEmail: accountEmail(session) }), props.importJob); return
       }
       if (signup && contactCards && request.method === 'POST' && ['/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
@@ -2497,7 +2504,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
             if (!email) throw new ContactCardError('contact_email_invalid')
             const current = (await contactCards.read(session.owner))?.settings ?? {}
             await contactCards.save(session.owner, { ...current, email, showEmail: true, ...(current.shareCard === false ? { shareCard: true } : {}) }, identity)
-            redirect(response, '/card?share=contact&done=email'); return
+            redirect(response, '/card/edit?done=email'); return
           }
           else await contactCards.rotate(session.owner)
         } catch (failure) {
@@ -2507,7 +2514,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           const contact = { ...ownContactCard(await contactCards.read(session.owner).catch(() => null)), ...(url.pathname === '/card/contact' ? { settings: values } : {}) }
           journey(response, renderCard({ ...props, profile, cardUrl, qr: null, contact, share: 'contact', error }), props.importJob, '', 400); return
         }
-        redirect(response, `/card?share=contact&done=${url.pathname === '/card/contact' ? 'saved' : 'reset'}`); return
+        redirect(response, `/card/edit?done=${url.pathname === '/card/contact' ? 'saved' : 'reset'}`); return
       }
       // Off-platform people: add someone to your own people, or invite them.
       if (request.method === 'POST' && ['/people/lookup', '/people/lookup/save'].includes(url.pathname)) {

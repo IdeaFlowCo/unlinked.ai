@@ -1,9 +1,9 @@
 # Contact card
 
-A member's card comes in two versions, both at `/card`, reached as **My card** in the Me menu, on Home, and as a tab of the Scan sheet behind the search field's QR button:
+A member's card comes in two versions, reached through `/card` as **My card** in the Me menu, on Home, and as a tab of the Scan sheet behind the search field's QR button:
 
 - **Public** (`/card?share=public`) — name, headline, location, the member's LinkedIn address (when their profile has one) and a QR code that opens the member's public profile (`/people/<id>`). Unchanged: no contact details.
-- **With contact details** (default) — the business-card version. It carries the phone number, WhatsApp, email address and link the member switches on, and has its own QR code and link.
+- **With contact details** (default; `/card` redirects to the member’s own `/c/<token>`) — the business-card version. It carries the phone number, WhatsApp, email address and link the member switches on, and has its own QR code and link.
 
 Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard), routes in `mcp-server/private-browser.mjs`, pages in `mcp-server/private-onboarding-views.mjs` (`renderCard`, `renderContactCard`). Tests: `tests/contact-card.test.mjs` and `tests/card-signup.test.mjs`.
 
@@ -13,9 +13,9 @@ Implementation: `mcp-server/contact-card.mjs` (model, store, projection, vCard),
 |---|---|
 | Public profile, People index, company pages, search | Never |
 | Model context, MCP tools, `/api/agent/v1` | Never |
-| `/card?share=public` (Public version), `/scan`, `/profile`, Settings | Never |
-| `/c/<token>` and `/c/<token>/contact.vcf` | Only the fields switched on |
-| The member's own `/card` (also `/card?share=contact`) and `/export` | Everything they entered |
+| `/card?share=public` (Public version), `/profile`, Settings | Never |
+| `/c/<token>`, `/c/<token>/contact.vcf`, Scan sheet’s My card tab | Only the fields switched on |
+| The member's own `/card/edit` and `/export` | Everything they entered |
 
 The contact card is reached only through `/c/<token>`. The token is 24 random alphanumerics (about 143 bits), unrelated to any account or profile id, so it cannot be derived from a public page. The page is sent with `noindex`, `no-store` and `Referrer-Policy: same-origin` (the token never leaves the site; `no-referrer` would make browsers send `Origin: null` with the page's Join/Add form, which the same-origin POST check refuses), and requests are bounded for the whole site.
 
@@ -34,7 +34,11 @@ comes from the session, never the form), never added silently. A display name
 that is an email address never becomes an automatic card. Creation is
 create-if-absent (`MERGE … ON CREATE`), so two tabs end with one card and one link.
 
-`/card` shows the card with its QR code first (on phones the QR panel sits
+`/card` is the stable entry point for My card, the Scan sheet’s **Open full card**, and the PWA **My card** shortcut. Signed-out visitors sign in and return here. It redirects to the current `/c/<token>`, so the address bar contains the shareable link; `/card?share=contact` remains an alias. If sharing is off or a card cannot be created/read, it redirects to `/card/edit`. The public version stays at `/card?share=public`.
+
+On `/c/<token>`, only the authenticated owner sees **Edit card**, leading to `/card/edit`. Their card shows a QR code and copy/share link; guests and other members see the consented card without owner controls. The editor retains the switches, reset link, one-tap email, and professional details. Save, reset and email success return to `/card/edit?done=…`; reset changes the next `/card` destination. `/card` and `/card/edit` require sign-in; `/c/<token>` remains accessible to guests. No contact field is added automatically.
+
+`/card/edit` shows the card with its QR code first (on phones the QR panel sits
 above the details), then the link, then the explanation and the form. The link
 block (`shareLink` in the views, `CARD_SHARE_SCRIPT` on every page) shows the
 same URL the QR code encodes with **Copy link** and, where the browser has a
@@ -61,7 +65,7 @@ Scanning your own card says **This is your card**.
 | `email` | `showEmail` | A plain address, up to 254 characters. |
 | `link` | `showLink` | `https` only, no credentials, up to 200 characters. |
 
-The card also keeps the member's `name`, `headline`, `location`, public `linkedinUrl` and public `profilePath`, refreshed whenever they open `/card`, so the link can be rendered without their session. The LinkedIn address is part of the already-public identity (it appears on the public profile), not a switched contact detail; both card versions and the vCard show it. If the member's profile rows, legacy profile and signup source have no LinkedIn address, the card falls back to the validated address from the published profile its QR code opens. This does not replace an existing address; it also covers recovered profiles whose LinkedIn slug is joined only into the published profile.
+The card also keeps the member's `name`, `headline`, `location`, public `linkedinUrl` and public `profilePath`, refreshed whenever they open `/card`, `/card/edit` or the Scan sheet, so the link can be rendered without their session. The LinkedIn address is part of the already-public identity (it appears on the public profile), not a switched contact detail; both card versions and the vCard show it. If the member's profile rows, legacy profile and signup source have no LinkedIn address, the card falls back to the validated address from the published profile its QR code opens. This does not replace an existing address; it also covers recovered profiles whose LinkedIn slug is joined only into the published profile.
 
 Storage: one `UnlinkedContactCard` node per account in the pilot graph (`ownerKey` and `token` unique). `projectContactCard` is the single consent projection; the page, the owner's preview and the vCard all render from it.
 

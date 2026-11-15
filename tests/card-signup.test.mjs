@@ -92,8 +92,10 @@ test('existing members, pending requests in either direction and own-card scans 
         const sent = await s.connections.send({ sender, recipient })
         if (direction === 'connected') await s.connections.respond(recipient, sent.request.id, 'accept')
       }
-      const { callback } = await s.finish(await s.start())
+      const { callback, cookie } = await s.finish(await s.start())
       assert.equal(callback.headers.get('location'), s.path + '?added=1')
+      const cardPage = await (await s.request(s.path, { headers: { Cookie: cookie } })).text()
+      assert.equal(cardPage.includes('href="/card/edit">Edit card'), direction === 'self')
       assert.equal(s.signups(), 0)
       assert.equal(s.connectionStore.records.size, direction === 'self' ? 0 : 1)
       if (direction !== 'self') assert.equal((await s.connections.between(visitor, sharer)).state, 'connected')
@@ -149,7 +151,7 @@ test('My card is one tap from the main navigation, defaults to details, and incl
 test('owner HTTP card defaults to contact details and retains the public-only switch', async t => {
   const s = await site(t, { existing: true, self: true })
   const { cookie } = await s.finish(await s.start())
-  const full = await s.request('/card', { headers: { Cookie: cookie } })
+  const full = await s.request('/card/edit', { headers: { Cookie: cookie } })
   assert.equal(full.status, 200)
   const content = await full.text()
   assert.match(content, /aria-current="page">Contact card/)
@@ -160,4 +162,14 @@ test('owner HTTP card defaults to contact details and retains the public-only sw
   const publicOnly = await (await s.request('/card?share=public', { headers: { Cookie: cookie } })).text()
   assert.match(publicOnly, /aria-current="page">Public profile</)
   assert.doesNotMatch(publicOnly, /ada@example.test/)
+})
+
+test('card sign-in callbacks restore the entry, editor and public variant', async t => {
+  const s = await site(t, { existing: true, self: true })
+  for (const path of ['/card', '/card/edit', '/card?share=public']) {
+    const entry = await s.request(path)
+    assert.equal(entry.headers.get('location'), `/login?next=${encodeURIComponent(path)}`)
+    const { callback } = await s.finish(await s.request(entry.headers.get('location')))
+    assert.equal(callback.headers.get('location'), path)
+  }
 })

@@ -18,7 +18,9 @@ test('manifest, icons and offline page satisfy installability and reference only
   assert.equal(manifest.theme_color, '#4349c4')
   
   assert.equal(manifest.shortcuts.length, 2)
+  // Keep the stable entry redirect: never bake a member token or editor into the manifest.
   assert.equal(manifest.shortcuts[0].url, '/card')
+  assert.doesNotMatch(JSON.stringify(manifest), /\/c\/|\/card\/edit/)
   assert.equal(manifest.shortcuts[1].url, '/scan')
 
   const sizes = manifest.icons.map(icon => icon.sizes).sort()

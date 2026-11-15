@@ -82,7 +82,7 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
   assert.match(unavailableSignupMarkup, /Seed Owner/)
   assert.doesNotMatch(unavailableSignupMarkup, /href="\/messages\?profile=/)
   await evidence('own-unavailable-source-fallback', unavailableSignupMarkup)
-  const unavailableSignupCard = await request('/card', session); assert.equal(unavailableSignupCard.status, 200)
+  const unavailableSignupCard = await request('/card/edit', session); assert.equal(unavailableSignupCard.status, 200)
   assert.match(await unavailableSignupCard.text(), /Seed Owner/)
   snapshotUnavailable = false
   snapshot.profiles = [{ id: 'seed-person', name: 'Seed Person', positions: [], education: [], skills: [] }]
@@ -92,7 +92,7 @@ test('anonymous and signed-in runtime person profiles open the same shared-inbox
   assert.match(restoredMarkup, /Seed Owner/)
   assert.doesNotMatch(restoredMarkup, /href="\/messages\?profile=/, 'no Message button on your own profile')
   await evidence('own-unavailable-source-published', restoredMarkup)
-  const restoredCard = await request('/card', session)
+  const restoredCard = await request('/card/edit', session)
   assert.equal(restoredCard.status, 200)
   const restoredCardMarkup = await restoredCard.text()
   assert.match(restoredCardMarkup, /Seed Owner/)
