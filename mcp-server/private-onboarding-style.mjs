@@ -767,9 +767,15 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:var(--fg,#16181
 .unlinked-onboarding .feedback-status{flex-basis:100%;font-size:12px;color:var(--muted)}
 @media(prefers-color-scheme:dark){
   body:has(.unlinked-onboarding){background:#151925;color:#e7eaf1}
-  .unlinked-onboarding{--brand:#646cde;--brand-fill:#6068d8;--brand-text:#b7bdff;--brand-d:#b7bdff;--tint:#282e50;--page:#151925;--fg:#e7eaf1;--muted:#b1bacd;--line:#374057;--line2:#5c6680;--surface:#202636;--surface-overlay:#202636a8}
+  .unlinked-onboarding,dialog.msg-picker{--brand:#646cde;--brand-fill:#6068d8;--brand-text:#b7bdff;--brand-d:#b7bdff;--tint:#282e50;--page:#151925;--fg:#e7eaf1;--muted:#b1bacd;--line:#374057;--line2:#5c6680;--surface:#202636;--surface-overlay:#202636a8}
   .unlinked-onboarding .more-actions summary,.unlinked-onboarding .more-panel{background:var(--surface)}
   .unlinked-onboarding .msg-bubble{background:var(--surface);color:var(--fg)}
   .unlinked-onboarding .msg-row.own .msg-bubble{background:var(--tint);color:var(--fg)}
+  /* The picker is portalled to body, outside the onboarding token scope. */
+  dialog.msg-picker{background:var(--surface);border-color:var(--line2)}
+  .msg-picker .msg-act{color:var(--fg);border-color:var(--line2)}
+  .msg-picker input[type=search]{background:var(--page);color:var(--fg);border-color:var(--line2)}
+  .msg-picker input[type=search]::placeholder{color:var(--muted);opacity:1}
+  .msg-picker .msg-pick:hover,.msg-picker .msg-pick[aria-selected=true]{background:var(--tint)}
 }
 `
