@@ -47,6 +47,8 @@ jobs:
           fi
       - name: Run executable web and private OIDC/grant tests
         run: npm test
+      - name: Check Meet layout in sandboxed Chrome
+        run: node --test tests/meet-layout.browser.mjs
       - name: Run reader suites through the public index worker
         # The same reader tests with every cacheable reader served by the worker
         # (docs/public-people-reader.md). One suggestion test is skipped: it lets a
