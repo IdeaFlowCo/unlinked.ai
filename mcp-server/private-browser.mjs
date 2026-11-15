@@ -332,7 +332,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
   const downloadReturn = value => { try { const url=new URL(value,base); if(url.origin!==base.origin||!['/downloads','/downloads/file'].includes(url.pathname))return false; bulkExportInput(url.searchParams); return !url.hash } catch { return false } }
-  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card(?:\/edit)?|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/card\?share=public$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || isCommunityPath(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card(?:\/edit)?|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/card\?share=public$/.test(value) || /^\/card\/edit\?done=(?:saved|reset|email)$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || isCommunityPath(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -1221,7 +1221,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     if (iosApp(request)) iosResponses.set(response, iosAppVersion(request.headers['user-agent']) ?? '')
     const navigationPath = new URL(request.url, base).pathname
     const navigation = ['GET', 'HEAD'].includes(request.method) && pageView(navigationPath) && !/^\/people\/[^/]+\/photo$/.test(navigationPath) && !navigationPath.startsWith('/c/') && !navigationPath.startsWith('/messages/person/')
-    response.setHeader('Cache-Control', navigation && !isGroupPath(navigationPath) && !isCommunityPath(navigationPath) ? 'private, no-cache' : 'no-store')
+    response.setHeader('Cache-Control', navigationPath === '/card' ? 'no-store, private' : navigation && !isGroupPath(navigationPath) && !isCommunityPath(navigationPath) ? 'private, no-cache' : 'no-store')
     if (navigation) response.setHeader('Vary', 'Cookie')
     response.setHeader('Referrer-Policy', 'strict-origin')
     response.setHeader('X-Content-Type-Options', 'nosniff')
@@ -1999,7 +1999,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       const session = sessionFor(request)
       if (!session) {
         if (request.method === 'GET' && ['/card', '/card/edit'].includes(url.pathname)) {
-          const next = url.pathname === '/card' && url.searchParams.get('share') === 'public' ? '/card?share=public' : url.pathname
+          const done = url.searchParams.get('done')
+          const next = url.pathname === '/card' && url.searchParams.get('share') !== 'public' && ['saved', 'reset', 'email'].includes(done) ? `/card/edit?done=${done}` : url.pathname === '/card' && url.searchParams.get('share') === 'public' ? '/card?share=public' : url.pathname === '/card/edit' && ['saved', 'reset', 'email'].includes(done) ? `/card/edit?done=${done}` : url.pathname
           redirect(response, `/login?next=${encodeURIComponent(next)}`); return
         }
         if (request.method === 'GET' && url.pathname === '/') journey(response, { ...renderLanding({ inApp: inAppBrowser(request.headers['user-agent']) }), preview: { title: 'Unlinked: your professional profile and network', description: 'Bring your profile and connections from LinkedIn. Explore who knows whom. Ask your AI agent who you need.', url: '/' } })
@@ -2482,7 +2483,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         }
         if (url.pathname === '/scan') { journey(response, renderScan({ ...card, contact, tab: url.searchParams.get('tab') }), props.importJob); return }
         if (url.pathname === '/card' && url.searchParams.get('share') !== 'public') {
-          redirect(response, contact?.shareUrl ? new URL(contact.shareUrl).pathname : '/card/edit'); return
+          const done = url.searchParams.get('done')
+          redirect(response, ['saved', 'reset', 'email'].includes(done) ? `/card/edit?done=${done}` : contact?.shareUrl ? new URL(contact.shareUrl).pathname : '/card/edit'); return
         }
         const notice = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.', email: 'Your email is on your card.' }[url.searchParams.get('done')]
         journey(response, renderCard({ ...card, contact, share: contact && (url.pathname === '/card/edit' || url.searchParams.get('share') !== 'public') ? 'contact' : 'public', notice, accountEmail: accountEmail(session) }), props.importJob); return
