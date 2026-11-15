@@ -761,12 +761,15 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:var(--fg,#16181
 .network-facets{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0}.network-facets label{font-size:13px;font-weight:600}.network-facets input,.network-facets select{display:block;width:100%;font:inherit;padding:9px;border:1px solid var(--line,#dde1e9);border-radius:6px;background:var(--bg,#f7f8fa);color:inherit;box-sizing:border-box}.network-advanced{margin-top:12px}.network-advanced summary{cursor:pointer;font-weight:600;font-size:14px}.result-select{font-size:12px;display:inline-flex;align-items:center;gap:6px;min-height:36px}.result-select input{width:16px;height:16px}.save-results form{display:flex;align-items:end;gap:12px;flex-wrap:wrap}.save-results label{display:grid;gap:4px}.save-results input{max-width:100%}@media(max-width:600px){.network-facets input,.network-facets select{font-size:16px}}
 
 /* Shared release line is muted; the kit handles minute/visibility refresh. */
-.unlinked-onboarding [data-app-stamp]{display:inline;font:inherit;color:inherit;font-variant-numeric:tabular-nums;cursor:pointer}
+.unlinked-onboarding footer .app-version{font-size:12px}
+.unlinked-onboarding [data-app-stamp]{display:inline;font:inherit;font-size:12px;color:inherit;font-variant-numeric:tabular-nums;cursor:pointer}
 .unlinked-onboarding [data-app-stamp]:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
 .unlinked-onboarding .feedback-status{flex-basis:100%;font-size:12px;color:var(--muted)}
 @media(prefers-color-scheme:dark){
   body:has(.unlinked-onboarding){background:#151925;color:#e7eaf1}
   .unlinked-onboarding{--brand:#646cde;--brand-fill:#6068d8;--brand-text:#b7bdff;--brand-d:#b7bdff;--tint:#282e50;--page:#151925;--fg:#e7eaf1;--muted:#b1bacd;--line:#374057;--line2:#5c6680;--surface:#202636;--surface-overlay:#202636a8}
   .unlinked-onboarding .more-actions summary,.unlinked-onboarding .more-panel{background:var(--surface)}
+  .unlinked-onboarding .msg-bubble{background:var(--surface);color:var(--fg)}
+  .unlinked-onboarding .msg-row.own .msg-bubble{background:var(--tint);color:var(--fg)}
 }
 `

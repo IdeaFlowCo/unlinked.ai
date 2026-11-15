@@ -1,4 +1,4 @@
-/* app-stamp.js: "v1.4.2 · Updated 5m ago" for any page. No dependencies, no network
+/* app-stamp.js 1.1 (2026-11-15): "v1.4.2 · Updated 5m ago" for any page. No dependencies, no network
  * beyond one same-origin fetch of version.json. Spec: APP-PRINCIPLES.md §1.
  *
  *   <span data-app-stamp></span>                          reads ./version.json
@@ -8,6 +8,7 @@
  *         data-time="2026-11-15T09:37:12Z" data-repo="tmad4000/breathe"></span>   build-injected
  *
  * version.json: { "version", "commit", "commitTime", "buildTime", "event": "commit" | "build" }
+ * 1.1: Enter and Space on the stamp no longer propagate to the host app's key handlers.
  */
 (function (root, factory) {
   var api = factory();
@@ -74,7 +75,12 @@
     el.setAttribute('role', 'button');
     var toggle = function () { el.dataset.exact = el.dataset.exact === '1' ? '0' : '1'; render(el, info); };
     el.addEventListener('click', toggle);                     // title alone is unreachable by touch and keyboard
-    el.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    el.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      e.stopPropagation();                                    // host apps bind global Enter/Space hotkeys (found on IdeaPad Retrofit)
+      toggle();
+    });
     var timer = null;
     var start = function () { if (!timer) timer = setInterval(function () { render(el, info); }, 60000); };
     var stop = function () { clearInterval(timer); timer = null; };
