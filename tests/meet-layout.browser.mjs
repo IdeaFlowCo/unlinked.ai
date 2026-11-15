@@ -35,10 +35,17 @@ async function browser(directory) {
     pending.set(requestId, { resolve, reject, timer })
     child.stdio[3].write(JSON.stringify({ id: requestId, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0')
   })
-  return { send, async close() { if (child.exitCode === null) { const exited = once(child, 'exit'); child.kill(); await exited } } }
+  return { send, async close() {
+    if (child.exitCode !== null || child.signalCode !== null) return
+    const exited = once(child, 'exit')
+    // Let Chrome flush its profile before removal; bound a stuck shutdown.
+    const deadline = setTimeout(() => child.kill(), 5000)
+    try { await send('Browser.close').catch(() => {}); await exited }
+    finally { clearTimeout(deadline) }
+  } }
 }
 
-test('Meet keeps its hidden photo input and document within390/1280px', { timeout: 60000 }, async t => {
+test('Meet keeps its hidden photo input and document within 390/1280px', { timeout: 60000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'unlinked-meet-layout-'))
   let chrome
   try {
@@ -72,5 +79,5 @@ test('Meet keeps its hidden photo input and document within390/1280px', { timeou
         assert.equal(result.value.enabled, true)
       } finally { await chrome.send('Target.closeTarget', { targetId }) }
     })
-  } finally { await chrome?.close(); await rm(directory, { recursive: true, force: true }) }
+  } finally { await chrome?.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) }
 })
