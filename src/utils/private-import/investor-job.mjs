@@ -42,7 +42,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
   }
   const rowsFor = async (backend, job) => {
     const bytes = await sourceFor(backend, job)
-    const parsed = parseInvestorFile(bytes, job.source, job.mapping)
+    const parsed = parseInvestorFile(bytes, job.source, job.mapping, { parserVersion: job.parserVersion })
     return [...parsed.accepted, ...parsed.rejected].sort((a, b) => a.row - b.row)
   }
   const catalogFor = async (backend, ownerId, importId) => {
@@ -78,7 +78,13 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
       try {
         ;({ bytes, source } = investorFileInput(input))
         parsed = parseInvestorFile(bytes, source, mapping, { inspectOnly })
-      } catch (error) { throw fail('invalid_input', `File validation failed (${error.message}).`) }
+      } catch (error) {
+        if (error.message === 'xlsx_formula_unsupported') {
+          throw fail('invalid_input', `Formula in cell ${error.details.cell} is unsupported (xlsx_formula_unsupported). Replace formulas with values in a copy, or export a values-only CSV. For HYPERLINK formulas, put the actual LinkedIn URL in the mapped URL column; the displayed name is not a URL.`,
+            { failureReason: 'xlsx_formula_unsupported', ...error.details, recovery: 'values_only_export' })
+        }
+        throw fail('invalid_input', `File validation failed (${error.message}).`)
+      }
       const disclosure = 'The entire original workbook, including unselected and hidden sheets, is retained privately on the server. Only the explicitly selected sheet is imported. Requires owner authorization for retaining the whole file.'
       if (inspectOnly) return source.format === 'xlsx' ? { ...parsed, disclosure, requiredAcknowledgement: 'retainOriginalConfirmed:true' } : parsed
       if (source.format === 'xlsx' && input.retainOriginalConfirmed !== true) throw fail('invalid_input', `Set retainOriginalConfirmed:true only after owner authorization. ${disclosure}`)
@@ -139,6 +145,7 @@ export function createInvestorJobs({ getBackend, graph, fail, now = Date.now }) 
         const entry = { ordinal: i, sourceRow: rows[i].row, rowId: rows[i].rowId, fields: rows[i].fields ?? null,
           ...(job.source?.selectedSheet ? { sourceSheet: job.source.selectedSheet } : {}),
           ...(rows[i].sourceValues ? { sourceValues: rows[i].sourceValues } : {}),
+          ...(rows[i].sourceHyperlink ? { sourceHyperlink: rows[i].sourceHyperlink } : {}),
           result: receipt?.result ?? { status: rows[i].reason ? 'rejected' : 'pending', ...(rows[i].reason ? { reason: rows[i].reason } : {}) } }
         if (Buffer.byteLength(JSON.stringify(entry)) > 512 * 1024) {
           delete entry.sourceValues
