@@ -200,6 +200,7 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   // and link. The card page opens on it; the public version carries no contact channel.
   const entry = await signed.get('/card')
   assert.equal(entry.status, 303)
+  assert.equal(entry.headers.get('cache-control'), 'no-store, private')
   assert.match(entry.headers.get('location'), /^\/c\/[A-Za-z0-9]{24}$/)
   let html = await (await signed.get('/card/edit')).text()
   assert.match(html, /<nav class="tabs" aria-label="Card version"><a href="\/card\/edit" aria-current="page">Contact card<\/a><a href="\/card\?share=public">Public profile<\/a><\/nav>/)
@@ -350,4 +351,20 @@ test('without a contact card store the card page has one version and the routes 
     const login = await signed.get(response.headers.get('location'), false)
     assert.equal(login.status, 303)
   }
+})
+
+test('legacy card bookmarks preserve bounded success notices through sign-in and editor', async t => {
+ const signed = await harness(t).start()
+ for (const done of ['saved', 'reset', 'email']) {
+  const path = `/card?share=contact&done=${done}`
+  const entry = await signed.get(path)
+  assert.equal(entry.headers.get('cache-control'), 'no-store, private')
+  assert.equal(entry.headers.get('location'), `/card/edit?done=${done}`)
+  const editor = await (await signed.get(entry.headers.get('location'))).text()
+  assert.match(editor, /role="status">(?:Saved\.|Your contact card has a new link\.|Your email is on your card\.)/)
+  const guest = await signed.get(path, false)
+  assert.equal(guest.headers.get('location'), `/login?next=${encodeURIComponent(`/card/edit?done=${done}`)}`)
+ }
+ const unknown = await signed.get('/card?done=not-a-notice')
+ assert.match(unknown.headers.get('location'), /^\/c\/[A-Za-z0-9]{24}$/)
 })
