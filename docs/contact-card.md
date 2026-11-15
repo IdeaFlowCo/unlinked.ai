@@ -36,7 +36,7 @@ create-if-absent (`MERGE … ON CREATE`), so two tabs end with one card and one 
 
 `/card` is the stable entry point for My card, the Scan sheet’s **Open full card**, and the PWA **My card** shortcut. Signed-out visitors sign in and return here. It redirects to the current `/c/<token>`, so the address bar contains the shareable link; `/card?share=contact` remains an alias. If sharing is off or a card cannot be created/read, it redirects to `/card/edit`. The public version stays at `/card?share=public`.
 
-On `/c/<token>`, only the authenticated owner sees **Edit card**, leading to `/card/edit`. Their card shows a QR code and copy/share link; guests and other members see the consented card without owner controls. The editor retains the switches, reset link, one-tap email, and professional details. Save, reset and email success return to `/card/edit?done=…`; reset changes the next `/card` destination. Both routes require sign-in, and no contact field is added automatically.
+On `/c/<token>`, only the authenticated owner sees **Edit card**, leading to `/card/edit`. Their card shows a QR code and copy/share link; guests and other members see the consented card without owner controls. The editor retains the switches, reset link, one-tap email, and professional details. Save, reset and email success return to `/card/edit?done=…`; reset changes the next `/card` destination. `/card` and `/card/edit` require sign-in; `/c/<token>` remains accessible to guests. No contact field is added automatically.
 
 `/card/edit` shows the card with its QR code first (on phones the QR panel sits
 above the details), then the link, then the explanation and the form. The link
