@@ -158,7 +158,15 @@ test('a non-member scans a public profile: Join & connect sends the request afte
 test('My card puts the QR code first, offers the sign-in email in one tap, and never puts an email-address name on a card', async t => {
   const s = await site(t)
   const { cookie } = await s.signIn('grace')
-  const card = await (await s.request('/card', { cookie })).text()
+  const entry = await s.request('/card', { cookie })
+  assert.equal(entry.status, 303)
+  const shared = await (await s.request(entry.headers.get('location'), { cookie })).text()
+  assert.match(shared, /href="\/card\/edit">Edit card/)
+  assert.match(shared, /aria-label="QR code opening your contact card"/)
+  assert.doesNotMatch(shared, /name="email"|<form class="cc-add-email"|<form class="card cc-form"/)
+  const scan = await (await s.request('/scan?tab=card', { cookie })).text()
+  assert.match(scan, /href="\/card">Open full card/)
+  const card = await (await s.request('/card/edit', { cookie })).text()
   const main = card.split('<main class="journey">')[1]
   assert.ok(main.indexOf('class="bcard qr-first"') < main.indexOf('cc-lead'), 'the card (and its QR) before the explanation')
   assert.ok(main.indexOf('aria-label="QR code opening your contact card"') < main.indexOf('What this card shares'))
@@ -168,20 +176,20 @@ test('My card puts the QR code first, offers the sign-in email in one tap, and n
   // The address comes from the session; a posted one is refused.
   assert.equal((await s.post('/card/contact/email', { csrf, email: 'evil@example.test' }, { cookie })).status, 400)
   const added = await s.post('/card/contact/email', { csrf }, { cookie })
-  assert.equal(added.headers.get('location'), '/card?share=contact&done=email')
+  assert.equal(added.headers.get('location'), '/card/edit?done=email')
   const token = (await s.cards.read(s.grace)).token
   assert.equal((await s.cards.open(token)).email, 'grace@example.test')
-  assert.doesNotMatch(await (await s.request('/card', { cookie })).text(), /Add grace@example\.test to my card/)
+  assert.doesNotMatch(await (await s.request('/card/edit', { cookie })).text(), /Add grace@example\.test to my card/)
   // In the app: no "Add to Home Screen" hint and no analytics; feedback is the
   // menu-launched widget (no launcher), labelled with the installed app version.
-  const inApp = await (await s.request('/card', { cookie, agent: IOS_APP })).text()
+  const inApp = await (await s.request('/card/edit', { cookie, agent: IOS_APP })).text()
   assert.doesNotMatch(inApp, /id="pwa-hint"|analytics\.ideaflow\.app/)
   assert.match(inApp, /wit-feedback\.js" data-tracker-slug="unlinked-feedback" data-trigger="none" data-app="Unlinked iOS" data-app-version="1\.0\.0 \(web \d+\.\d+\.\d+\)"/)
-  assert.match(await (await s.request('/card', { cookie, agent: SAFARI })).text(), /id="pwa-hint"[\s\S]*wit-feedback\.js/)
+  assert.match(await (await s.request('/card/edit', { cookie, agent: SAFARI })).text(), /id="pwa-hint"[\s\S]*wit-feedback\.js/)
 
   const emailNamed = await site(t, { visitorName: 'grace@example.test' })
   const signed = await emailNamed.signIn('grace')
-  await emailNamed.request('/card', { cookie: signed.cookie })
+  await emailNamed.request('/card/edit', { cookie: signed.cookie })
   assert.equal(await emailNamed.cards.read(emailNamed.grace), null, 'no automatic card whose name is an email address')
 })
 

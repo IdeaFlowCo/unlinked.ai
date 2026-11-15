@@ -15,9 +15,9 @@
   - *Fails*: No dismissible "Add to Home Screen" hint on the `/card` page to encourage installation.
 
 ## Changes Made
-1. **Manifest Shortcuts**: Added `shortcuts` to `public/manifest.webmanifest` for `My card` (`/card`) and `Scan` (`/scan`).
+1. **Manifest Shortcuts**: Added `shortcuts` to `public/manifest.webmanifest` for `My card` (`/card`, the stable redirect to the current shareable card, or `/card/edit` when hidden) and `Scan` (`/scan`). Never store a member token in the public manifest.
 2. **iOS Meta Tags**: Added `apple-mobile-web-app-capable="yes"` and `apple-mobile-web-app-status-bar-style="default"` to the page template in `mcp-server/private-browser.mjs`.
-3. **PWA Hint**: Added a dismissible "Add to Home Screen" hint (`#pwa-hint`) on the `/card` view (`renderCard` in `mcp-server/private-onboarding-views.mjs`). The logic to show/dismiss it is placed in `TOP_BAR_SCRIPT` to comply with the page's strict CSP (no inline event handlers). It appears only on touch devices, when the page is not already running as the installed app, and stays dismissed per browser.
+3. **PWA Hint**: Added a dismissible "Add to Home Screen" hint (`#pwa-hint`) on the owner’s `/c/<token>` page and `/card/edit` (also the public-profile card; `renderContactCard`/`renderCard` in `mcp-server/private-onboarding-views.mjs`). The logic to show/dismiss it is placed in `TOP_BAR_SCRIPT` to comply with the page's strict CSP (no inline event handlers). It appears only on touch devices, when the page is not already running as the installed app, and stays dismissed per browser.
    `viewport-fit=cover` was considered and left out: the stylesheet defines no safe-area padding, so the page would slide under the notch.
 4. **Tests**: Verified that the changes do not break existing `tests/pwa-assets.test.mjs` and the application remains compliant with the `default-src 'none'` CSP.
 

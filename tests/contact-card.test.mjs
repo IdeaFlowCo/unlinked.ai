@@ -198,8 +198,11 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
 
   // Every member has a card from day one: their name alone, shared, with a QR code
   // and link. The card page opens on it; the public version carries no contact channel.
-  let html = await (await signed.get('/card')).text()
-  assert.match(html, /<nav class="tabs" aria-label="Card version"><a href="\/card\?share=contact" aria-current="page">Contact card<\/a><a href="\/card\?share=public">Public profile<\/a><\/nav>/)
+  const entry = await signed.get('/card')
+  assert.equal(entry.status, 303)
+  assert.match(entry.headers.get('location'), /^\/c\/[A-Za-z0-9]{24}$/)
+  let html = await (await signed.get('/card/edit')).text()
+  assert.match(html, /<nav class="tabs" aria-label="Card version"><a href="\/card\/edit" aria-current="page">Contact card<\/a><a href="\/card\?share=public">Public profile<\/a><\/nav>/)
   assert.match(html, /<div class="bcard qr-first">/)
   assert.match(html, /<svg[^>]*aria-label="QR code opening your contact card"/)
   assert.match(html, /Only your name is on this card so far/)
@@ -208,7 +211,7 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   assert.deepEqual({ name: dayOne.name, shareCard: dayOne.shareCard, phone: dayOne.phone, email: dayOne.email }, { name: 'Card Owner', shareCard: true, phone: undefined, email: undefined })
   // A second visit (or a second tab) keeps the same card and link.
   const firstLink = html.match(/id="cc-link-out" type="text" readonly value="([^"]+)"/)[1]
-  html = await (await signed.get('/card?share=contact')).text()
+  html = await (await signed.get('/card/edit')).text()
   assert.equal(html.match(/id="cc-link-out" type="text" readonly value="([^"]+)"/)[1], firstLink)
   assert.equal(fixture.store.records.size, 1)
   const dayOnePage = await (await signed.get(new URL(firstLink).pathname, false)).text()
@@ -238,8 +241,8 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
 
   response = await signed.post('/card/contact', { phone: '+1 (415) 555-0123', showPhone: 'yes', showWhatsapp: 'yes', email: 'ada@example.test', link: 'example.test/ada', showLink: 'yes' })
   assert.equal(response.status, 303)
-  assert.equal(response.headers.get('location'), '/card?share=contact&done=saved')
-  html = await (await signed.get('/card?share=contact&done=saved')).text()
+  assert.equal(response.headers.get('location'), '/card/edit?done=saved')
+  html = await (await signed.get('/card/edit?done=saved')).text()
   assert.match(html, /role="status">Saved\./)
   const shareUrl = html.match(/id="cc-link-out" type="text" readonly value="([^"]+)"/)[1]
   const token = shareUrl.match(/\/c\/([0-9A-Za-z]{24})$/)[1]
@@ -271,7 +274,9 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
     assert.match(body, /href="tel:\+14155550123"[^>]*>.*?\+1 \(415\) 555-0123/s)
     assert.match(body, /href="https:\/\/wa\.me\/14155550123" target="_blank" rel="noopener noreferrer"/)
     assert.match(body, new RegExp(`href="/c/${token}/contact\\.vcf">Save contact`))
-    assert.doesNotMatch(body, /ada@example\.test|mailto:|<svg[^>]*aria-label="QR code/)
+    assert.doesNotMatch(body, /ada@example\.test|mailto:/)
+    assert.equal(body.includes('href="/card/edit">Edit card'), signedIn)
+    assert.equal(body.includes('aria-label="QR code opening your contact card"'), signedIn)
     assert.equal(/Make your own card/.test(body), !signedIn)
   }
   const vcf = await signed.get(`/c/${token}/contact.vcf`, false)
@@ -301,7 +306,8 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   assert.equal((await signed.post('/card/contact', { phone: '+14155550123', email: 'ada@example.test', link: 'https://example.test/ada', shareCardSwitch: '1' })).status, 303)
   assert.equal((await signed.get(`/c/${token}`, false)).status, 404)
   assert.equal((await signed.get(`/c/${token}/contact.vcf`, false)).status, 404)
-  html = await (await signed.get('/card?share=contact')).text()
+  assert.equal((await signed.get('/card')).headers.get('location'), '/card/edit')
+  html = await (await signed.get('/card/edit')).text()
   assert.match(html, /Your card isn’t shared right now/)
   assert.doesNotMatch(html, /name="shareCard" value="yes" checked/)
   assert.match(html, /name="phone"[^>]*value="\+14155550123"/)
@@ -313,8 +319,8 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
   assert.match(page, /href="mailto:ada@example\.test"/); assert.doesNotMatch(page, /4155550123|wa\.me/)
   assert.equal((await signed.post('/card/contact/reset', { extra: 'x' })).status >= 400, true)
   response = await signed.post('/card/contact/reset', {})
-  assert.equal(response.headers.get('location'), '/card?share=contact&done=reset')
-  html = await (await signed.get('/card?share=contact&done=reset')).text()
+  assert.equal(response.headers.get('location'), '/card/edit?done=reset')
+  html = await (await signed.get('/card/edit?done=reset')).text()
   assert.match(html, /has a new link/)
   const next = html.match(/\/c\/([0-9A-Za-z]{24})"/)[1]
   assert.notEqual(next, token)
@@ -329,8 +335,19 @@ test('a member builds a contact card, shares it by link, hides it and resets it'
 
 test('without a contact card store the card page has one version and the routes do not exist', async t => {
   const signed = await harness(t, { withCards: false }).start()
-  const html = await (await signed.get('/card?share=contact')).text()
+  const html = await (await signed.get('/card/edit')).text()
   assert.doesNotMatch(html, /aria-label="Card version"|class="card cc-form"/)
   assert.equal((await signed.get('/c/000000000000000000000000', false)).status, 401)
   assert.notEqual((await signed.post('/card/contact', { phone: '+14155550123' })).status, 303)
+})
+
+ test('signed-out card entry and editor keep their exact sign-in destination', async t => {
+  const signed = await harness(t).start()
+  for (const path of ['/card', '/card/edit', '/card?share=public']) {
+    const response = await signed.get(path, false)
+    assert.equal(response.status, 303)
+    assert.equal(response.headers.get('location'), `/login?next=${encodeURIComponent(path)}`)
+    const login = await signed.get(response.headers.get('location'), false)
+    assert.equal(login.status, 303)
+  }
 })
