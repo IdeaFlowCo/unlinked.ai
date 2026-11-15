@@ -628,7 +628,7 @@ test('the stylesheet loads nothing the page policy forbids, and the search icon 
   assert.doesNotMatch(ONBOARDING_STYLE, /url\(|@import|expression\(/i)
   const header = renderLanding().content.match(/<header>(.*?)<\/header>/s)[1]
   assert.match(header, /<svg class="search-icon"[^>]*aria-hidden="true">/)
-  assert.doesNotMatch(renderLanding().content, /<img\b|background-image|src=/)
+  assert.doesNotMatch(renderLanding().content, /<img\b|background-image|\ssrc=/)
 })
 
 test('a connections heading uses a given name, never a bare initial', () => {

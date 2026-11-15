@@ -39,7 +39,8 @@ test('canonical anonymous discovery GET/HEAD works while owner and mutation rout
     // link without script) and a launcher-free widget on the app's board.
     assert.ok(markup.includes('<a href="/support" data-wit-feedback>Send feedback</a>'), path)
     const nonce = markup.match(/<script nonce="([^"]+)"/)[1]
-    assert.ok(markup.includes(`<script nonce="${nonce}" src="https://worldissuetracker.com/widget/wit-feedback.js" data-tracker-slug="unlinked-feedback" data-trigger="none" data-app="Unlinked" data-app-version="`), path)
+    assert.ok(markup.includes(`<script nonce="${nonce}" type="application/json" data-wit-config data-tracker-slug="unlinked-feedback" data-trigger="none" data-app="Unlinked" data-app-version="`), path)
+    assert.doesNotMatch(markup, /<script[^>]*\ssrc="https:\/\/worldissuetracker\.com\/widget\/wit-feedback\.js"/, path)
     assert.doesNotMatch(markup, /data-mount-selector/, path)
     const csp = page.headers.get('content-security-policy')
     assert.ok(csp.includes(`'nonce-${nonce}' https://worldissuetracker.com`), path)
