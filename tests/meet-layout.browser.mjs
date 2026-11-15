@@ -1,22 +1,21 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { servePublicDiscovery } from '../mcp-server/public-discovery.mjs'
 
 // Chrome's private CDP pipe avoids a listener and needs no browser npm dependency.
 // Keep its sandbox enabled. CI supplies Chrome; locally use UNLINKED_TEST_CHROME.
-async function browser(directory) {
-  const executable = process.env.UNLINKED_TEST_CHROME || ['/usr/bin/google-chrome', '/opt/google/chrome/chrome', '/usr/bin/chromium'].find(existsSync)
+async function browser(directory, executable = process.env.UNLINKED_TEST_CHROME || ['/usr/bin/google-chrome', '/opt/google/chrome/chrome', '/usr/bin/chromium'].find(existsSync)) {
   assert.ok(executable, 'Chrome required; set UNLINKED_TEST_CHROME')
   const child = spawn(executable, ['--headless', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--host-resolver-rules=MAP * ~NOTFOUND', `--user-data-dir=${join(directory, 'profile')}`], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] })
   const pending = new Map()
-  let id = 0, buffer = '', stderr = ''
+  let id = 0, buffer = '', stderr = '', terminal
+  const closed = new Promise(resolve => child.once('close', resolve))
   child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-3000) })
   child.stdio[4].on('data', chunk => {
     buffer += chunk
@@ -26,22 +25,34 @@ async function browser(directory) {
       if (entry) { pending.delete(message.id); clearTimeout(entry.timer); message.error ? entry.reject(Error(JSON.stringify(message.error))) : entry.resolve(message.result) }
     }
   })
-  const fail = error => { for (const entry of pending.values()) { clearTimeout(entry.timer); entry.reject(error) } pending.clear() }
+  const fail = error => { terminal ??= error; for (const entry of pending.values()) { clearTimeout(entry.timer); entry.reject(terminal) } pending.clear() }
   child.on('error', fail)
+  child.stdio[3].on('error', fail)
+  child.stdio[4].on('error', fail)
   child.on('exit', () => fail(Error(`Chrome exited: ${stderr}`)))
   const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+    if (terminal) { reject(terminal); return }
     const requestId = ++id
     const timer = setTimeout(() => { pending.delete(requestId); reject(Error(`Chrome timeout: ${method}: ${stderr}`)) }, 15000)
     pending.set(requestId, { resolve, reject, timer })
-    child.stdio[3].write(JSON.stringify({ id: requestId, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0')
+    child.stdio[3].write(JSON.stringify({ id: requestId, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0', error => { if (error) fail(error) })
   })
+  const settled = async (promise, ms) => {
+    let timer
+    try { return await Promise.race([promise.then(() => true), new Promise(resolve => { timer = setTimeout(() => resolve(false), ms) })]) }
+    finally { clearTimeout(timer) }
+  }
   return { send, async close() {
-    if (child.exitCode !== null || child.signalCode !== null) return
-    const exited = once(child, 'exit')
-    // Let Chrome flush its profile before removal; bound a stuck shutdown.
-    const deadline = setTimeout(() => child.kill(), 5000)
-    try { await send('Browser.close').catch(() => {}); await exited }
-    finally { clearTimeout(deadline) }
+    try {
+      if (!terminal) await settled(send('Browser.close').catch(() => {}), 1000)
+      if (!await settled(closed, 1000)) {
+        child.kill('SIGTERM')
+        if (!await settled(closed, 1000)) {
+          child.kill('SIGKILL')
+          assert.ok(await settled(closed, 2000), 'Chrome did not close after SIGKILL')
+        }
+      }
+    } finally { fail(Error('Chrome closed')) }
   } }
 }
 
@@ -80,4 +91,23 @@ test('Meet keeps its hidden photo input and document within 390/1280px', { timeo
       } finally { await chrome.send('Target.closeTarget', { targetId }) }
     })
   } finally { await chrome?.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) }
+})
+
+
+test('browser cleanup handles signal exit and failed spawn without hanging', { timeout: 10000 }, async t => {
+  for (const mode of ['signal', 'missing']) await t.test(mode, async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'unlinked-meet-exit-'))
+    let chrome
+    try {
+      const executable = join(directory, 'synthetic-browser')
+      if (mode === 'signal') {
+        await writeFile(executable, '#!/bin/sh\nkill -TERM "$$"\n')
+        await chmod(executable, 0o700)
+      }
+      chrome = await browser(directory, executable)
+      await assert.rejects(chrome.send('Browser.getVersion'), /Chrome exited|EPIPE|ECONNRESET|ENOENT/)
+      await chrome.close()
+      await assert.rejects(chrome.send('Browser.getVersion'))
+    } finally { await chrome?.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) }
+  })
 })
