@@ -555,7 +555,7 @@ body:has(.unlinked-onboarding){margin:0;background:#f5f6fc;color:var(--fg,#16181
 .unlinked-onboarding .scan-sheet .phead{margin:0}
 .unlinked-onboarding .phead h2{font:600 24px/1.15 "Public Sans",system-ui,sans-serif;letter-spacing:-.01em;margin:12px 24px 2px}
 /* Connections and notifications: My Network + bell in the header, Connect on profiles, the two feeds. */
-.unlinked-onboarding .vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.unlinked-onboarding .vh,.unlinked-onboarding input[type=file].vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .unlinked-onboarding nav .nav-ico{position:relative;display:inline-grid;place-items:center;width:40px;height:40px;border-radius:50%;color:var(--fg)}
 .unlinked-onboarding nav .nav-ico:hover{background:var(--tint);text-decoration:none}
 .unlinked-onboarding .badge{position:absolute;top:1px;right:-2px;min-width:19px;height:19px;padding:0 5px;border-radius:99px;background:#c8372d;color:#fff;border:2px solid var(--page);font:700 11px/15px "Public Sans",system-ui,sans-serif;text-align:center}
