@@ -16,7 +16,7 @@ Jacob's November 14 direction: recognized people he knows who have signed up get
 | AI API/MCP tools | 20/min, 2000/day, 2 in flight | 60/min, 6000/day, 4 in flight |
 | Grant provisioning by an app client (OpenChat, Vision) | 30/min | 150/min |
 | Browser private context / message people picker | 60/min / 20/min | 300/min / 100/min |
-| Downloads of everyone visible (`scope=everyone|all`) | no | yes |
+| Downloads of everyone visible (`scope=everyone|all`) and of first + second degree with intermediaries (`scope=extended`, docs/bulk-exports.md) | no | yes |
 
 Limits and factors live in `mcp-server/access-tiers.mjs`. Deterministic reads are cheap in-memory graph reads, so 5x (about 10/s) suits agent bulk work; AI calls are paid and share the runtime-wide ceiling of 8 concurrent calls, which does not change, so they get 3x. Connection-write budgets and the 50/day connection-request allowance are unchanged: they limit unsolicited requests, not downloads. An approved account's shared-network download uses the same permission-aware export as verified (published, viewer-visible rows only, never other owners' private imports). Settings shows one quiet line, **Enhanced access**, under Your data; standard accounts see nothing.
 
