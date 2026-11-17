@@ -29,7 +29,7 @@ export function parseGroupRoster(input, format) {
     const { display_name: name, phone_hash: hash, participant_id: id } = row
     if (typeof name !== 'string' || !name.trim() || name.length > 200 || /[\p{Cc}\p{Cf}]/u.test(name) ||
       // Phone-like names are never an escape hatch for raw numbers.
-      /(?:\+?\p{Nd}[\s().-]*){7,}/u.test(name.normalize('NFKC')) || typeof id !== 'string' ||
+      [...name.normalize('NFKC')].filter(ch => /\p{Nd}/u.test(ch)).length >= 7 || typeof id !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) || ids.has(id) ||
       !(hash === null || hash === '' || (typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash)))) invalid()
     ids.add(id)
@@ -49,4 +49,20 @@ export function suggestRosterMatches(rows, profiles) {
     }))
     return { ...row, resolution: { status: candidates.length > 1 ? 'ambiguous' : candidates.length ? 'suggested' : 'unmatched', candidates } }
   })
+}
+
+// Apply live owner/profile and two-way account blocks before candidate ranking.
+// Errors are not converted into an unfiltered fallback.
+export async function filterGroupCandidates({ profiles, owner, memberBlocks, accountForProfile }) {
+  if (!memberBlocks) return profiles
+  const hidden = new Set((await memberBlocks.list(owner)).map(block => block.blockedProfileId).filter(Boolean))
+  const visible = []
+  for (const profile of profiles) {
+    if (hidden.has(profile.id)) continue
+    if (typeof accountForProfile !== 'function') throw Error('group_candidate_authorization_unavailable')
+    const other = await accountForProfile(profile.id)
+    if (other && await memberBlocks.between(owner, other)) continue
+    visible.push(profile)
+  }
+  return visible
 }

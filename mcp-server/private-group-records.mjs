@@ -68,9 +68,9 @@ export function createNoosGroupRecords({ backend, owner }) {
       return result
     },
     async removeOwner() {
-      if (typeof backend.writeBatch !== 'function') throw Error('group_delete_backend_required')
       const raw = await backend.readResource('import', catalogId)
       if (!raw || raw.deleted) return
+      if (typeof backend.writeBatch !== 'function') throw Error('group_delete_backend_required')
       let catalog = await read(catalogId)
       if (!catalog.deleting) {
         catalog = { ...catalog, deleting: true, revision: catalog.revision + 1 }
@@ -139,7 +139,9 @@ export function createNoosGroupRecords({ backend, owner }) {
       if (manifest && (manifest.kind !== 'group_roster_manifest' || manifest.groupId !== groupId)) fail()
       return manifest
     },
-    async publishRoster(groupId, rows, expectedRevision, nodeRevision) {
+    async publishRoster(groupId, rows, expectedRevision, nodeRevision, verifyLive) {
+      if (typeof verifyLive !== 'function') throw Error('group_live_fence_required')
+      await verifyLive()
       if (!Array.isArray(rows) || rows.length > 2000) throw Error('group_support_limit')
       const revision = (expectedRevision ?? 0) + 1, generation = randomUUID(), chunks = []
       for (let start = 0; start < rows.length; start += 25) {
@@ -152,6 +154,7 @@ export function createNoosGroupRecords({ backend, owner }) {
         { chunks, count: rows.length, nodeRevision, generation }, revision)
       // A no-op node CAS prevents publication after a concurrent membership,
       // metadata or owner fence transition. Staged chunks have no reader path.
+      await verifyLive() // revalidate live group/account after all chunk staging
       const node = await this.group(groupId)
       if (!node || node.revision !== nodeRevision) fail()
       const receiptId = id(groupId, 'receipt', generation)

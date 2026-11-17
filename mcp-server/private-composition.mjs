@@ -692,7 +692,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     const privateGroupPilot = process.env.UNLINKED_PRIVATE_GROUP_ROSTER === 'on' && collectiveGroups &&
       process.env.UNLINKED_PRIVATE_GROUP_ROSTER_OWNERS?.trim() ? createPrivateGroupPilot({ enabled: true,
         allowedOwnerIds: process.env.UNLINKED_PRIVATE_GROUP_ROSTER_OWNERS.split(',').map(v => v.trim()).filter(Boolean),
-        groups: collectiveGroups, getBackend, active: identityForOwner,
+        groups: collectiveGroups, getBackend, active: identityForOwner, memberBlocks, accountForProfile,
         groupOwner: async id => (await collectiveGroupsStore.get(id))?.organizer,
       }) : undefined
     if (collectiveGroupsStore && typeof collectiveGroupsStore.chatDue === 'function') {

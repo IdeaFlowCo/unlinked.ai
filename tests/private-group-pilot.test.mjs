@@ -31,7 +31,7 @@ function memoryBackend() {
     },
   }
 }
-async function fixture({ enabled = true, allowedOwnerIds = ['owner'] } = {}) {
+async function fixture({ enabled = true, allowedOwnerIds = ['owner'], memberBlocks } = {}) {
   const backend = memoryBackend(), store = createMemoryCollectiveGroupsStore(), active = new Set(['owner', 'admin', 'member', 'stranger'])
   const groups = createCollectiveGroups({ store, active: a => active.has(a.ownerId) && a.userId === actor(a.ownerId).userId })
   const group = await groups.create(owner, 'MIT Early Stage Investors & Founders', 'owner-profile')
@@ -40,7 +40,7 @@ async function fixture({ enabled = true, allowedOwnerIds = ['owner'] } = {}) {
     await store.change(group.id, g => { g.members.push({ id: randomUUID(), actor: who, name: who.ownerId, profileId: who.ownerId + '-profile' }); return g })
   }
   await join(member); await join(admin)
-  const pilot = createPrivateGroupPilot({ enabled, allowedOwnerIds, groups, groupOwner: async id => (await store.get(id))?.organizer,
+  const pilot = createPrivateGroupPilot({ enabled, allowedOwnerIds, groups, memberBlocks, accountForProfile: async id => actor(id), groupOwner: async id => (await store.get(id))?.organizer,
     getBackend: async () => backend, active: async a => active.has(a.ownerId) && a.userId === actor(a.ownerId).userId })
   const records = createNoosGroupRecords({ backend, owner })
   return { pilot, group, groups, store, backend, active, records, join }
@@ -322,4 +322,46 @@ test('standalone HTTP: pilot extends existing groups, disabled paths 404, and me
   assert.equal(roster.status, 200)
   assert.match(await roster.text(), /fictional-person/)
   assert.equal((await f.store.get(id)).invites.length, 0)
+})
+
+test('account cleanup of an absent group catalog requires no write capability', async () => {
+  const records = createNoosGroupRecords({ backend: { readResource: async () => null }, owner })
+  await records.removeOwner()
+})
+
+test('phone names reject Unicode separators/digits and group revocation during staging prevents final publication', async () => {
+  for (const name of ['+1–555–555–0123', '+１．５５５．５５５．０１２３', '١٥٥٥٥٥٥٠١٢٣', '+1☎555☎555☎0123']) {
+    assert.throws(() => parseGroupRoster(bytes([row(name)]), 'json'), /invalid_roster/)
+  }
+  const f = await fixture(), id = f.group.id
+  await f.pilot.enable(owner, id)
+  const original = f.backend.writeImportBatch.bind(f.backend)
+  f.backend.writeImportBatch = async items => {
+    await original(items)
+    if (items.some(i => i.payload?.kind === 'group_pending_roster_edges')) await f.store.change(id, () => null)
+  }
+  const preview = await f.pilot.preview(owner, id, bytes([row()]), 'json')
+  await notFound(f.pilot.commit(owner, id, preview, 'retain_privately'))
+  assert.equal(await f.records.rosterManifest(id), null)
+})
+
+test('name candidates exclude live outgoing-profile and incoming-account blocks; failures fail closed', async () => {
+  const { filterGroupCandidates } = await import('../mcp-server/private-group-roster.mjs')
+  const profiles = [{ id: 'outgoing', name: 'Fictional' }, { id: 'incoming', name: 'Fictional' }, { id: 'visible', name: 'Fictional' }]
+  const memberBlocks = { list: async () => [{ blockedProfileId: 'outgoing' }], between: async (_, other) => other.ownerId === 'incoming' }
+  const result = await filterGroupCandidates({ profiles, owner, memberBlocks, accountForProfile: async id => actor(id) })
+  assert.deepEqual(result.map(p => p.id), ['visible'])
+  await assert.rejects(filterGroupCandidates({ profiles, owner, memberBlocks: { ...memberBlocks, list: async () => { throw Error('fixture_unavailable') } }, accountForProfile: async id => actor(id) }), /fixture_unavailable/)
+})
+
+test('service refreshes two-way candidate blocks after the batch before showing name suggestions', async () => {
+  let blocked = false, queries = 0
+  const memberBlocks = { list: async () => [], between: async () => blocked }
+  const f = await fixture({ memberBlocks }), id = f.group.id
+  await f.pilot.enable(owner, id); await importRows(f, [row(), row()])
+  const result = await f.pilot.suggestions(owner, id, async () => {
+    if (++queries === 2) blocked = true
+    return [{ id: 'candidate', name: 'Fictional Founder', presence: 'member' }]
+  })
+  assert.ok(result.rows.every(r => r.resolution.candidates.length === 0 && r.resolution.status === 'unmatched'))
 })

@@ -1,11 +1,11 @@
 import { createNoosGroupRecords, PRIVATE_GROUP_CONTRACT } from './private-group-records.mjs'
-import { parseGroupRoster, rosterDigest, suggestRosterMatches } from './private-group-roster.mjs'
+import { parseGroupRoster, rosterDigest, suggestRosterMatches, filterGroupCandidates } from './private-group-roster.mjs'
 
 const same = (a, b) => Boolean(a?.ownerId && a?.userId && a.ownerId === b?.ownerId && a.userId === b?.userId)
 const fail = (code = 'not_found') => { throw Object.assign(Error(code), { code }) }
 const fingerprint = rows => JSON.stringify(rows.map(r => [r.actor.ownerId, r.actor.userId, r.profileId ?? null]).sort())
 
-export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [], groups, groupOwner, getBackend, active }) {
+export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [], groups, groupOwner, getBackend, active, memberBlocks, accountForProfile }) {
   const allowed = new Set(allowedOwnerIds)
   // No environment defaults, backend initialization or migrations here.
   const context = async (actor, id, ownerOnly = false) => {
@@ -37,9 +37,21 @@ export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [],
     return { ...ctx, node, edges, role: edge.role }
   }
   const recheck = async ctx => {
-    await context(ctx.actor, ctx.id, ctx.role === 'owner')
+    const live = await context(ctx.actor, ctx.id, ctx.role === 'owner')
+    const joined = await groups.roster(ctx.owner, ctx.id)
+    if (fingerprint(joined) !== fingerprint(ctx.edges) || live.detail.name !== ctx.detail.name ||
+      live.detail.description !== ctx.detail.description || live.detail.chatUrl !== ctx.detail.chatUrl) fail('review_changed')
     const node = await ctx.records.group(ctx.id)
     if (!node || node.revision !== ctx.node.revision) fail('review_changed')
+  }
+  const candidatesFor = async (actor, profiles) => filterGroupCandidates({ profiles, owner: actor, memberBlocks, accountForProfile })
+  const recheckCandidates = async (actor, rows) => {
+    const candidates = rows.flatMap(row => row.resolution.candidates)
+    const permitted = new Set((await candidatesFor(actor, candidates.map(c => ({ ...c, id: c.profileId })))).map(c => c.id))
+    return rows.map(row => {
+      const candidates = row.resolution.candidates.filter(c => permitted.has(c.profileId))
+      return { ...row, resolution: { status: candidates.length > 1 ? 'ambiguous' : candidates.length ? 'suggested' : 'unmatched', candidates } }
+    })
   }
   return {
     async exportOwner(actor) {
@@ -88,7 +100,7 @@ export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [],
       const manifest = await ctx.records.rosterManifest(id)
       if ((manifest?.revision ?? null) !== review.rosterRevision) fail('review_changed')
       await recheck(ctx)
-      await ctx.records.publishRoster(id, rows, review.rosterRevision, ctx.node.revision)
+      await ctx.records.publishRoster(id, rows, review.rosterRevision, ctx.node.revision, () => recheck(ctx))
     },
     async roster(actor, id) {
       const ctx = await current(actor, id, true)
@@ -104,11 +116,12 @@ export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [],
       const rows = await this.roster(actor, id)
       const result = []
       for (const row of rows.slice(offset, offset + 25)) {
-        const profiles = await readCandidates(row.display_name)
+        const profiles = await candidatesFor(actor, await readCandidates(row.display_name))
         result.push(...suggestRosterMatches([row], profiles))
       }
+      const checked = await recheckCandidates(actor, result)
       await recheck(ctx)
-      return { rows: result, total: rows.length, nextOffset: offset + 25 < rows.length ? offset + 25 : null }
+      return { rows: checked, total: rows.length, nextOffset: offset + 25 < rows.length ? offset + 25 : null }
     },
     async resolveNext(actor, id, readCandidates) {
       const ctx = await current(actor, id, true)
@@ -119,16 +132,17 @@ export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [],
       const rows = await ctx.records.roster(id, manifest), start = job?.cursor ?? 0, results = []
       for (const row of rows.slice(start, start + 25)) {
         const { phone_hash, ...safe } = row
-        results.push(...suggestRosterMatches([safe], await readCandidates(row.display_name)))
+        results.push(...suggestRosterMatches([safe], await candidatesFor(actor, await readCandidates(row.display_name))))
       }
+      const checked = await recheckCandidates(actor, results)
       await recheck(ctx)
-      return ctx.records.saveResolution(id, manifest, results, Math.min(start + 25, rows.length), job?.revision ?? null, ctx.node.revision)
+      return ctx.records.saveResolution(id, manifest, checked, Math.min(start + 25, rows.length), job?.revision ?? null, ctx.node.revision)
     },
     async clear(actor, id, acknowledgement) {
       if (acknowledgement !== 'delete_pending_roster') fail('acknowledgement_required')
       const ctx = await current(actor, id, true), manifest = await ctx.records.rosterManifest(id)
       await recheck(ctx)
-      await ctx.records.publishRoster(id, [], manifest?.revision ?? null, ctx.node.revision)
+      await ctx.records.publishRoster(id, [], manifest?.revision ?? null, ctx.node.revision, () => recheck(ctx))
     },
     async draft(actor, id, participantId) {
       const ctx = await current(actor, id, true)
