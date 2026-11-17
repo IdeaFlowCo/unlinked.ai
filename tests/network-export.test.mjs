@@ -55,3 +55,20 @@ test('owned export filters private observations without accessing the public gra
   assert.deepEqual(networkExportInput(new URLSearchParams('ids=alice,bob&scope=everyone')), { scope: 'everyone', query: '', ids: ['alice', 'bob'] })
   for (const input of ['scope=admin', 'ownerId=other', 'ids=bad%3Cscript', 'scope=mine&scope=everyone']) assert.throws(() => networkExportInput(new URLSearchParams(input)), /input_invalid/)
 })
+
+// unlinked-flav: who connects the viewer to each second-degree person.
+test('export pages name only the caller’s own visible intermediaries, follow merges and keep their cursor scope', async () => {
+  const source = () => ({ state: 'published', complete: true, revision: 'paths-v1', profiles: ['me', 'ann', 'ben', 'cat', 'private', 'dee', 'eve', 'far'].map(person), members: ['me', 'ann', 'ben', 'private'],
+    connections: [{ fromId: 'ann', toId: 'dee' }, { fromId: 'dee', toId: 'ben' }, { fromId: 'cat', toId: 'dee' }, { fromId: 'private', toId: 'eve' }, { fromId: 'private', toId: 'dee' }, { fromId: 'dee', toId: 'far' }, { fromId: 'me', toId: 'dee' }],
+    connectionPrivacy: { private: { audience: 'only_me', scope: 'all' } }, aliases: { 'ann-old': 'ann' } })
+  const reader = createPublicPeopleReader({ readPublishedSnapshot: async () => source(), pageSize: 1 })
+  const request = { viewer: { signedIn: true, id: 'me' }, filters: { degree: '2' }, networkSeeds: ['ann-old', 'ben', 'private'], networkSelf: 'me', networkPaths: true }
+  const page = await reader.exportPage(request)
+  assert.deepEqual(page.profiles.map(row => row.id), ['dee'], 'eve is reachable only through a private list; far is third degree')
+  assert.deepEqual(page.paths, [{ toId: 'dee', viaIds: ['ann', 'ben'], viaTotal: 2 }], 'cat is not the caller’s contact, the private list is not evidence, and self is never an intermediary')
+  assert.equal((await reader.exportPage({ ...request, networkPaths: undefined })).paths, undefined)
+  await assert.rejects(reader.exportPage({ viewer: request.viewer, networkPaths: true }), { status: 400 })
+  await assert.rejects(reader.exportPage({ ...request, networkPaths: 'yes' }), { status: 400 })
+  const all = await reader.exportPage({ viewer: request.viewer, networkSeeds: request.networkSeeds, networkSelf: 'me', networkPaths: true })
+  assert.ok(all.nextCursor); await assert.rejects(reader.exportPage({ viewer: request.viewer, networkSeeds: request.networkSeeds, networkSelf: 'me', cursor: all.nextCursor }), { status: 400 }, 'a cursor is not reusable without paths')
+})

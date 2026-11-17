@@ -7,6 +7,7 @@ import { peopleFilters, PEOPLE_FILTER_KEYS, matchesPeopleFilters } from '../src/
 import { rowSlug, rowPublicTarget, groupConnectionRows, rowProvenanceType } from './connection-identity.mjs'
 import { exportFields, writeBulkExport } from './bulk-export-format.mjs'
 
+const EXTENDED_NOTE='Second-degree rows are people recorded in connection lists visible to you through your identified first-degree people; via names who connects you. This is recorded evidence from Unlinked, not complete LinkedIn second-degree coverage, relationship strength or a promise of an introduction.'
 const fail = (code,message) => Object.assign(Error(message),{code})
 const text = value => typeof value==='string'?value:''
 export function bulkExportInput(value = {}) {
@@ -16,8 +17,9 @@ export function bulkExportInput(value = {}) {
   if(!raw||typeof raw!=='object'||Object.keys(raw).some(key=>!allowed.includes(key)) || value instanceof URLSearchParams && [...new Set(value.keys())].some(key=>value.getAll(key).length!==1)) throw fail('invalid_input','Invalid download options.')
   const ids=Array.isArray(raw.ids)?raw.ids:text(raw.ids).split(/[\s,]+/).filter(Boolean), fields=Array.isArray(raw.fields)?raw.fields:text(raw.fields).split(',').filter(Boolean)
   const input={scope:raw.scope||'mine',query:raw.query??raw.q??'',format:raw.format||'csv',detail:raw.detail||'summary',ids:[...new Set(ids)],fields:[...new Set(fields)],...(raw.listId?{listId:raw.listId}:{}),...(raw.presence?{presence:raw.presence}:{}),mode:raw.mode||'exact',filters:peopleFilters(raw)}
-  if(!['mine','everyone','all','list'].includes(input.scope)||!['csv','json','jsonl'].includes(input.format)||!['headline','summary','full'].includes(input.detail)||!['exact','best'].includes(input.mode)||typeof input.query!=='string'||input.query.length>200||ids.length>10000||ids.some(id=>typeof id!=='string'||!id||id.length>160)||!['member','legacy','shadow',undefined].includes(input.presence)||input.scope==='list'&&(!/^(?:private:[A-Za-z0-9_-]{1,80}|saved:[a-f0-9-]{36})$/.test(input.listId??''))||input.scope!=='list'&&input.listId) throw fail('invalid_input','Invalid download options.')
+  if(!['mine','everyone','all','list','extended'].includes(input.scope)||!['csv','json','jsonl'].includes(input.format)||!['headline','summary','full'].includes(input.detail)||!['exact','best'].includes(input.mode)||typeof input.query!=='string'||input.query.length>200||ids.length>10000||ids.some(id=>typeof id!=='string'||!id||id.length>160)||!['member','legacy','shadow',undefined].includes(input.presence)||input.scope==='list'&&(!/^(?:private:[A-Za-z0-9_-]{1,80}|saved:[a-f0-9-]{36})$/.test(input.listId??''))||input.scope!=='list'&&input.listId) throw fail('invalid_input','Invalid download options.')
   if(input.scope==='list'&&input.filters.degree)throw fail('invalid_input','Connection degree filters apply to network downloads. Remove degree to download a list.')
+  if(input.scope==='extended'&&input.filters.degree==='3')throw fail('invalid_input','This download covers first and second-degree people. Use degree 1 or 2, or remove degree.')
   if (bulkExportParams(input).toString().length > 12000) throw fail('invalid_input','The selected IDs exceed the download URL size. Use filters or download the whole selection instead.')
   try { exportFields(input) } catch { throw fail('invalid_input','Invalid download fields.') }
   return input
@@ -38,19 +40,22 @@ const queryMatches=(row,query)=>{
   const haystack=normalized(cells.join('\n')),terms=[...normalized(query).matchAll(/"([^"]+)"|(\S+)/g)].map(match=>match[1]??match[2])
   return terms.every(term=>haystack.includes(term))
 }
+// Scopes that read published profiles beyond the owner's own rows.
+export const SHARED_SCOPES=Object.freeze(['everyone','all','extended'])
+const profileUrl=id=>`https://www.unlinked.ai/people/${encodeURIComponent(id)}`
 const summaryOf = row => ({id:row.id,name:row.name,headline:row.headline??'',company:row.company??row.positions?.[0]?.company??'',location:row.location??'',linkedinUrl:row.linkedinUrl??'',url:row.profileId?`https://www.unlinked.ai/people/${encodeURIComponent(row.profileId)}`:row.source?.kind==='own_network'?`https://www.unlinked.ai/network/contacts/${encodeURIComponent(row.id)}`:row.source?.kind==='private_list'?'':row.id?`https://www.unlinked.ai/people/${encodeURIComponent(row.id)}`:'',detailLevel:row.detailLevel??'basic',enrichmentStatus:row.enrichmentStatus??'unknown',...row})
 export function createBulkExports({getBackend,readPublishedSnapshot,lookupSlug,ownProfileId,privateLists,savedSearchLists,isVerified=async()=>false,accessTier}) {
   const tierOf=tierResolver({accessTier,isVerified})
   const membersSnapshot=typeof readPublishedSnapshot==='function'?createMembersOnlySnapshotReader(readPublishedSnapshot):undefined
   const check = async(owner,input,policy={})=>{
     await getBackend(owner)
-    if(['everyone','all'].includes(input.scope)&&(!policy.publicAllowed||!sharedExportAllowed(await tierOf(owner))))throw fail('scope_not_granted','A verified or enhanced-access account with public-network access is required for this download.')
+    if(SHARED_SCOPES.includes(input.scope)&&(!policy.publicAllowed||!sharedExportAllowed(await tierOf(owner))))throw fail('scope_not_granted','A verified or enhanced-access account with public-network access is required for this download.')
     if(input.scope==='list'&&!policy.privateAllowed)throw fail('scope_not_granted','Private people notes & relations permission is required to download private lists.')
   }
   const manifest=async(owner,raw,policy,signal,authorizeCaller)=>{
     const input=bulkExportInput(raw);await check(owner,input,policy)
     const params=bulkExportParams(input).toString()
-    const result = {kind:'unlinked_export',scope:input.scope,format:input.format,detail:input.detail,fields:exportFields(input),selection:'all_matching_people',truncated:false,download:{url:'https://www.unlinked.ai/downloads/file?'+params,apiUrl:'https://www.unlinked.ai/api/agent/v1/export?'+params,authentication:owner.grantId?.startsWith('ideaflow:')?'Browser session for url. apiUrl requires a direct Unlinked account key; the shared connector token remains at its gateway. No token is included in these links.':'Browser session for url; same direct Unlinked account bearer for apiUrl. No token is included in these links.'},guidance:'One download streams the whole result, including all internal pages. JSON and JSON Lines finish with a completion marker. Full profiles contain available evidence only.'}
+    const result = {kind:'unlinked_export',scope:input.scope,format:input.format,detail:input.detail,fields:exportFields(input),selection:'all_matching_people',truncated:false,download:{url:'https://www.unlinked.ai/downloads/file?'+params,apiUrl:'https://www.unlinked.ai/api/agent/v1/export?'+params,authentication:owner.grantId?.startsWith('ideaflow:')?'Browser session for url. apiUrl requires a direct Unlinked account key; the shared connector token remains at its gateway. No token is included in these links.':'Browser session for url; same direct Unlinked account bearer for apiUrl. No token is included in these links.'},guidance:'One download streams the whole result, including all internal pages. JSON and JSON Lines finish with a completion marker. Full profiles contain available evidence only.'+(input.scope==='extended'?' '+EXTENDED_NOTE:'')}
     if (raw.inline === true) {
       const authorize=async()=>{signal?.throwIfAborted();await authorizeCaller?.();await check(owner,input,policy)}
       const source=await open(owner,input,policy,signal,authorize), fields=exportFields(input)
@@ -73,12 +78,13 @@ export function createBulkExports({getBackend,readPublishedSnapshot,lookupSlug,o
     const full=exportFields(input).some(key=>['about','positions','education','skills','connections','notes','sourceRecords'].includes(key))
     const reader=createPublicPeopleReader({readPublishedSnapshot:policy.membersOnly?membersSnapshot:readPublishedSnapshot,pageSize:100,reuse:false}), selected=new Set(input.ids)
     const viewer={signedIn:true,...(typeof ownProfileId==='function'?{id:await ownProfileId(owner)??undefined}:{})}
-    const own=['mine','all'].includes(input.scope)||input.filters.degree||input.scope==='list'&&input.listId.startsWith('saved:')?await createAccountNetwork({owner,getBackend}).readNetwork(undefined,{signal}):null
+    const extended=input.scope==='extended'
+    const own=['mine','all','extended'].includes(input.scope)||input.filters.degree||input.scope==='list'&&input.listId.startsWith('saved:')?await createAccountNetwork({owner,getBackend}).readNetwork(undefined,{signal}):null
     const ownRows=own?.assertions.filter(row=>row.category==='connections')??[], ownIndex=new Map(ownRows.map((row,index)=>[row.id,index]))
     let publicMatches
     const matches=async()=>{
       if(publicMatches)return publicMatches
-      if(!full&&!input.query.trim()&&!input.presence&&!Object.keys(input.filters).length&&!input.ids.length)return publicMatches=ownRows.map(()=>null)
+      if(!extended&&!full&&!input.query.trim()&&!input.presence&&!Object.keys(input.filters).length&&!input.ids.length)return publicMatches=ownRows.map(()=>null)
       try {
       const direct=await lookup([...new Set(ownRows.map(rowPublicTarget).filter(Boolean))])
       const unresolved=ownRows.filter(row=>!direct.has(rowPublicTarget(row))), slugs=[...new Set(unresolved.map(rowSlug).filter(Boolean))], resolved=new Map()
@@ -105,19 +111,41 @@ export function createBulkExports({getBackend,readPublishedSnapshot,lookupSlug,o
         // An agent's network scope never acquires raw archive contact fields.
         if(policy.browser&&typeof fields['email address']==='string')record.email=fields['email address']
         if(policy.browser&&full)record.sourceRecords=group.map(index=>({assertionId:rows[index].id,importId:rows[index].importId,fields:rows[index].fields??{}}))
+        if(extended)Object.assign(record,{degree:1,viaCount:0,viaNames:'',viaUrls:'',via:[],pathEvidence:{type:rowProvenanceType(row),hops:1}})
         if((!input.presence||profile?.presence===input.presence)&&wanted(record))yield record
       }
     }
+    // The owner's own first-degree people by published id: the only people a
+    // path may name. Names come from the owner's own row first.
+    const intermediaries=async()=>{
+      const all=await matches(),found=new Map()
+      ownRows.forEach((row,index)=>{const profile=all[index];if(!profile?.id||found.has(profile.id))return
+        const fields=row.fields??{},name=[fields['first name'],fields['last name']].filter(Boolean).join(' ')||profile.name||''
+        found.set(profile.id,{viaId:profile.id,contactId:row.id,name,url:profileUrl(profile.id),linkedinUrl:fields.url||profile.linkedinUrl||'',firstHop:rowProvenanceType(row)})})
+      return found
+    }
     async function* published() {
       let cursor
-      const seeds=input.filters.degree?(await matches()).filter(Boolean).map(row=>row.id):undefined
+      const seeds=input.filters.degree||extended?(await matches()).filter(Boolean).map(row=>row.id):undefined
+      const named=extended?await intermediaries():null,filters=extended?{...input.filters,degree:'2'}:input.filters
       const unlistedGroup=viewer.id?await reader.unlistedGroup({id:viewer.id,signal}):null
       do{
         await authorize()
-        const page=await reader.exportPage({viewer,query:input.query,ids:input.ids,filters:input.filters,presence:input.presence,mode:input.mode,...(seeds?{networkSeeds:seeds,networkSelf:viewer.id}:{}),...(unlistedGroup?{unlistedGroups:[unlistedGroup]}:{}),cursor,signal})
+        const page=await reader.exportPage({viewer,query:input.query,ids:input.ids,filters,presence:input.presence,mode:input.mode,...(seeds?{networkSeeds:seeds,networkSelf:viewer.id}:{}),...(extended?{networkPaths:true}:{}),...(unlistedGroup?{unlistedGroups:new Set([unlistedGroup])}:{}),cursor,signal})
         if(lastRevision&&page.revision!==lastRevision)throw fail('upstream_unavailable','The network changed while downloading. Retry for a complete copy.')
         lastRevision=page.revision
-        for(const profile of page.profiles)yield summaryOf({...profile,connections:page.connections.filter(edge=>edge.fromId===profile.id).map(edge=>edge.toId),source:{kind:'published_network',revision:page.revision}})
+        const paths=extended?new Map((page.paths??[]).map(path=>[path.toId,path])):null
+        for(const profile of page.profiles){
+          const row=summaryOf({...profile,connections:page.connections.filter(edge=>edge.fromId===profile.id).map(edge=>edge.toId),source:{kind:'published_network',revision:page.revision}})
+          if(extended){
+            // A second-degree row always carries its proving path. A page that
+            // cannot name one is an inconsistent read, never a silent row.
+            const path=paths.get(profile.id),via=(path?.viaIds??[]).map(id=>named.get(id)).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name)||a.viaId.localeCompare(b.viaId))
+            if(!path||!via.length||via.length!==path.viaIds.length)throw fail('upstream_unavailable','A connection path could not be confirmed. Retry for a complete copy.')
+            Object.assign(row,{degree:2,viaCount:path.viaTotal,viaNames:via.map(entry=>entry.name).join('; '),viaUrls:via.map(entry=>entry.url).join(' '),via:via.map(entry=>({...entry,path:{fromId:viewer.id??null,viaId:entry.viaId,toId:profile.id}})),pathEvidence:{type:'recorded_public_path',hops:2,revision:page.revision,named:via.length,total:path.viaTotal}})
+          }
+          yield row
+        }
         cursor=page.nextCursor
       }while(cursor)
     }
@@ -158,11 +186,11 @@ export function createBulkExports({getBackend,readPublishedSnapshot,lookupSlug,o
     }
     async function* rows(){
       if(input.scope==='list'){yield* list();return}
-      if(['mine','all'].includes(input.scope))yield* imported()
-      if(['everyone','all'].includes(input.scope))yield* published()
+      if(['mine','all','extended'].includes(input.scope))yield* imported()
+      if(['everyone','all'].includes(input.scope)||extended&&input.filters.degree!=='1')yield* published()
     }
     const finish=async()=>{await authorize();await listFence?.();
-      if(own&&(['mine','all'].includes(input.scope)||input.scope==='list'&&input.listId.startsWith('saved:'))){
+      if(own&&(['mine','all','extended'].includes(input.scope)||input.scope==='list'&&input.listId.startsWith('saved:'))){
         const backend=await getBackend(owner),current=await backend.listImportIds()
         if(JSON.stringify([...current].sort())!==JSON.stringify([...(own.imports??[])].sort()))throw fail('upstream_unavailable','Your imports changed during download. Retry for a complete copy.')
         if(own.legacyProfileId&&(await backend.readLegacyProfile())?.profileId!==own.legacyProfileId)throw fail('upstream_unavailable','Your linked profile changed during download.')

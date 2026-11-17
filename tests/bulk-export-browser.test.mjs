@@ -23,6 +23,8 @@ test('ordinary signed-in owners get a complete CSV and format/detail controls; p
  const page=await fetch(endpoint+'/downloads?scope=mine',{headers});assert.equal(page.status,200);const html=await page.text();assert.match(html,/<title>Download my network · Unlinked<\/title>/);assert.match(html,/All matching people are included/);assert.match(html,/id="download-format"/);assert.match(html,/id="download-detail"/)
  const file=await fetch(endpoint+'/downloads/file?scope=mine&format=csv&detail=headline',{headers});assert.equal(file.status,200);assert.match(file.headers.get('content-type'),/text\/csv/);assert.equal((await file.text()).split('\r\n').length,125)
  assert.equal((await fetch(endpoint+'/downloads/file?scope=everyone',{headers})).status,403)
+ assert.equal((await fetch(endpoint+'/downloads/file?scope=extended',{headers})).status,403,'the second-degree download keeps the shared-network entitlement')
+ const gated=await (await fetch(endpoint+'/downloads?scope=extended',{headers})).text();assert.match(gated,/<title>Download my network · Unlinked<\/title>/);assert.doesNotMatch(gated,/value="extended"/)
  reads=0;revokeAt=4
  await assert.rejects(async()=>{const interrupted=await fetch(endpoint+'/downloads/file?scope=mine&format=json',{headers});await interrupted.text()},'a session removed during streaming must not complete the attachment')
 })
@@ -42,4 +44,13 @@ test('download form escapes query text in the page heading',async()=>{
  const {bulkDownloadForm}=await import('../mcp-server/bulk-export-views.mjs')
  const form=bulkDownloadForm({scope:'mine',query:'<img src=x onerror=alert(1)>',format:'csv',detail:'summary',ids:[],fields:[]})
  assert.ok(!form.content.includes('<img'));assert.match(form.content,/&lt;img/)
+})
+
+test('the download form offers the first and second-degree selection only with shared-network access, with its coverage limits stated (unlinked-flav)',async()=>{
+ const {bulkDownloadForm}=await import('../mcp-server/bulk-export-views.mjs')
+ const input={scope:'extended',query:'',format:'csv',detail:'summary',ids:[],fields:[],filters:{}}
+ const verified=bulkDownloadForm(input,{verified:true})
+ assert.equal(verified.title,'Download my first and second-degree network');assert.match(verified.content,/<option value="extended" selected>My network \+ 2nd-degree people, with who connects us<\/option>/);assert.match(verified.content,/not your complete LinkedIn 2nd-degree network/)
+ const standard=bulkDownloadForm(input,{verified:false})
+ assert.equal(standard.title,'Download my network');assert.doesNotMatch(standard.content,/value="extended"/);assert.match(standard.content,/available to verified and enhanced-access accounts/)
 })
