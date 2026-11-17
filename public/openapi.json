@@ -2811,7 +2811,7 @@
       "post": {
         "operationId": "prepareNetworkExport",
         "summary": "Query or prepare a whole-result network/list download",
-        "description": "Query or download all matching people in one operation. CSV, JSON or JSON Lines; headline, summary or full detail; optional selected fields. Own network needs network access; owned lists additionally require private_notes; everyone/all require a verified account and public scope. Existing visibility and grant boundaries remain. Inline results have a real response-size bound and explicitly identify an incomplete preview; authenticated file downloads include every matching internal page.",
+        "description": "Query or download all matching people in one operation. CSV, JSON or JSON Lines; headline, summary or full detail; optional selected fields. Own network needs network access; owned lists additionally require private_notes; everyone/all require a verified account and public scope. With the same access, scope extended returns your first-degree people plus second-degree people recorded in connection lists visible to you, one row each, with degree and who connects you (via, viaCount, viaNames, viaUrls, pathEvidence); recorded Unlinked evidence only, not complete LinkedIn second-degree coverage. Existing visibility and grant boundaries remain. Inline results have a real response-size bound and explicitly identify an incomplete preview; authenticated file downloads include every matching internal page.",
         "security": [
           {
             "accountGrant": []
@@ -2834,7 +2834,8 @@
                       "mine",
                       "everyone",
                       "all",
-                      "list"
+                      "list",
+                      "extended"
                     ]
                   },
                   "query": {
@@ -2894,10 +2895,16 @@
                         "sourceRecords",
                         "source",
                         "detailLevel",
-                        "enrichmentStatus"
+                        "enrichmentStatus",
+                        "degree",
+                        "viaCount",
+                        "viaNames",
+                        "viaUrls",
+                        "via",
+                        "pathEvidence"
                       ]
                     },
-                    "maxItems": 20
+                    "maxItems": 26
                   },
                   "presence": {
                     "type": "string",
@@ -2968,7 +2975,7 @@
       "get": {
         "operationId": "downloadNetworkExport",
         "summary": "Stream the whole selected network/list as one CSV or JSON file",
-        "description": "Query or download all matching people in one operation. CSV, JSON or JSON Lines; headline, summary or full detail; optional selected fields. Own network needs network access; owned lists additionally require private_notes; everyone/all require a verified account and public scope. Existing visibility and grant boundaries remain. Inline results have a real response-size bound and explicitly identify an incomplete preview; authenticated file downloads include every matching internal page.",
+        "description": "Query or download all matching people in one operation. CSV, JSON or JSON Lines; headline, summary or full detail; optional selected fields. Own network needs network access; owned lists additionally require private_notes; everyone/all require a verified account and public scope. With the same access, scope extended returns your first-degree people plus second-degree people recorded in connection lists visible to you, one row each, with degree and who connects you (via, viaCount, viaNames, viaUrls, pathEvidence); recorded Unlinked evidence only, not complete LinkedIn second-degree coverage. Existing visibility and grant boundaries remain. Inline results have a real response-size bound and explicitly identify an incomplete preview; authenticated file downloads include every matching internal page.",
         "security": [
           {
             "accountGrant": []
@@ -2984,7 +2991,8 @@
                 "mine",
                 "everyone",
                 "all",
-                "list"
+                "list",
+                "extended"
               ]
             }
           },
@@ -3182,7 +3190,8 @@
                 "mine",
                 "everyone",
                 "all",
-                "list"
+                "list",
+                "extended"
               ]
             }
           },
@@ -3330,7 +3339,7 @@
             "description": "Sign in"
           },
           "403": {
-            "description": "Verified tier required for everyone/all"
+            "description": "Verified tier required for everyone/all/extended"
           }
         }
       }

@@ -275,6 +275,11 @@ human-facing profile card (card-only opt-ins such as phone never appear here):
   `path {fromId, viaId, toId}` and snapshot `revision` on every entry. Without
   an anchor the call fails `degree_unproven`. Second degree is never inferred
   from imports, names or emails.
+- `unlinked_export_network` `scope: "extended"` is a separate, download-oriented
+  rule: first hop from the owner's own network rows, second hop a published
+  visible connection, with `via[]` intermediaries in the same
+  `path {fromId, viaId, toId}` shape. Its evidence fields and limits are in
+  `docs/bulk-exports.md` ("First and second degree, with intermediaries").
 
 ## Endpoints (HTTP ⇄ MCP tool)
 
