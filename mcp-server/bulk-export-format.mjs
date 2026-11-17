@@ -1,9 +1,16 @@
 import { once } from 'node:events'
 export const EXPORT_FIELDS = Object.freeze(['id','profileId','name','headline','company','email','location','linkedinUrl','url','connectedAt','about','positions','education','skills','connections','notes','sourceRecords','source','detailLevel','enrichmentStatus'])
 export const EXPORT_PRESETS = Object.freeze({ headline: ['id','name','headline'], summary: ['id','name','headline','company','email','location','linkedinUrl','connectedAt'], full: EXPORT_FIELDS })
+// Path columns of the combined first + second-degree download (scope
+// `extended`, docs/bulk-exports.md#first-and-second-degree-with-intermediaries).
+// They exist only there, so every other export keeps its exact columns.
+export const PATH_SUMMARY_FIELDS = Object.freeze(['degree','viaCount','viaNames','viaUrls'])
+export const PATH_FIELDS = Object.freeze([...PATH_SUMMARY_FIELDS,'via','pathEvidence'])
 export function exportFields(input) {
-  const fields = input.fields?.length ? input.fields : EXPORT_PRESETS[input.detail ?? 'summary']
-  if (!fields || !Array.isArray(fields) || fields.length > EXPORT_FIELDS.length || fields.some(key => !EXPORT_FIELDS.includes(key))) throw Error('bulk_export_input_invalid')
+  const extended = input.scope === 'extended', known = extended ? [...EXPORT_FIELDS, ...PATH_FIELDS] : EXPORT_FIELDS
+  const preset = EXPORT_PRESETS[input.detail ?? 'summary']
+  const fields = input.fields?.length ? input.fields : preset && extended ? [...preset, ...(input.detail === 'full' ? PATH_FIELDS : PATH_SUMMARY_FIELDS)] : preset
+  if (!fields || !Array.isArray(fields) || fields.length > known.length || fields.some(key => !known.includes(key))) throw Error('bulk_export_input_invalid')
   return [...new Set(fields)]
 }
 // Quote every cell and neutralize formulas, including leading whitespace/control

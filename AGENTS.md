@@ -214,4 +214,4 @@ MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment s
 
 Operator-controlled verified and Enhanced access (approved) tiers, their per-owner limits (`mcp-server/access-tiers.mjs`), priority admission and visible-network exports are documented in `docs/verified-access.md`.
 
-Whole-result network/list queries and streamed CSV/JSON downloads share one permission-aware service; see `docs/bulk-exports.md`. Internal list paging uses a private Symbol admission capability, never a client field.
+Whole-result network/list queries and streamed CSV/JSON downloads share one permission-aware service; see `docs/bulk-exports.md`. Its `extended` scope (first + second degree, `via` intermediaries) keeps the shared-network entitlement and is recorded evidence, never complete LinkedIn coverage. Internal list paging uses a private Symbol admission capability, never a client field.

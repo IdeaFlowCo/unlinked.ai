@@ -260,6 +260,6 @@
       "summary",
       "full"
     ],
-    "notes": "Own networks and owned lists are downloadable by their signed-in owner. Shared public-network exports require verified access. An agent additionally needs the existing scope for its data; links contain no credential."
+    "notes": "Own networks and owned lists are downloadable by their signed-in owner. Shared public-network exports require verified access. With that access, scope extended adds second-degree people recorded in connection lists visible to the owner, with degree and intermediary (via) columns; it is recorded Unlinked evidence, not complete LinkedIn second-degree coverage. An agent additionally needs the existing scope for its data; links contain no credential."
   }
 }

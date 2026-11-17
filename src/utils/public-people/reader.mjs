@@ -66,6 +66,8 @@ const immutableIdentity = (value, ancestors = new Set()) => {
 // member: confirmed current account; legacy: recovered account awaiting claim; shadow: imported contact.
 export const ENRICHMENT_STATUS = Object.freeze(['enriched', 'not_recorded', 'unknown'])
 export const PRESENCE = Object.freeze(['member', 'legacy', 'shadow'])
+// Named intermediaries per second-degree person in an export page.
+export const EXPORT_VIA_LIMIT = 25
 const requestValue = value => {
   if (!plain(value) || Reflect.ownKeys(value).some(key => !Object.hasOwn(Object.getOwnPropertyDescriptor(value, key), 'value'))) invalid()
   if (value.signal !== undefined && !(value.signal instanceof AbortSignal)) invalid()
@@ -453,12 +455,16 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     // Page an export from the exact same sanitized projection and viewer
     // visibility as browsing. Never copy the raw publication or adjacency map.
     async exportPage(request = {}) {
-      const { signal, cursor, query = '', ids = [], unlistedGroups, presence, filters: rawFilters = {}, mode = 'exact', networkSeeds, networkSelf } = requestValue(request)
+      const { signal, cursor, query = '', ids = [], unlistedGroups, presence, filters: rawFilters = {}, mode = 'exact', networkSeeds, networkSelf, networkPaths } = requestValue(request)
       const viewer = viewerValue(request.viewer), groups = groupsValue(unlistedGroups)
       if (!viewer?.signedIn || !Array.isArray(ids) || ids.length > 10000 || !ids.every(idValid)) invalid()
       const search = queryValue(query), filters = peopleFilters(rawFilters)
       if (!SEARCH_MODES.includes(mode) || ![undefined, ...PRESENCE].includes(presence) || networkSeeds !== undefined && (!Array.isArray(networkSeeds) || networkSeeds.length > maxProfiles || !networkSeeds.every(idValid)) || networkSelf !== undefined && !idValid(networkSelf) || filters.degree && !networkSeeds) invalid()
-      const scope = `export:${search}:${hash(JSON.stringify([...ids].sort()))}:${groupScope(groups)}${viewerScope(viewer)}:${hash(JSON.stringify([presence, filters, mode, networkSeeds, networkSelf]))}`
+      // `networkPaths`: also name, for each second-degree person on the page,
+      // the caller's own first-degree people (`networkSeeds`) whose visible
+      // recorded connection reaches them. Only the caller's seeds are ever named.
+      if (![undefined, true].includes(networkPaths) || networkPaths && !networkSeeds) invalid()
+      const scope = `export:${search}:${hash(JSON.stringify([...ids].sort()))}:${groupScope(groups)}${viewerScope(viewer)}:${hash(JSON.stringify([presence, filters, mode, networkSeeds, networkSelf]))}${networkPaths ? ':paths' : ''}`
       const decoded = cursorValue(cursor, scope), data = await snapshot(signal)
       if (data.remote) return remote('exportPage', request, data)
       // Keep one selection plan per reader, so a whole-network download
@@ -469,16 +475,32 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
         const degrees = networkSeeds ? connectionDegrees({ seeds: networkSeeds.map(id => data.aliases.get(id) ?? id), self: data.aliases.get(networkSelf) ?? networkSelf, connected: data.connected, visible: visibilityFor(data, viewer).visible }) : null
         let people = data.ordered.filter(person => listed(person.id) && (!presence || person.presence === presence) && matchesPeopleFilters(data.details.get(person.id), filters) && (!filters.degree || degrees.get(person.id) === Number(filters.degree)) && (!ids.length || selected.has(person.id)))
         if (matcher) people = rankMatches(people, matcher, person => data.tokens.get(person.id)).rows
-        exportPlan = { data, scope, people, included: new Set(people.map(person => person.id)), visibility: visibilityFor(data, viewer) }
+        exportPlan = { data, scope, people, included: new Set(people.map(person => person.id)), visibility: visibilityFor(data, viewer), degrees,
+          seeds: networkPaths ? new Set(networkSeeds.map(id => data.aliases.get(id) ?? id)) : null }
       }
-      const { people, included, visibility } = exportPlan
+      const { people, included, visibility, degrees, seeds } = exportPlan
       const result = page(people, decoded, scope, data.revision)
       const profiles = result.profiles.map(person => ({ ...data.details.get(person.id) }))
       const connections = []
       for (const person of result.profiles) for (const toId of data.connected.get(person.id) ?? []) {
         if (included.has(toId) && visibility.visible(person.id, toId)) connections.push({ fromId: person.id, toId })
       }
-      return { revision: data.revision, profiles, connections, total: people.length, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) }
+      // Every visible intermediary is counted; at most EXPORT_VIA_LIMIT are
+      // named (sorted by id, so a retry names the same ones) and `viaTotal`
+      // discloses the rest. The same audience rule as the degree itself.
+      let paths
+      if (seeds) {
+        paths = []
+        const self = data.aliases.get(networkSelf) ?? networkSelf
+        for (const person of result.profiles) {
+          if (degrees.get(person.id) !== 2) continue
+          const via = []
+          for (const other of data.connected.get(person.id) ?? []) if (other !== self && seeds.has(other) && degrees.get(other) === 1 && visibility.visible(other, person.id)) via.push(other)
+          via.sort()
+          paths.push({ toId: person.id, viaIds: via.slice(0, EXPORT_VIA_LIMIT), viaTotal: via.length })
+        }
+      }
+      return { revision: data.revision, profiles, connections, total: people.length, ...(paths ? { paths } : {}), ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) }
     },
     async profile(request = {}) {
       // `show` narrows to members ('members') or to `known`, the published ids
