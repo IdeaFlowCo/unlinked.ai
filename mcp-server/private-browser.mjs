@@ -2,6 +2,7 @@ import { releaseStampTag } from './release-stamp.mjs'
 import { isCommunityPath } from './community-intake.mjs'
 import { renderGroupsInCommon } from './group-member-views.mjs'
 import { createCommunityIntakeBrowser } from './community-intake-browser.mjs'
+import { createProLinkedinBrowser } from './pro-linkedin-browser.mjs'
 import { bulkExportInput } from './bulk-exports.mjs'
 import { networkExportInput, streamNetworkExport } from './network-export.mjs'
 import { createGroupBrowser, flyerJoinTarget, groupBodyLimit, groupReturnPath, isFlyerJoinPath, isGroupPath } from './collective-group-browser.mjs'
@@ -195,7 +196,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ proLinkedin, bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -269,6 +270,12 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     }
     return false
   } } : {}), ...messagingOptions }) : null
+  // Owner-only Pro LinkedIn source (docs/pro-linkedin.md); absent unless composed.
+  const proBrowser = proLinkedin ? createProLinkedinBrowser({ pro: proLinkedin, body, resolveExisting: async (request, addresses) => {
+    const found = new Map(), reader = readerFor(request)
+    for (const address of addresses.slice(0, 10)) { const match = await reader.lookupLinkedin({ address }).catch(() => null); if (match?.id) found.set(address, profilePath(match.id)) }
+    return found
+  } }) : null
   const communityBrowser = createCommunityIntakeBrowser({ client: communityIntake, groups: collectiveGroups, messagingAvailable: Boolean(messaging), body })
   const groupBrowser = collectiveGroups && createGroupBrowser({
     messaging, groups: collectiveGroups, welcome: Boolean(communityIntake), privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
@@ -1445,6 +1452,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         return
       }
       const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf, headline: viewer.headline } : {}
+      if (proBrowser && (url.pathname === '/pro' || url.pathname.startsWith('/pro/'))) {
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive'); response.setHeader('Cache-Control', 'no-store, private'); response.setHeader('Referrer-Policy', 'no-referrer')
+        await proBrowser({ request, url, session: viewer,
+          render: (view, status) => journey(response, view, null, '', status),
+          redirect: path => redirect(response, path),
+          notFound: () => render(response, 'Page not found', '<p>This page is not available.</p><p><a href="/">Back to Home</a></p>', 404) })
+        return
+      }
       if (isCommunityPath(url.pathname)) {
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         await communityBrowser({ request, url, session: viewer,
@@ -2808,7 +2823,9 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // Cards on both sections are counted once each.
         const counted = Number.isSafeInteger(total) ? total + (own !== undefined ? matchingContacts.length : 0) : total
         searchActivity().result({ people: [...(own ?? []), ...(everyone ?? [])], total: counted, nextCursor })
-        const view = renderPeople({ ...props, membersOnly: iosApp(request), scope, own, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total: counted, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, filters, savedListsAvailable: Boolean(savedSearchLists), added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts })
+        const view = renderPeople({ ...props, membersOnly: iosApp(request), scope, own, everyone, nextCursor, nextContactPage: matchingContacts.length > (index + 1) * 100 ? index + 1 : undefined, total: counted, sort, state, ...(!publicProfessionalSearch ? { contacts } : {}), query: typed, mode, presence, filters, savedListsAvailable: Boolean(savedSearchLists), added: url.searchParams.get('added') === '1', match, returnTo, notice, connectedCounts,
+          // Offered only after this local search finished and found no one; a failed or filtered search is not a no-match.
+          linkedinExpand: proBrowser && typed.trim() && state === 'ready' && publicProfessionalSearch && Array.isArray(everyone) && !everyone.length && !matchingContacts.length && !presence && !Object.keys(filters).length && index === 0 ? await proBrowser.offer(session, typed) : '' })
         journey(response, view, props.importJob)
         return
       }
@@ -3002,6 +3019,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         if (contactCards) await contactCards.removeOwner(session.owner)
         if (savedSearchLists) await savedSearchLists.removeOwner(session.owner)
         if (homePreferences) await homePreferences.removeOwner(session.owner)
+        // The owner's personal LinkedIn source only; never a system account.
+        if (proLinkedin) await proLinkedin.removeOwner(session.owner)
         if (connectionPrivacy) await connectionPrivacy.removeOwner(session.owner)
         if (ideaflowProfiles?.choices) await ideaflowProfiles.choices.removeOwner(session.owner)
         if (personLookup) await personLookup.removeOwner(session.owner)
