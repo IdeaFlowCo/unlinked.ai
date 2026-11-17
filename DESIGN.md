@@ -20,10 +20,18 @@ requested Noos adapter design.
 The MVP adds an explicitly private group with provisional name **MIT Early Stage
 Investors & Founders**, pending Jacob’s confirmation of the exact title, and tags
 `investor` and `founders`. Jacob’s original wording was “mit early stage
-#investor/founders”; the WhatsApp title may be “MIT Early Stage Investors/Founders”
-but has not been verified. An authorized Beeper search for “MIT early stage”,
-“investor” and “founders” should establish the actual title without importing
-messages or roster data. The group has an owner-only pending roster. No WhatsApp invite link is available through the API. Display exactly
+#investor/founders”.
+
+**VERIFIED WhatsApp title: MIT Early-Stage Investors/Founders Group.**
+Source: root relayed confirmation from the M5 Beeper owner `a62eb1a8`;
+chat `!JDJIl42caxQsrOK9mV5i:beeper.local`, 1,024 participants. This is verified
+source evidence supplied by root, not a Beeper lookup performed by this worker.
+No further Beeper search is needed or authorized for this task. The Unlinked
+display title **MIT Early Stage Investors & Founders** remains provisional until
+Jacob confirms it; the verified WhatsApp title does not change that decision.
+
+The group has an owner-only pending roster. No WhatsApp invite link is available
+through the API. Display exactly
 “WhatsApp group (ask Jacob for an invite)” until Jacob supplies one. Do not fetch
 WhatsApp, scrape members or guess an invite URL. The 1,024-entry private roster
 exists ONLY on M5: 1,024 participants with display names, 1,023 with phones.
