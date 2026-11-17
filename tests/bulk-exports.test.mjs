@@ -184,3 +184,12 @@ test('more intermediaries than the named bound are disclosed by count, and agent
  const [row]=JSON.parse(res.text()).rows
  assert.equal(row.via.length,25);assert.equal(row.viaCount,30);assert.deepEqual(row.pathEvidence,{type:'recorded_public_path',hops:2,revision:'paths-v1',named:25,total:30});assert.equal(row.email,undefined);assert.equal(row.sourceRecords,undefined)
 })
+test('a viewer in an unlisted group can download shared scopes and sees only their own group’s unlisted people',async()=>{
+ // Regression: the viewer's group must reach the reader as a Set; the earlier array form failed every shared download for such a viewer.
+ const grouped=xService({readPublishedSnapshot:async()=>xSnapshot({unlisted:[{id:'me',group:'pilot'},{id:'unlisted-target',group:'pilot'},{id:'target-002',group:'other'},{id:'target-003'}]})})
+ const data=JSON.parse((await xRun(grouped,{scope:'extended',format:'json'})).text()),ids=new Set(data.rows.map(row=>row.id))
+ assert.equal(data.complete,true);assert.ok(ids.has('unlisted-target'),'same-group unlisted person stays visible');assert.ok(!ids.has('target-002')&&!ids.has('target-003'),'other groups and ungrouped unlisted people stay hidden')
+ assert.equal(data.rows.find(row=>row.id==='unlisted-target').viaNames,'Hub 0')
+ const everyone=new Set(JSON.parse((await xRun(grouped,{scope:'everyone',format:'json',detail:'headline'})).text()).rows.map(row=>row.id))
+ assert.ok(everyone.has('unlisted-target')&&!everyone.has('target-002')&&!everyone.has('target-003'))
+})
