@@ -15,6 +15,10 @@ Tracker: `unlinked-flav`. Jacob's November 16 direction: add a contribution-base
 
 `contributionDecision(receipt, { reviewer, approve })` returns the instruction for a named reviewer's decision. It performs no write: applying it is the existing operator tool for the approved tier.
 
+## Receipts and automatic enrichment
+
+Decided separately (November 16): any account with a validated upload may get automatic enrichment of its uploaded contacts, without review, within the shared $100/month cap (docs/enrichment-providers.md). That uses only the receipt's upload checks (`format`, `exact_addresses`, `duplicates`, `date_spread`), not `eligible` or the proposal, and it is not a tier: it never grants or implies Enhanced, Verified or Pro, and the contribution award below is unchanged.
+
 ## Honest limits
 
 - These are plausibility checks. They do not prove an archive is authentic or the uploader's own; the receipt states this. Identity is the exact LinkedIn address only, never a name.
