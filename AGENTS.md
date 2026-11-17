@@ -212,6 +212,8 @@ Offline professional-profile publication stores only Noos-supported basic fields
 
 MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment status) and `docs/agent-api.md`.
 
+The owner-only Pro LinkedIn source (`/pro`, Unipile Hosted Auth as a private data source, explicit LinkedIn search after a local no-match; `mcp-server/pro-linkedin.mjs`) is default off, allowlist-gated separately from tiers and never proven by a browser redirect: `docs/pro-linkedin.md`. Never fall back to a system provider account, and do not add sync, saving, messaging or publication to it without the decisions listed there.
+
 Operator-controlled verified and Enhanced access (approved) tiers, their per-owner limits (`mcp-server/access-tiers.mjs`), priority admission and visible-network exports are documented in `docs/verified-access.md`.
 
 Whole-result network/list queries and streamed CSV/JSON downloads share one permission-aware service; see `docs/bulk-exports.md`. Its `extended` scope (first + second degree, `via` intermediaries) keeps the shared-network entitlement and is recorded evidence, never complete LinkedIn coverage. Internal list paging uses a private Symbol admission capability, never a client field.

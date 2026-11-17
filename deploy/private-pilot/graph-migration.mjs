@@ -27,6 +27,8 @@ export const LABELS = Object.freeze([
   'UnlinkedIdeaflowProfileChoice',
   // Members' choice of who can see their connections (mcp-server/connection-privacy-store.mjs).
   'UnlinkedConnectionPrivacy',
+  // Owner-only Pro LinkedIn source bindings and Hosted Auth attempts (mcp-server/pro-linkedin.mjs).
+  'UnlinkedProSource', 'UnlinkedProAuthAttempt',
   // Reviewed source schema exists for these currently empty domains. Later
   // email/invitation writes must remain included in shared recovery snapshots.
   'UnlinkedEmailInviteLock', 'UnlinkedEmailSend', 'UnlinkedEmailSuppression', 'UnlinkedMemberInvitation',

@@ -38,6 +38,8 @@ import { createNeo4jCompanyFactsStore } from './company-facts-store.mjs'
 import { COMPANY_DATASET, createCompanyFacts } from './company-metadata.mjs'
 import { createNeo4jSessionStore } from './session-store.mjs'
 import { createNeo4jHomePreferenceStore } from './home-preferences.mjs'
+import { createNeo4jProLinkedinStore, createProLinkedin, proAccessFromEnv } from './pro-linkedin.mjs'
+import { createUnipileClient } from './unipile-client.mjs'
 import { createNeo4jConnectionPrivacyStore } from './connection-privacy-store.mjs'
 import { createIdeaflowProfileClient, createIdeaflowProfileProvider, createNeo4jIdeaflowProfileChoices } from './ideaflow-profile.mjs'
 import { createNeo4jProfileLinkStore } from './profile-social-links.mjs'
@@ -226,6 +228,19 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     // The signed-in home's display choices (docs/member-home.md); UI preferences only.
     const homePreferences = typeof dependencies.createHomePreferenceStore === 'function' ? dependencies.createHomePreferenceStore(driver, 'neo4j') : undefined
     await homePreferences?.initialize()
+    // Owner-only Pro LinkedIn source (docs/pro-linkedin.md). Default off: with
+    // no switch or no allowlisted owner nothing is composed, no graph schema is
+    // created and no route exists. Search is a second switch, also default off.
+    const proAccess = proAccessFromEnv(process.env)
+    let proLinkedin
+    if (proAccess.enabled) {
+      const proStore = createNeo4jProLinkedinStore(driver, 'neo4j')
+      await proStore.initialize()
+      proLinkedin = createProLinkedin({ store: proStore, access: proAccess, origin: base.origin,
+        client: createUnipileClient({ dsn: process.env.UNLINKED_PRO_UNIPILE_DSN, apiKey: process.env.UNLINKED_PRO_UNIPILE_API_KEY }),
+        systemAccountIds: (process.env.UNLINKED_PRO_SYSTEM_ACCOUNT_IDS || '').split(',').map(value => value.trim()).filter(Boolean),
+        searchEnabled: process.env.UNLINKED_PRO_LINKEDIN_SEARCH === 'on' })
+    }
     // Member photo index (profile id -> owner + blob), refreshed by each public index build.
     let memberPhotos = new Map()
     // Members' choice of who can see their connections (docs/connection-privacy.md).
@@ -748,6 +763,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       notifications,
       contactCards,
       homePreferences,
+      proLinkedin,
       connectionPrivacy,
       savedSearchLists,
       collectiveGroups,
