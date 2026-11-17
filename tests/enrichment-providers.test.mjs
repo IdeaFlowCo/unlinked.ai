@@ -1,10 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createEnrichmentPlan, mergeEnrichment, createMemoryEnrichmentLedger } from '../mcp-server/enrichment-providers.mjs'
+import { createEnrichmentSpendLedger } from '../mcp-server/enrichment-spend.mjs'
 
 const url = 'https://www.linkedin.com/in/ada-example'
-const provider = (id, paid, answer) => { const calls = []; return { id, paid, calls, lookup: async address => { calls.push(address); const value = typeof answer === 'function' ? answer(calls.length) : answer; if (value instanceof Error) throw value; return value } } }
+const provider = (id, paid, answer) => { const calls = []; return { id, paid, ...(paid ? { estimateCents: 5 } : {}), calls, lookup: async address => { calls.push(address); const value = typeof answer === 'function' ? answer(calls.length) : answer; if (value instanceof Error) throw value; return value } } }
 const found = fields => ({ outcome: 'found', fields, observedAt: 1000 })
+// Paid providers now also need the monthly USD ledger (enrichment-spend.test.mjs covers it in depth).
+const spendLedger = () => createEnrichmentSpendLedger({ config: { capCents: 10000 }, now: () => Date.UTC(2026, 10, 16) })
+const owner = { ownerId: 'owner-1' }
 
 test('nothing runs unconfigured: paid providers need explicit activation and every provider needs a budget', async () => {
   const free = provider('exa-existing', false, found({ headline: 'Founder' })), paid = provider('paid-fallback', true, found({ headline: 'Paid' }))
@@ -19,20 +23,24 @@ test('nothing runs unconfigured: paid providers need explicit activation and eve
 
 test('providers run in order, fail over only on a definite miss, and a hit is cached with its source and time', async () => {
   const first = provider('exa-existing', false, { outcome: 'not_found' }), second = provider('paid-fallback', true, found({ headline: ' Investor ', invented: 'ignored', about: '' }))
-  const plan = createEnrichmentPlan({ providers: [first, second], budgets: { 'exa-existing': { perDay: 5 }, 'paid-fallback': { perDay: 5, activated: true } }, now: () => 5000 })
-  const result = await plan.enrich(url)
+  const spend = spendLedger()
+  const plan = createEnrichmentPlan({ providers: [first, second], budgets: { 'exa-existing': { perDay: 5 }, 'paid-fallback': { perDay: 5, activated: true } }, spend, now: () => 5000 })
+  const result = await plan.enrich(url, owner)
   assert.deepEqual(result, { outcome: 'found', fields: { headline: 'Investor' }, provider: 'paid-fallback', observedAt: 1000, cached: false, attempts: [{ provider: 'exa-existing', result: 'not_found' }, { provider: 'paid-fallback', result: 'found' }] })
-  const again = await plan.enrich('https://www.linkedin.com/in/Ada-Example/'); assert.equal(again.cached, true); assert.equal(again.provider, 'paid-fallback'); assert.equal(first.calls.length + second.calls.length, 2, 'the same person is not looked up or charged twice')
+  assert.equal((await spend.summary()).spentMicros, 50000, 'the paid hit is settled at its estimate when no cost is reported')
+  const again = await plan.enrich('https://www.linkedin.com/in/Ada-Example/', owner); assert.equal(again.cached, true); assert.equal(again.provider, 'paid-fallback'); assert.equal(first.calls.length + second.calls.length, 2, 'the same person is not looked up or charged twice')
 })
 
 test('a transient failure does not fail over, and an uncertain outcome is charged once and never retried on another paid provider', async () => {
   const flaky = provider('exa-existing', false, { outcome: 'transient', retryAfter: 60 }), paid = provider('paid-fallback', true, found({ headline: 'Paid' }))
   const budgets = { 'exa-existing': { perDay: 5 }, 'paid-fallback': { perDay: 5, activated: true }, 'paid-second': { perDay: 5, activated: true } }
-  assert.deepEqual(await createEnrichmentPlan({ providers: [flaky, paid], budgets }).enrich(url), { outcome: 'retry_later', provider: 'exa-existing', retryAfter: 60, attempts: [{ provider: 'exa-existing', result: 'transient' }] }); assert.equal(paid.calls.length, 0)
+  assert.deepEqual(await createEnrichmentPlan({ providers: [flaky, paid], budgets, spend: spendLedger() }).enrich(url, owner), { outcome: 'retry_later', provider: 'exa-existing', retryAfter: 60, attempts: [{ provider: 'exa-existing', result: 'transient' }] }); assert.equal(paid.calls.length, 0)
   const lost = provider('paid-fallback', true, new Error('socket closed after send')), other = provider('paid-second', true, found({ headline: 'Other' })), ledger = createMemoryEnrichmentLedger()
-  const plan = createEnrichmentPlan({ providers: [lost, other], budgets, ledger, now: () => 86400000 * 10 })
-  assert.equal((await plan.enrich(url)).outcome, 'held_uncertain'); assert.equal((await plan.enrich(url)).outcome, 'held_uncertain')
+  const spend = spendLedger()
+  const plan = createEnrichmentPlan({ providers: [lost, other], budgets, ledger, spend, now: () => 86400000 * 10 })
+  assert.equal((await plan.enrich(url, owner)).outcome, 'held_uncertain'); assert.equal((await plan.enrich(url, owner)).outcome, 'held_uncertain')
   assert.equal(lost.calls.length, 1); assert.equal(other.calls.length, 0); assert.equal(await ledger.used('paid-fallback', 10), 1, 'the uncertain call is counted against the budget')
+  const summary = await spend.summary(); assert.equal(summary.spentMicros, 50000, 'and settled at its full estimate in the USD ledger'); assert.equal(summary.perProvider['paid-second'], undefined)
 })
 
 test('a daily budget stops calls, and only a miss from every provider that ran is remembered', async () => {

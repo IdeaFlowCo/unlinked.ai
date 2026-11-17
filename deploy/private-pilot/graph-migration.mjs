@@ -29,6 +29,8 @@ export const LABELS = Object.freeze([
   'UnlinkedConnectionPrivacy',
   // Owner-only Pro LinkedIn source bindings, Hosted Auth attempts and daily search counts (mcp-server/pro-linkedin.mjs).
   'UnlinkedProSource', 'UnlinkedProAuthAttempt', 'UnlinkedProSearchCount',
+  // Monthly paid-enrichment spend ledger and its budget notification outbox (mcp-server/enrichment-spend.mjs).
+  'UnlinkedEnrichmentSpendMonth', 'UnlinkedEnrichmentSpend', 'UnlinkedEnrichmentNotice',
   // Reviewed source schema exists for these currently empty domains. Later
   // email/invitation writes must remain included in shared recovery snapshots.
   'UnlinkedEmailInviteLock', 'UnlinkedEmailSend', 'UnlinkedEmailSuppression', 'UnlinkedMemberInvitation',
