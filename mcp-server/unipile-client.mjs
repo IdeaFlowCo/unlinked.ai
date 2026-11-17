@@ -56,7 +56,7 @@ export function createUnipileClient({ dsn, apiKey, fetchImpl = globalThis.fetch,
     try {
       response = await fetchImpl(url, { method, redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         headers: { 'X-API-KEY': apiKey, accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })
-    } catch (error) {
+    } catch {
       if (signal?.aborted) throw new UnipileError('aborted')
       throw new UnipileError(timeout.aborted ? 'timeout' : 'provider_unavailable')
     }
