@@ -196,7 +196,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ proLinkedin, bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ proLinkedin, proLinkedinCleanup, bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -3038,8 +3038,14 @@ export function createPrivateBrowserHandler({ proLinkedin, bulkExports, isVerifi
         if (contactCards) await contactCards.removeOwner(session.owner)
         if (savedSearchLists) await savedSearchLists.removeOwner(session.owner)
         if (homePreferences) await homePreferences.removeOwner(session.owner)
-        // The owner's personal LinkedIn source only; never a system account.
-        if (proLinkedin) await proLinkedin.removeOwner(session.owner)
+        // The owner's personal LinkedIn source only; never a system account. It
+        // runs whenever a Pro store exists, even with the feature switched off; a
+        // Pro failure is recorded and never stops the rest of the deletion.
+        const proCleanup = proLinkedinCleanup ?? proLinkedin
+        if (proCleanup) try { await proCleanup.removeOwner(session.owner) } catch (error) {
+          if (!String(error?.message).startsWith('pro_linkedin_')) throw error
+          await recordAudit({ event: 'pro_linkedin_cleanup_incomplete', ownerHash: createHash('sha256').update(session.owner.ownerId).digest('hex'), code: error.code })
+        }
         if (connectionPrivacy) await connectionPrivacy.removeOwner(session.owner)
         if (ideaflowProfiles?.choices) await ideaflowProfiles.choices.removeOwner(session.owner)
         if (personLookup) await personLookup.removeOwner(session.owner)

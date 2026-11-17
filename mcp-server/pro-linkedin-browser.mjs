@@ -27,6 +27,7 @@ const FAILURES = Object.freeze({
   superseded: 'The connection changed while this was running. Check the status below.',
   invalid_query: 'Enter a name or a few words to search for.',
   protected_account: 'That account cannot be used here.',
+  local_search_required: 'Search Unlinked first. LinkedIn search is offered under an Unlinked search that found no one, for those same words, once, within 10 minutes.',
 })
 const ATTEMPT_FAILURES = Object.freeze({
   account_not_ready: 'LinkedIn did not finish signing in.', account_not_new: 'That provider account already existed, so it was not linked.', account_in_use: 'That LinkedIn account is already linked to another Unlinked account.',
@@ -59,7 +60,8 @@ export function renderProContinue({ chrome, link, reconnect = false }) {
 export function renderProSearch({ chrome, query, result, error, retryAfter }) {
   const back = `<p class="small"><a href="${h('/network?q=' + encodeURIComponent(query))}">← Back to Unlinked results</a></p>`
   let body
-  if (error) body = `<p class="notice" role="alert"><b>LinkedIn search did not run.</b> ${h(FAILURES[error] ?? FAILURES.provider_unavailable)}${retryAfter ? ` Try again in about ${Math.max(1, Math.ceil(retryAfter / 60))} min.` : ''}</p>${error === 'reconnect_required' ? '<p><a class="button sec sm" href="/pro">Open Pro to reconnect</a></p>' : ''}<p class="small">This is a problem reaching LinkedIn, not a “no results” answer.</p>`
+  if (error === 'local_search_required') body = `<p class="notice" role="alert"><b>LinkedIn search did not run.</b> ${h(FAILURES.local_search_required)}</p><p><a class="button sec sm" href="${h('/network?q=' + encodeURIComponent(query))}">Search Unlinked for “${h(query)}”</a></p><p class="small">Nothing was sent to LinkedIn and no search was counted.</p>`
+  else if (error) body = `<p class="notice" role="alert"><b>LinkedIn search did not run.</b> ${h(FAILURES[error] ?? FAILURES.provider_unavailable)}${retryAfter ? ` Try again in about ${Math.max(1, Math.ceil(retryAfter / 60))} min.` : ''}</p>${error === 'reconnect_required' ? '<p><a class="button sec sm" href="/pro">Open Pro to reconnect</a></p>' : ''}<p class="small">This is a problem reaching LinkedIn, not a “no results” answer.</p>`
   else {
     const rows = result.people.map(person => `<div class="pro-result"><h3>${h(person.name)}<span class="pro-tag">${person.existing ? 'Already on Unlinked' : 'LinkedIn · not yet on Unlinked'}</span></h3>${person.headline ? `<p>${h(person.headline)}</p>` : ''}<p class="small">${[person.location, person.networkDistance ? `LinkedIn ${['1st', '2nd', '3rd'][person.networkDistance - 1]}-degree` : null].filter(Boolean).map(h).join(' · ')}</p><p class="small">${person.existing ? `<a href="${h(person.existing)}">Open on Unlinked</a> · ` : ''}<a href="${h(person.linkedinUrl)}" target="_blank" rel="noopener noreferrer">Open on LinkedIn ↗</a></p></div>`).join('')
     body = `${result.people.length ? `<div class="card">${rows}</div>` : `<p class="notice" role="status">LinkedIn search ran and found no people for “${h(query)}”.</p>`}<p class="small">From LinkedIn through ${h(result.account.name || 'your')} connected account · ${when(result.observedAt)} · ${result.people.length} shown${result.total !== undefined ? ` of about ${result.total}` : ''}${result.skipped ? ` · ${result.skipped} without a public address left out` : ''} · ${result.remainingToday} searches left today.</p><p class="small">This is a private preview. It is not saved, published or added to your network, and no one was messaged or invited. Saving a person is a separate step that is not available yet.</p>`
@@ -68,7 +70,7 @@ export function renderProSearch({ chrome, query, result, error, retryAfter }) {
 }
 
 // The explicit offer under a finished Unlinked search that found no one.
-export const linkedinExpandOffer = ({ csrf, query }) => `${PRO_STYLE}<form class="linkedin-expand" method="post" action="/pro/linkedin/search">${csrfInput(csrf)}<input type="hidden" name="q" value="${h(query)}"><button type="submit" class="sec">Search LinkedIn for “${h(query)}”</button><p class="small">Uses your connected LinkedIn account once, only when you press this. Results are a private preview.</p></form>`
+export const linkedinExpandOffer = ({ csrf, query, receipt }) => `${PRO_STYLE}<form class="linkedin-expand" method="post" action="/pro/linkedin/search">${csrfInput(csrf)}<input type="hidden" name="q" value="${h(query)}"><input type="hidden" name="receipt" value="${h(receipt)}"><button type="submit" class="sec">Search LinkedIn for “${h(query)}”</button><p class="small">Uses your connected LinkedIn account once, only when you press this. Results are a private preview.</p></form>`
 
 export function createProLinkedinBrowser({ pro, body, resolveExisting }) {
   const form = async (request, session, allowed) => {
@@ -97,9 +99,10 @@ export function createProLinkedinBrowser({ pro, body, resolveExisting }) {
       if (url.pathname === '/pro/linkedin/check') { await form(request, session, ['csrf']); await pro.check(owner); return redirect('/pro?done=checked') }
       if (url.pathname === '/pro/linkedin/disconnect') { await form(request, session, ['csrf']); const result = await pro.disconnect(owner); return redirect(result.pending ? '/pro?done=disconnect-pending' : '/pro?done=disconnected') }
       if (url.pathname === '/pro/linkedin/search') {
-        const input = await form(request, session, ['csrf', 'q']), query = (input.get('q') ?? '').trim()
+        const input = await form(request, session, ['csrf', 'q', 'receipt']), query = (input.get('q') ?? '').trim()
         try {
-          const result = await pro.search(owner, query)
+          // The receipt proves this owner's own Unlinked search for these words just found no one.
+          const result = await pro.search(owner, query, { receipt: input.get('receipt') ?? undefined })
           // Exact LinkedIn address only; a name never marks someone as existing.
           const existing = typeof resolveExisting === 'function' ? await resolveExisting(request, result.people.map(person => person.linkedinUrl)).catch(() => new Map()) : new Map()
           return render(renderProSearch({ chrome, query, result: { ...result, people: result.people.map(person => existing.get(person.linkedinUrl) ? { ...person, existing: existing.get(person.linkedinUrl) } : person) } }))
@@ -114,12 +117,16 @@ export function createProLinkedinBrowser({ pro, body, resolveExisting }) {
     }
     return notFound()
   }
-  // The offer for the People page; empty unless this owner can actually use it now.
+  // The offer for the People page; empty unless this owner can actually use it
+  // now. The caller asks only after its own search finished with no one, and
+  // only then is the single-use search receipt issued.
   handler.offer = async (session, query) => {
     try {
       if (!session?.owner || !pro.eligible(session.owner) || typeof query !== 'string' || !query.trim()) return ''
       const status = await pro.status(session.owner)
-      return status.configured && status.searchEnabled && status.source?.state === 'connected' ? linkedinExpandOffer({ csrf: session.csrf, query: query.trim() }) : ''
+      if (!status.configured || !status.searchEnabled || status.source?.state !== 'connected') return ''
+      const receipt = pro.searchReceipt(session.owner, query)
+      return receipt ? linkedinExpandOffer({ csrf: session.csrf, query: query.trim(), receipt }) : ''
     } catch { return '' }
   }
   return handler
