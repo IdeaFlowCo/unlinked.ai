@@ -17,7 +17,7 @@ export function createPrivateGroupBrowser({ pilot, body, now = Date.now }) {
       }
     },
     matches: path => matchPath.test(path),
-    async handle({ request, url, session, render, redirect, readCandidates }) {
+    async handle({ request, url, session, render, redirect, readCandidates, lookupCandidates }) {
       const m = matchPath.exec(url.pathname), id = m?.[1], action = m?.[2]
       const chrome = { csrf: session?.csrf, displayName: session?.displayName, accountLabel: session?.accountLabel }
       try {
@@ -56,7 +56,7 @@ export function createPrivateGroupBrowser({ pilot, body, now = Date.now }) {
         }
         if (action === 'roster/resolve') {
           await fields([])
-          await pilot.resolveNext(actor, id, readCandidates)
+          await pilot.resolveNext(actor, id, readCandidates, lookupCandidates)
           return redirect(`/groups/${id}/roster`)
         }
         if (action === 'roster/clear') {
@@ -71,7 +71,7 @@ export function createPrivateGroupBrowser({ pilot, body, now = Date.now }) {
         } else if (request.method !== 'GET' || action !== 'roster') throw Error('not_found')
         const offset = url.searchParams.get('offset') ?? '0'
         if (!/^\d{1,4}$/.test(offset)) throw Error('invalid_input')
-        const rows = await pilot.suggestions(actor, id, readCandidates, Number(offset))
+        const rows = await pilot.suggestions(actor, id, readCandidates, Number(offset), lookupCandidates)
         return render(renderPrivateGroup(chrome, group, rosterRows(chrome, id, rows, draft) + rosterImportForm(chrome, id)))
       } catch (error) {
         const code = error.code ?? error.message

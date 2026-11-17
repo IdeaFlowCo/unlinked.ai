@@ -84,7 +84,7 @@ export function createGroupBrowser({ privateGroupBrowser, messaging, groups, wel
     }
     try {
       const privateUrl = new URL(pathname + url.search, origin)
-      if (privateGroupBrowser?.matches(pathname)) return privateGroupBrowser.handle({ request, url: privateUrl, session, render, redirect, readCandidates })
+      if (privateGroupBrowser?.matches(pathname)) return privateGroupBrowser.handle({ request, url: privateUrl, session, render, redirect, readCandidates, lookupCandidates: lookup })
       if(action==='leave' && !get) { await fields();await groups.leave(actor,groupId);return redirect('/groups') }
       if (isFlyerJoinPath(pathname)) {
         const join = flyerJoinTarget(pathname + url.search)

@@ -45,6 +45,7 @@ async function fixture({ enabled = true, allowedOwnerIds = ['owner'], memberBloc
   const records = createNoosGroupRecords({ backend, owner })
   return { pilot, group, groups, store, backend, active, records, join }
 }
+const keepPublished = async ids => new Map(ids.map(id => [id, { id, name: 'Fictional Founder', presence: id === 'p1' ? 'member' : 'profile' }]))
 const notFound = promise => assert.rejects(promise, /not_found/)
 async function importRows(f, rows) {
   const preview = await f.pilot.preview(owner, f.group.id, bytes(rows), 'json')
@@ -145,7 +146,7 @@ test('drafts never write or invite; name matches stay ambiguous and low confiden
   await importRows(f, input)
   let queries = 0
   const read = async query => { assert.equal(query, 'Fictional Founder'); queries++; return [{ id: 'p1', name: query, presence: 'member' }, { id: 'p2', name: query }] }
-  const suggestions = await f.pilot.suggestions(owner, id, read)
+  const suggestions = await f.pilot.suggestions(owner, id, read, 0, keepPublished)
   assert.equal(suggestions.rows.length, 25); assert.equal(suggestions.nextOffset, 25)
   assert.ok(suggestions.rows.every(r => r.resolution.status === 'ambiguous' && r.resolution.candidates.every(c => c.confidence === 'low')))
   const before = f.backend.calls.filter(c => c[0] === 'write').length
@@ -154,11 +155,11 @@ test('drafts never write or invite; name matches stay ambiguous and low confiden
   assert.equal(f.backend.calls.filter(c => c[0] === 'write').length, before)
   assert.equal((await f.store.get(id)).invites.length, 0)
   assert.equal((await f.store.get(id)).members.length, 2)
-  const first = await f.pilot.resolveNext(owner, id, read)
+  const first = await f.pilot.resolveNext(owner, id, read, keepPublished)
   assert.equal(first.cursor, 25); assert.equal(first.state, 'pending')
-  const second = await f.pilot.resolveNext(owner, id, read)
+  const second = await f.pilot.resolveNext(owner, id, read, keepPublished)
   assert.equal(second.cursor, 26); assert.equal(second.state, 'complete')
-  assert.equal((await f.pilot.resolveNext(owner, id, read)).revision, second.revision)
+  assert.equal((await f.pilot.resolveNext(owner, id, read, keepPublished)).revision, second.revision)
   assert.equal(queries, 51)
   await f.pilot.clear(owner, id, 'delete_pending_roster')
   assert.deepEqual(await f.pilot.roster(owner, id), [])
@@ -362,6 +363,26 @@ test('service refreshes two-way candidate blocks after the batch before showing 
   const result = await f.pilot.suggestions(owner, id, async () => {
     if (++queries === 2) blocked = true
     return [{ id: 'candidate', name: 'Fictional Founder', presence: 'member' }]
-  })
+  }, 0, keepPublished)
   assert.ok(result.rows.every(r => r.resolution.candidates.length === 0 && r.resolution.status === 'unmatched'))
+})
+
+test('final name projection removes unpublished candidates and follows current merged profile values', async () => {
+  const f = await fixture(), id = f.group.id
+  await f.pilot.enable(owner, id); await importRows(f, [row(), row()])
+  let queries = 0, removed = false
+  const search = async () => {
+    if (++queries % 2 === 0) removed = true
+    return [{ id: 'removed-profile', name: 'Fictional Founder' }, { id: 'old-id', name: 'Fictional Founder' }]
+  }
+  const lookup = async ids => {
+    assert.equal(removed, true)
+    assert.deepEqual(ids.sort(), ['old-id', 'removed-profile'])
+    return new Map([['old-id', { id: 'merged-id', name: 'Current Public Name', presence: 'member' }]])
+  }
+  const result = await f.pilot.suggestions(owner, id, search, 0, lookup)
+  assert.ok(result.rows.every(r => r.resolution.candidates.length === 1 && r.resolution.candidates[0].profileId === 'merged-id' && r.resolution.candidates[0].name === 'Current Public Name' && r.resolution.candidates[0].presence === 'member'))
+  const job = await f.pilot.resolveNext(owner, id, search, lookup)
+  assert.equal(job.state, 'complete')
+  for (const resource of f.backend.rows.values()) if (resource.payload?.kind === 'group_resolution_results') assert.doesNotMatch(JSON.stringify(resource), /removed-profile|old-id/)
 })

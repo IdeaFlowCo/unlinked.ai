@@ -45,14 +45,28 @@ export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [],
     if (!node || node.revision !== ctx.node.revision) fail('review_changed')
   }
   const candidatesFor = async (actor, profiles) => filterGroupCandidates({ profiles, owner: actor, memberBlocks, accountForProfile })
-  const recheckCandidates = async (actor, rows) => {
-    const candidates = rows.flatMap(row => row.resolution.candidates)
+  const recheckCandidates = async (actor, rows, lookupCandidates) => {
+    const ids = [...new Set(rows.flatMap(row => row.resolution.candidates.map(c => c.profileId)))]
+    if (!ids.length) return rows
+    if (typeof lookupCandidates !== 'function') fail('group_candidate_publication_required')
+    const current = await lookupCandidates(ids)
+    if (!(current instanceof Map)) fail('group_candidate_publication_unavailable')
+    const refreshed = rows.map(row => {
+      const candidates = row.resolution.candidates.flatMap(candidate => {
+        const profile = current.get(candidate.profileId)
+        return profile && typeof profile.id === 'string' && typeof profile.name === 'string' ? [{ ...candidate,
+          profileId: profile.id, name: profile.name.slice(0, 200), presence: profile.presence === 'member' ? 'member' : 'profile' }] : []
+      })
+      return { ...row, resolution: { ...row.resolution, candidates: candidates.filter((c, i) => candidates.findIndex(other => other.profileId === c.profileId) === i) } }
+    })
+    const candidates = refreshed.flatMap(row => row.resolution.candidates)
     const permitted = new Set((await candidatesFor(actor, candidates.map(c => ({ ...c, id: c.profileId })))).map(c => c.id))
-    return rows.map(row => {
+    return refreshed.map(row => {
       const candidates = row.resolution.candidates.filter(c => permitted.has(c.profileId))
       return { ...row, resolution: { status: candidates.length > 1 ? 'ambiguous' : candidates.length ? 'suggested' : 'unmatched', candidates } }
     })
   }
+
   return {
     async exportOwner(actor) {
       if (!enabled || !allowed.has(actor?.ownerId) || !await active(actor)) return []
@@ -110,7 +124,7 @@ export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [],
       // Hashes stay inside the owner-private Noos record, never HTML/proposals.
       return rows.map(({ phone_hash, ...row }) => row)
     },
-    async suggestions(actor, id, readCandidates, offset = 0) {
+    async suggestions(actor, id, readCandidates, offset = 0, lookupCandidates) {
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > 2000) fail('invalid_input')
       const ctx = await current(actor, id, true)
       const rows = await this.roster(actor, id)
@@ -119,11 +133,11 @@ export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [],
         const profiles = await candidatesFor(actor, await readCandidates(row.display_name))
         result.push(...suggestRosterMatches([row], profiles))
       }
-      const checked = await recheckCandidates(actor, result)
+      const checked = await recheckCandidates(actor, result, lookupCandidates)
       await recheck(ctx)
       return { rows: checked, total: rows.length, nextOffset: offset + 25 < rows.length ? offset + 25 : null }
     },
-    async resolveNext(actor, id, readCandidates) {
+    async resolveNext(actor, id, readCandidates, lookupCandidates) {
       const ctx = await current(actor, id, true)
       const manifest = await ctx.records.rosterManifest(id)
       if (!manifest) fail()
@@ -134,7 +148,7 @@ export function createPrivateGroupPilot({ enabled = false, allowedOwnerIds = [],
         const { phone_hash, ...safe } = row
         results.push(...suggestRosterMatches([safe], await candidatesFor(actor, await readCandidates(row.display_name))))
       }
-      const checked = await recheckCandidates(actor, results)
+      const checked = await recheckCandidates(actor, results, lookupCandidates)
       await recheck(ctx)
       return ctx.records.saveResolution(id, manifest, checked, Math.min(start + 25, rows.length), job?.revision ?? null, ctx.node.revision)
     },
