@@ -51,9 +51,9 @@ const messages = {
   review_changed: 'The list changed since you reviewed it. Review the list again before sharing.',
 }
 
-export function createGroupBrowser({ messaging, groups, welcome = false, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body }) {
+export function createGroupBrowser({ privateGroupBrowser, messaging, groups, welcome = false, privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body }) {
   if (typeof accountForProfile !== 'function') throw new TypeError('collective_groups_account_resolution_required')
-  return async ({ request, url, session, lookup, render, redirect }) => {
+  return async ({ request, url, session, lookup, render, redirect, readCandidates }) => {
     let { pathname } = url
     const { searchParams, origin } = url
     const key=/^\/groups\/([^/]+)/.exec(pathname)?.[1]
@@ -83,6 +83,8 @@ export function createGroupBrowser({ messaging, groups, welcome = false, private
       return group
     }
     try {
+      const privateUrl = new URL(pathname + url.search, origin)
+      if (privateGroupBrowser?.matches(pathname)) return privateGroupBrowser.handle({ request, url: privateUrl, session, render, redirect, readCandidates })
       if(action==='leave' && !get) { await fields();await groups.leave(actor,groupId);return redirect('/groups') }
       if (isFlyerJoinPath(pathname)) {
         const join = flyerJoinTarget(pathname + url.search)
@@ -152,7 +154,7 @@ export function createGroupBrowser({ messaging, groups, welcome = false, private
       if (!action && !collection && get) {
         const group = await groups.detail(actor, groupId)
         const roster = (await groups.roster(actor, groupId)).map(row => ({ id:row.id, name:row.name, role:row.role, self:row.actor.ownerId === actor.ownerId && row.actor.userId === actor.userId }))
-        return render(renderGroup(chrome, { ...group, roster, messagingAvailable: Boolean(messaging) }, origin))
+        return render(renderGroup(chrome, { ...group, roster, messagingAvailable: Boolean(messaging), privatePilotNavigation: await privateGroupBrowser?.navigation(actor, groupId, chrome) }, origin))
       }
       if (action === 'about' && request.method === 'POST') {
         const input = await fields('description', 'chatUrl', 'openChatUrl', 'urlMode')

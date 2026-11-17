@@ -1,3 +1,4 @@
+import { createPrivateGroupPilot } from './private-group-pilot.mjs'
 import { createOpenChatGroupSync } from './openchat-groups.mjs'
 import { createCommunityIntakeClient } from './community-intake.mjs'
 import { createCollectiveGroups } from './collective-groups.mjs'
@@ -685,6 +686,15 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
     collectiveGroups = collectiveGroupsStore ? createCollectiveGroups({
       store: collectiveGroupsStore, active: identityForOwner, verifyChatActivation: verifyCommunityChatActivation, chatEnabled:(process.env.UNLINKED_MESSAGING_SECRET?.length ?? 0)>=32, ...(memberBlocks ? { blocked: memberBlocks.between } : {}),
     }) : undefined
+    // Default-off owner allowlist. Construction performs no reads, schema
+    // initialization, import, migration or outreach. Noos record support is
+    // verified on explicit owner activation through the existing adapter.
+    const privateGroupPilot = process.env.UNLINKED_PRIVATE_GROUP_ROSTER === 'on' && collectiveGroups &&
+      process.env.UNLINKED_PRIVATE_GROUP_ROSTER_OWNERS?.trim() ? createPrivateGroupPilot({ enabled: true,
+        allowedOwnerIds: process.env.UNLINKED_PRIVATE_GROUP_ROSTER_OWNERS.split(',').map(v => v.trim()).filter(Boolean),
+        groups: collectiveGroups, getBackend, active: identityForOwner,
+        groupOwner: async id => (await collectiveGroupsStore.get(id))?.organizer,
+      }) : undefined
     if (collectiveGroupsStore && typeof collectiveGroupsStore.chatDue === 'function') {
       groupChatSync=createOpenChatGroupSync({store:collectiveGroupsStore,identityForOwner,secret:process.env.UNLINKED_MESSAGING_SECRET,blocked:memberBlocks ? (a,b)=>memberBlocks.between(a,b) : undefined})
       groupChatSync.start()
@@ -751,6 +761,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       connectionPrivacy,
       savedSearchLists,
       collectiveGroups,
+      privateGroupPilot,
       communityIntake: createCommunityIntakeClient({ identityForOwner, secret: process.env.UNLINKED_SOCIAL_INTAKE_SECRET, origin: process.env.UNLINKED_SOCIAL_INTAKE_ORIGIN || 'https://social.ideaflow.app' }),
       profileSocialLinks,
       profileHandles,

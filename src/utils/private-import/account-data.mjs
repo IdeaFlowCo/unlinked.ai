@@ -1,3 +1,4 @@
+import { createNoosGroupRecords } from '../../../mcp-server/private-group-records.mjs'
 import { investorJobsForAccount, investorReceiptId } from './investor-job.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
@@ -62,7 +63,8 @@ export async function exportAccountData({ owner, backend, jobs, grants = [], sig
     const bytes = await backend.readAsset(job.sourceDigest)
     investorImports.push({ job, ...(job.source?.format === 'xlsx' ? { originalFile: { ...job.source, encoding: 'base64', base64: bytes.toString('base64') } } : { csv: bytes.toString('utf8') }), receipts })
   }
-  return { investorImports, format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
+  const privateGroups = await createNoosGroupRecords({ backend, owner }).exportOwner()
+  return { privateGroups, investorImports, format: 'unlinked-account-export', version: 1, exportedAt: new Date().toISOString(),
     account: { ownerId: owner.ownerId }, imports, agentGrantIds: [...grants], legacy, signupProfile }
 }
 
@@ -80,6 +82,9 @@ export async function deleteAccountData({ rowCache = sharedImportRowCache, ...in
 
 async function eraseAccountData({ owner, backend, jobs, grantIds = [], signupLookup, signal }) {
   if (signupLookup) await signupLookup.removeOwner(owner)
+  // Cleanup is independent of the pilot flag/allowlist so rollback never
+  // strands private roster records outside the ordinary account lifecycle.
+  await createNoosGroupRecords({ backend, owner }).removeOwner()
   const ownerId = owner.ownerId
   const writeBatch = typeof backend.writeBatch === 'function'
     ? items => backend.writeBatch(items)
