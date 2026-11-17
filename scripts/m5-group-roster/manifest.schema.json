@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:unlinked:m5-group-roster-manifest:v1",
+  "title": "M5-only private roster preparation manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "algorithm", "keyId", "salt", "hostname", "createdAt", "participants"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "algorithm": {"const": "HMAC-SHA-256"},
+    "keyId": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "salt": {"type": "string", "pattern": "^[A-Za-z0-9+/]{43}=$"},
+    "hostname": {"type": "string", "minLength": 1, "maxLength": 255},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "participants": {
+      "type": "object",
+      "maxProperties": 10000,
+      "propertyNames": {"pattern": "^[0-9a-f]{64}$"},
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}
+    },
+    "lastExport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "inputSha256", "outputSha256", "rows", "phones", "format", "preparedAt"],
+      "properties": {
+        "state": {"enum": ["prepared", "written"]},
+        "inputSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "outputSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "rows": {"type": "integer", "minimum": 1, "maximum": 2000},
+        "phones": {"type": "integer", "minimum": 0, "maximum": 2000},
+        "format": {"enum": ["json", "csv"]},
+        "preparedAt": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}
