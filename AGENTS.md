@@ -215,3 +215,5 @@ MCP profile status and filters: see `docs/public-people-reader.md` (Enrichment s
 Operator-controlled verified and Enhanced access (approved) tiers, their per-owner limits (`mcp-server/access-tiers.mjs`), priority admission and visible-network exports are documented in `docs/verified-access.md`.
 
 Whole-result network/list queries and streamed CSV/JSON downloads share one permission-aware service; see `docs/bulk-exports.md`. Internal list paging uses a private Symbol admission capability, never a client field.
+
+Default-off private group roster pilot (Noos group/membership records, owner-only pending roster, M5-only phone hashing, preview/ack publication, draft-only outreach and lifecycle cleanup): [docs/private-group-roster.md](docs/private-group-roster.md). Real import and release require explicit root GO.

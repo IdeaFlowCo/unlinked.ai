@@ -1,4 +1,5 @@
 import { releaseStampTag } from './release-stamp.mjs'
+import { createPrivateGroupBrowser, isPrivateGroupPilotPath } from './private-group-browser.mjs'
 import { isCommunityPath } from './community-intake.mjs'
 import { renderGroupsInCommon } from './group-member-views.mjs'
 import { createCommunityIntakeBrowser } from './community-intake-browser.mjs'
@@ -195,7 +196,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, privateGroupPilot, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
@@ -271,7 +272,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   } } : {}), ...messagingOptions }) : null
   const communityBrowser = createCommunityIntakeBrowser({ client: communityIntake, groups: collectiveGroups, messagingAvailable: Boolean(messaging), body })
   const groupBrowser = collectiveGroups && createGroupBrowser({
-    messaging, groups: collectiveGroups, welcome: Boolean(communityIntake), privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
+    privateGroupBrowser: createPrivateGroupBrowser({ pilot: privateGroupPilot, body }), messaging, groups: collectiveGroups, welcome: Boolean(communityIntake), privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
   })
   // "View on Unlinked" for conversation partners (docs/openchat-message.md):
   // OpenChat names which of the member's own partners have a shared Ideaflow
@@ -1453,7 +1454,9 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         return
       }
       if (isGroupPath(url.pathname)) {
+        response.setHeader('Cache-Control', 'no-store')
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        if (isPrivateGroupPilotPath(url.pathname) && !privateGroupPilot) { await journey(response, { ...renderNotFound(chrome), privateGroup: true }, null, '', 404); return }
         if (!groupBrowser) { await journey(response, { ...renderNotFound(chrome), privateGroup: true }, null, '', 404); return }
         if (!viewer && !isFlyerJoinPath(url.pathname)) {
           if (request.method === 'GET') await journey(response, { ...renderSignInRequired({ next: returnPath(url.pathname) }), privateGroup: true }, null, '', 401)
@@ -1461,8 +1464,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           return
         }
         await settleAlerts(response)
-        await groupBrowser({ request, url, session: viewer, lookup: ids => pageReader(request).lookup({ ids, listedOnly: true }),
-          render: (view, status) => journey(response, { ...view, privateGroup: true }, null, '', status),
+        await groupBrowser({ request, url, session: viewer, readCandidates: async query => (await pageReader(request).list({ query })).profiles, lookup: ids => pageReader(request).lookup({ ids, listedOnly: true }),
+          render: (view, status) => journey(response, { ...view, privateGroup: true }, null, view.script || '', status),
           redirect: path => redirect(response, path) })
         return
       }
