@@ -8,7 +8,13 @@ See [DESIGN.md](../DESIGN.md) for the approved privacy and M5 hashing design.
 The canonical runtime is standalone Noos-backed Unlinked, not legacy Next.js or
 Supabase. Groups are a Noos capability with Unlinked as UI. This pilot extends the
 existing collective-group pages without changing existing invitation acceptance.
-No existing group is migrated or created automatically.
+No existing group is migrated or created automatically. The MIT group is an
+ordinary collective group named **MIT Early-Stage Investors/Founders Group**.
+Its collective id is also the add-on id: there is no second group creation or
+joining flow. `collective-groups.mjs` remains authoritative for organizer,
+metadata, consent and membership; the private Noos group record is a synchronized
+projection used to fence the owner-only roster. The 1,024 pending entries do not
+occupy joined seats or expand the existing group capacity.
 
 ## Activation contract
 

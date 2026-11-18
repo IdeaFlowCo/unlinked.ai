@@ -1,4 +1,4 @@
-# MIT Early Stage Investors & Founders: private groups and pending roster
+# MIT Early-Stage Investors/Founders Group: private roster add-on
 
 Status: approved by root d3caa262 for implementation, 2026-11-17. No release, migration,
 roster transfer, group creation or outreach is authorized by this document.
@@ -17,13 +17,12 @@ store persists `UnlinkedCollectiveGroup` documents in Neo4j. That is evidence of
 existing behavior, not permission to substitute direct graph writes for the
 requested Noos adapter design.
 
-The MVP adds an explicitly private group with provisional name **MIT Early Stage
-Investors & Founders**, pending Jacob’s confirmation of the exact title, and tags
-`investor` and `founders`. Jacob’s original wording was “mit early stage
-#investor/founders”; the WhatsApp title may be “MIT Early Stage Investors/Founders”
-but has not been verified. An authorized Beeper search for “MIT early stage”,
-“investor” and “founders” should establish the actual title without importing
-messages or roster data. The group has an owner-only pending roster. No WhatsApp invite link is available through the API. Display exactly
+Jacob confirmed on 2026-11-18 that the Unlinked display title must match the
+verified WhatsApp title exactly: **MIT Early-Stage Investors/Founders Group**.
+The MIT group uses the existing collective-group id, organizer, joined seats,
+metadata and invitation flow. Its Noos records are a private add-on, synchronized
+from that group; they cannot create independent membership. Tags are `investor`
+and `founders`. No Beeper title search remains pending. The group has an owner-only pending roster. No WhatsApp invite link is available through the API. Display exactly
 “WhatsApp group (ask Jacob for an invite)” until Jacob supplies one. Do not fetch
 WhatsApp, scrape members or guess an invite URL. The 1,024-entry private roster
 exists ONLY on M5: 1,024 participants with display names, 1,023 with phones.

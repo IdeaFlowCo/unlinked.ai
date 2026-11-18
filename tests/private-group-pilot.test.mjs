@@ -34,7 +34,7 @@ function memoryBackend() {
 async function fixture({ enabled = true, allowedOwnerIds = ['owner'], memberBlocks } = {}) {
   const backend = memoryBackend(), store = createMemoryCollectiveGroupsStore(), active = new Set(['owner', 'admin', 'member', 'stranger'])
   const groups = createCollectiveGroups({ store, active: a => active.has(a.ownerId) && a.userId === actor(a.ownerId).userId })
-  const group = await groups.create(owner, 'MIT Early Stage Investors & Founders', 'owner-profile')
+  const group = await groups.create(owner, 'MIT Early-Stage Investors/Founders Group', 'owner-profile')
   const join = async who => {
     // Fixture represents an already accepted seat, not a roster-based join.
     await store.change(group.id, g => { g.members.push({ id: randomUUID(), actor: who, name: who.ownerId, profileId: who.ownerId + '-profile' }); return g })
@@ -385,4 +385,21 @@ test('final name projection removes unpublished candidates and follows current m
   const job = await f.pilot.resolveNext(owner, id, search, lookup)
   assert.equal(job.state, 'complete')
   for (const resource of f.backend.rows.values()) if (resource.payload?.kind === 'group_resolution_results') assert.doesNotMatch(JSON.stringify(resource), /removed-profile|old-id/)
+})
+
+
+test('roster is an owner-only add-on to the exact collective group, with no second group navigation', async () => {
+  const f = await fixture(), id = f.group.id
+  const browser = createPrivateGroupBrowser({ pilot: f.pilot })
+  await f.pilot.enable(owner, id)
+  const detail = await f.pilot.detail(owner, id)
+  assert.equal(detail.id, id)
+  assert.equal(detail.name, 'MIT Early-Stage Investors/Founders Group')
+  assert.match(await browser.navigation(owner, id, {}), new RegExp(`/groups/${id}/roster`))
+  assert.equal(await browser.navigation(member, id, {}), '')
+  assert.equal(await browser.navigation(stranger, id, {}), '')
+  const before = await f.groups.roster(owner, id)
+  await f.pilot.preview(owner, id, bytes([row()]), 'json')
+  assert.deepEqual(await f.groups.roster(owner, id), before)
+  assert.equal((await f.pilot.roster(owner, id)).length, 0)
 })

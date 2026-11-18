@@ -12,7 +12,7 @@ export function createPrivateGroupBrowser({ pilot, body, now = Date.now }) {
   return {
     async navigation(actor, id, chrome) {
       if (!pilot) return ''
-      try { await pilot.detail(actor, id); return `<p><a href="/groups/${id}/private">Private group and joined members</a></p>` } catch {
+      try { const group = await pilot.detail(actor, id); return group.owner ? `<p><a href="/groups/${id}/roster">Your private pending roster</a></p>` : '' } catch {
         return await pilot.available(actor, id) ? pilotEnableForm(chrome, id) : ''
       }
     },
@@ -34,7 +34,7 @@ export function createPrivateGroupBrowser({ pilot, body, now = Date.now }) {
         if (action === 'private/enable') {
           await fields([])
           await pilot.enable(actor, id)
-          return redirect(`/groups/${id}/private`)
+          return redirect(`/groups/${id}/roster`)
         }
         const group = await pilot.detail(actor, id)
         if (action === 'private' && request.method === 'GET') return render(renderPrivateGroup(chrome, group))
