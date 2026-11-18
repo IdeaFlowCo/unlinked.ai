@@ -4,7 +4,7 @@ export const ANALYTICS_SCRIPT = `${ANALYTICS_ORIGIN}/ideaflow.js`
 const EVENTS = new Set(['signup', 'activated'])
 
 export function analyticsTag(nonce) {
-  return `<script nonce="${nonce}" defer src="${ANALYTICS_SCRIPT}" data-product="unlinked" data-respect-dnt="true" data-privacy="strict"></script>`
+  return `<script nonce="${nonce}" async src="${ANALYTICS_SCRIPT}" data-product="unlinked" data-respect-dnt="true" data-privacy="strict"></script>`
 }
 
 // Read and clear a session's queued one-shot events.
