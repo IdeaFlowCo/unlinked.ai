@@ -1853,7 +1853,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         try {
           const controller = new AbortController()
           response.once('close', () => { if (!response.writableFinished) controller.abort() })
-          const result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]) })
+          const result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query, signal: controller.signal })
           searchActivity().result(result)
           journey(response, page({ aiMatches: result.matches, aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }))
         } catch {
@@ -2797,7 +2797,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const connectedCounts = mine ? { all: mine.length + privateCards.length, member: mine.filter(value => value.presence === 'member').length, shadow: mine.filter(value => value.presence === 'shadow').length } : undefined
         if (connectedOnly) {
           const kept = await filterCards([...(mine ?? []), ...privateCards].filter(value => !presence || value.presence === presence), filters, reader)
-          const ranked = matcher ? rankMatches(kept, matcher, value => ({ name: words(value.name), text: words([value.name, value.headline, value.location].filter(Boolean).join(' ')) })) : { rows: kept, match: 'none' }
+          const ranked = matcher ? rankMatches(kept, matcher, cardTokens) : { rows: kept, match: 'none' }
           const ordered = orderNetwork(ranked.rows, sort)
           const rows = await withConnect(session.owner, ordered.slice(index * 100, (index + 1) * 100), reader)
           const enrichmentPreferences = contactEnrichment ? await contactEnrichment.preferences(session.owner).catch(() => null) : undefined
@@ -3082,8 +3082,11 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           if (!['everyone', 'own'].includes(scope)) throw new Error('shared_search_scope_invalid')
           if (scope === 'everyone') {
             let result = null
-            try { const groups = await viewerGroupsReady(session.owner); result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query: input.get('query'), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(40000)]), ...(groups ? { unlistedGroups: groups } : {}) }) }
-            catch { /* The page still shows the people this account knows, with a notice. */ }
+            try { const groups = await viewerGroupsReady(session.owner); result = await createSharedPeopleSearch({ readPublishedSnapshot: snapshotFor(request), complete })({ query: input.get('query'), signal: controller.signal, ...(groups ? { unlistedGroups: groups } : {}) }) }
+            catch (error) {
+              searchActivity().failure(error)
+              // The ordinary People listing remains available from the result page.
+            }
             const props = jobProps(await jobResources()), network = await accountNetwork(session.owner)
             const reader = pageReader(request)
             const connections = network.assertions.filter(row => row.category === 'connections')
@@ -3096,13 +3099,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
             const own = network.imports.length || network.legacyProfileId ? await withConnect(session.owner, await ownRows(), reader) : undefined
             const ai = result
               ? { aiMatches: await withConnect(session.owner, result.matches, reader), aiNote: `${result.considered.toLocaleString('en-US')} public profiles considered; ${result.modelCandidates} ranked with AI.` }
-              : { aiError: own === undefined ? 'AI search could not finish. Try again in a minute.' : 'AI search could not finish. Try again in a minute; your own matching people are below.' }
+              : { aiError: own === undefined ? 'AI search could not finish. You can still browse all text matches.' : 'AI search could not finish. Browse all text matches or see your own matching people below.' }
             searchActivity().result(result)
             const view = renderPeople({ ...props, membersOnly: iosApp(request), scope, ...ai, own, query: input.get('query'), state: 'ready', returnTo: searchReturn(input.get('query')) })
             journey(response, view, props.importJob, '', result ? 200 : 503); return
           }
           const account = createAccountNetwork({ owner: session.owner, getBackend, complete })
-          const result = await account.search({ query: input.get('query'), signal: controller.signal })
+          const result = await account.askNetwork({ query: input.get('query'), signal: controller.signal })
           searchActivity().result(result)
           const props = jobProps(await jobResources())
           // Picks carry only the assertion; its source row says where the public profile is.

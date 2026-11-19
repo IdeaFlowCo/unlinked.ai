@@ -39,7 +39,7 @@
   "tools": [
     {
       "name": "unlinked_search_network",
-      "description": "Search the owner's imported network, or pass degree 1/2 plus an optional cursor to read recorded public paths from the explicitly confirmed recovered profile.",
+      "description": "Page through the owner's network text matches by passing nextCursor as cursor. Use mode text to suppress the default AI fallback, or degree 1/2 for recorded public paths from a confirmed recovered profile.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -58,6 +58,18 @@
           "cursor": {
             "type": "string",
             "maxLength": 2048
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "text"
+            ]
           }
         },
         "required": [
@@ -68,6 +80,7 @@
     },
     {
       "name": "unlinked_search_everyone",
+      "description": "Use mode text to enumerate public People matches by passing nextCursor as cursor. A query-only call returns a bounded AI shortlist.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -75,6 +88,22 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 1024
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "text"
+            ]
           }
         },
         "required": [

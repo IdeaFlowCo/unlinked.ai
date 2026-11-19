@@ -59,8 +59,8 @@ const ROUTES = Object.freeze({
   'POST /api/agent/v1/private/links/delete': { tool: 'unlinked_delete_private_link', body: ['linkId'] },
   'POST /api/agent/v1/exports': { tool:'unlinked_export_network', body:['inline','scope','query','listId','format','detail','ids','fields','presence','mode','degree','location','company','pastCompany','title','school','industry'] },
   'POST /api/agent/v1/ai-search': { tool: 'unlinked_ai_search', body: ['query', 'scope', 'timeoutMs'] },
-  'POST /api/agent/v1/search-network': { tool: 'unlinked_search_network', body: ['query', 'degree', 'cursor'] },
-  'POST /api/agent/v1/search-everyone': { tool: 'unlinked_search_everyone', body: ['query'] },
+  'POST /api/agent/v1/search-network': { tool: 'unlinked_search_network', body: ['query', 'degree', 'cursor', 'limit', 'mode'] },
+  'POST /api/agent/v1/search-everyone': { tool: 'unlinked_search_everyone', body: ['query', 'cursor', 'limit', 'mode'] },
 })
 
 async function readJsonBody(request, limit = 8192) {

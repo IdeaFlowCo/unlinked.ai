@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto'
 import { validTimestamp, connectionDate } from '../network-order.mjs'
 import { privateId } from './job.mjs'
 import { createScopedImportReader } from './noos-adapter.mjs'
 import { sharedImportRowCache } from './import-row-cache.mjs'
 import { COMBINED_UPLOAD_CONSENT, requireCombinedUploadConsent } from './consent.mjs'
 import { createPrivateSearch } from './ai-search.mjs'
-import { matchNetworkText } from './network-text-search.mjs'
+import { matchNetworkText, TEXT_MATCH_LIMIT } from './network-text-search.mjs'
 import { withoutSuspendedRows } from '../public-people/suspension-filter.mjs'
 
 // unlinked_search_network answers literal queries from text alone; only a
@@ -28,16 +29,23 @@ export async function withSearchDeadline({ signal, budgetMs, label = 'search', r
   if (!Number.isSafeInteger(budgetMs) || budgetMs < 1) throw new Error('search_deadline_invalid')
   const timer = new AbortController(), soft = new AbortController()
   const handle = setTimeout(() => timer.abort(new DOMException(`${label} deadline elapsed`, 'TimeoutError')), budgetMs)
-  const softHandle = setTimeout(() => soft.abort(new DOMException(`${label} ranking time elapsed`, 'TimeoutError')), Math.max(0, budgetMs - Math.min(reserveMs, budgetMs / 5)))
+  const softHandle = reserveMs > 0
+    ? setTimeout(() => soft.abort(new DOMException(`${label} ranking time elapsed`, 'TimeoutError')), budgetMs - Math.min(reserveMs, budgetMs / 5))
+    : undefined
   const deadline = signal ? AbortSignal.any([signal, timer.signal]) : timer.signal
-  const expired = new Promise((_, reject) => {
-    if (deadline.aborted) reject(deadline.reason)
-    else deadline.addEventListener('abort', () => reject(deadline.reason), { once: true })
-  })
-  const run = Promise.resolve().then(() => work({ deadline, stopSignal: soft.signal }))
-  run.catch(() => {}); expired.catch(() => {})
-  try { return await Promise.race([run, expired]) }
-  finally { clearTimeout(handle); clearTimeout(softHandle) }
+  let rejectDeadline
+  const expired = new Promise((_, reject) => { rejectDeadline = reject })
+  const abort = () => rejectDeadline(deadline.reason)
+  deadline.addEventListener('abort', abort, { once: true })
+  try {
+    deadline.throwIfAborted()
+    const run = Promise.resolve().then(() => work({ deadline, stopSignal: soft.signal }))
+    return await Promise.race([run, expired])
+  } finally {
+    clearTimeout(handle)
+    clearTimeout(softHandle)
+    deadline.removeEventListener('abort', abort)
+  }
 }
 
 // One authenticated account, all its currently published imports. Source
@@ -111,23 +119,38 @@ export function createAccountNetwork({ owner, getBackend, complete, observationL
   } : null
   // Text first: every literal name/company/title match, no model call. A query
   // with no literal match falls back to AI ranking, all inside one deadline.
-  const searchWithin = async ({ query, deadline, stopSignal }) => {
+  const searchWithin = async ({ query, cursor, limit, mode, deadline, stopSignal }) => {
     const network = await readNetwork(networkId, { signal: deadline })
-    const text = matchNetworkText(network.assertions, query)
+    const text = matchNetworkText(network.assertions, query, network.assertions.length)
     const considered = network.assertions.filter(row => row.category === 'connections').length
-    if (text?.total) return { importId: networkId, mode: 'text_match', indexed: network.indexed, considered, total: text.total, truncated: text.truncated,
-      matches: text.matches.map(({ row, matchedIn }) => ({ assertionId: row.id, sourceId: row.sourceId, rowId: row.rowId, subject: row.subject,
-        fields: Object.fromEntries(['first name', 'last name', 'company', 'position', 'connected on'].filter(key => typeof row.fields?.[key] === 'string').map(key => [key, row.fields[key].slice(0, 256)])),
-        reason: `Text match in ${matchedIn.join(' and ')}` })), scope: 'owner_network' }
+    if (text?.total || cursor !== undefined || mode === 'text') {
+      const rows = text?.matches ?? []
+      const binding = createHash('sha256').update(JSON.stringify([networkId, query.trim(), rows.map(({ row }) => row.id)])).digest('hex')
+      let offset = 0
+      if (cursor !== undefined) {
+        try {
+          const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
+          if (value.binding !== binding || !Number.isSafeInteger(value.offset) || value.offset < 0 || value.offset > rows.length) throw new Error()
+          offset = value.offset
+        } catch { throw new Error('private_search_cursor_invalid') }
+      }
+      const selected = rows.slice(offset, offset + limit)
+      const next = offset + selected.length
+      const nextCursor = next < rows.length ? Buffer.from(JSON.stringify({ binding, offset: next })).toString('base64url') : undefined
+      return { importId: networkId, mode: 'text_match', indexed: network.indexed, considered, total: rows.length, truncated: Boolean(nextCursor), nextCursor,
+        matches: selected.map(({ row, matchedIn }) => ({ assertionId: row.id, sourceId: row.sourceId, rowId: row.rowId, subject: row.subject,
+          fields: Object.fromEntries(['first name', 'last name', 'company', 'position', 'connected on'].filter(key => typeof row.fields?.[key] === 'string').map(key => [key, row.fields[key].slice(0, 256)])),
+          reason: `Text match in ${matchedIn.join(' and ')}` })), scope: 'owner_network' }
+    }
     if (!search) throw new Error('private_search_configuration_required')
     // The already-read network seeds the ranking; its final consistency re-read stays live.
     let first = network
     const readFirst = async (id, options) => { if (first) { const value = first; first = null; return value } return readNetwork(id, options) }
     return search({ query, signal: deadline, stopSignal, readFirst, concurrency: NETWORK_RANK_CONCURRENCY })
   }
-  const searchNetwork = async ({ query, signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
+  const searchNetwork = async ({ query, cursor, limit = TEXT_MATCH_LIMIT, mode = 'auto', signal, aiBudgetMs = NETWORK_AI_BUDGET_MS }) => {
     if (typeof query !== 'string' || !query.trim() || query.length > 1024) throw new Error('private_search_query_limit')
-    return withSearchDeadline({ signal, budgetMs: aiBudgetMs, label: 'search_network' }, ({ deadline, stopSignal }) => searchWithin({ query, deadline, stopSignal }))
+    return withSearchDeadline({ signal, budgetMs: aiBudgetMs, label: 'search_network' }, ({ deadline, stopSignal }) => searchWithin({ query, cursor, limit, mode, deadline, stopSignal }))
   }
   // unlinked_ai_search scope "mine": always AI-ranked (no text-first), under
   // the same hard deadline and soft partial-result stop as searchNetwork. It

@@ -130,3 +130,28 @@ test('the reviewed seed file carries names and public profile ids only', async (
   assert.doesNotMatch(JSON.stringify(seed), /@[a-z0-9-]+\.[a-z]/i, 'no email addresses')
   for (const row of seed.approve) assert.deepEqual(Object.keys(row).sort(), ['evidence', 'name', 'profileId'])
 })
+
+test('configured owner has unlimited search calls within process capacity and retains unrelated quotas', async () => {
+  const inputs = { query: 'Ada', mode: 'text' }
+  const getBackend = async () => ({ listImportIds: async () => [] })
+  const service = createAccountToolService({ getBackend, unlimitedSearchOwnerIds: ['trusted'], limits: { deterministicPerMinute: 1, aiPerMinute: 1, aiPerDay: 1, aiInFlightTotal: 1 } })
+  const authorized = ownerId => ({ ownerId, userId: ownerId + '-user', tools: ['unlinked_search_network', 'unlinked_whoami'] })
+  const search = grant => service.call({ grant, name: 'unlinked_search_network', input: inputs })
+  await search(authorized('trusted'))
+  await search(authorized('trusted'))
+  await search(authorized('ordinary'))
+  await assert.rejects(search(authorized('ordinary')), { code: 'rate_limited' })
+  const who = () => service.call({ grant: authorized('trusted'), name: 'unlinked_whoami' })
+  await who()
+  await assert.rejects(who(), { code: 'rate_limited' })
+
+  let release, admitted
+  const entered = new Promise(resolve => { admitted = resolve })
+  const run = work => service.withSearchBudget(authorized('trusted'), 'unlinked_search_network', work)
+  const pending = run(() => { admitted(); return new Promise(resolve => { release = resolve }) })
+  await entered
+  try { await assert.rejects(run(async () => {}), { code: 'rate_limited' }) }
+  finally { release(); await pending }
+  await run(async () => {})
+  await run(async () => {})
+})

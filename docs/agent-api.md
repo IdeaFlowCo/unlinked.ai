@@ -448,25 +448,60 @@ Response (`everyone`): `{ kind, scope, mode, revision, considered,
 lexicalMatches, modelCandidates, matches: [{ id, name, headline?, location?,
 company?, reason }], visibility: "public" }`.
 
-### `POST /api/agent/v1/search-network` `{ query, degree?, cursor? }` ⇄ `unlinked_search_network`
-Launch tool. Without `degree` it is **text first**: when every query word
-starts a word in a connection's name, company or position, it returns all such
-connections at once with no model call (`mode: "text_match"`, sorted by name,
-at most 500 rows with `total` and `truncated`, `reason` naming the matched
-fields). Only a query with no literal match is AI-ranked (`mode:
-"query_time_ai"`, top ten), within one 20 s deadline for the whole call, network reads included (below the shared connector's 25 s downstream timeout); a spent budget returns
-`upstream_unavailable` naming the text-query and `list_connections`
-alternatives. Ranking stops 4 s before that deadline and returns the best
-matches ranked so far with `partial: true` (`considered` then counts only the
-rows actually ranked); the error is returned only if nothing finished. The
-owner-network ranking runs eight model calls at a time. With `degree` it reads recorded paths. On HTTP, failures are typed
-(`degree_unproven`, `cursor_invalid`, ...) and recorded-path pages cap at 50
-rows; on MCP it returns the same typed failure shape and keeps 100-row pages
-(offset cursors are interchangeable between the two).
+### `POST /api/agent/v1/search-network` `{ query, degree?, cursor?, limit?, mode? }` ⇄ `unlinked_search_network`
 
-### `POST /api/agent/v1/search-everyone` `{ query }` ⇄ `unlinked_search_everyone`
-Launch tool, unchanged semantics: AI search over the published public index.
-Requires the public scope.
+Without `degree`, search matches word prefixes across connections' names,
+companies and titles. `mode: "text"` always runs this search, even if no rows
+match. Results include archive provenance, `mode: "text_match"`, `total` and
+up to 50 rows per page. Set `limit` from 1 to 50 (default 50). Pass
+`nextCursor` as `cursor` with the same query until it is absent. `truncated`
+indicates additional rows after the current page. If the owner, query or
+ordered match set changes, restart after a `cursor_invalid` response.
+
+In default `mode: "auto"`, a first page with no literal match falls back to
+a bounded AI shortlist (up to ten, `mode: "query_time_ai"`). The overall 20 s
+budget includes owner network reads. If ranking stops early, `partial: true`
+means only the finished rankings are represented. Use text mode or
+`unlinked_list_connections` to enumerate results without an AI fallback.
+
+`degree: 1` or `2` reads recorded public paths. REST and MCP share a 50-row
+maximum and compatible recorded-path cursors. A `degree_unproven` response
+means the account lacks a usable confirmed legacy anchor. Check
+`unlinked_whoami.legacyProfile`, then sign in with the same Ideaflow account.
+If offered **Your existing Unlinked profile**, choose **Continue with my old
+profile**. Otherwise, open **Me → My profile** and use **Find yourself on Unlinked**. Enter your
+LinkedIn profile URL and select **Yes, that's me** if Unlinked shows your
+recovered profile.
+A newly created profile does not recover historical edges. Recheck
+`legacyProfile` before retrying degree 2.
+
+### `POST /api/agent/v1/search-everyone` `{ query, mode?, cursor?, limit? }` ⇄ `unlinked_search_everyone`
+
+Requires a public-scope grant. Use `mode: "text"` for a deterministic search
+over the published People index (query up to 200 characters, 1–50 results per
+page). Results contain `profiles`, `total`, the published index revision, and
+`nextCursor` when more rows remain. Pass it as `cursor` with the same query.
+An explicit `limit` or `cursor` also selects text mode when mode is omitted.
+
+A query-only call keeps the AI shortlist (up to ten picks among the best
+lexical candidates). Public agent AI search defaults to a 22 s overall
+deadline, including index access and publication revalidation. A transient
+provider failure can receive one retry with jitter within that deadline.
+An unavailable index or exhausted search returns typed `upstream_unavailable`
+rather than an empty result. `unlinked_ai_search` can explicitly set its
+existing `timeoutMs` when the client transport can wait longer.
+
+### Configuring unlimited search quotas
+
+Set `UNLINKED_UNLIMITED_SEARCH_OWNER_IDS=<ownerId>,<ownerId>` in the protected
+standalone runtime environment and apply it through the approved runtime
+release route. Use the exact stable `ownerId` from each account's authenticated
+`unlinked_whoami` or `GET /api/agent/v1/whoami`, never the public profile ID,
+display name, or email. An absent or empty value grants no overrides. The
+override removes per-minute read quotas for People and connection search,
+listing and profile/connection lookup, plus per-minute and daily AI search
+quotas. AI concurrency caps, permissions, writes and anonymous limits still
+apply. Remove the ID and restart through the same route to revoke the override.
 
 ## Grant provisioning (v1.1) — `POST /api/agent/v1/provision-grant`
 

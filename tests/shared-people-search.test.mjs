@@ -20,3 +20,19 @@ test('unavailable/incomplete publications are not empty results; late revocation
  await assert.rejects(search({query:'graph'}),/shared_people_unavailable/)
  await assert.rejects(search({query:''}),/shared_search_query_invalid/)
 })
+
+test('public AI retries a transient provider failure and times out a stuck index read', async () => {
+  const data = snapshot([{ id: 'person', name: 'Game investor', positions: [], education: [], skills: [] }])
+  let attempts = 0
+  const search = createSharedPeopleSearch({ readPublishedSnapshot: async () => data, complete: async () => {
+    if (++attempts === 1) throw Error('private_search_provider_http_503')
+    return { matches: [] }
+  } })
+  await search({ query: 'game investor' })
+  assert.equal(attempts, 2)
+
+  attempts = 0
+  const stuck = createSharedPeopleSearch({ readPublishedSnapshot: () => new Promise(() => {}), complete: async () => { attempts++ } })
+  await assert.rejects(stuck({ query: 'game investor', budgetMs: 20 }), { name: 'TimeoutError' })
+  assert.equal(attempts, 0)
+})

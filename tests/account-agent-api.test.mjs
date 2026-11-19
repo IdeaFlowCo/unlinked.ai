@@ -213,6 +213,40 @@ test('HTTP agent API: whoami, deterministic listings, pagination, typed errors, 
   const shared = await (await call(app.endpoint, accessToken, 'search-everyone', { method: 'POST', body: JSON.stringify({ query: 'graph' }) })).json()
   assert.equal(shared.scope, 'everyone')
 
+  // A cursor issued by REST continues the same search in MCP.
+  const post = (path, input) => call(app.endpoint, accessToken, path, { method: 'POST', body: JSON.stringify(input) })
+  const client = new Client({ name: 'paging-client', version: '1.0' })
+  await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', app.endpoint), { requestInit: { headers: { Authorization: `Bearer ${accessToken}` } } }))
+  try {
+    for (const [route, tool, query, key, id] of [
+      ['search-network', 'unlinked_search_network', 'a', 'matches', 'assertionId'],
+      ['search-everyone', 'unlinked_search_everyone', 'anchor graph index', 'profiles', 'id'],
+    ]) {
+      const input = { query, mode: 'text', limit: 1 }
+      const response = await post(route, input)
+      assert.equal(response.status, 200)
+      const first = await response.json()
+      assert.equal(first.mode, 'text_match')
+      assert.equal(first[key].length, 1)
+      assert.ok(first.nextCursor)
+      const ids = [first[key][0][id]]
+      let cursor = first.nextCursor
+      while (cursor) {
+        const reply = await client.callTool({ name: tool, arguments: { ...input, cursor } })
+        assert.ok(!reply.isError)
+        const page = JSON.parse(reply.content[0].text)
+        assert.equal(page[key].length, 1)
+        ids.push(page[key][0][id])
+        assert.ok(ids.length <= first.total)
+        cursor = page.nextCursor
+      }
+      assert.equal(new Set(ids).size, first.total)
+      const wrongQuery = await post(route, { ...input, query: 'wrong query', cursor: first.nextCursor })
+      assert.equal(wrongQuery.status, 400)
+      assert.equal((await wrongQuery.json()).error.code, 'cursor_invalid')
+    }
+  } finally { await client.close() }
+
   // Unknown routes and invalid input are typed, not free text.
   const unknown = await call(app.endpoint, accessToken, 'unsupported-operation')
   assert.equal(unknown.status, 404)
