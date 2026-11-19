@@ -144,7 +144,7 @@ const invalid = () => new MessagingError(400, 'invalid_input')
 // `blockedUsers(session)` (optional) returns the OpenChat user ids this member
 // blocked (member-blocks.mjs): their direct conversations are hidden, their
 // messages are not delivered, and no message is sent to them from here.
-export function createMessagingProxy({ isVerified = async () => false, createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, profilesForParticipants = null, profilePathFor = null, blockedUsers = null, participantBlocked = null, resolveOwnerRecipient = null } = {}) {
+export function createMessagingProxy({ isVerified = async () => false, createMessagingSession, apiOrigin = OPENCHAT_ORIGIN, socketUrl = OPENCHAT_SOCKET_URL, fetchImpl = fetch, connectSocket = connectOpenChatSocket, now = Date.now, pollMs = 4000, heartbeatMs = 25000, streamLifetimeMs = 30 * 60000, lingerMs = 20000, maxLinks = 500, isSessionLive = () => true, allowSession = () => true, profilesForParticipants = null, profilePathFor = null, blockedUsers = null, participantBlocked = null, resolveOwnerRecipient = null } = {}) {
   const credentials = new Map(), badges = new Map(), budgets = new Map(), issued = new Map(), links = new Map(), uploads = new Map(), blockCache = new Map(), peers = new Map()
   // The member's blocked OpenChat users, read at most every 30 seconds (and again after a change).
   async function blockedFor(session) {
@@ -166,7 +166,7 @@ export function createMessagingProxy({ isVerified = async () => false, createMes
     peers.set(ownerKey(session), map); trim(peers, 5000)
   }
   const blockedConversation = (session, conversationId) => { const peer = peers.get(ownerKey(session))?.get(conversationId); return Boolean(peer && knownBlocked(session).has(peer)) }
-  const ownerKey = session => session?.owner?.ownerId
+  const ownerKey = session => allowSession(session) ? session?.owner?.ownerId : undefined
   const trim = (map, limit) => { while (map.size > limit) map.delete(map.keys().next().value) }
 
   // One embedded credential per member, minted through the existing exchange and
@@ -439,6 +439,7 @@ export function createMessagingProxy({ isVerified = async () => false, createMes
   // Only a browser handler's live card or authorized group roster may supply this owner. Never
   // accept an owner/identity from browser fields, a name or an imported email.
   async function openOwner(session, owner, name) {
+    if (!ownerKey(session)) return { status: 'unavailable' }
     await spend(session, 'write')
     if (typeof resolveOwnerRecipient !== 'function') return { status: 'unavailable' }
     const recipient = await resolveOwnerRecipient(owner, name)
