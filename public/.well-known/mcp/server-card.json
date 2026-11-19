@@ -62,7 +62,8 @@
           "limit": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 1000,
+            "description": "Requested rows per page. Default 50. Standard accounts can request up to 250, and operator-allowlisted accounts up to 1000. Use nextCursor for more."
           },
           "mode": {
             "type": "string",
@@ -96,7 +97,8 @@
           "limit": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 1000,
+            "description": "Requested rows per page. Default 50. Standard accounts can request up to 250, and operator-allowlisted accounts up to 1000. Use nextCursor for more."
           },
           "mode": {
             "type": "string",

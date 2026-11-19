@@ -6,3 +6,6 @@ export const PUBLIC_INDEX_MAX_PROFILES = 100000
 export const PUBLIC_INDEX_MAX_CONNECTIONS = 500000
 // Whole-index text, including operator-published profile histories.
 export const PUBLIC_INDEX_MAX_TEXT_BYTES = 96 * 1024 * 1024
+
+// Absolute page bound for credentialed text and recorded-path search.
+export const SEARCH_PAGE_MAX = 1000

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES } from './limits.mjs'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES, SEARCH_PAGE_MAX } from './limits.mjs'
 import { CONNECTION_SORTS, orderNetwork } from '../network-order.mjs'
 import { connectionPolicies, createConnectionVisibility } from './connection-privacy.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
@@ -12,7 +12,7 @@ export function createKnownConnectionsReader({ owner, getBackend, readPublishedS
   if (!owner?.ownerId || !owner.userId || typeof getBackend !== 'function' || typeof readPublishedSnapshot !== 'function') throw Error('known_connections_configuration_required')
   const principal = Object.freeze({ownerId:owner.ownerId,userId:owner.userId})
   return async ({ degree=1,query='',cursor,signal,pageSize=100,sort }={}) => {
-    if (![1,2].includes(degree) || (sort!==undefined && !CONNECTION_SORTS.includes(sort)) || typeof query!=='string' || query.length>256 || cursor!==undefined && (typeof cursor!=='string' || cursor.length>2048) || !Number.isSafeInteger(pageSize) || pageSize<1 || pageSize>100) throw Error('known_connections_input_invalid')
+    if (![1,2].includes(degree) || (sort!==undefined && !CONNECTION_SORTS.includes(sort)) || typeof query!=='string' || query.length>256 || cursor!==undefined && (typeof cursor!=='string' || cursor.length>2048) || !Number.isSafeInteger(pageSize) || pageSize<1 || pageSize>SEARCH_PAGE_MAX) throw Error('known_connections_input_invalid')
     signal?.throwIfAborted()
     const backend=await getBackend(principal), anchor=await backend.readLegacyProfile?.()
     if (!anchor) throw Error('known_connections_anchor_unavailable')

@@ -1,3 +1,4 @@
+import { SEARCH_PAGE_MAX } from '../src/utils/public-people/limits.mjs'
 import { EXPORT_FIELDS } from './bulk-export-format.mjs'
 import { ACCESS_TIER, limitsForTier, tierResolver } from './access-tiers.mjs'
 export const INTERNAL_BULK_READ = Symbol('unlinked-internal-bulk-read')
@@ -69,6 +70,12 @@ export class AccountToolError extends Error {
 // returns one row per source record, as before.
 export const CONNECTION_GROUPINGS = Object.freeze(['person', 'none'])
 
+const SEARCH_PAGE_DEFAULT = 50
+const SEARCH_PAGE_STANDARD_MAX = 250
+const SEARCH_PAGE_LIMIT_DESCRIPTION = `Maximum rows requested per page. Defaults to ${SEARCH_PAGE_DEFAULT}. Up to ${SEARCH_PAGE_STANDARD_MAX} for standard accounts, or ${SEARCH_PAGE_MAX} for accounts on the operator search allowlist. Use nextCursor for more; choose a smaller limit if the 1 MiB response limit is reached.`
+const searchPageLimit = z.number().int().min(1).max(SEARCH_PAGE_MAX).describe(SEARCH_PAGE_LIMIT_DESCRIPTION).optional()
+const PAGED_SEARCH_TOOLS = new Set(['unlinked_search_network', 'unlinked_search_everyone'])
+
 export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   unlinked_export_network: { inline: z.boolean().optional(), scope: z.enum(['mine','everyone','all','list']).optional(), query: z.string().max(200).optional(), listId: z.string().max(100).optional(), format: z.enum(['csv','json','jsonl']).optional(), detail: z.enum(['headline','summary','full']).optional(), ids: z.array(z.string().min(1).max(160)).max(10000).optional(), fields: z.array(z.enum(EXPORT_FIELDS)).max(EXPORT_FIELDS.length).optional(), presence: z.enum(['member','legacy','shadow']).optional(), mode: z.enum(['best','exact']).optional(), ...Object.fromEntries(['degree','location','company','pastCompany','title','school','industry'].map(key=>[key,z.string().max(120).optional()])) },
   unlinked_whoami: {},
@@ -90,11 +97,11 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   },
   unlinked_search_network: {
     query: z.string().min(1).max(1024), degree: z.union([z.literal(1), z.literal(2)]).optional(),
-    cursor: z.string().max(2048).optional(), limit: z.number().int().min(1).max(50).optional(), mode: z.enum(['auto', 'text']).optional(),
+    cursor: z.string().max(2048).optional(), limit: searchPageLimit, mode: z.enum(['auto', 'text']).optional(),
   },
   unlinked_search_everyone: {
     query: z.string().min(1).max(1024), cursor: z.string().max(2048).optional(),
-    limit: z.number().int().min(1).max(50).optional(), mode: z.enum(['ai', 'text']).optional(),
+    limit: searchPageLimit, mode: z.enum(['ai', 'text']).optional(),
   },
   unlinked_list_connection_requests: { direction: z.enum(['received', 'sent']).optional() },
   unlinked_list_notifications: { limit: z.number().int().min(1).max(50).optional() },
@@ -125,8 +132,8 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_withdraw_connection_request: 'Opt-in write tool. Withdraw a still-open connection request the owner sent (id from unlinked_list_connection_requests direction sent). The recipient’s notification is removed; asking the same person again waits 21 days.',
   unlinked_lookup_contact: 'Read-only, owner-scoped: resolve one of the owner’s own contacts without paging. Give exactly one of connectionId (an id from unlinked_list_connections), linkedinUrl (a linkedin.com/in/ address), profileId (a published profile id) or refHashes (up to 100 linkedinRefHash values). Returns name, headline, company, the owner connectionId when the owner imported the person, linkedinRefHash (SHA-256 of the canonical LinkedIn slug, the private-graph key `linkedin:in:<hash>`) and publishedProfileId when the same person has a published Unlinked profile. Also returns presence, enrichmentStatus and detailLevel, each unknown if public evidence is unavailable. Never returns another owner’s imports; typed not_found when nothing matches.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and give short conversational reasons stating unknown sector focus. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
-  unlinked_search_network: 'Search the authenticated owner’s connections. Literal name, company and title matches retain archive provenance. Follow nextCursor as cursor with the same query, up to 50 rows per page. mode text returns only text matches, even when empty. The default auto mode uses a bounded AI shortlist only when no literal match exists. Use degree 1 or 2 to search recorded public connection paths for a confirmed legacy profile.',
-  unlinked_search_everyone: 'Search published People. Use mode text with limit (1–50) and follow nextCursor with the same query to enumerate matching public profiles. The default AI mode returns a bounded shortlist. Private imports and contact details are excluded.',
+  unlinked_search_network: 'Search the authenticated owner’s connections. Literal name, company and title matches retain archive provenance. Follow nextCursor as cursor with the same query. Page size defaults to 50, with a maximum of 250 or 1000 for operator-allowlisted accounts. mode text returns only text matches, even when empty. The default auto mode uses a bounded AI shortlist only when no literal match exists. Use degree 1 or 2 to search recorded public connection paths for a confirmed legacy profile.',
+  unlinked_search_everyone: 'Search published People. Use mode text and follow nextCursor with the same query to enumerate matching public profiles. Page size defaults to 50, with a maximum of 250 or 1000 for operator-allowlisted accounts. The default AI mode returns a bounded shortlist. Private imports and contact details are excluded.',
   ...PRIVATE_NOTES_DESCRIPTIONS,
   ...INVESTOR_DESCRIPTIONS,
 })
@@ -416,9 +423,9 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     },
     // Members' public addresses use their handle (docs/profile-handles.md).
     async unlinked_list_people(grant, { q = '', mode = 'best', presence, enrichmentStatus, sort = 'best', cursor, limit = 50 }, signal) {
-      const { reader, captured } = publicReader(limit)
+      const { reader, captured } = publicReader(50)
       let result
-      try { result = await reader.list({ query: q, mode, presence, enrichmentStatus, sort, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined) }
+      try { result = await reader.list({ query: q, mode, presence, enrichmentStatus, sort, cursor, signal, limit }) } catch (error) { throw readerFailure(error, cursor !== undefined) }
       return { kind: 'unlinked_list_people', revision: captured.revision, ...(sort !== 'best' ? { sort } : {}), total: result.total ?? captured.total ?? result.profiles.length,
         ...(result.match ? { match: result.match } : {}), profiles: result.profiles.map(withHandle),
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), visibility: 'public' }
@@ -693,7 +700,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       return { kind: 'unlinked_ai_search', scope: 'everyone', mode: result.mode, revision: result.revision, considered: result.considered,
         lexicalMatches: result.lexicalMatches, modelCandidates: result.modelCandidates, matches: result.matches, visibility: 'public' }
     },
-    async unlinked_search_network(grant, { query, degree, cursor, limit = 50, mode }, signal) {
+    async unlinked_search_network(grant, { query, degree, cursor, limit = SEARCH_PAGE_DEFAULT, mode }, signal) {
       const owner = { ownerId: grant.ownerId, userId: grant.userId }
       let connectionQuery
       try { connectionQuery = knownConnectionQuery(query, degree) }
@@ -701,8 +708,6 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       try {
         if (connectionQuery.degree) {
           if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('degree_unproven', 'Recorded public connection paths require the published public index.')
-          // The HTTP contract caps pages at 50; offset cursors stay compatible
-          // with the hosted MCP launch tool's historical 100-row pages.
           return await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal, pageSize: limit })
         }
         return await createAccountNetwork({ owner, getBackend, complete }).searchNetwork({ query, signal, cursor, limit, mode })
@@ -766,6 +771,9 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       || (name === 'unlinked_search_everyone' && (mode === 'text' || (mode === undefined && (cursor !== undefined || limit !== undefined))))
     const unlimited = unlimitedSearchOwners.has(grant.ownerId)
       && SEARCH_QUOTA_TOOLS.has(name)
+    if (PAGED_SEARCH_TOOLS.has(name) && limit > SEARCH_PAGE_STANDARD_MAX && !unlimited) {
+      throw new AccountToolError('invalid_input', `limit: This account can request up to ${SEARCH_PAGE_STANDARD_MAX} rows per search page.`, { maxLimit: SEARCH_PAGE_STANDARD_MAX })
+    }
     const release = internal || tier === ACCESS_TIER.verified ? null
       : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null
       : DETERMINISTIC_TOOLS.has(name) || textSearch ? unlimited ? null : admitDeterministic(grant.ownerId, allowed) ?? null
