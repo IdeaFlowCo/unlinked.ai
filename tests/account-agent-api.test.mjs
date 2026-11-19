@@ -510,3 +510,37 @@ test('MCP and REST expose independent profile status and enforce public scope', 
     if (process.env.STATUS_INTERFACE_EVIDENCE) console.log('STATUS_INTERFACE_EVIDENCE ' + JSON.stringify({ mcpList: status, mcpFiltered: filtered.profiles, mcpProfile: profile.profile, mcpContact: contact.contact, restFiltered: restBody.profiles, restrictedRestStatus: denied.status }))
   } finally { await client.close() }
 })
+
+test('search honors the account page limit and continues when the requested size changes', async () => {
+  const profiles = Array.from({ length: 1001 }, (_, i) => publicProfile(`p-${i}`, `Investor ${String(i).padStart(4, '0')}`))
+  const anchor = publicProfile('anchor', 'Anchor')
+  const via = publicProfile('via', 'First-degree contact')
+  const connections = [{ fromId: anchor.id, toId: via.id }, ...profiles.map(profile => ({ fromId: via.id, toId: profile.id }))]
+  const snapshot = { state: 'published', complete: true, revision: 'large-page-v1', profiles: [anchor, via, ...profiles], connections }
+  const getBackend = async () => ({
+    listImportIds: async () => [],
+    readLegacyProfile: async () => ({ receiptId: 'receipt', sourceSha256: 'digest', revision: snapshot.revision, profileId: anchor.id, profiles: [anchor, via], connections: connections.slice(0, 1) }),
+    readLegacyObservations: async () => ({ assertions: profiles.map(profile => ({ id: profile.id, category: 'connections', sourceId: 'source', rowId: profile.id, fields: { 'first name': profile.name } })) }),
+  })
+  const readPublishedSnapshot = Object.assign(async () => snapshot, { revisionIdentifiesContent: true })
+  const service = createAccountToolService({ getBackend, readPublishedSnapshot, unlimitedSearchOwnerIds: ['trusted'] })
+  const grant = ownerId => ({ ownerId, userId: ownerId, scope: 'owner_network_and_public', tools: ['unlinked_search_network', 'unlinked_search_everyone'] })
+  const search = (ownerId, name, input) => service.call({ grant: grant(ownerId), name, input: { query: 'Investor', mode: 'text', ...input } })
+  for (const [name, input, key, identity] of [
+    ['unlinked_search_network', {}, 'matches', 'assertionId'],
+    ['unlinked_search_network', { degree: 2 }, 'profiles', 'id'],
+    ['unlinked_search_everyone', {}, 'profiles', 'id'],
+  ]) {
+    const ordinary = await search('standard', name, { ...input, limit: 250 })
+    assert.equal(ordinary.result[key].length, 250)
+    assert.ok(ordinary.result.nextCursor)
+    await assert.rejects(search('standard', name, { ...input, limit: 251 }), { code: 'invalid_input', details: { maxLimit: 250 } })
+    await assert.rejects(search('trusted', name, { ...input, limit: 1001 }), { code: 'invalid_input' })
+    const first = (await search('trusted', name, { ...input, limit: 1000 })).result
+    const second = (await search('trusted', name, { ...input, limit: 7, cursor: first.nextCursor })).result
+    assert.equal(first[key].length, 1000)
+    assert.equal(second[key].length, 1)
+    assert.equal(second.nextCursor, undefined)
+    assert.equal(new Set([...first[key], ...second[key]].map(row => row[identity])).size, 1001)
+  }
+})

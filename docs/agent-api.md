@@ -222,7 +222,8 @@ This vocabulary may be extended, never renamed.
 
 - Cursors are opaque strings; treat them as such. They are bound to the
   owner, query, degree and data revision — any change yields `cursor_invalid`.
-- `limit` is 1–50; default and maximum page size is **50**.
+- For `search-network` and `search-everyone`, `limit` defaults to **50**. Standard accounts may request **1–250** rows and operator-allowlisted accounts may request **1–1000**. Requests over the account maximum return `invalid_input`. Listing endpoints retain their documented limits.
+- You can change `limit` when continuing with `nextCursor`. If a page exceeds the response byte limit, retry the same cursor with a smaller `limit`.
 - Every response is capped at **1 MiB**.
 - List responses carry `total`, a `revision` (snapshot or content hash — if it
   changes between pages, restart) and `nextCursor` only when more rows exist.
@@ -453,7 +454,7 @@ company?, reason }], visibility: "public" }`.
 Without `degree`, search matches word prefixes across connections' names,
 companies and titles. `mode: "text"` always runs this search, even if no rows
 match. Results include archive provenance, `mode: "text_match"`, `total` and
-up to 50 rows per page. Set `limit` from 1 to 50 (default 50). Pass
+the standard or allowlisted page size described above. Pass
 `nextCursor` as `cursor` with the same query until it is absent. `truncated`
 indicates additional rows after the current page. If the owner, query or
 ordered match set changes, restart after a `cursor_invalid` response.
@@ -464,8 +465,8 @@ budget includes owner network reads. If ranking stops early, `partial: true`
 means only the finished rankings are represented. Use text mode or
 `unlinked_list_connections` to enumerate results without an AI fallback.
 
-`degree: 1` or `2` reads recorded public paths. REST and MCP share a 50-row
-maximum and compatible recorded-path cursors. A `degree_unproven` response
+`degree: 1` or `2` reads recorded public paths. REST and MCP share the search page limits
+and compatible recorded-path cursors. A `degree_unproven` response
 means the account lacks a usable confirmed legacy anchor. Check
 `unlinked_whoami.legacyProfile`, then sign in with the same Ideaflow account.
 If offered **Your existing Unlinked profile**, choose **Continue with my old
@@ -478,8 +479,7 @@ A newly created profile does not recover historical edges. Recheck
 ### `POST /api/agent/v1/search-everyone` `{ query, mode?, cursor?, limit? }` ⇄ `unlinked_search_everyone`
 
 Requires a public-scope grant. Use `mode: "text"` for a deterministic search
-over the published People index (query up to 200 characters, 1–50 results per
-page). Results contain `profiles`, `total`, the published index revision, and
+over the published People index (query up to 200 characters, with the search page limits above). Results contain `profiles`, `total`, the published index revision, and
 `nextCursor` when more rows remain. Pass it as `cursor` with the same query.
 An explicit `limit` or `cursor` also selects text mode when mode is omitted.
 

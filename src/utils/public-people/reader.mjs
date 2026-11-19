@@ -2,7 +2,7 @@ import { peopleFilters, matchesPeopleFilters, connectionDegrees } from './search
 import { publicLinkedinUrl, publicWebsite } from './profile-links.mjs'
 import { parseLinkedinProfileUrl } from '../linkedin-profile-url.mjs'
 import { createHash } from 'node:crypto'
-import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES, PUBLIC_INDEX_MAX_TEXT_BYTES } from './limits.mjs'
+import { PUBLIC_INDEX_MAX_CONNECTIONS, PUBLIC_INDEX_MAX_PROFILES, PUBLIC_INDEX_MAX_TEXT_BYTES, SEARCH_PAGE_MAX } from './limits.mjs'
 import { PUBLIC_LIST_SORTS, orderNetwork } from '../network-order.mjs'
 import { profileDetailLevel } from './detail-level.mjs'
 import { PROFILE_DECISION_LIMIT } from './profile-decisions.mjs'
@@ -330,15 +330,15 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
     const photo = photoFor(row.id)
     return Object.freeze({ ...row, ...(typeof photo === 'string' && PHOTO_URL.test(photo) ? { photo } : {}) })
   }
-  function page(rows, cursor, scope, revision) {
+  function page(rows, cursor, scope, revision, limit = pageSize) {
     let offset = 0
     if (cursor !== undefined) {
       if (cursor.revision !== revision) throw new PublicPeopleReaderError(503, 'public_people_unavailable', 'cursor_revision')
       if (cursor.offset > rows.length) invalid()
       offset = cursor.offset
     }
-    const profiles = rows.slice(offset, offset + pageSize).map(withPhoto)
-    const nextCursor = offset + pageSize < rows.length ? Buffer.from(JSON.stringify({ v: 1, scope: hash(scope), revision, offset: offset + pageSize })).toString('base64url') : undefined
+    const profiles = rows.slice(offset, offset + limit).map(withPhoto)
+    const nextCursor = offset + limit < rows.length ? Buffer.from(JSON.stringify({ v: 1, scope: hash(scope), revision, offset: offset + limit })).toString('base64url') : undefined
     return { profiles, ...(nextCursor ? { nextCursor } : {}) }
   }
   // Rows that carry a photo, per method, so photos stay resolved on this side
@@ -419,7 +419,8 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       return { people: suggestPeople(index, data, search, { limit: SUGGESTED_PEOPLE, known, listed: listedFor(data.unlisted, groups) }).map(withPhoto), companies: suggestCompanies(index, data, search, { limit: 3 }) }
     },
     async list(request = {}) {
-      const { query = '', cursor, signal, mode = 'best', presence, enrichmentStatus, sort = 'best', includeTotal = false, exclude = [], unlistedGroups, filters: inputFilters = {}, networkSeeds, networkSelf } = requestValue(request)
+      const { query = '', cursor, signal, mode = 'best', presence, enrichmentStatus, sort = 'best', includeTotal = false, exclude = [], unlistedGroups, filters: inputFilters = {}, networkSeeds, networkSelf, limit = pageSize } = requestValue(request)
+      if (!bounded(limit, SEARCH_PAGE_MAX)) invalid()
       const groups = groupsValue(unlistedGroups), filters = peopleFilters(inputFilters), viewer = networkSeeds ? viewerValue(request.viewer) : null
       if (networkSeeds !== undefined && (!Array.isArray(networkSeeds) || networkSeeds.length > maxProfiles || !networkSeeds.every(idValid))) invalid()
       if (networkSelf !== undefined && !idValid(networkSelf)) invalid()
@@ -446,10 +447,10 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       // Exclusions apply after ranking, so leaving out the full matches the
       // page already shows never promotes people who match only some words.
       const kept = rows => excluded?.size ? rows.filter(person => !excluded.has(person.id)) : rows
-      if (!matcher) { const rows = kept(people); return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), ...(presence || enrichmentStatus || includeTotal ? { total: rows.length } : {}) } }
+      if (!matcher) { const rows = kept(people); return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision, limit), ...(presence || enrichmentStatus || includeTotal ? { total: rows.length } : {}) } }
       // `match` says whether the rows have every word ('all') or only some of them.
       const ranked = rankMatches(people, matcher, person => data.tokens.get(person.id)), rows = kept(ranked.rows)
-      return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision), match: ranked.match, total: rows.length }
+      return { ...page(orderNetwork(rows, sort), decodedCursor, scope, data.revision, limit), match: ranked.match, total: rows.length }
     },
     // Page an export from the exact same sanitized projection and viewer
     // visibility as browsing. Never copy the raw publication or adjacency map.
