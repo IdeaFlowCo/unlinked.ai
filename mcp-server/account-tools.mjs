@@ -10,7 +10,7 @@ import { z } from 'zod'
 import { createAccountNetwork, withSearchDeadline } from '../src/utils/private-import/account-network.mjs'
 import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
 import { createPublicPeopleReader, PublicPeopleReaderError, PRESENCE, ENRICHMENT_STATUS } from '../src/utils/public-people/reader.mjs'
-import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
+import { createSharedPeopleSearch, searchFailureCause, PUBLIC_AGENT_AI_BUDGET_MS } from '../src/utils/public-people/shared-search.mjs'
 import { SEARCH_MODES } from '../src/utils/public-people/text-match.mjs'
 import { UNLINKED_PROFILE_ORIGIN } from '../src/utils/openchat-profile-context.mjs'
 import { ConnectionError } from './member-connections.mjs'
@@ -46,6 +46,7 @@ export const ACCOUNT_TOOL_ERROR_STATUS = Object.freeze({
 export function networkSearchFailure(error, signal) {
   if (error instanceof AccountToolError) return error
   if (error?.message === 'private_search_configuration_required') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking is not configured.')
+  if (error?.message === 'private_search_cursor_invalid') return new AccountToolError('cursor_invalid', 'The cursor does not match this search; restart from the first page.')
   if (error?.message === 'private_search_query_limit') return new AccountToolError('invalid_input', 'The query was empty or too long.')
   if (!signal?.aborted && error?.name === 'TimeoutError') return new AccountToolError('upstream_unavailable', 'No literal name, company or title match, and AI ranking did not finish within 20 s; search a name, company or title word, or page through unlinked_list_connections.')
   return error
@@ -89,9 +90,12 @@ export const ACCOUNT_TOOL_SCHEMAS = Object.freeze({
   },
   unlinked_search_network: {
     query: z.string().min(1).max(1024), degree: z.union([z.literal(1), z.literal(2)]).optional(),
-    cursor: z.string().max(2048).optional(),
+    cursor: z.string().max(2048).optional(), limit: z.number().int().min(1).max(50).optional(), mode: z.enum(['auto', 'text']).optional(),
   },
-  unlinked_search_everyone: { query: z.string().min(1).max(1024) },
+  unlinked_search_everyone: {
+    query: z.string().min(1).max(1024), cursor: z.string().max(2048).optional(),
+    limit: z.number().int().min(1).max(50).optional(), mode: z.enum(['ai', 'text']).optional(),
+  },
   unlinked_list_connection_requests: { direction: z.enum(['received', 'sent']).optional() },
   unlinked_list_notifications: { limit: z.number().int().min(1).max(50).optional() },
   unlinked_send_connection_request: { profileId: z.string().min(1).max(160), note: z.string().max(300).optional() },
@@ -121,10 +125,13 @@ export const ACCOUNT_TOOL_DESCRIPTIONS = Object.freeze({
   unlinked_withdraw_connection_request: 'Opt-in write tool. Withdraw a still-open connection request the owner sent (id from unlinked_list_connection_requests direction sent). The recipient’s notification is removed; asking the same person again waits 21 days.',
   unlinked_lookup_contact: 'Read-only, owner-scoped: resolve one of the owner’s own contacts without paging. Give exactly one of connectionId (an id from unlinked_list_connections), linkedinUrl (a linkedin.com/in/ address), profileId (a published profile id) or refHashes (up to 100 linkedinRefHash values). Returns name, headline, company, the owner connectionId when the owner imported the person, linkedinRefHash (SHA-256 of the canonical LinkedIn slug, the private-graph key `linkedin:in:<hash>`) and publishedProfileId when the same person has a published Unlinked profile. Also returns presence, enrichmentStatus and detailLevel, each unknown if public evidence is unavailable. Never returns another owner’s imports; typed not_found when nothing matches.',
   unlinked_ai_search: 'Ask the AI about people. scope "mine" ranks only your own imported network; scope "everyone" ranks the published public People index and requires a public-scope grant. Owner role queries require supplied title evidence, omit domain-only matches and give short conversational reasons stating unknown sector focus. Default scope is the widest the grant covers. AI-backed: may exceed 10s; set timeoutMs to bound it.',
+  unlinked_search_network: 'Search the authenticated owner’s connections. Literal name, company and title matches retain archive provenance. Follow nextCursor as cursor with the same query, up to 50 rows per page. mode text returns only text matches, even when empty. The default auto mode uses a bounded AI shortlist only when no literal match exists. Use degree 1 or 2 to search recorded public connection paths for a confirmed legacy profile.',
+  unlinked_search_everyone: 'Search published People. Use mode text with limit (1–50) and follow nextCursor with the same query to enumerate matching public profiles. The default AI mode returns a bounded shortlist. Private imports and contact details are excluded.',
   ...PRIVATE_NOTES_DESCRIPTIONS,
   ...INVESTOR_DESCRIPTIONS,
 })
 
+const SEARCH_QUOTA_TOOLS = new Set(['unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_lookup_contact', 'unlinked_ai_search', 'unlinked_search_network', 'unlinked_search_everyone'])
 const DETERMINISTIC_TOOLS = new Set(['unlinked_export_network', 'unlinked_list_person_targets', ...PRIVATE_NOTES_TOOLS, ...INVESTOR_TOOLS, 'unlinked_lookup_contact', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_list_connection_requests', 'unlinked_list_notifications'])
 export const WRITE_TOOLS = new Set(['unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request'])
 // Every tool that changes something: connection writes plus private-notes writes.
@@ -181,11 +188,12 @@ const indexReasonOf = (stage, error) => {
   return 'tool_exception'
 }
 const indexFailure = (stage, error) => Object.assign(new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.'), { stage, indexReason: indexReasonOf(stage, error) })
-export function createAccountToolService({ exportManifest, isVerified = async () => false, accessTier, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, limits = {} }) {
+export function createAccountToolService({ exportManifest, isVerified = async () => false, accessTier, getBackend, complete, readPublishedSnapshot, profileHandles, memberConnections, memberBlocks, connectionIdentityForOwner, notifications, accountForProfile, ownProfileId, memberInvitations, lookupSlug, contactAddresses, overlay, identityFor, coordination, unlimitedSearchOwnerIds = [], limits = {} }) {
   if (typeof getBackend !== 'function') throw new Error('account_tool_service_configuration_required')
   const { deterministicPerMinute = 120, aiPerMinute = 20, aiPerDay = 2000, aiInFlight = 2, aiInFlightTotal = 8, writePerMinute = 20 } = limits
   // Per-owner allowances follow the operator-held access tier (docs/verified-access.md).
   const tierOf = tierResolver({ accessTier, isVerified })
+  const unlimitedSearchOwners = new Set(unlimitedSearchOwnerIds)
   const standardLimits = { deterministicPerMinute, aiPerMinute, aiPerDay, aiInFlight }
   // list_connections and lookup_contact share one bounded read per owner. It
   // runs independently of each caller's signal so cancellation cannot discard
@@ -258,12 +266,13 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     if (Date.now() - value.window >= 60000) { value.window = Date.now(); value.deterministic = 0 }
     if (++value.deterministic > allowed.deterministicPerMinute) throw new AccountToolError('rate_limited', 'Deterministic tool budget is exhausted; retry within a minute.')
   }
-  const admitAi = (ownerId, allowed = standardLimits) => {
+  const admitAi = (ownerId, allowed = standardLimits, unlimited = false) => {
     const value = bucket(ownerId), now = Date.now(), day = Math.floor(now / 86400000)
     if (now - value.aiWindow >= 60000) { value.aiWindow = now; value.ai = 0 }
     if (day !== value.aiDay) { value.aiDay = day; value.aiDayCount = 0 }
-    if (value.ai >= allowed.aiPerMinute || value.aiDayCount >= allowed.aiPerDay || value.aiBusy >= allowed.aiInFlight || aiBusyTotal >= aiInFlightTotal) throw new AccountToolError('rate_limited', 'AI tool budget is exhausted; retry within a minute.')
-    value.ai++; value.aiDayCount++; value.aiBusy++; aiBusyTotal++
+    if ((!unlimited && (value.ai >= allowed.aiPerMinute || value.aiDayCount >= allowed.aiPerDay)) || value.aiBusy >= allowed.aiInFlight || aiBusyTotal >= aiInFlightTotal) throw new AccountToolError('rate_limited', 'AI tool budget is exhausted; retry within a minute.')
+    if (!unlimited) { value.ai++; value.aiDayCount++ }
+    value.aiBusy++; aiBusyTotal++
     return () => { value.aiBusy--; aiBusyTotal-- }
   }
 
@@ -290,14 +299,13 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     return { reader, captured }
   }
   // With q/mode already schema-validated, a reader 400 under a supplied cursor
-  // is a cursor problem; a post-snapshot failure under a supplied cursor is the
-  // revision moving between pages. Both mean: restart from the first page.
-  const readerFailure = (error, cursorSupplied, captured) => {
+  // is a cursor problem. A stale cursor also starts over from the first page.
+  const readerFailure = (error, cursorSupplied) => {
     if (error instanceof PublicPeopleReaderError && error.status === 400)
       return cursorSupplied
         ? new AccountToolError('cursor_invalid', 'The cursor does not match this listing; restart from the first page.')
         : new AccountToolError('invalid_input', 'The public People request was invalid (query or mode).')
-    if (cursorSupplied && captured?.revision)
+    if (cursorSupplied && error?.reason === 'cursor_revision')
       return new AccountToolError('cursor_invalid', 'The published index revision changed; restart from the first page.')
     return new AccountToolError('upstream_unavailable', 'The published public People index is unavailable right now.')
   }
@@ -410,7 +418,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     async unlinked_list_people(grant, { q = '', mode = 'best', presence, enrichmentStatus, sort = 'best', cursor, limit = 50 }, signal) {
       const { reader, captured } = publicReader(limit)
       let result
-      try { result = await reader.list({ query: q, mode, presence, enrichmentStatus, sort, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined, captured) }
+      try { result = await reader.list({ query: q, mode, presence, enrichmentStatus, sort, cursor, signal }) } catch (error) { throw readerFailure(error, cursor !== undefined) }
       return { kind: 'unlinked_list_people', revision: captured.revision, ...(sort !== 'best' ? { sort } : {}), total: result.total ?? captured.total ?? result.profiles.length,
         ...(result.match ? { match: result.match } : {}), profiles: result.profiles.map(withHandle),
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), visibility: 'public' }
@@ -425,7 +433,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
         result = await reader.profile({ id: profileHandles?.resolve(id)?.profileId ?? id, cursor: connectionsCursor, signal, viewer })
         // A merged profile answers with the profile it was merged into.
         if (result?.moved) result = { ...(await reader.profile({ id: result.moved, signal, viewer })), movedFrom: id }
-      } catch (error) { throw readerFailure(error, connectionsCursor !== undefined, captured) }
+      } catch (error) { throw readerFailure(error, connectionsCursor !== undefined) }
       // A handle names only a member's profile.
       if (!result?.profile || (profileHandles?.resolve(id) && !handleOf(result.profile))) throw new AccountToolError('not_found', 'No published public profile has that id.')
       return { kind: 'unlinked_get_profile', revision: captured.revision, profile: withHandle(result.profile, true), ...(result.movedFrom ? { movedFrom: result.movedFrom } : {}), visibility: 'public' }
@@ -662,7 +670,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       }
       return { kind: 'unlinked_lookup_contact', publicReconciliationComplete: true, contact: { ...profileStatus(published), connectionId: null, name: published.name, ...(published.headline ? { headline: published.headline } : {}), linkedinRefHash: targetRef, publishedProfileId: published.id, ...([...publicIds].some(id => id !== published.id) ? { publishedProfileIds: [...publicIds].filter(id => id !== published.id) } : {}) }, visibility: 'public' }
     },
-    async unlinked_ai_search(grant, { query, scope, timeoutMs = 40000 }, signal) {
+    async unlinked_ai_search(grant, { query, scope, timeoutMs = PUBLIC_AGENT_AI_BUDGET_MS }, signal) {
       // Default to the widest scope the grant actually covers, so the natural
       // single-argument call works on every grant that includes the tool.
       scope ??= scopeCoversPublic(grant.scope) ? 'everyone' : 'mine'
@@ -680,41 +688,46 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
       if (!scopeCoversPublic(grant.scope)) throw new AccountToolError('scope_not_granted', 'This grant covers only the owner network; asking about everyone requires a public-scope grant.')
       if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('upstream_unavailable', 'The published public People index is not configured.')
       let result
-      try { result = await withSearchDeadline({ signal, budgetMs: timeoutMs, label: 'ai_search' }, ({ deadline }) => createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal: deadline })) }
+      try { result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal, budgetMs: timeoutMs }) }
       catch (error) { throw askFailure(error, signal) }
       return { kind: 'unlinked_ai_search', scope: 'everyone', mode: result.mode, revision: result.revision, considered: result.considered,
         lexicalMatches: result.lexicalMatches, modelCandidates: result.modelCandidates, matches: result.matches, visibility: 'public' }
     },
-    // The two launch tools keep their exact names and result semantics; the
-    // hosted MCP endpoint still serves them inline for old and new grants.
-    async unlinked_search_network(grant, { query, degree, cursor }, signal) {
+    async unlinked_search_network(grant, { query, degree, cursor, limit = 50, mode }, signal) {
       const owner = { ownerId: grant.ownerId, userId: grant.userId }
       let connectionQuery
       try { connectionQuery = knownConnectionQuery(query, degree) }
       catch { throw new AccountToolError('invalid_input', 'The search request was invalid (query or degree).') }
-      if (cursor !== undefined && !connectionQuery.degree) throw new AccountToolError('invalid_input', 'A cursor requires a degree-filtered connections query.')
       try {
         if (connectionQuery.degree) {
           if (typeof readPublishedSnapshot !== 'function') throw new AccountToolError('degree_unproven', 'Recorded public connection paths require the published public index.')
           // The HTTP contract caps pages at 50; offset cursors stay compatible
           // with the hosted MCP launch tool's historical 100-row pages.
-          return await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal, pageSize: 50 })
+          return await createKnownConnectionsReader({ owner, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal, pageSize: limit })
         }
-        return await createAccountNetwork({ owner, getBackend, complete }).searchNetwork({ query, signal })
+        return await createAccountNetwork({ owner, getBackend, complete }).searchNetwork({ query, signal, cursor, limit, mode })
       } catch (error) {
+        requestDiagnostic().failure(error, signal)
         if (error instanceof AccountToolError) throw error
         const typed = networkSearchFailure(error, signal)
         if (typed instanceof AccountToolError) throw typed
-        if (error.message === 'known_connections_anchor_unavailable') throw new AccountToolError('degree_unproven', 'Recorded public paths require a confirmed legacy profile anchor; none is linked.')
+        if (error.message === 'known_connections_anchor_unavailable') throw new AccountToolError('degree_unproven', 'Recorded public paths require a confirmed legacy profile. Sign into Unlinked with this account and confirm your recovered profile if offered.')
         if (error.message === 'known_connections_cursor_invalid') throw new AccountToolError('cursor_invalid', 'The cursor does not match the current listing; restart from the first page.')
         if (error.message === 'known_connections_input_invalid') throw new AccountToolError('invalid_input', 'The search request was invalid (query, degree or cursor).')
-        throw new AccountToolError('upstream_unavailable', 'The owner network search could not finish; retry.')
+        throw new AccountToolError('upstream_unavailable', 'The owner network search is unavailable right now. Retry shortly.', { cause: searchFailureCause(error) })
       }
     },
-    async unlinked_search_everyone(grant, { query }, signal) {
+    async unlinked_search_everyone(grant, { query, mode, cursor, limit }, signal) {
       if (!scopeCoversPublic(grant.scope)) throw new AccountToolError('scope_not_granted', 'This grant covers only the owner network.')
-      if (typeof readPublishedSnapshot !== 'function' || typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'Public People search is not configured.')
-      try { return await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal }) }
+      if (!query.trim()) throw new AccountToolError('invalid_input', 'The query was empty.')
+      if (mode === 'text' || (mode === undefined && (cursor !== undefined || limit !== undefined))) {
+        if (query.length > 200) throw new AccountToolError('invalid_input', 'Text search queries are limited to 200 characters.')
+        const result = await tools.unlinked_list_people(grant, { q: query, cursor, limit }, signal)
+        return { ...result, kind: 'unlinked_search_everyone', scope: 'everyone', mode: 'text_match' }
+      }
+      if (cursor !== undefined || limit !== undefined) throw new AccountToolError('invalid_input', 'Use mode text for cursor pagination.')
+      if (typeof readPublishedSnapshot !== 'function' || typeof complete !== 'function') throw new AccountToolError('upstream_unavailable', 'Public AI search is not configured.')
+      try { return await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal, budgetMs: PUBLIC_AGENT_AI_BUDGET_MS }) }
       catch (error) { throw askFailure(error, signal) }
     },
   }
@@ -731,7 +744,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     if (signal?.aborted || error?.name === 'TimeoutError' || error?.name === 'AbortError') return new AccountToolError('upstream_unavailable', 'AI ranking did not finish within the time budget; retry, raise timeoutMs, or use the deterministic listing tools.')
     if (/query_invalid|query_limit/.test(String(error?.message))) return new AccountToolError('invalid_input', 'The query was empty or too long.')
     if (/not_found/.test(String(error?.message))) return new AccountToolError('not_found', 'An import referenced by the search is no longer published.')
-    return new AccountToolError('upstream_unavailable', 'AI ranking is unavailable right now; retry.')
+    return new AccountToolError('upstream_unavailable', 'AI ranking is unavailable right now. Retry shortly or use the deterministic listing tools.', { cause: searchFailureCause(error) })
   }
 
   // revalidate (when supplied) must re-authenticate the live grant and throw
@@ -748,7 +761,15 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
     const parsed = z.object(ACCOUNT_TOOL_SCHEMAS[name]).strict().safeParse(input)
     if (!parsed.success) throw new AccountToolError('invalid_input', parsed.error.issues.map(issue => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; ').slice(0, 512))
     const internal = admission === INTERNAL_BULK_READ && DETERMINISTIC_TOOLS.has(name), tier = internal ? null : await tierOf(grant), allowed = limitsForTier(tier, standardLimits)
-    const release = internal || tier === ACCESS_TIER.verified ? null : DETERMINISTIC_TOOLS.has(name) ? admitDeterministic(grant.ownerId, allowed) ?? null : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null : admitAi(grant.ownerId, allowed)
+    const { mode, cursor, limit } = parsed.data
+    const textSearch = (name === 'unlinked_search_network' && (mode === 'text' || cursor !== undefined || parsed.data.degree !== undefined))
+      || (name === 'unlinked_search_everyone' && (mode === 'text' || (mode === undefined && (cursor !== undefined || limit !== undefined))))
+    const unlimited = unlimitedSearchOwners.has(grant.ownerId)
+      && SEARCH_QUOTA_TOOLS.has(name)
+    const release = internal || tier === ACCESS_TIER.verified ? null
+      : WRITE_TOOLS.has(name) ? admitWrite(grant.ownerId) ?? null
+      : DETERMINISTIC_TOOLS.has(name) || textSearch ? unlimited ? null : admitDeterministic(grant.ownerId, allowed) ?? null
+      : admitAi(grant.ownerId, allowed, unlimited)
     try {
       const execute = async () => {
       if (coordination && MUTATING_TOOLS.has(name) && requestContext?.ownerCheckpoint !== undefined && coordination.version(grant.ownerId) > requestContext.ownerCheckpoint) throw new AccountToolError('grant_revoked', 'The account changed during this request; reconnect and retry.')
@@ -774,7 +795,7 @@ export function createAccountToolService({ exportManifest, isVerified = async ()
   async function withSearchBudget(grant, name, work) {
     if (!['unlinked_search_network', 'unlinked_search_everyone'].includes(name) || !grant?.tools?.includes(name)) throw new AccountToolError('scope_not_granted', 'This grant does not include the requested search.')
     const tier = await tierOf(grant)
-    const release = tier === ACCESS_TIER.verified ? () => {} : admitAi(grant.ownerId, limitsForTier(tier, standardLimits))
+    const release = tier === ACCESS_TIER.verified ? () => {} : admitAi(grant.ownerId, limitsForTier(tier, standardLimits), unlimitedSearchOwners.has(grant.ownerId))
     try { return await work() } finally { release() }
   }
   return { call, withSearchBudget }

@@ -748,7 +748,7 @@
     },
     "/api/agent/v1/search-network": {
       "post": {
-        "summary": "Launch tool over HTTP: AI owner-network search or recorded public paths by degree",
+        "summary": "Page through owner network matches or recorded public paths, or request an AI shortlist",
         "security": [
           {
             "accountGrant": []
@@ -774,7 +774,20 @@
                     ]
                   },
                   "cursor": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "text"
+                    ]
                   }
                 },
                 "required": [
@@ -787,20 +800,29 @@
         },
         "responses": {
           "200": {
-            "description": "Search or recorded-path result"
+            "description": "Matches or recorded paths with nextCursor when more rows remain"
           },
           "401": {
             "description": "not_linked or grant_revoked"
           },
           "409": {
             "description": "degree_unproven"
+          },
+          "400": {
+            "description": "invalid_input or cursor_invalid"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
           }
         }
       }
     },
     "/api/agent/v1/search-everyone": {
       "post": {
-        "summary": "Launch tool over HTTP: AI search over the published public People index",
+        "summary": "Page through published People matches or request an AI shortlist",
         "security": [
           {
             "accountGrant": []
@@ -817,6 +839,22 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 1024
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "ai",
+                      "text"
+                    ]
                   }
                 },
                 "required": [
@@ -829,13 +867,22 @@
         },
         "responses": {
           "200": {
-            "description": "Ranked public matches"
+            "description": "Published People page or ranked AI shortlist"
           },
           "401": {
             "description": "not_linked or grant_revoked"
           },
           "403": {
             "description": "scope_not_granted"
+          },
+          "400": {
+            "description": "invalid_input or cursor_invalid"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "upstream_unavailable"
           }
         }
       }

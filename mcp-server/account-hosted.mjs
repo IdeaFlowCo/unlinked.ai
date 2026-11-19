@@ -1,15 +1,11 @@
 import { searchActivity } from './search-activity.mjs'
 import { INVESTOR_TOOLS } from './investor-tools.mjs'
 import { requestDiagnostic, instrumentMcpTransport } from './request-diagnostics.mjs'
-import { createKnownConnectionsReader, knownConnectionQuery } from '../src/utils/public-people/known-connections.mjs'
-import { createSharedPeopleSearch } from '../src/utils/public-people/shared-search.mjs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { z } from 'zod'
-import { createAccountNetwork } from '../src/utils/private-import/account-network.mjs'
 import { PRIVATE_NOTES_TOOLS, accountGrantTools } from './account-grants.mjs'
 import { PRIVATE_NOTES_DESTRUCTIVE } from './private-notes-tools.mjs'
-import { ACCOUNT_TOOL_DESCRIPTIONS, ACCOUNT_TOOL_SCHEMAS, AccountToolError, MUTATING_TOOLS, networkSearchFailure, createAccountToolService } from './account-tools.mjs'
+import { ACCOUNT_TOOL_DESCRIPTIONS, ACCOUNT_TOOL_SCHEMAS, AccountToolError, MUTATING_TOOLS, createAccountToolService } from './account-tools.mjs'
 
 // Tool failures carry sanitized typed causes (code/message plus an internal
 // error identifier) so a provider or aggregation failure is distinguishable
@@ -37,9 +33,8 @@ export function typedToolFailure(error) {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code, message: text, ...(cause ? { cause } : {}) } }) }] }
 }
 
-// Tools beyond the two launch tools are registered from the shared service so
-// the MCP surface and the HTTP agent API (docs/agent-api.md) stay one contract.
-const SERVICE_TOOLS = ['unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact',
+// MCP and REST run the same account tool handlers.
+const SERVICE_TOOLS = ['unlinked_search_network', 'unlinked_search_everyone', 'unlinked_whoami', 'unlinked_list_people', 'unlinked_list_connections', 'unlinked_get_profile', 'unlinked_ai_search', 'unlinked_list_connection_requests', 'unlinked_list_notifications', 'unlinked_lookup_contact',
   // Registered only for grants whose opt-in scope includes them.
   'unlinked_send_connection_request', 'unlinked_accept_connection_request', 'unlinked_ignore_connection_request', 'unlinked_withdraw_connection_request',
   // Registered only for grants with the private-notes permission (catalog v7).
@@ -73,48 +68,8 @@ export function createAccountHostedHandler({ authenticateGrant, getBackend, comp
       return current
     }
     const server = new McpServer({ name: 'unlinked-account-network', version: '1.0.0' })
-    server.registerTool('unlinked_search_network', {
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-      description: 'Search all currently published LinkedIn observations owned by your authenticated Unlinked account. A name, company or title query returns every literal match instantly (mode text_match, sorted by name, up to 500 with total/truncated); only a query with no literal match is AI-ranked, within 20 s (best matches so far, marked partial, if ranking runs long). Every result retains archive provenance. With degree1/2 (or a second-degree query), read recorded public connection paths from your explicitly linked legacy profile. Unknown identity/relationship matches are not invented; no other owner/private fields are accessed.',
-      inputSchema: { query: z.string().min(1).max(1024), degree: z.union([z.literal(1), z.literal(2)]).optional(), cursor: z.string().max(2048).optional() },
-    }, async ({ query, degree, cursor }) => {
-      const controller = new AbortController()
-      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)])
-      response.once('close', () => { if (!response.writableFinished) controller.abort() })
-      try {
-        await revalidate('unlinked_search_network')
-        return await toolService.withSearchBudget(grant, 'unlinked_search_network', async () => {
-          const connectionQuery = knownConnectionQuery(query, degree)
-          if (cursor !== undefined && !connectionQuery.degree) throw new Error('account_cursor_requires_connection_mode')
-          const result = connectionQuery.degree ? await createKnownConnectionsReader({ owner: grant, getBackend, readPublishedSnapshot })({ ...connectionQuery, cursor, signal }) : await createAccountNetwork({ owner: grant, getBackend, complete }).searchNetwork({ query, signal })
-          await revalidate('unlinked_search_network')
-          requestDiagnostic().result(result)
-          const text = JSON.stringify(result)
-          if (Buffer.byteLength(text) > 1024 * 1024) throw new Error('account_tool_result_limit')
-          return { content: [{ type: 'text', text }] }
-        })
-      } catch (error) { requestDiagnostic().failure(error, signal); return typedToolFailure(networkSearchFailure(error, signal)) }
-    })
-    if (grant.tools.includes('unlinked_search_everyone') && typeof readPublishedSnapshot === 'function') server.registerTool('unlinked_search_everyone', {
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-      description: 'Search the complete published professional People index, including recovered public Unlinked profiles. No personal archive is required. All profiles are considered for bounded index retrieval before AI ranks up to200 professional candidates. Raw archives, contact email/phone and private imports are excluded.',
-      inputSchema: { query: z.string().min(1).max(1024) },
-    }, async ({ query }) => {
-      const controller = new AbortController(), signal = AbortSignal.any([controller.signal, AbortSignal.timeout(40000)])
-      response.once('close', () => { if (!response.writableFinished) controller.abort() })
-      try {
-        const valid = () => revalidate('unlinked_search_everyone')
-        await valid()
-        return await toolService.withSearchBudget(grant, 'unlinked_search_everyone', async () => {
-          const result = await createSharedPeopleSearch({ readPublishedSnapshot, complete })({ query, signal })
-          await valid()
-          requestDiagnostic().result(result)
-          return { content: [{ type: 'text', text: JSON.stringify(result) }] }
-        })
-      } catch (error) { requestDiagnostic().failure(error, signal); return typedToolFailure(error) }
-    })
     for (const name of SERVICE_TOOLS) {
-      if (!grant.tools.includes(name)) continue
+      if (!grant.tools.includes(name) || (name === 'unlinked_search_everyone' && typeof readPublishedSnapshot !== 'function')) continue
       // Clients that ask before acting see which tools change something.
       const annotations = MUTATING_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: PRIVATE_NOTES_DESTRUCTIVE.has(name), idempotentHint: PRIVATE_NOTES_TOOLS.includes(name) || name === 'unlinked_stage_investor_csv', openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
       server.registerTool(name, { description: ACCOUNT_TOOL_DESCRIPTIONS[name], inputSchema: ACCOUNT_TOOL_SCHEMAS[name], annotations }, async input => {

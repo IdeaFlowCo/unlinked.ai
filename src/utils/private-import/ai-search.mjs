@@ -156,11 +156,23 @@ export function parseResponsesResult(result) {
 export function createResponsesCompletion({ apiKey, model = 'gpt-4.1-mini', fetchImpl = fetch }) {
   if (typeof apiKey !== 'string' || !apiKey) throw new Error('private_search_credential_required')
   return async input => {
-    const response = await fetchImpl('https://api.openai.com/v1/responses', { method: 'POST', redirect: 'error',
-      signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000), headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(responsesRequest(input, model)),
-    })
-    if (!response.ok) throw new Error(`private_search_provider_http_${response.status}`)
+    const body = JSON.stringify(responsesRequest(input, model))
+    const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000)
+    let response
+    try {
+      response = await fetchImpl('https://api.openai.com/v1/responses', { method: 'POST', redirect: 'error',
+        signal, headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body })
+    } catch (error) {
+      signal.throwIfAborted()
+      if (error instanceof TypeError) throw new Error('private_search_provider_network')
+      throw error
+    }
+    if (!response.ok) {
+      const retryAfter = response.headers?.get('retry-after')
+      const retryAfterMs = retryAfter ? (/^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now()) : NaN
+      throw Object.assign(new Error(`private_search_provider_http_${response.status}`),
+        Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? { retryAfterMs } : {})
+    }
     return parseResponsesResult(await response.json())
   }
 }

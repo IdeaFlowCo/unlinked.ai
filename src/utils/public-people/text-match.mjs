@@ -54,19 +54,44 @@ export function createQueryMatcher(query, mode = 'best') {
 // Rank rows for a matcher. When any row has every word, only those are kept,
 // unless `keepPartial` asks for the rest after them. Among partial matches a
 // rarer word counts for more, so “game” outranks “partner” when few people have it.
-export function rankMatches(rows, matcher, tokens, { tie = () => 0, keepPartial = false } = {}) {
+function matchRanking(matcher, tie, keepPartial) {
   const scored = [], frequency = matcher.terms.map(() => 0)
-  for (const row of rows) {
-    const result = matcher.test(tokens(row))
-    if (!result.matched) continue
+  const add = (row, tokens) => {
+    const result = matcher.test(tokens)
+    if (!result.matched) return
     result.hits.forEach((found, index) => { if (found) frequency[index]++ })
     scored.push({ row, ...result })
   }
-  const weight = frequency.map(count => count ? Math.log(1 + scored.length / count) : 0)
-  for (const value of scored) value.score = value.hits.reduce((sum, found, index) => sum + (found ? weight[index] : 0), 0)
-  const order = (a, b) => Number(b.all) - Number(a.all) || b.score - a.score || b.inName - a.inName || tie(a.row, b.row)
-  const complete = scored.filter(value => value.all)
-  const kept = complete.length && !keepPartial ? complete : scored
-  kept.sort(order)
-  return { rows: kept.map(value => value.row), match: !scored.length ? 'none' : complete.length ? 'all' : 'some', matched: scored.length, complete: complete.length }
+  const finish = () => {
+    const weight = frequency.map(count => count ? Math.log(1 + scored.length / count) : 0)
+    for (const value of scored) value.score = value.hits.reduce((sum, found, index) => sum + (found ? weight[index] : 0), 0)
+    const order = (a, b) => Number(b.all) - Number(a.all) || b.score - a.score || b.inName - a.inName || tie(a.row, b.row)
+    const complete = scored.filter(value => value.all)
+    const kept = complete.length && !keepPartial ? complete : scored
+    kept.sort(order)
+    return { rows: kept.map(value => value.row), match: !scored.length ? 'none' : complete.length ? 'all' : 'some', matched: scored.length, complete: complete.length }
+  }
+  return { add, finish }
+}
+
+export function rankMatches(rows, matcher, tokens, { tie = () => 0, keepPartial = false } = {}) {
+  const ranking = matchRanking(matcher, tie, keepPartial)
+  for (const row of rows) ranking.add(row, tokens(row))
+  return ranking.finish()
+}
+
+// The AI shortlist scans the raw published snapshot in the HTTP process.
+// Yield between batches so broad queries leave room for other requests and aborts.
+export async function rankMatchesCooperatively(rows, matcher, tokens, { tie, signal }) {
+  const ranking = matchRanking(matcher, tie, true)
+  let count = 0
+  for (const row of rows) {
+    if (++count % 512 === 0) {
+      await new Promise(resolve => setImmediate(resolve))
+      signal?.throwIfAborted()
+    }
+    ranking.add(row, tokens(row))
+  }
+  signal?.throwIfAborted()
+  return ranking.finish()
 }

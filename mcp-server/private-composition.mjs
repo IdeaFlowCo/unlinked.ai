@@ -136,6 +136,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // reach anonymous and member pages within the window plus one build.
   // UNLINKED_PUBLIC_INDEX_FRESH_MS=0 restores next-request rebuilds.
   publicIndexEnv = process.env, verifyCommunityChatActivation }) {
+  const unlimitedSearchOwnerIds = (process.env.UNLINKED_UNLIMITED_SEARCH_OWNER_IDS ?? '').split(',').map(value => value.trim()).filter(Boolean)
   const base = new URL(baseUrl), bolt = new URL(boltUrl)
   const privateBolt = networkMode === 'loopback' ? bolt.hostname === '127.0.0.1' : ((networkMode === 'isolated-container' && bolt.hostname === 'graph') || (networkMode === 'shared-noos' && bolt.hostname === 'noos_neo4j')) && bolt.port === '7687'
   if (!isAbsolute(root) || host !== '127.0.0.1' || base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
@@ -720,7 +721,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       })
       contactEnrichment.start()
     }
-    return { isVerified, accessTier, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
+    return { isVerified, accessTier, unlimitedSearchOwnerIds, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),

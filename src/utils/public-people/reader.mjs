@@ -333,7 +333,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
   function page(rows, cursor, scope, revision) {
     let offset = 0
     if (cursor !== undefined) {
-      if (cursor.revision !== revision) unavailable()
+      if (cursor.revision !== revision) throw new PublicPeopleReaderError(503, 'public_people_unavailable', 'cursor_revision')
       if (cursor.offset > rows.length) invalid()
       offset = cursor.offset
     }
@@ -491,7 +491,7 @@ export function createPublicPeopleReader({ readPublishedSnapshot, viewer = null,
       const narrowed = show ? `:${show}${show === 'known' ? `:${hash([...known].sort().join('\n'))}` : ''}` : ''
       const scope = `connections:${id}${sort === 'name' && !search && !show ? '' : `:${sort}:${search}${narrowed}`}${viewerScope(viewer)}`, decodedCursor = cursorValue(cursor, scope)
       const data = await snapshot(signal)
-      if (decodedCursor && decodedCursor.revision !== data.revision) unavailable()
+      if (decodedCursor && decodedCursor.revision !== data.revision) throw new PublicPeopleReaderError(503, 'public_people_unavailable', 'cursor_revision')
       if (data.remote) return remote('profile', request, data)
       if (data.aliases.has(id)) return { moved: data.aliases.get(id) }
       if (!data.details.has(id)) return null
