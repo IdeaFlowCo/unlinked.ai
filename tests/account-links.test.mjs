@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { createNeo4jAccountLinks, verifiedLinkEmail } from '../mcp-server/account-links.mjs'
 import { createPrivateBrowserHandler } from '../mcp-server/private-browser.mjs'
 import { createNeo4jSessionStore } from '../mcp-server/session-store.mjs'
+import { createContactCards, createMemoryContactCardStore } from '../mcp-server/contact-card.mjs'
 
 const uri = process.env.UNLINKED_TEST_NEO4J_URI
 const driverPath = process.env.UNLINKED_TEST_NEO4J_DRIVER
@@ -66,6 +67,11 @@ test('real Neo4j and canonical browser: link, scope access, unlink, session fenc
       return { issuer, subject: account.subject, displayName: 'Same Name', verifiedEmail: account.email, providerEmailVerified: !unverified }
     },
   }
+  const contactCards = createContactCards({ store: createMemoryContactCardStore() })
+  const cardToken = (await contactCards.save(accounts.other, { shareCard: true }, { name: 'Synthetic contact' })).token
+  const cardMessage = '/c/' + cardToken + '/message'
+  const messagingReads = [], messagingRequests = []
+  const messagingCounts = () => [messagingReads.length, messagingRequests.length]
   const options = {
     login, resolveOwner, sessionStore, signup: async () => { assert.fail('linking must not provision accounts') },
     issueAccountGrant: async () => assert.fail('linked login must not create a key'),
@@ -78,6 +84,18 @@ test('real Neo4j and canonical browser: link, scope access, unlink, session fenc
       return { adapter: {}, readResource: async () => null, listImportIds: async () => [], listImportJobIds: async () => [], listAccountGrantIds: async () => ['sensitive-key'],
         readLegacyFiles: async () => ({ objects: [{ objectId: 'file-id', filename: `${account.name}-import.zip`, bytes: 12, accepted: 1 }] }) }
     },
+    contactCards,
+    resolveCardMessagingRecipient: async () => ({ id: 'synthetic-peer' }),
+    createMessagingSession: async session => {
+      messagingReads.push(session.owner.ownerId)
+      return { token: 'synthetic-messaging-token', user: { userId: 'synthetic-user' } }
+    },
+    messagingOptions: { fetchImpl: async url => {
+      messagingRequests.push(new URL(url).pathname)
+      if (url.endsWith('/unread-total')) return Response.json({ unreadTotal: 17 })
+      assert.match(url, /conversations$/)
+      return Response.json({ id: 'synthetic-conversation', type: 'direct' })
+    } },
     privateContext: { search: async owner => ({ state: 'ready', recordsFrom: owner.ownerId }) },
     connectionPrivacy: { get: async () => null, list: async () => [], removeOwner: async () => {}, set: async (owner, value) => query(`MATCH (n:UnlinkedConnectionPrivacy {ownerId:$ownerId,userId:$userId}) SET n.audience=$audience`, { ...owner, audience: value.audience }) },
   }
@@ -121,7 +139,11 @@ test('real Neo4j and canonical browser: link, scope access, unlink, session fenc
   assert.match(await settings(other), /other-import\.zip/)
   assert.doesNotMatch(await settings(other), /primary-import\.zip/)
   assert.match(await settings(primary), /original-login-key/)
+  // Prime ordinary-login badge and credential caches for both record owners.
+  for (const session of [primary, secondary]) assert.equal((await (await fetchRoute('/api/nav-alerts', session)).json()).messages, 17)
   const csrf = formValue(await settings(primary), 'csrf')
+  const direct = await fetchRoute(cardMessage, primary, { csrf })
+  assert.equal(direct.headers.get('location'), '/messages/c/synthetic-conversation')
   assert.equal((await fetchRoute(prefix, primary, { action: 'self', csrf }, 'https://other.invalid')).status, 403)
   assert.equal((await fetchRoute(prefix, primary, { action: 'self', csrf: 'wrong' })).status, 409)
   assert.equal((await fetchRoute(prefix, primary, { action: 'admin', primary: ids[0], secondary: ids[1], csrf })).status, 409)
@@ -151,7 +173,21 @@ test('real Neo4j and canonical browser: link, scope access, unlink, session fenc
   assert.equal(await signIn('secondary:unverified', 409), undefined)
 
   const viaSecondary = await signIn('secondary')
+  const beforeAlias = messagingCounts()
   const linkedSettings = await settings(viaSecondary)
+  assert.equal((await (await fetchRoute('/api/nav-alerts', viaSecondary)).json()).messages, undefined)
+  assert.equal((await fetchRoute(cardMessage, viaSecondary, { csrf: formValue(linkedSettings, 'csrf') })).status, 403)
+  assert.deepEqual(messagingCounts(), beforeAlias)
+
+  const viaPrimary = await signIn('primary')
+  const primaryScope = await fetchRoute(prefix + '/scope', viaPrimary, { owner: accounts.secondary.ownerId, csrf: formValue(await settings(viaPrimary), 'csrf') })
+  assert.equal(primaryScope.status, 303)
+  const primaryViewingSecondary = cookie(primaryScope, 'session'), beforePrimaryScope = messagingCounts()
+  const primaryScopeSettings = await settings(primaryViewingSecondary)
+  assert.match(primaryScopeSettings, /secondary-import\.zip/)
+  assert.equal((await (await fetchRoute('/api/nav-alerts', primaryViewingSecondary)).json()).messages, undefined)
+  assert.equal((await fetchRoute(cardMessage, primaryViewingSecondary, { csrf: formValue(primaryScopeSettings, 'csrf') })).status, 403)
+  assert.deepEqual(messagingCounts(), beforePrimaryScope)
   assert.match(linkedSettings, /Primary/); assert.match(linkedSettings, /secondary@example.invalid/)
   assert.match(linkedSettings, /primary-import\.zip/); assert.doesNotMatch(linkedSettings, /secondary-import\.zip|original-login-key/)
   assert.equal((await fetchRoute('/settings/api-keys?key=sensitive-key', viaSecondary)).status, 403)
@@ -165,7 +201,10 @@ test('real Neo4j and canonical browser: link, scope access, unlink, session fenc
   // Restart the browser handler and pause new link changes. Existing routing
   // and record access continue from Neo4j alone.
   handler = createPrivateBrowserHandler({ ...options, baseUrl, accountLinks: makeLinks(false) })
+  const beforeScope = messagingCounts()
   const scopedSettings = await settings(scoped)
+  assert.equal((await (await fetchRoute('/api/nav-alerts', scoped)).json()).messages, undefined)
+  assert.deepEqual(messagingCounts(), beforeScope)
   assert.match(scopedSettings, /Viewing records from secondary@example.invalid|Viewing records from <[^>]+>secondary@example.invalid/)
   assert.match(scopedSettings, /secondary-import\.zip/); assert.doesNotMatch(scopedSettings, /primary-import\.zip|original-login-key/)
   assert.equal((await (await fetchRoute('/api/private-context/search?q=note', scoped)).json()).recordsFrom, accounts.secondary.ownerId)

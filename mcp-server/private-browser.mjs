@@ -272,7 +272,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       }
     }
     return false
-  } } : {}), ...messagingOptions }) : null
+  } } : {}), ...messagingOptions, allowSession: session => !crossedAccount(session) }) : null
   const communityBrowser = createCommunityIntakeBrowser({ client: communityIntake, groups: collectiveGroups, messagingAvailable: Boolean(messaging), body })
   const groupBrowser = collectiveGroups && createGroupBrowser({
     privateGroupBrowser: createPrivateGroupBrowser({ pilot: privateGroupPilot, body }), messaging, groups: collectiveGroups, welcome: Boolean(communityIntake), privateLists, savedSearchLists, accountForProfile, ownProfileId, handleTarget, body,
@@ -799,10 +799,11 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   // Header counts for a signed-in session. Messages is OpenChat's unread total,
   // read through the member's own messaging credential (messaging-proxy.mjs).
   const readAlerts = async (viewer, fallback = 0) => {
-    if (!memberConnections && !notifications && !messaging) return null
+    const canReadMessages = messaging && !crossedAccount(viewer)
+    if (!memberConnections && !notifications && !canReadMessages) return null
     const owner = viewer.owner
-    const [network, unseen, messages] = await Promise.all([memberConnections ? bounded(() => memberConnections.pendingCount(owner), fallback) : undefined, notifications ? bounded(() => notifications.counts(owner).then(value => value.unseen), fallback) : undefined, messaging ? bounded(() => messaging.unreadTotal(viewer).then(value => value ?? fallback), fallback) : undefined])
-    return { ...(memberConnections ? { network } : {}), ...(notifications ? { notifications: unseen } : {}), ...(messaging ? { messages } : {}) }
+    const [network, unseen, messages] = await Promise.all([memberConnections ? bounded(() => memberConnections.pendingCount(owner), fallback) : undefined, notifications ? bounded(() => notifications.counts(owner).then(value => value.unseen), fallback) : undefined, canReadMessages ? bounded(() => messaging.unreadTotal(viewer).then(value => value ?? fallback), fallback) : undefined])
+    return { ...(memberConnections ? { network } : {}), ...(notifications ? { notifications: unseen } : {}), ...(canReadMessages ? { messages } : {}) }
   }
   // The badge read (including an upstream OpenChat unread total) starts before
   // routing and is awaited only at render time, overlapped with the route
@@ -824,7 +825,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     const alerts = responseAlerts.get(response) ?? (readers.has(response) ? {
       ...(memberConnections ? { network: 0 } : {}),
       ...(notifications ? { notifications: 0 } : {}),
-      ...(messaging ? { messages: 0 } : {}),
+      ...(messaging && !crossedAccount(readers.get(response)) ? { messages: 0 } : {}),
     } : undefined)
     const scoped = readers.get(response)
     if (crossedAccount(scoped)) {
@@ -1203,7 +1204,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       if (!current || current.ownerId !== blocked.ownerId || current.userId !== blocked.userId) throw new BlockError('block_target_invalid')
     }
     // A member's OpenChat user, through the same confidential path as Message.
-    if (!openChatUserId && profileId && messaging) {
+    if (!openChatUserId && profileId && messaging && !crossedAccount(session)) {
       const context = unlinkedProfileContext(profileId)
       if (context) openChatUserId = (await bounded(() => messaging.recipientFor(session, context), null))?.id ?? null
     }
@@ -1217,7 +1218,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         else if (relation?.state === 'connected' && relation.requestId) await connectionActions.remove(session.owner, relation.requestId)
       } catch { /* The block stands; the connection can still be removed by hand. */ }
     }
-    const openChat = openChatUserId && messaging ? await messaging.blockUser(session, openChatUserId).then(() => true, () => false) : false
+    const openChat = openChatUserId && messaging && !crossedAccount(session) ? await messaging.blockUser(session, openChatUserId).then(() => true, () => false) : false
     messaging?.invalidateBlocks(session)
     knownCache.delete(session.owner.ownerId)
     await recordAudit({ event: 'member_blocked', ownerHash: ownerHash(session.owner), openChat, account: Boolean(blocked) })
@@ -1481,6 +1482,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       }
       if (crossedAccount(viewer) && (isGroupPath(url.pathname) || isCommunityPath(url.pathname) || url.pathname === '/messages' ||
           url.pathname.startsWith('/messages/') || url.pathname.startsWith('/oauth/') ||
+          /^\/c\/[0-9A-Za-z]{24}\/message$/.test(url.pathname) ||
           ['/settings/api-keys', '/setup-account', '/revoke-account', '/setup', '/find-me', '/legacy-account', '/delete-account'].includes(url.pathname))) {
         if (url.pathname.startsWith('/messages/api/')) { response.writeHead(403, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'original_login_required' })); return }
         render(response, 'Use the original login', '<p>This action needs the original sign-in for these records. Manage your linked logins in Settings.</p><a href="/settings#login-identities">Open Settings</a>', 403)
@@ -1680,7 +1682,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // Right after joining or adding from a card: the new connection's own card to share back.
         const added = url.searchParams.get('added') === '1' && relation?.state === 'connected'
         const own = added ? await ensureOwnCard(viewer.owner, { name: viewer.displayName }) : null
-        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, canMessage: Boolean(viewer && target && messaging && resolveCardMessagingRecipient), messageError: url.searchParams.get('message'), relation: relation?.state, addError: url.searchParams.get('add') === 'failed', added, own, ownerCard: self ? ownContactCard({ token: contactLink[1], card }) : null }), null, '', card ? 200 : 404); return
+        journey(response, renderContactCard({ ...chrome, card, token: contactLink[1], canAdd: canAddCard, canMessage: Boolean(viewer && !crossedAccount(viewer) && target && messaging && resolveCardMessagingRecipient), messageError: url.searchParams.get('message'), relation: relation?.state, addError: url.searchParams.get('add') === 'failed', added, own, ownerCard: self ? ownContactCard({ token: contactLink[1], card }) : null }), null, '', card ? 200 : 404); return
       }
       // Native header/directory searches accept LinkedIn URLs as well as names.
       // Navigating never spends a provider request; the lookup form does that.
@@ -2205,7 +2207,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const input = new URLSearchParams((await body(request, 2048)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('id').length !== 1 || input.getAll('next').length > 1 || [...input.keys()].some(key => !['csrf', 'id', 'next'].includes(key))) throw new Error('private_browser_csrf')
         const removed = await memberBlocks.unblock(session.owner, input.get('id'))
-        if (removed?.openChatUserId && messaging) await messaging.blockUser(session, removed.openChatUserId, false).catch(() => {})
+        if (removed?.openChatUserId && messaging && !crossedAccount(session)) await messaging.blockUser(session, removed.openChatUserId, false).catch(() => {})
         messaging?.invalidateBlocks(session)
         const next = input.get('next')
         redirect(response, next === '/settings#blocked' ? '/settings?blocks=unblocked#blocked' : typeof next === 'string' && /^\/people\/[A-Za-z0-9._~%-]{1,480}$/.test(next) ? `${next}?connect=unblocked` : '/settings#blocked'); return
