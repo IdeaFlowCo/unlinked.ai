@@ -4,7 +4,7 @@ import { analyticsTag, queueAnalyticsEvent, takeAnalyticsEvents } from '../mcp-s
 
 test('signed-out pages carry only the nonce-bound analytics tag', () => {
   const tag = analyticsTag('n0nce')
-  assert.equal(tag, '<script nonce="n0nce" defer src="https://analytics.ideaflow.app/ideaflow.js" data-product="unlinked" data-respect-dnt="true" data-privacy="strict"></script>')
+  assert.equal(tag, '<script nonce="n0nce" async src="https://analytics.ideaflow.app/ideaflow.js" data-product="unlinked" data-respect-dnt="true" data-privacy="strict"></script>')
 })
 
 test('signed-in analytics never render account identity or queued event data', () => {
