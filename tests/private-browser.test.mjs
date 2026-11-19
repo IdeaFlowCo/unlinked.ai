@@ -46,13 +46,16 @@ test('OIDC code flow verifies signed ID token, issuer/audience/nonce/state/PKCE 
     }
     else await assert.rejects(login.finish(callback, start.transaction))
   }
-  // The account chooser and the automatic sign-in's silent `none` are the only
-  // other requests; nothing else reaches the provider.
+  // Account selection, automatic sign-in and linking use distinct prompts.
   assert.equal(new URL((await login.begin({ prompt: 'select_account' })).location).searchParams.get('prompt'), 'select_account')
   const silent = new URL((await login.begin({ prompt: 'none' })).location)
   assert.equal(silent.searchParams.get('prompt'), 'none'); assert.equal(silent.searchParams.get('code_challenge_method'), 'S256')
   assert.ok(silent.searchParams.get('state')); assert.ok(silent.searchParams.get('nonce'))
-  for (const prompt of ['login', 'consent', 'none select_account', 'select_account login', '']) await assert.rejects(login.begin({ prompt }), /unsupported_ideaflow_prompt/)
+  const fresh = await login.begin({ prompt: 'login' })
+  assert.equal(new URL(fresh.location).searchParams.get('prompt'), 'login')
+  nonce = fresh.transaction.nonce; override = { email_verified: true }
+  assert.equal((await login.finish(new URL(`${callbackUrl}?code=code&state=${fresh.transaction.state}`), fresh.transaction)).providerEmailVerified, true)
+  for (const prompt of ['consent', 'none select_account', 'select_account login', '']) await assert.rejects(login.begin({ prompt }), /unsupported_ideaflow_prompt/)
   const missingFlag = await login.begin(); nonce = missingFlag.transaction.nonce; override = { email_verified: undefined }
   const authenticated = await login.finish(new URL(`${callbackUrl}?code=code&state=${missingFlag.transaction.state}`), missingFlag.transaction)
   assert.equal(authenticated.verifiedEmail, 'authenticated@example.invalid')

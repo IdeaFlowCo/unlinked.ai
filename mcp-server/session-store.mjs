@@ -30,7 +30,7 @@ export function createMemorySessionStore() {
   }
 }
 
-const RECORD_KEYS = ['ownerId', 'userId', 'subject', 'accountLabel', 'displayName', 'csrf', 'expiresAt', 'createdAt']
+const RECORD_KEYS = ['ownerId', 'userId', 'subject', 'accountLabel', 'displayName', 'csrf', 'expiresAt', 'createdAt', 'linkEpoch', 'linkVerified', 'dataOwnerId']
 
 const fromNode = properties => {
   const value = {}

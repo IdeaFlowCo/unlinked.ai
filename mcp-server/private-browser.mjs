@@ -1,3 +1,5 @@
+import { sameAccount, verifiedLinkEmail } from './account-links.mjs'
+import { createAccountLinkFlow, isAccountLinkPath, isAccountLinkMutation, linkSettings } from './account-link-flow.mjs'
 import { createPrivateGroupBrowser, isPrivateGroupPilotPath } from './private-group-browser.mjs'
 import { isCommunityPath } from './community-intake.mjs'
 import { renderGroupsInCommon } from './group-member-views.mjs'
@@ -134,12 +136,12 @@ export async function createIdeaflowLogin({ issuer, clientId, clientSecret, call
   return {
     authorizationOrigin: server.origin,
     // Silent SSO by default: with an Ideaflow ID session the provider returns a
-    // code without a page. The only other request is the provider's account
-    // chooser (`select_account`), used after an explicit Unlinked sign-out,
-    // for Switch account and for binding an invitation to an account. The
-    // automatic sign-in hop asks for `none`: no provider page at all.
+    // code without a page. The provider's account
+    // chooser (`select_account`) follows an explicit sign-out, Switch account
+    // or an invitation. Automatic sign-in uses `none`; account-link changes
+    // use `login` so the provider demands fresh authentication.
     async begin({ prompt } = {}) {
-      if (prompt !== undefined && prompt !== SELECT_ACCOUNT && prompt !== PROMPT_NONE) throw new Error('unsupported_ideaflow_prompt')
+      if (prompt !== undefined && prompt !== SELECT_ACCOUNT && prompt !== PROMPT_NONE && prompt !== 'login') throw new Error('unsupported_ideaflow_prompt')
       const verifier = oidc.randomPKCECodeVerifier(), state = oidc.randomState(), nonce = oidc.randomNonce()
       const location = oidc.buildAuthorizationUrl(config, { redirect_uri: callback.href, response_type: 'code', scope: 'openid profile email',
         code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: 'S256', state, nonce, ...(prompt ? { prompt } : {}) })
@@ -196,9 +198,10 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, privateGroupPilot, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, privateGroupPilot, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, accountLinks, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
+  if (accountLinks && !sessionStore) throw new Error('account_links_require_durable_session_store')
   if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !login?.begin || !login?.finish || typeof resolveOwner !== 'function' || typeof getBackend !== 'function') throw new Error('explicit_private_browser_configuration_required')
   if (!['synthetic', 'private_live'].includes(dataMode)) throw new Error('explicit_private_data_mode_required')
   if (claimInvitation !== undefined && typeof claimInvitation !== 'function') throw new Error('explicit_private_invitation_configuration_required')
@@ -688,15 +691,76 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   function purge(map) { for (const [id, value] of map) if (value.expiresAt <= Date.now()) map.delete(id) }
   const requestSessions = new WeakMap(), deletionInputs = new WeakMap()
   const sessionFor = request => requestSessions.get(request)
-  const authorizeDownloadSession = async (request,session) => {
-    const sid=cookies(request)['__Host-ul-session'],now=Date.now()
-    const denied=()=>Object.assign(Error('Sign in again to download.'),{code:'grant_revoked'})
-    if(!sid||sessions.get(sid)!==session||session.expiresAt<=now)throw denied()
-    if(sessionStore){const current=await sessionStore.get(createHash('sha256').update(sid).digest('hex'),now);if(!current||current.ownerId!==session.owner.ownerId||current.userId!==session.owner.userId||current.csrf!==session.csrf)throw denied()}
+  const sessionHash = sid => createHash('sha256').update(sid).digest('hex')
+  const readSessionRecord = (sid, now = Date.now()) => sessionStore.get(sessionHash(sid), now)
+  const accountOf = session => session.primary ?? session.owner
+  const crossedAccount = session => Boolean(session?.primary && (session.linkedLogin || !sameAccount(session.primary, session.owner)))
+  const readLinkSession = async record => {
+    const canonical = { ownerId: record.ownerId, userId: record.userId }
+    if (!accountLinks) return { owner: canonical }
+    const route = await accountLinks.routeSubject(record.subject)
+    if (!route || !sameAccount(route.primary, canonical) || route.primary.epoch !== (record.linkEpoch ?? null)) return null
+    const linkedLogin = !sameAccount(route.source, route.primary)
+    if (linkedLogin && !record.linkVerified) return null
+    let owner = canonical, scopeLabel = null
+    if (record.dataOwnerId) {
+      if (!record.linkVerified) return null
+      const scope = await accountLinks.account(record.dataOwnerId)
+      if (!scope || scope.primaryOwnerId !== canonical.ownerId) return null
+      owner = { ownerId: scope.ownerId, userId: scope.userId }
+      scopeLabel = scope.email ?? 'Linked records'
+    }
+    return { owner, primary: canonical, scopeLabel, linkedLogin, linkEpoch: route.primary.epoch, linkVerified: record.linkVerified === true }
+  }
+  const liveBrowserSession = async (sid, session) => {
+    if (!sid || sessions.get(sid) !== session || session.expiresAt <= Date.now()) return false
+    if (!sessionStore) return true
+    const record = await readSessionRecord(sid)
+    return Boolean(record && record.csrf === session.csrf && sameAccount(record, accountOf(session)) &&
+      (record.dataOwnerId ?? null) === (sameAccount(accountOf(session), session.owner) ? null : session.owner.ownerId) &&
+      (!accountLinks || await readLinkSession(record)))
+  }
+  const authorizeDownloadSession = async (request, session) => {
+    if (!await liveBrowserSession(cookies(request)['__Host-ul-session'], session)) {
+      throw Object.assign(Error('Sign in again to download.'), { code: 'grant_revoked' })
+    }
     await getBackend(session.owner)
   }
 
   const redirect = (response, location) => { response.writeHead(303, { Location: location }); response.end() }
+  const linkFlow = accountLinks && createAccountLinkFlow({
+    links: accountLinks, login, pending, token, cookie, cookies, body, render, redirect, html,
+    coordinate: coordination.run,
+    liveSession: liveBrowserSession,
+    onChange({ primary, secondary }) {
+      const changedOwners = new Set([primary.ownerId, secondary.ownerId])
+      for (const ownerId of changedOwners) coordination.deleted(ownerId)
+      for (const map of coordination.sessionMaps) for (const [id, session] of map) {
+        if (changedOwners.has(accountOf(session).ownerId)) map.delete(id)
+      }
+    },
+    async switchScope(request, response, session, ownerId) {
+      if (!session.linkVerified) throw new Error('account_link_not_allowed')
+      const primary = session.primary
+      const sid = cookies(request)['__Host-ul-session']
+      const keys = [primary.ownerId, session.owner.ownerId, ownerId].map(id => 'owner:' + id)
+      if (!/^[a-f0-9-]{36}$/i.test(ownerId)) throw new Error('account_link_not_allowed')
+      await coordination.run(keys, async () => {
+        if (!await liveBrowserSession(sid, session)) throw new Error('account_link_not_allowed')
+        const record = await readSessionRecord(sid)
+        const csrf = token(), newId = token()
+        const next = { ...record, dataOwnerId: ownerId === primary.ownerId ? null : ownerId, csrf }
+        const context = await readLinkSession(next)
+        if (!context) throw new Error('account_link_not_allowed')
+        await sessionStore.put(sessionHash(newId), next)
+        await sessionStore.delete(sessionHash(sid))
+        sessions.delete(sid)
+        response.setHeader('Set-Cookie', cookie('__Host-ul-session', newId, Math.max(1, Math.ceil((session.expiresAt - Date.now()) / 1000))))
+        response.setHeader('Clear-Site-Data', '"cache"')
+        redirect(response, linkSettings)
+      }, { exclusive: true })
+    },
+  })
   const normalizedName = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : ''
   const hidden = (session, id) => `<input type="hidden" name="csrf" value="${html(session.csrf)}"><input type="hidden" name="importId" value="${html(id)}">`
   const recordAudit = async event => { try { await audit({ ...event, at: new Date().toISOString(), ...(event.event === 'own_profile_timing' ? {} : { origin: base.origin }) }) } catch { /* Audit availability never changes identity authority. */ } }
@@ -762,6 +826,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       ...(notifications ? { notifications: 0 } : {}),
       ...(messaging ? { messages: 0 } : {}),
     } : undefined)
+    const scoped = readers.get(response)
+    if (crossedAccount(scoped)) {
+      response.setHeader('Cache-Control', 'no-store, private')
+      script += ';window.addEventListener("pageshow",event=>{if(event.persisted) location.reload()})'
+    }
+    if (scoped?.scopeLabel) {
+      view = { ...view, content: view.content.replace('<main class="journey">', `<main class="journey"><div class="import-status"><strong>Viewing records from ${html(scoped.scopeLabel)}</strong> <a href="${linkSettings}">Change records</a></div>`) }
+    }
     view = { ...view, content: fillNavAlerts(iosResponses.has(response) ? iosAppView(view.content) : view.content, alerts, view.active ?? null) }
     // Messages page or dock: the static client plus its non-executable configuration.
     const dockOn = responseDock.has(response) && readers.has(response) && view.content.includes('</main>')
@@ -791,12 +863,43 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     response.end(`<!doctype html><html lang="en"><!--email_off--><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#4349c4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>${html(view.title)} · Unlinked</title>${previewMeta(view.preview, base.origin)}<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/app-icon-192.png"><link rel="icon" href="/app-icon-192.png" type="image/png"><link rel="stylesheet" href="${ONBOARDING_FONT_HREF}">${dataMode === 'synthetic' ? '<p>Synthetic rehearsal only. Do not upload a personal archive.</p>' : ''}${fillMeHeadline(view.content, readers.get(response)?.headline)}<script nonce="${nonce}">${!view.privateGroup && recordBrowserPerformance && !iosResponses.has(response) ? browserPerformanceScript(status) : ''}${script}</script>${readers.has(response) ? `<script nonce="${nonce}" src="${CONNECTION_FEEDBACK_SRC}" defer></script>` : ''}${camera ? `<script nonce="${nonce}" src="${JSQR_SRC}" defer></script><script nonce="${nonce}" type="module">${MEET_SCRIPT}${SCAN_TABS_SCRIPT}</script>` : ''}${messagesClient ? `${messagesConfig({ ...messagesClient, reactions: REACTION_EMOJI })}<script nonce="${nonce}" src="/public-assets/messages-client.js?v=${MESSAGES_CLIENT_VERSION}"></script>` : ''}${view.privateGroup ? '' : iosResponses.has(response) ? feedbackWidgetTag(nonce, { iosApp: iosResponses.get(response) || 'unknown' }) : feedbackWidgetTag(nonce) + analyticsTag(nonce, { subject: readers.get(response)?.subject, events: takeAnalyticsEvents(readers.get(response)) })}<!--/email_off--></html>`)
   }
   const displayIdentity = identity => identity.verifiedEmail ? html(identity.verifiedEmail) : `${html(identity.issuer)} / ${html(identity.subject)}`
+  async function issueBrowserSession(response, { owner, identity, accountLabel, displayName, linkEpoch, linkedLogin = false,
+    legacyProof = null, legacyCandidate = null, selfClaim = null, newOwner = false }) {
+    purge(sessions)
+    if (sessions.size >= SESSION_CAPACITY) throw new Error('private_login_capacity')
+    const sessionId = token(), csrf = token(), createdAt = Date.now(), expiresAt = createdAt + SESSION_SECONDS * 1000
+    const linkVerified = Boolean(verifiedLinkEmail(identity))
+    const linkRecord = accountLinks ? { linkEpoch, linkVerified } : {}
+    if (sessionStore) await sessionStore.put(sessionHash(sessionId), { ownerId: owner.ownerId, userId: owner.userId, subject: identity.subject,
+      accountLabel, displayName, csrf, expiresAt, createdAt, ...linkRecord })
+    const scope = Object.freeze({ ownerId: owner.ownerId, userId: owner.userId })
+    sessions.set(sessionId, { legacyProof, legacyCandidate, selfClaim, owner: scope, subject: identity.subject, accountLabel, displayName, csrf,
+      expiresAt, analyticsEvents: newOwner ? ['signup'] : [], feedbackIdToken: linkedLogin ? null : identity.feedbackIdToken ?? null, feedbackToken: null,
+      ...(accountLinks ? { primary: scope, linkEpoch, linkVerified, linkedLogin } : {}) })
+    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(FLYER_RETURN_COOKIE, '', 0),
+      cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
+    await recordAudit({ event: 'auth_session_created', ownerHash: sessionHash(owner.ownerId) })
+  }
   // `silentBack` (automatic sign-in) returns to the original page without
   // publishing a profile or opening an onboarding/confirmation step. A verified
   // Ideaflow identity receives its private account, just as in OpenChat.
   async function establishSession(response, identity, invitationToken = null, next = null, silentBack = null, cardToken = null, connectProfileId = null) {
     let claimed
     const started = coordination.checkpoint()
+    const initialLink = accountLinks ? await accountLinks.route(identity) : null
+    if (initialLink && !sameAccount(initialLink.source, initialLink.primary)) {
+      if (!verifiedLinkEmail(identity) || invitationToken) throw new Error('account_link_not_allowed')
+      const { source, primary } = initialLink
+      return coordination.run([source, primary].map(value => 'owner:' + value.ownerId), async () => {
+        const current = await accountLinks.route(identity)
+        if (!sameAccount(source, current?.source) || !sameAccount(primary, current?.primary) || current.primary.epoch !== primary.epoch ||
+            coordination.version(primary.ownerId) > started || coordination.version(source.ownerId) > started) throw new Error('account_link_not_allowed')
+        await issueBrowserSession(response, { owner: primary, identity, linkEpoch: primary.epoch, linkedLogin: true,
+          accountLabel: primary.email ?? 'Primary account', displayName: primary.email ?? 'Primary account' })
+        redirect(response, silentBack ?? returnPath(next) ?? '/')
+        return 'signed_in'
+      })
+    }
     let owner = await resolveOwner(identity)
     const releaseOwner = owner ? await coordination.acquire('owner:' + owner.ownerId, false) : () => {}
     try {
@@ -828,9 +931,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     if (coordination.version(owner.ownerId) > started) throw new Error('private_owner_recovery_required')
     const currentOwner = await resolveOwner(identity)
     if (!currentOwner || currentOwner.ownerId !== owner.ownerId || currentOwner.userId !== owner.userId) throw new Error('private_owner_recovery_required')
-    purge(sessions)
-    if (sessions.size >= SESSION_CAPACITY) throw new Error('private_login_capacity')
-    const sessionId = token()
+    const route = accountLinks ? await accountLinks.route(identity) : null
+    if (accountLinks && (!sameAccount(route?.primary, owner) || !sameAccount(route.source, owner))) throw new Error('account_link_not_allowed')
     const legacyProof = identity.verifiedEmail && identity.emailEvidence === 'signed-ideaflow-beta-v1' ? Object.freeze({ issuer: identity.issuer, subject: identity.subject, clientId: identity.clientId, verifiedAt: identity.verifiedAt, email: identity.verifiedEmail, emailEvidence: identity.emailEvidence, ownerId: owner.ownerId, userId: owner.userId }) : null
     const legacyCandidate = legacyProof && legacyAccount ? await legacyAccount.candidate(legacyProof) : null
     if (silentBack !== null && legacyCandidate && !legacyCandidate.linked) return 'needs_confirmation'
@@ -841,12 +943,9 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     // Keep the sign-in address private for member email and invite Reply-To.
     if (memberEmail?.sending && (identity.verifiedEmail || newOwner)) await memberEmail.rememberAddress(owner, { address: identity.verifiedEmail, verified: identity.providerEmailVerified === true, newAccount: newOwner && silentBack === null }).catch(() => {})
     const displayName = identity.displayName ?? identity.verifiedEmail ?? identity.subject
-    const csrf = token()
-    const expiresAt = Date.now() + SESSION_SECONDS * 1000
-    if (sessionStore) await sessionStore.put(createHash('sha256').update(sessionId).digest('hex'), { ownerId: owner.ownerId, userId: owner.userId, subject: identity.subject, accountLabel, displayName, csrf, expiresAt, createdAt: Date.now() })
-    sessions.set(sessionId, { legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, owner: Object.freeze({ ownerId: owner.ownerId, userId: owner.userId }), subject: identity.subject, accountLabel, displayName, csrf, expiresAt, analyticsEvents: newOwner ? ['signup'] : [], feedbackIdToken: identity.feedbackIdToken ?? null, feedbackToken: null })
-    response.setHeader('Set-Cookie', [cookie('__Host-ul-login', '', 0), cookie('__Host-ul-confirm', '', 0), cookie(FLYER_RETURN_COOKIE, '', 0), cookie(SIGNED_OUT_COOKIE, '', 0), cookie('__Host-ul-session', sessionId, SESSION_SECONDS)])
-    await recordAudit({ event: 'auth_session_created', ownerHash: createHash('sha256').update(owner.ownerId).digest('hex') })
+    if (accountLinks) await accountLinks.recordVerifiedLogin(owner, identity).catch(() => {})
+    await issueBrowserSession(response, { owner, identity, accountLabel, displayName, linkEpoch: route?.primary.epoch,
+      legacyProof, legacyCandidate: legacyCandidate?.linked ? null : legacyCandidate, selfClaim, newOwner })
     if (cardToken) {
       let added = false
       try { await addCard(owner, cardToken, displayName); added = true } catch { /* Keep the new session and offer retry on the card. */ }
@@ -1256,15 +1355,15 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       const sid = cookies(request)['__Host-ul-session']
       let current = sid ? sessions.get(sid) : null
       if (sessionStore && sid) {
-        const hash = createHash('sha256').update(sid).digest('hex')
-        let record
+        let record, context
         try {
-          record = await sessionStore.get(hash, Date.now())
+          record = await readSessionRecord(sid)
+          if (record) context = await readLinkSession(record)
         } catch { response.writeHead(503, { 'Retry-After': '10' }).end(); return }
-        if (!record) { sessions.delete(sid); current = null }
-        else if (!current || current.csrf !== record.csrf || current.owner.ownerId !== record.ownerId || current.owner.userId !== record.userId) {
-          current = { legacyProof: null, legacyCandidate: null, selfClaim: null,
-            owner: Object.freeze({ ownerId: record.ownerId, userId: record.userId }), subject: record.subject ?? null,
+        if (!record || !context) { sessions.delete(sid); current = null }
+        else if (!current || current.csrf !== record.csrf || !sameAccount(current.owner, context.owner)) {
+          current = { legacyProof: null, legacyCandidate: null, selfClaim: null, ...context,
+            owner: Object.freeze(context.owner), subject: record.subject ?? null,
             accountLabel: record.accountLabel, displayName: record.displayName, csrf: record.csrf, expiresAt: record.expiresAt }
           sessions.set(sid, current)
         }
@@ -1373,6 +1472,20 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
 
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
+      if (crossedAccount(viewer)) response.setHeader('Cache-Control', 'no-store, private')
+      if (linkFlow && isAccountLinkPath(url.pathname)) {
+        response.setHeader('Cache-Control', 'no-store, private')
+        if (authorizationOrigin) response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${authorizationOrigin}; base-uri 'none'; frame-ancestors 'none'`)
+        await linkFlow.handle(request, response, url.pathname, viewer)
+        return
+      }
+      if (crossedAccount(viewer) && (isGroupPath(url.pathname) || isCommunityPath(url.pathname) || url.pathname === '/messages' ||
+          url.pathname.startsWith('/messages/') || url.pathname.startsWith('/oauth/') ||
+          ['/settings/api-keys', '/setup-account', '/revoke-account', '/setup', '/find-me', '/legacy-account', '/delete-account'].includes(url.pathname))) {
+        if (url.pathname.startsWith('/messages/api/')) { response.writeHead(403, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'original_login_required' })); return }
+        render(response, 'Use the original login', '<p>This action needs the original sign-in for these records. Manage your linked logins in Settings.</p><a href="/settings#login-identities">Open Settings</a>', 403)
+        return
+      }
       // WIT feedback: the signed-in member's Ideaflow ID token, kept only in
       // this process's memory, becomes a 15-minute create-issue-only token.
       // Signed out, restored-after-restart or expired sessions get 204 and the
@@ -1411,7 +1524,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const begun = performance.now()
         responseAlertsPending.set(response, readAlerts(viewer).then(alerts => { mark(response, 'alerts', begun); if (alerts && !responseAlerts.has(response)) responseAlerts.set(response, alerts); return alerts }, () => null))
         // Other signed-in pages carry the Messages dock (shown at ≥ 1024 px).
-        if (messaging && url.pathname !== '/messages' && !url.pathname.startsWith('/messages/')) responseDock.add(response)
+        if (messaging && !crossedAccount(viewer) && url.pathname !== '/messages' && !url.pathname.startsWith('/messages/')) responseDock.add(response)
       }
       if (request.method === 'GET' && url.pathname === '/api/nav-alerts') {
         response.writeHead(viewer ? 200 : 401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
@@ -1959,6 +2072,11 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         }
         if (!transaction || url.searchParams.getAll('state').length !== 1 || url.searchParams.get('state') !== transaction.state || url.searchParams.getAll('code').length !== 1) throw new Error('private_login_transaction_invalid')
         const identity = await login.finish(url, transaction)
+        if (transaction.linkFlow) {
+          if (authorizationOrigin) response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${authorizationOrigin}; base-uri 'none'; frame-ancestors 'none'`)
+          await linkFlow.finishProof(request, response, transaction.linkFlow, identity, viewer)
+          return
+        }
         if (transaction.invitationToken) {
           if (typeof claimInvitation !== 'function' || transaction.newProfileIntent !== true) throw new Error('private_invitation_intent_invalid')
           if (confirmations.size >= 100) throw new Error('private_login_capacity')
@@ -2900,11 +3018,20 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // Settings shows the owner's live key, but a page view never creates
         // one: a member creates a key when they want to connect an app.
         // Explicit selection reads only.
+        const restrictAccountCredentials = crossedAccount(session)
+        let loginIdentities = null
+        if (accountLinks) {
+          const primary = await accountLinks.account(session.primary.ownerId)
+          const linked = await accountLinks.list(session.primary)
+          if (accountLinks.manage || linked.length) loginIdentities = { primary, linked,
+            dataOwnerId: session.owner.ownerId, manage: accountLinks.manage, admin: accountLinks.isAdmin(primary),
+            canView: session.linkVerified, updated: url.searchParams.get('identities') === 'linked' && accountLinks.isAdmin(primary) }
+        }
         const selectedId = url.searchParams.get('key')
-        const ensured = selectedId && accountKeys ? await accountKeys.readKey(session.owner, selectedId) : typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner, { mint: false }) : null
+        const ensured = restrictAccountCredentials ? null : selectedId && accountKeys ? await accountKeys.readKey(session.owner, selectedId) : typeof ensureAccountGrant === 'function' ? await ensureAccountGrant(session.owner, { mint: false }) : null
         const configuration = ensured ? scopedSetupConfiguration({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
         const setups = ensured ? agentClientSetups({ endpoint: mcpEndpoint, accessToken: ensured.accessToken }) : null
-        const grants = await grantList(session.owner, backend)
+        const grants = restrictAccountCredentials ? [] : await grantList(session.owner, backend)
         const jobs = await jobResources(), props = jobProps(jobs)
         // Email choices appear only while email is on; a slow read costs the section, never the page.
         const email = memberEmail?.sending ? await bounded(() => memberEmail.settings(session.owner), null) : null
@@ -2912,10 +3039,10 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const blocks = memberBlocks ? await bounded(() => memberBlocks.list(session.owner), []) : null
         // An unreadable choice leaves the control out: a form must never resubmit a guessed default.
         const privacyChoice = connectionPrivacy ? await bounded(() => connectionPrivacy.get(session.owner), null) : null
-        const tier=await tierOf(session.owner),view=renderSettings({ ...props, verified: tier === ACCESS_TIER.verified, enhancedAccess: tier === ACCESS_TIER.approved, ...(privacyChoice ? { connectionPrivacy: privacyChoice, connectionPrivacySaved: url.searchParams.get('privacy') === 'saved' } : {}), blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
+        const tier=await tierOf(session.owner),view=renderSettings({ ...props, loginIdentities, restrictAccountCredentials, restrictAccountDeletion: Boolean(loginIdentities?.linked.length), verified: tier === ACCESS_TIER.verified, enhancedAccess: tier === ACCESS_TIER.approved, ...(privacyChoice ? { connectionPrivacy: privacyChoice, connectionPrivacySaved: url.searchParams.get('privacy') === 'saved' } : {}), blocks, recoveredFileCount: recovered?.objects.length ?? 0, selectedKeyId: ensured?.grantId, keyManagement: Boolean(accountKeys), grants: settingsGrants(grants), imports: summaries(jobs), agentConfiguration: configuration, agentSetups: setups, agentSetupAutomatic: typeof ensureAccountGrant === 'function', connector, agentAccess: ensured ? setupAccess(ensured) : undefined, connectionActionsAvailable,
           ...(email ? { email: { ...email, labels: EMAIL_PREFERENCES, saved: url.searchParams.get('email') === 'saved' } } : {}) })
         if(recovered?.objects.length)extend(view,`<div class="narrow wide"><details><summary>Your recovered LinkedIn files (${recovered.objects.length})</summary><p>Original files stay private. Professional connection observations are included in your own network; other files and invalid records remain available here.</p>${recovered.objects.map(file=>`<p><a href="/legacy-files/${html(file.objectId)}">${html(file.filename)}</a> · ${html(file.bytes)} bytes · ${html(file.accepted)} professional records${file.error?' · preserved original; not indexed':''}</p>`).join('')}</details></div>`)
-        journey(response,view,props.importJob,configuration||connector?agentSetupCopyScript():'')
+        journey(response,view,props.importJob,configuration||(!restrictAccountCredentials&&connector)?agentSetupCopyScript():'')
         return
       }
       if (signup && accountKeys && request.method === 'POST' && url.pathname === '/settings/api-keys') {
@@ -3009,6 +3136,10 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         response.end(JSON.stringify(data, null, 2)); return
       }
       if (signup && request.method === 'POST' && url.pathname === '/delete-account') {
+        if (accountLinks && (await accountLinks.list(session.primary)).length) {
+          render(response, 'Unlink logins before deleting', '<p>Open Login identities in Settings and unlink the additional logins first.</p><a href="/settings#login-identities">Open Settings</a>', 409)
+          return
+        }
         const input = deletionInputs.get(request) ?? new URLSearchParams((await body(request, 8192)).toString('utf8'))
         if (input.getAll('csrf').length !== 1 || input.get('csrf') !== session.csrf || input.getAll('confirm').length > 1 || [...input.keys()].some(key => !['csrf', 'confirm'].includes(key))) throw new Error('private_browser_csrf')
         if (!['delete account', 'delete everything'].includes((input.get('confirm') ?? '').trim().toLowerCase())) {
@@ -3053,6 +3184,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         if (memberEmail) await memberEmail.removeOwner(session.owner)
         if (typeof revokeLegacyLink === 'function') await revokeLegacyLink(session.owner)
         if (typeof removeOwnerAssets === 'function') await removeOwnerAssets(session.owner.ownerId)
+        if (accountLinks) await accountLinks.clearVerifiedLogin(session.owner)
         if (sessionStore) await sessionStore.deleteOwner(session.owner.ownerId)
         coordination.deleted(session.owner.ownerId)
         for (const map of coordination.sessionMaps) for (const [id, value] of map) if (value.owner.ownerId === session.owner.ownerId) map.delete(id)
@@ -3273,6 +3405,10 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       if (new URL(request.url, base).pathname === '/auth/callback/ideaflow') await recordAudit({ event: 'auth_callback_denied', reason: ['private_login_transaction_invalid', 'private_owner_recovery_required'].includes(error.message) ? error.message : 'oidc_or_owner_validation_failed' })
       const limited = error.message === 'private_body_limit' || error.message === 'archive_size_limit'
       const recovery = error.message === 'private_owner_recovery_required'
+      if (error.message === 'account_link_not_allowed' && !response.headersSent) {
+        render(response, 'Account link could not be changed', '<p>Check that you used the requested verified login. If you signed out, the request expired, or either account changed, start again in Settings.</p><a href="/settings#login-identities">Open Settings</a>', 409)
+        return
+      }
       if (!response.headersSent) render(response, recovery ? 'Account recovery required' : 'We could not finish that', recovery ? '<p>Your Ideaflow identity could not be safely mapped to an existing or newly provisioned Unlinked owner. No archive was accepted. Complete the trusted account recovery/provisioning step.</p>' : '<p>Try again, or sign in and return to your files in Settings. Your account and files have not been moved to another account.</p><a href="/settings">Open Settings</a>', limited ? 413 : recovery ? 409 : 400)
     }
   }
@@ -3290,6 +3426,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
     }
     const exclusive = request.method === 'POST' && path === '/delete-account'
+    const linkMutation = linkFlow && request.method === 'POST' && (isAccountLinkMutation(path) || path === '/settings/login-identities/scope')
     const sid = cookies(request)['__Host-ul-session']
     let record = sid ? sessions.get(sid) : null
     if (sid && sessionStore) {
@@ -3322,7 +3459,13 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           deletionInputs.set(request, input)
         }
       }
-      if (!ownerId || path === '/auth/callback/ideaflow' || path === '/invite/confirm' || (exclusive && !deletionInputs.has(request))) return await serveCore(request, response)
+      if (!ownerId || linkMutation || path === '/auth/callback/ideaflow' || path === '/invite/confirm' || (exclusive && !deletionInputs.has(request))) return await serveCore(request, response)
+      if (record?.dataOwnerId && record.dataOwnerId !== ownerId) {
+        return await coordination.run([ownerId, record.dataOwnerId].map(id => 'owner:' + id), async () => {
+          if (coordination.version(ownerId) !== before) { response.writeHead(401).end(); return }
+          return serveCore(request, response)
+        }, { exclusive })
+      }
       const release = await coordination.acquire('owner:' + ownerId, exclusive)
       try {
         if (coordination.version(ownerId) !== before) { response.writeHead(401).end(); return }

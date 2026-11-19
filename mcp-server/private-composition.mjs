@@ -1,3 +1,4 @@
+import { createNeo4jAccountLinks } from './account-links.mjs'
 import { createPrivateGroupPilot } from './private-group-pilot.mjs'
 import { createOpenChatGroupSync } from './openchat-groups.mjs'
 import { createCommunityIntakeClient } from './community-intake.mjs'
@@ -128,7 +129,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
   // Optional signup profile lookup (docs/signup-profile-lookup.md): UNLINKED_PROFILE_LOOKUP_*.
   profileLookupEnv = process.env, profileLookupLoader = loadProfileLookupAdapter,
   // Automatic sign-in kill switch: UNLINKED_AUTO_SIGNIN=off.
-  autoSignInEnv = process.env, diagnosticsEnv = process.env,
+  autoSignInEnv = process.env, diagnosticsEnv = process.env, accountLinkEnv = process.env,
   // Private context from the Ideaflow people overlay: NOOS_OVERLAY_APP_UNLINKED_SECRET, NOOS_OVERLAY_URL.
   overlayEnv = process.env,
   // Shared public index freshness window: a build this young is served as-is,
@@ -721,6 +722,16 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       })
       contactEnrichment.start()
     }
+    const resolveOwner = identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null
+    const adminSubjects = JSON.parse(accountLinkEnv.UNLINKED_ACCOUNT_LINK_ADMINS ?? '[]')
+    if (!Array.isArray(adminSubjects) || adminSubjects.length > 16 ||
+        adminSubjects.some(subject => typeof subject !== 'string' || !subject || subject.length > 512 || /[\x00-\x1f\x7f]/.test(subject))) {
+      throw new Error('account_link_admin_configuration_invalid')
+    }
+    const accountLinks = sessionStore ? createNeo4jAccountLinks(driver, {
+      issuer: config.issuer, resolveOwner, manage: accountLinkEnv.UNLINKED_ACCOUNT_LINKS === 'on', adminSubjects,
+    }) : undefined
+    if (accountLinks?.manage) await accountLinks.initialize()
     return { isVerified, accessTier, unlimitedSearchOwnerIds, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
@@ -830,7 +841,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         await rm(target, { recursive: true, force: true })
       },
       ideaflowConnectorSecret: process.env.IDEAFLOW_CONNECTOR_SECRET,
-      resolveOwner: identity => identity?.issuer === config.issuer ? store.resolveIdentity('unlinked', identity.issuer, identity.subject) : null,
+      resolveOwner, accountLinks,
       claimInvitation: provisioner.claim.bind(provisioner),
       signup: provisioner.signup.bind(provisioner),
       // Separate domain/audience from operational credentials. Stable across
