@@ -36,7 +36,7 @@ function budget(now) {
   }
 }
 
-export function createMeetBrowser({ meet, asks, cards, openCard, origin, groups, notifications, ownProfileId, photoFor, body, acquireOwner, now = Date.now }) {
+export function createMeetBrowser({ meet, asks, cards, openCard, origin, groups, notifications, ownProfileId, photoFor, body, acquireOwner, withCardSharing, now = Date.now }) {
   const readBudget = budget(now), writeBudget = budget(now), qrBudget = budget(now), ownerBudget = budget(now)
   const contexts = new Map(), drafts = new Map(), syncing = new Map()
   const expire = (records, max) => {
@@ -111,10 +111,15 @@ export function createMeetBrowser({ meet, asks, cards, openCard, origin, groups,
       card = sharedCard
       if (!link || !card?.name || !card.phone || (group && link.group?.id !== group)) return notFound()
       if (query.has('vcard')) {
-        const social = [link.instagram && 'https://www.instagram.com/' + link.instagram + '/', link.x && 'https://x.com/' + link.x].filter(Boolean)
-        response.writeHead(200, { 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': vcardContentDisposition(card) })
-        response.end(renderContactVcard(card, origin, { social }))
-        return
+        release = acquireOwner(owner)
+        if (!release) return notFound()
+        return await withCardSharing(owner, async () => {
+          const current = await openCard(token)
+          if (!current?.name || !current.phone || !await meet.link(owner, token, event)) return notFound()
+          const social = [link.instagram && 'https://www.instagram.com/' + link.instagram + '/', link.x && 'https://x.com/' + link.x].filter(Boolean)
+          response.writeHead(200, { 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': vcardContentDisposition(current) })
+          response.end(renderContactVcard(current, origin, { social }))
+        })
       }
       const liveGroup = group ? await groupFor(owner, group) : null
       // A rotated flyer belongs to a new invitation. Earlier QR codes continue
@@ -131,16 +136,20 @@ export function createMeetBrowser({ meet, asks, cards, openCard, origin, groups,
       input = await getBody(request, ['submission', ...CONTACT_CHANNELS, 'name', 'about', 'ask', 'invite', 'join'])
       const values = parseSwap(input, link)
       release = acquireOwner(owner)
-      if (!release || !await openCard(token)) return notFound()
-      const { contact, encounter, duplicate } = await meet.capture(owner, link, values)
-      if (encounter) {
-        // This is an in-app notification. The kind is never eligible for email.
-        await notifications?.notify({ recipient: owner, kind: 'meet_swap', actorName: encounter.name || contact?.name || 'Someone you met',
-          subjectId: encounter.id, dedupeKey: 'meet-swap:' + owner.ownerId + ':' + encounter.id }).catch(() => {})
-        // Keep the swap fast. It is already durable, including the pending ask.
-        if (!duplicate) void syncEncounter({ owner, displayName: card.name }, contact, encounter).catch(() => {})
-      }
-      return render(renderSwapSuccess({ link, card, joined: Boolean(encounter?.group) }), 200)
+      if (!release) return notFound()
+      return await withCardSharing(owner, async () => {
+        const current = await openCard(token)
+        if (!current?.name || !current.phone) return notFound()
+        const { contact, encounter, duplicate } = await meet.capture(owner, link, values)
+        if (encounter) {
+          // This is an in-app notification. The kind is never eligible for email.
+          await notifications?.notify({ recipient: owner, kind: 'meet_swap', actorName: encounter.name || contact?.name || 'Someone you met',
+            subjectId: encounter.id, dedupeKey: 'meet-swap:' + owner.ownerId + ':' + encounter.id }).catch(() => {})
+          // Keep the swap fast. It is already durable, including the pending ask.
+          if (!duplicate) void syncEncounter({ owner, displayName: current.name }, contact, encounter).catch(() => {})
+        }
+        return render(renderSwapSuccess({ link, card: { ...current, photo }, joined: Boolean(encounter?.group) }), 200)
+      })
     } catch (error) {
       const { status, message } = safeError(error)
       if (status === 404) return notFound()
@@ -185,7 +194,7 @@ export function createMeetBrowser({ meet, asks, cards, openCard, origin, groups,
         }
         const input = await getBody(request, ['csrf', 'action', 'event', 'label', 'instagram', 'x', 'group'], session)
         if (input.get('action') === 'disable' && MEET_EVENT.test(input.get('event') ?? '')) {
-          await meet.disableLink(owner, input.get('event'))
+          await withCardSharing(owner, () => meet.disableLink(owner, input.get('event')))
           return redirect('/swaps/links?done=disabled')
         }
         if (input.get('action') !== 'create' || !own?.card?.phone) throw new MeetError(400, 'Set a shared phone number on your contact card first.')

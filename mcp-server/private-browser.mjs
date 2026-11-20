@@ -404,9 +404,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     const owner = await contactCards.ownerForToken(cardToken)
     try { return owner && await ownSuspended(owner) ? null : card } catch { return null }
   }
+  // A swap can disclose card fields. Order its final projection and response
+  // against the owner's card privacy changes, after the visitor body arrives.
+  const withCardSharing = (owner, work) => meetEnabled
+    ? coordination.run(['card-sharing:' + owner.ownerId], work, { exclusive: true })
+    : work()
   const meetBrowser = meetEnabled && meetSwap && contactCards?.ownerForToken && signup ? createMeetBrowser({
     meet: meetSwap, asks: meetAsks, cards: contactCards, openCard, origin: base.origin, groups: collectiveGroups, notifications, ownProfileId, photoFor, body,
-    acquireOwner: owner => coordination.tryAcquireShared('owner:' + owner.ownerId),
+    acquireOwner: owner => coordination.tryAcquireShared('owner:' + owner.ownerId), withCardSharing,
   }) : null
   // Suspended profile ids for owner-private lists (fails closed).
   const suspendedIdsFor = async backend => (typeof backend?.readSuppressions === 'function' ? (await backend.readSuppressions())?.ids : null) ?? new Set()
@@ -2634,7 +2639,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         let contact = null
         if (contactCards) {
           // The card still renders, without its contact version, while the graph is unavailable.
-          try { await contactCards.syncIdentity(session.owner, identity) } catch { /* shown as stored */ }
+          try { await withCardSharing(session.owner, () => contactCards.syncIdentity(session.owner, identity)) } catch { /* shown as stored */ }
           contact = await ensureOwnCard(session.owner, identity)
         }
         if (url.pathname === '/scan') {
@@ -2663,16 +2668,17 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // The share switch counts only when the form carries it (an older page never hides a card).
         const values = { ...Object.fromEntries(fields.map(key => [key, (input.get(key) ?? '').slice(0, 400)])), ...Object.fromEntries(switches.map(key => [key, input.get(key) === 'yes'])), ...(input.get('shareCardSwitch') === '1' ? { shareCard: input.get('shareCard') === 'yes' } : {}) }
         try {
-          if (url.pathname === '/card/contact') await contactCards.save(session.owner, values, identity)
-          else if (url.pathname === '/card/contact/email') {
-            // One tap: the sign-in address from the session, shown on the card; everything else stays as saved.
-            const email = accountEmail(session)
-            if (!email) throw new ContactCardError('contact_email_invalid')
-            const current = (await contactCards.read(session.owner))?.settings ?? {}
-            await contactCards.save(session.owner, { ...current, email, showEmail: true, ...(current.shareCard === false ? { shareCard: true } : {}) }, identity)
-            redirect(response, '/card/edit?done=email'); return
-          }
-          else await contactCards.rotate(session.owner)
+          await withCardSharing(session.owner, async () => {
+            if (url.pathname === '/card/contact') await contactCards.save(session.owner, values, identity)
+            else if (url.pathname === '/card/contact/email') {
+              // One tap: show the sign-in address and preserve the other card settings.
+              const email = accountEmail(session)
+              if (!email) throw new ContactCardError('contact_email_invalid')
+              const current = (await contactCards.read(session.owner))?.settings ?? {}
+              await contactCards.save(session.owner, { ...current, email, showEmail: true, ...(current.shareCard === false ? { shareCard: true } : {}) }, identity)
+            }
+            else await contactCards.rotate(session.owner)
+          })
         } catch (failure) {
           if (!(failure instanceof ContactCardError)) throw failure
           const error = { contact_phone_invalid: 'Write your phone number with its country code, like +1 415 555 0123.', contact_whatsapp_invalid: 'Write your WhatsApp number with its country code, like +1 415 555 0123.',
@@ -2680,7 +2686,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           const contact = { ...ownContactCard(await contactCards.read(session.owner).catch(() => null)), ...(url.pathname === '/card/contact' ? { settings: values } : {}) }
           journey(response, renderCard({ ...props, profile, cardUrl, qr: null, contact, share: 'contact', error }), props.importJob, '', 400); return
         }
-        redirect(response, `/card/edit?done=${url.pathname === '/card/contact' ? 'saved' : 'reset'}`); return
+        const result = url.pathname === '/card/contact' ? 'saved' : url.pathname.endsWith('/email') ? 'email' : 'reset'
+        redirect(response, '/card/edit?done=' + result); return
       }
       // Off-platform people: add someone to your own people, or invite them.
       if (request.method === 'POST' && ['/people/lookup', '/people/lookup/save'].includes(url.pathname)) {

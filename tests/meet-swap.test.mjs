@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
+import { createServer, request } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
@@ -96,6 +96,57 @@ test('scan, swap, vCard, private card, invite list, pending ask sync and notific
   assert.equal((await get(path)).status, 404)
   assert.equal((await get(path + '&vcard=1')).status, 404)
   assert.equal((await get(person, host)).status, 200)
+})
+
+test('a submitted swap respects the current sharing choice and current host contact fields', { timeout: 10_000 }, async t => {
+  const app = await harness(t)
+  const { host, post } = app
+  const link = await app.meetSwap.createLink(host, app.ownerCard.token, { label: 'Demo evening' })
+  const path = meetPath(link)
+  const origin = app.endpoint.replace('http:', 'https:')
+  const open = app.contactCards.open
+  async function submitAfterCardChange(settings) {
+    const initialProjection = Promise.withResolvers()
+    app.contactCards.open = async token => {
+      const card = await open(token)
+      initialProjection.resolve()
+      return card
+    }
+    const data = new URLSearchParams({ submission: randomUUID(), email: 'guest@example.test', ask: 'A local introduction' }).toString()
+    const result = Promise.withResolvers()
+    const pending = request(app.endpoint + path, {
+      method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(data) },
+    }, async response => {
+      const parts = []
+      for await (const chunk of response) parts.push(chunk)
+      result.resolve({ status: response.statusCode, html: Buffer.concat(parts).toString('utf8') })
+    })
+    pending.on('error', result.reject)
+    pending.flushHeaders()
+    try {
+      await initialProjection.promise
+      assert.equal((await post('/card/contact', settings, host)).status, 303)
+    } finally {
+      pending.end(data)
+      app.contactCards.open = open
+    }
+    return result.promise
+  }
+
+  const hidden = await submitAfterCardChange({ phone: '+14155550112', showEmail: 'yes', email: 'host@example.test' })
+  assert.equal(hidden.status, 404)
+  assert.doesNotMatch(hidden.html, /4155550112|host@example\.test/)
+  assert.equal((await app.meetSwap.read(host)).encounters.length, 0)
+  assert.equal(app.operations.length, 0)
+  assert.equal((await app.notifications.list(host)).length, 0)
+
+  assert.equal((await post('/card/contact', { phone: '+14155550112', showPhone: 'yes', showEmail: 'yes', email: 'old@example.test' }, host)).status, 303)
+  const updated = await submitAfterCardChange({ phone: '+14155550116', showPhone: 'yes', showEmail: 'yes', email: 'new@example.test' })
+  assert.equal(updated.status, 200)
+  assert.match(updated.html, /sms:\+14155550116/)
+  assert.match(updated.html, /mailto:new@example\.test/)
+  assert.doesNotMatch(updated.html, /4155550112|old@example\.test/)
+  assert.equal((await app.meetSwap.read(host)).encounters.length, 1)
 })
 
 test('ambiguous names require selection and explicit confirmation bound to the owner session', async t => {
