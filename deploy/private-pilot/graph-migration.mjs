@@ -23,6 +23,7 @@ export const LABELS = Object.freeze([
   'UnlinkedContactEnrichment',
   // Owner-private contact addresses (mcp-server/contact-slugs.mjs).
   'UnlinkedContactSlug',
+  'UnlinkedMeetSwap',
   // Members' show/hide choice for Ideaflow interests and asks (mcp-server/ideaflow-profile.mjs).
   'UnlinkedIdeaflowProfileChoice',
   // Members' choice of who can see their connections (mcp-server/connection-privacy-store.mjs).

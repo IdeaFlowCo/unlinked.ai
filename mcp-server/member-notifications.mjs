@@ -20,6 +20,8 @@ export const NOTIFICATION_KINDS = Object.freeze({
   invite_accepted: Object.freeze({ email: true }),
   // Someone you listed as a connection joined and claimed their profile.
   profile_claimed: Object.freeze({ email: false }),
+  // In-app only. This kind has no preference or template in member-email.mjs.
+  meet_swap: Object.freeze({ email: false }),
 })
 export const NOTIFICATIONS_PER_ACCOUNT = 500
 const NOTIFICATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/

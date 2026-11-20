@@ -1,5 +1,5 @@
 import { parseOpenChatCard, openChatCardUrl } from './openchat-card.js'
-import { parseUnlinkedCard, unlinkedProfilePath } from './unlinked-card.js'
+import { parseUnlinkedCard, parseUnlinkedMeetLink, unlinkedProfilePath } from './unlinked-card.js'
 import { parseLinkedinProfileUrl } from './linkedin-profile-url.mjs'
 
 /**
@@ -10,6 +10,8 @@ import { parseLinkedinProfileUrl } from './linkedin-profile-url.mjs'
 export function classifyMeetCode(value) {
   const openChat = parseOpenChatCard(value)
   if (openChat) return { kind: 'openchat', href: openChatCardUrl(openChat), label: `OpenChat card on ${new URL(openChat.origin).host}` }
+  const swap = parseUnlinkedMeetLink(value)
+  if (swap) return { kind: 'unlinked', href: swap, label: 'Unlinked swap link' }
   const unlinked = parseUnlinkedCard(value)
   if (unlinked) return { kind: 'unlinked', href: unlinkedProfilePath(unlinked), label: unlinked.contact ? 'Unlinked contact card' : 'Unlinked profile' }
   const linkedin = parseLinkedinProfileUrl(value)

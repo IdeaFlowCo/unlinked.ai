@@ -268,7 +268,7 @@ test('notifications dedupe, never notify the actor, and track seen and read sepa
   assert.deepEqual((await feed.list(ada)).map(value => value.actorName), ['An Unlinked member', 'An Unlinked member', 'Grace Hopper'])
   await feed.retract('d'); assert.equal((await feed.list(ada)).length, 2)
   assert.equal((await feed.list(jacob)).length, 0)
-  assert.deepEqual(Object.keys(NOTIFICATION_KINDS).sort(), ['connection_request_accepted', 'connection_request_received', 'invite_accepted', 'profile_claimed'])
+  assert.deepEqual(Object.keys(NOTIFICATION_KINDS).sort(), ['connection_request_accepted', 'connection_request_received', 'invite_accepted', 'meet_swap', 'profile_claimed'])
   await assert.rejects(feed.list(ada, { limit: 1000 }), /notification_limit_invalid/)
 })
 

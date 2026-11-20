@@ -6,6 +6,14 @@
 const WEB_ORIGINS = new Set(['https://www.unlinked.ai', 'https://private.unlinked.ai'])
 // The same person-id grammar the browser runtime accepts for /people/ return paths.
 const PROFILE_PATH = /^\/people\/([A-Za-z0-9._~%-]{1,480})\/?$/
+const MEET_LINK = /^https:\/\/([^/?#]+)(\/m\/[A-Za-z0-9]{24})\?e=([a-z0-9]+(?:-[a-z0-9]+)*)(?:&g=([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}))?$/
+export function parseUnlinkedMeetLink(value) {
+  if (typeof value !== 'string' || value.length > 240) return null
+  const match = MEET_LINK.exec(value.trim())
+  if (!match || !WEB_ORIGINS.has('https://' + match[1]) || match[3].length > 45) return null
+  return `${match[2]}?e=${match[3]}${match[4] ? '&g=' + match[4] : ''}`
+}
+
 const CONTACT_PATH = /^\/c\/([0-9A-Za-z]{24})\/?$/
 
 export function parseUnlinkedCard(value) {

@@ -130,3 +130,9 @@ jobs:
           UNLINKED_TEST_NEO4J_PASSWORD: unlinked-s21-fixture
           UNLINKED_TEST_NEO4J_DRIVER: ${{ runner.temp }}/unlinked-migration-driver/node_modules/neo4j-driver
         run: node --test tests/account-links.test.mjs
+      - name: Exercise owner-private swap durability on the disposable graph
+        env:
+          UNLINKED_TEST_NEO4J_URI: bolt://127.0.0.1:8967
+          UNLINKED_TEST_NEO4J_PASSWORD: unlinked-s21-fixture
+          UNLINKED_TEST_NEO4J_DRIVER: ${{ runner.temp }}/unlinked-migration-driver/node_modules/neo4j-driver
+        run: node --test --test-name-pattern='Neo4j serializes duplicate claims' tests/meet-swap.test.mjs
