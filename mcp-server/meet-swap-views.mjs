@@ -26,6 +26,7 @@ const style = `<style>
 .unlinked-onboarding .meet-form{display:grid;gap:12px;margin:0}.unlinked-onboarding .meet-form .actions{margin:0}
 .unlinked-onboarding .meet-panel .swap-field{display:grid;gap:5px;font-size:.91rem;font-weight:600;min-width:0;margin:0}
 .unlinked-onboarding .meet-panel .swap-field input{margin:0;font-weight:400}
+.unlinked-onboarding .meet-panel .meet-options,.unlinked-onboarding .meet-panel .meet-channel{margin:0}
 .meet-extras[open] summary{margin-bottom:10px}.meet-extras fieldset{margin-top:10px}
 .meet-extras .meet-grid{margin-top:8px}
 .swap-field input,.meet-choice select,.ask-input{width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line2);border-radius:8px;background:var(--page);color:var(--fg);font:inherit;font-size:16px}
@@ -90,7 +91,7 @@ export function renderSwap({ card, link, submission, values, error }) {
   ${field('ask', 'What would help right now?', { value: get('ask'), placeholder: 'An intro to a cofounder' })}</div></fieldset></details>
   ${check('invite', `Invite me to ${name}’s future gatherings`, get('invite') === 'yes')}
   ${link.group ? check('join', 'I’d like to join ' + link.group.name, get('join') === 'yes') : ''}
-  <div class="meet-submit">${button('Swap')}<p class="small">${h(name)} will save what you share privately and may use it to get back in touch.</p></div></form></div>`, true)
+  <div class="meet-submit">${button('Swap')}<p class="small">${h(name)} will save what you share privately and may text or message you.</p></div></form></div>`, true)
 }
 
 export function renderSwapSuccess({ link, card, joined }) {
