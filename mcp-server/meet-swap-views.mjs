@@ -23,7 +23,11 @@ const style = `<style>
 .meet-swap .hq,.meet-workspace .hq{margin:0 0 .3em}.meet-kicker{color:var(--brand);font-size:.83rem;font-weight:650;letter-spacing:.045em;margin:0 0 .5rem}
 .meet-panel{padding:clamp(16px,4vw,28px);margin:16px 0;overflow-wrap:anywhere}.meet-panel h2{margin-top:0}
 .meet-host{margin:0 0 14px}.meet-host .bcard{padding:0;background:none;border:0;box-shadow:none}.meet-host .bc-main{padding:0}.meet-host .bc-name{font-size:1.1rem}
-.meet-form{display:grid;gap:14px;margin:0}.meet-form .actions{margin:0}.swap-field{display:grid;gap:5px;font-size:.91rem;font-weight:600;min-width:0}
+.unlinked-onboarding .meet-form{display:grid;gap:12px;margin:0}.unlinked-onboarding .meet-form .actions{margin:0}
+.unlinked-onboarding .meet-panel .swap-field{display:grid;gap:5px;font-size:.91rem;font-weight:600;min-width:0;margin:0}
+.unlinked-onboarding .meet-panel .swap-field input{margin:0;font-weight:400}
+.meet-extras[open] summary{margin-bottom:10px}.meet-extras fieldset{margin-top:10px}
+.meet-extras .meet-grid{margin-top:8px}
 .swap-field input,.meet-choice select,.ask-input{width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line2);border-radius:8px;background:var(--page);color:var(--fg);font:inherit;font-size:16px}
 .swap-field input:focus,.meet-choice select:focus,.ask-input:focus{outline:2px solid var(--brand);outline-offset:1px}
 .meet-options summary,.meet-panel summary{cursor:pointer;color:var(--brand-d);font-size:.91rem;font-weight:600}
@@ -33,7 +37,7 @@ const style = `<style>
 .meet-channel summary{list-style:none;padding:5px 10px;border-radius:100px;border:1px solid var(--line2)}
 .meet-channel summary::-webkit-details-marker{display:none}.meet-channel[open] summary{background:var(--tint);width:max-content;margin-bottom:6px}
 .meet-channel[open]{flex-basis:100%}.meet-channel .swap-field{max-width:100%}
-.swap-check{display:flex;align-items:flex-start;gap:6px;font-size:.92rem;line-height:1.35}.swap-check input{width:18px;height:18px;flex:none;accent-color:var(--brand);margin:0 2px 0 0}
+.unlinked-onboarding .meet-panel .swap-check{display:flex;align-items:flex-start;gap:6px;font-size:.92rem;line-height:1.35;margin:0}.unlinked-onboarding .meet-panel .swap-check input{width:18px;height:18px;flex:none;accent-color:var(--brand);margin:0 2px 0 0}
 .meet-submit{display:grid;gap:8px;margin-top:2px}.meet-submit .button{width:100%;min-height:46px}
 .meet-submit p,.meet-panel .small{margin:0}.meet-error{font-size:.92rem;color:#a23737;margin:0}
 .meet-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.meet-panel .meet-grid{align-items:start}
@@ -66,6 +70,7 @@ export function renderSwap({ card, link, submission, values, error }) {
     ['instagram', 'Instagram', '@handle'], ['x', 'X', '@handle'], ['linkedin', 'LinkedIn', 'linkedin.com/in/your-name'], ['email', 'Email', 'you@example.com'],
   ]
   const expanded = options.some(([name]) => get(name))
+  const extras = ['name', 'about', 'ask'].some(key => get(key))
   const name = card.name.split(' ')[0]
   const title = `Swap numbers with ${name}`
   return shell({}, title, `<div class="card meet-panel"><div class="meet-host">${businessCard({ ...card, heading: 'p' })}</div>
@@ -77,10 +82,12 @@ export function renderSwap({ card, link, submission, values, error }) {
   <details class="meet-options"${expanded ? ' open' : ''}><summary>Add another way to reach you</summary><div class="meet-chips">${options.map(([key, label, placeholder]) =>
     `<details class="meet-channel"${get(key) ? ' open' : ''}><summary>${label}</summary>${field(key, key === 'email' ? 'Email address' : label + ' handle or link', { type: key === 'email' ? 'email' : 'text', length: key === 'email' ? 254 : 300, value: get(key), placeholder,
       attr: key === 'email' ? 'autocomplete="email"' : 'autocapitalize="none" spellcheck="false"' })}</details>`).join('')}</div></details>
+  <details class="meet-options meet-extras"${extras ? ' open' : ''}><summary>Skip the small talk <span class="meet-optional">· optional</span></summary>
+  <p class="small">I already know I want to stay in touch.</p>
+  <fieldset aria-label="Optional introductions">
   ${field('name', 'Name (optional)', { length: 100, value: get('name'), attr: 'autocomplete="name"' })}
-  <fieldset><legend>Skip the small talk <span class="meet-optional">· optional</span></legend><p class="small">I already know I want to stay in touch.</p>
   <div class="meet-grid">${field('about', 'One thing about you', { value: get('about'), placeholder: 'Climbing, building sensors' })}
-  ${field('ask', 'What would help right now?', { value: get('ask'), placeholder: 'An intro to a cofounder' })}</div></fieldset>
+  ${field('ask', 'What would help right now?', { value: get('ask'), placeholder: 'An intro to a cofounder' })}</div></fieldset></details>
   ${check('invite', `Invite me to ${name}’s future gatherings`, get('invite') === 'yes')}
   ${link.group ? check('join', 'I’d like to join ' + link.group.name, get('join') === 'yes') : ''}
   <div class="meet-submit">${button('Swap')}<p class="small">${h(name)} will save what you share privately and may use it to get back in touch.</p></div></form></div>`, true)
@@ -230,7 +237,7 @@ export function meetAgent({ csrf, contextToken, context, value = '' }) {
 // in browsers without local SpeechRecognition or an installed language pack.
 export const MEET_VOICE_SCRIPT = `;(() => {
   const Speech = window.SpeechRecognition || window.webkitSpeechRecognition
-  const local = Speech && 'processLocally' in Speech.prototype
+  const local = window.isSecureContext && Speech && 'processLocally' in Speech.prototype
   for (const button of document.querySelectorAll('[data-meet-voice]')) {
     const input = button.form?.querySelector('[data-voice-target]')
     const status = button.form?.querySelector('[data-voice-status]')
