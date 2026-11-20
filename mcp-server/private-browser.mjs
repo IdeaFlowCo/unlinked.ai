@@ -60,6 +60,8 @@ import { readOwnerProfileRows, profileFromRows } from '../src/utils/private-impo
 import { exportAccountData, deleteAccountData } from '../src/utils/private-import/account-data.mjs'
 import { inAppBrowser, PROFILE_HANDLE_SCRIPT, renderChatPerson, renderMessages, renderMessagesDock, renderLanding, renderJoin, renderSignInRequired, renderBringArchive, renderImporting, renderOwnProfile, renderFindMe, renderCard, renderContactCard, renderPerson, renderPeople, renderCompany, renderSettings, renderAddPerson, renderInvites, renderInviteLanding, renderDataDeleted, renderPeopleUnavailable, renderProfileUnavailable, renderSignInElsewhere, renderNotFound, renderRemovalRequest, renderReport, renderBlock, safetyError, renderContactDetail, renderContactEnrichment, renderEmailUnsubscribe, renderInvitations, renderNotifications, fillNavAlerts, connectNoticeCodes, uploadProgressScript, agentSetupCopyScript } from './private-onboarding-views.mjs'
 import { createCompanyFacts } from './company-metadata.mjs'
+import { createMeetBrowser, isPrivateMeetPath, isPublicMeetPath } from './meet-swap-browser.mjs'
+import { MEET_VOICE_SCRIPT } from './meet-swap-views.mjs'
 import { qrSvg } from '../src/utils/qr-code.mjs'
 import { ContactCardError, renderContactVcard, vcardContentDisposition, normalizeEmail } from './contact-card.mjs'
 import { ONBOARDING_FONT_HREF } from './private-onboarding-style.mjs'
@@ -198,7 +200,7 @@ export function dropExpiredNetworks(cache, freshMs, at = Date.now()) {
   for (const [key, entry] of cache) if (!entry.pending && at - entry.at >= freshMs) cache.delete(key)
 }
 
-export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, privateGroupPilot, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, accountLinks, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
+export function createPrivateBrowserHandler({ bulkExports, isVerified = async () => false, accessTier, privateLists, privateListImports, savedSearchLists, collectiveGroups, privateGroupPilot, communityIntake, connectionPrivacy, createMessagingSession, resolveCardMessagingRecipient, baseUrl, login, resolveOwner, claimInvitation, signup, memberInvitations, memberConnections, notifications, contactCards, meetSwap, meetAsks, meetEnabled, homePreferences, profileSocialLinks, profileHandles, handleBackfillMs = 600000, safetyReports, memberBlocks, accountForProfile, ownProfileId, notifyProfileClaimed, legacyAccount, selfClaims, signupLookup, personLookup, contactEnrichment, contactSlugs = null, getBackend, complete, readPublishedSnapshot, issueGrant, issueAccountGrant, ensureAccountGrant, revokeAccountGrant, revokeLegacyLink, removeOwnerAssets, mcpEndpoint, dataMode = 'synthetic', backgroundImports = false, audit = async () => {}, oauth, listAccountGrants, accountKeys, sessionStore, accountLinks, memberEmail, lookupCompanyFacts = createCompanyFacts(), profilePhotos, autoSignIn = false, privateContext = null, networkFreshMs = 15000, messagingOptions = {}, messagingIdentities = null, recordPublicAdmission, recordBrowserPerformance, ideaflowProfiles = null, exchangeFeedback = exchangeFeedbackToken }) {
   if (!Number.isSafeInteger(networkFreshMs) || networkFreshMs < 0 || networkFreshMs > 300000) throw new Error('explicit_private_browser_configuration_required')
   const base = new URL(baseUrl)
   if (accountLinks && !sessionStore) throw new Error('account_links_require_durable_session_store')
@@ -336,7 +338,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
   // Scanning flows return to what was scanned: a contact card (/c/<token>), the
   // LinkedIn lookup (with or without its one address) and the scan sheet itself.
   const downloadReturn = value => { try { const url=new URL(value,base); if(url.origin!==base.origin||!['/downloads','/downloads/file'].includes(url.pathname))return false; bulkExportInput(url.searchParams); return !url.hash } catch { return false } }
-  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || /^\/(?:messages|profile|find-me|card(?:\/edit)?|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/card\?share=public$/.test(value) || /^\/card\/edit\?done=(?:saved|reset|email)$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || isCommunityPath(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
+  const returnPath = value => typeof value === 'string' && (downloadReturn(value) || (meetEnabled && /^\/(?:swaps(?:\/(?:links|invites|(?:person|encounter)\/[0-9a-f-]{36}))?|network\/asks)$/.test(value)) || /^\/(?:messages|profile|find-me|card(?:\/edit)?|settings|import|network|invites|invitations|notifications|notifications\/[0-9a-f-]{36}|people\/add|people\/lookup|scan|meet|c\/[0-9A-Za-z]{24}|messages\/c\/[A-Za-z0-9_-]{1,80}|i\/[A-Za-z0-9_-]{43}|people\/[A-Za-z0-9._~%-]{1,480})$/.test(value) || /^\/card\?share=public$/.test(value) || /^\/card\/edit\?done=(?:saved|reset|email)$/.test(value) || /^\/scan\?tab=(?:scan|card)$/.test(value) || /^\/messages\?profile=https%3A%2F%2Fwww\.unlinked\.ai%2Fpeople%2F[A-Za-z0-9._~%-]{1,1440}$/.test(value) || (/^\/network\?[^#\\]{1,4096}$/.test(value) && networkReturn(value)) || /^\/lists(?:\/[0-9a-f-]{36})?$/.test(value) || (groupBrowser && groupReturnPath(value)) || isCommunityPath(value) || lookupReturn(value) || (oauth && /^\/oauth\/authorize\?[\x21-\x7e]{1,6000}$/.test(value))) ? value : null
   const extend = (view, addition) => { view.content = view.content.includes('</main>') ? view.content.replace('</main>', `${addition}</main>`) : view.content + addition; return view }
   let uploadBusy = false
   // Operator-published photos (docs/profile-photos.md): public summaries carry a
@@ -402,6 +404,15 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     const owner = await contactCards.ownerForToken(cardToken)
     try { return owner && await ownSuspended(owner) ? null : card } catch { return null }
   }
+  // A swap can disclose card fields. Order its final projection and response
+  // against the owner's card privacy changes, after the visitor body arrives.
+  const withCardSharing = (owner, work) => meetEnabled
+    ? coordination.run(['card-sharing:' + owner.ownerId], work, { exclusive: true })
+    : work()
+  const meetBrowser = meetEnabled && meetSwap && contactCards?.ownerForToken && signup ? createMeetBrowser({
+    meet: meetSwap, asks: meetAsks, cards: contactCards, openCard, origin: base.origin, groups: collectiveGroups, notifications, ownProfileId, photoFor, body,
+    acquireOwner: owner => coordination.tryAcquireShared('owner:' + owner.ownerId), withCardSharing,
+  }) : null
   // Suspended profile ids for owner-private lists (fails closed).
   const suspendedIdsFor = async backend => (typeof backend?.readSuppressions === 'function' ? (await backend.readSuppressions())?.ids : null) ?? new Set()
   // The Unlinked iOS app (user agent `UnlinkediOS/`) lists only people who
@@ -837,7 +848,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     }
     view = { ...view, content: fillNavAlerts(iosResponses.has(response) ? iosAppView(view.content) : view.content, alerts, view.active ?? null) }
     // Messages page or dock: the static client plus its non-executable configuration.
-    const dockOn = responseDock.has(response) && readers.has(response) && view.content.includes('</main>')
+    if (meetBrowser && scoped && !crossedAccount(scoped) && !iosResponses.has(response) && view.content.includes('</main>')) {
+      const agent = meetBrowser.agent(scoped, view.meetContext, view.meetDraft)
+      if (agent) {
+        view.content = view.content.replace('</main>', agent + '</main>')
+        script += MEET_VOICE_SCRIPT
+      }
+    }
+    const dockOn = !view.meetPrivate && responseDock.has(response) && readers.has(response) && view.content.includes('</main>')
     if (dockOn) view.content = view.content.replace('</main>', `</main>${renderMessagesDock()}`)
     const messagesClient = view.messagesClient ?? (dockOn ? { csrf: readers.get(response).csrf, dock: true } : null)
     const nonce = token()
@@ -855,7 +873,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     const signInFormAction = authorizationOrigin ? ` ${authorizationOrigin}` : ''
     const formAction = typeof view.formAction === 'string' && /^(?:https:|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d{1,5})?)$/.test(view.formAction) ? ` ${view.formAction}` : ''
     response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src ${camera ? "'self' " : ''}'nonce-${nonce}' ${FEEDBACK_WIDGET_SITE} ${ANALYTICS_ORIGIN}; connect-src 'self' ${FEEDBACK_WIDGET_API} ${FEEDBACK_WIDGET_SITE} ${FEEDBACK_UPLOAD_ORIGIN} ${ANALYTICS_ORIGIN}; img-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'${signInFormAction}${formAction}; base-uri 'none'; frame-ancestors 'none'`)
-    if (camera) response.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)')
+    if (camera || (meetAsks && scoped && !crossedAccount(scoped))) response.setHeader('Permissions-Policy', camera ? 'camera=(self), microphone=(self)' : 'microphone=(self), on-device-speech-recognition=(self)')
     if (view.privateGroup) script += ';window.addEventListener("pageshow",event=>{if(event.persisted) location.reload()})'
     script = `${PRIVATE_LIST_LOADING_SCRIPT}${TOP_BAR_SCRIPT}${LINKEDIN_EMAIL_HELP_SCRIPT}${LINKEDIN_EXPORT_PROGRESS_SCRIPT}${NETWORK_FILTER_SCRIPT}${HOVER_CARD_SCRIPT}${CARD_SHARE_SCRIPT}${script}`
     if (job && ['uploaded', 'parsing', 'indexing'].includes(job.status)) script += `;let timer=setInterval(async()=>{try{const r=await fetch(${JSON.stringify(job.statusUrl)},{credentials:'same-origin'});if(!r.ok){clearInterval(timer);return}const j=await r.json();const el=document.querySelector('.import-status');if(el){el.textContent='Importing'+(j.total===null?'':' · '+Math.floor(j.processed*100/Math.max(1,j.total))+'% · '+j.processed+' of '+j.total)}if(['indexed','partial','failed'].includes(j.status)||(!${JSON.stringify(job.profileReady)}&&j.profileReady)){clearInterval(timer);location.reload()}}catch{}},2000);`
@@ -1336,6 +1354,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
     try {
       const url = new URL(request.url, base)
       if (url.origin !== base.origin) { response.writeHead(403).end(); return }
+      if (isPublicMeetPath(url.pathname)) {
+        response.setHeader('Cache-Control', 'no-store, private')
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        response.setHeader('Referrer-Policy', 'same-origin')
+        const renderMeet = (view, status) => journey(response, { ...view, privateGroup: true, meetPrivate: true }, null, '', status)
+        if (!meetBrowser) return renderMeet(renderNotFound(), 404)
+        return await meetBrowser.publicRoute({ request, url, response, render: renderMeet })
+      }
       // The empty guide is static: reserve public-read capacity for actual queries.
       if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/search-public' && !url.search) {
         const content = publicSearchDocument({}, { landing: true })
@@ -1474,6 +1500,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
       const viewer = sessionFor(request)
       if (viewer) readers.set(response, viewer)
       if (crossedAccount(viewer)) response.setHeader('Cache-Control', 'no-store, private')
+      if (isPrivateMeetPath(url.pathname)) {
+        response.setHeader('Cache-Control', 'no-store, private')
+        response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        const chrome = viewer ? { accountLabel: viewer.accountLabel, displayName: viewer.displayName, csrf: viewer.csrf } : {}
+        const renderMeet = (view, status, meetContext) => journey(response, { ...view, privateGroup: true, meetPrivate: true, meetContext }, null, '', status)
+        if (!meetBrowser) return renderMeet(renderNotFound(), 404)
+        return await meetBrowser.privateRoute({ request, url, response, session: viewer, crossed: crossedAccount(viewer), chrome, render: renderMeet, redirect: path => redirect(response, path) })
+      }
       if (linkFlow && isAccountLinkPath(url.pathname)) {
         response.setHeader('Cache-Control', 'no-store, private')
         if (authorizationOrigin) response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${authorizationOrigin}; base-uri 'none'; frame-ancestors 'none'`)
@@ -1921,7 +1955,11 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
               await knownPeopleReady(viewer.owner)
               viewerConnection = knownCache.get(viewer.owner.ownerId)?.people?.find(person => person.id === profile.id) ?? null
             }
-            const personView = renderPerson({ ...chrome, viewerConnection, ideaflowCard, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim })
+            const meetContext = meetBrowser && meetAsks && viewer && !crossedAccount(viewer) && !iosApp(request) && !blocked && !publicProfile?.[2] && /^[A-Za-z0-9._-]{1,160}$/.test(profile.id) && profile.name
+              ? { kind: 'unlinked', id: profile.id, name: profile.name } : null
+            const askSection = meetContext ? meetBrowser.personSection(viewer, meetContext, url.pathname) : ''
+            const personView = renderPerson({ ...chrome, askSection, viewerConnection, ideaflowCard, shareBack, blocked, canBlock, profile, membersOnly: iosApp(request), connectionQuery, connectionSort, connectionShow, connectionsView: Boolean(publicProfile?.[2]), connect, connectNotice: connectNoticeCodes.includes(notice) ? notice : undefined, privateContext: withContext, claim })
+            if (meetContext) personView.meetContext = meetContext
             // Signed out, the page is the published profile: its preview may name them.
             if (!viewer && !publicProfile?.[2]) personView.preview = personPreview(profile, handle ? `/people/${encodeURIComponent(handle)}` : profilePath(profile.id))
             journey(response, personView, null, `${PROFILE_CONNECTIONS_SCRIPT}${withContext ? PRIVATE_CONTEXT_SCRIPT : ''}`); return
@@ -2601,10 +2639,14 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         let contact = null
         if (contactCards) {
           // The card still renders, without its contact version, while the graph is unavailable.
-          try { await contactCards.syncIdentity(session.owner, identity) } catch { /* shown as stored */ }
+          try { await withCardSharing(session.owner, () => contactCards.syncIdentity(session.owner, identity)) } catch { /* shown as stored */ }
           contact = await ensureOwnCard(session.owner, identity)
         }
-        if (url.pathname === '/scan') { journey(response, renderScan({ ...card, contact, tab: url.searchParams.get('tab') }), props.importJob); return }
+        if (url.pathname === '/scan') {
+          const scanView = renderScan({ ...card, contact, tab: url.searchParams.get('tab') })
+          if (meetBrowser && !crossedAccount(session)) extend(scanView, '<p class="narrow"><a class="button sec" href="/swaps/links">Create a swap QR</a> <a class="button sec" href="/swaps">Recent swaps</a></p>')
+          journey(response, scanView, props.importJob); return
+        }
         if (url.pathname === '/card' && url.searchParams.get('share') !== 'public') {
           const done = url.searchParams.get('done')
           redirect(response, ['saved', 'reset', 'email'].includes(done) ? `/card/edit?done=${done}` : contact?.shareUrl ? new URL(contact.shareUrl).pathname : '/card/edit'); return
@@ -2612,7 +2654,9 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const notices = { saved: 'Saved.', reset: 'Your contact card has a new link. Earlier links and QR codes no longer work.', email: 'Your email is on your card.' }
         const done = url.searchParams.get('done')
         const notice = Object.hasOwn(notices, done) ? notices[done] : null
-        journey(response, renderCard({ ...card, contact, share: contact && (url.pathname === '/card/edit' || url.searchParams.get('share') !== 'public') ? 'contact' : 'public', notice, accountEmail: accountEmail(session) }), props.importJob); return
+        const cardView = renderCard({ ...card, contact, share: contact && (url.pathname === '/card/edit' || url.searchParams.get('share') !== 'public') ? 'contact' : 'public', notice, accountEmail: accountEmail(session) })
+        if (meetBrowser && !crossedAccount(session)) extend(cardView, '<p class="narrow"><a class="button sec" href="/swaps/links">Create a swap QR</a> <a class="button sec" href="/swaps">Recent swaps</a></p>')
+        journey(response, cardView, props.importJob); return
       }
       if (signup && contactCards && request.method === 'POST' && ['/card/contact', '/card/contact/reset', '/card/contact/email'].includes(url.pathname)) {
         const input = new URLSearchParams((await body(request, 8192)).toString('utf8'))
@@ -2624,16 +2668,17 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         // The share switch counts only when the form carries it (an older page never hides a card).
         const values = { ...Object.fromEntries(fields.map(key => [key, (input.get(key) ?? '').slice(0, 400)])), ...Object.fromEntries(switches.map(key => [key, input.get(key) === 'yes'])), ...(input.get('shareCardSwitch') === '1' ? { shareCard: input.get('shareCard') === 'yes' } : {}) }
         try {
-          if (url.pathname === '/card/contact') await contactCards.save(session.owner, values, identity)
-          else if (url.pathname === '/card/contact/email') {
-            // One tap: the sign-in address from the session, shown on the card; everything else stays as saved.
-            const email = accountEmail(session)
-            if (!email) throw new ContactCardError('contact_email_invalid')
-            const current = (await contactCards.read(session.owner))?.settings ?? {}
-            await contactCards.save(session.owner, { ...current, email, showEmail: true, ...(current.shareCard === false ? { shareCard: true } : {}) }, identity)
-            redirect(response, '/card/edit?done=email'); return
-          }
-          else await contactCards.rotate(session.owner)
+          await withCardSharing(session.owner, async () => {
+            if (url.pathname === '/card/contact') await contactCards.save(session.owner, values, identity)
+            else if (url.pathname === '/card/contact/email') {
+              // One tap: show the sign-in address and preserve the other card settings.
+              const email = accountEmail(session)
+              if (!email) throw new ContactCardError('contact_email_invalid')
+              const current = (await contactCards.read(session.owner))?.settings ?? {}
+              await contactCards.save(session.owner, { ...current, email, showEmail: true, ...(current.shareCard === false ? { shareCard: true } : {}) }, identity)
+            }
+            else await contactCards.rotate(session.owner)
+          })
         } catch (failure) {
           if (!(failure instanceof ContactCardError)) throw failure
           const error = { contact_phone_invalid: 'Write your phone number with its country code, like +1 415 555 0123.', contact_whatsapp_invalid: 'Write your WhatsApp number with its country code, like +1 415 555 0123.',
@@ -2641,7 +2686,8 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
           const contact = { ...ownContactCard(await contactCards.read(session.owner).catch(() => null)), ...(url.pathname === '/card/contact' ? { settings: values } : {}) }
           journey(response, renderCard({ ...props, profile, cardUrl, qr: null, contact, share: 'contact', error }), props.importJob, '', 400); return
         }
-        redirect(response, `/card/edit?done=${url.pathname === '/card/contact' ? 'saved' : 'reset'}`); return
+        const result = url.pathname === '/card/contact' ? 'saved' : url.pathname.endsWith('/email') ? 'email' : 'reset'
+        redirect(response, '/card/edit?done=' + result); return
       }
       // Off-platform people: add someone to your own people, or invite them.
       if (request.method === 'POST' && ['/people/lookup', '/people/lookup/save'].includes(url.pathname)) {
@@ -2766,19 +2812,30 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         const hiddenProfiles = memberBlocks ? (await bounded(() => memberBlocks.hidden(session.owner), { profiles: new Set() })).profiles : new Set()
         // Nor from suspended people (docs/profile-suspension.md).
         const suspended = await suspendedIdsFor(backend)
-        const items = (await notifications.list(session.owner)).filter(item => !item.actorProfileId || (!hiddenProfiles.has(item.actorProfileId) && !suspended.has(item.actorProfileId)))
+        const items = (await notifications.list(session.owner)).filter(item =>
+          (item.kind !== 'meet_swap' || (meetBrowser && !crossedAccount(session))) &&
+          (!item.actorProfileId || (!hiddenProfiles.has(item.actorProfileId) && !suspended.has(item.actorProfileId))))
         const [received, connections] = memberConnections ? await Promise.all([memberConnections.received(session.owner).then(rows => rows.filter(row => !suspended.has(row.profileId))), memberConnections.connections(session.owner)]) : [[], []]
         // Opening the feed clears the bell; each item stays highlighted until opened.
         await notifications.markSeen(session.owner)
         const alerts = await settleAlerts(response)
         if (alerts) responseAlerts.set(response, { ...alerts, notifications: 0 })
-        journey(response, renderNotifications({ ...props, items, pending: new Map(received.map(value => [value.id, value])), connected: new Set(connections.map(value => value.requestId)), pendingCount: received.length, notice: url.searchParams.get('notice'), emailEnabled: memberEmail?.sending === true }), props.importJob); return
+        const notificationsView = renderNotifications({ ...props, items, pending: new Map(received.map(value => [value.id, value])), connected: new Set(connections.map(value => value.requestId)), pendingCount: received.length, notice: url.searchParams.get('notice'), emailEnabled: memberEmail?.sending === true })
+        if (items.some(item => item.kind === 'meet_swap')) {
+          notificationsView.privateGroup = true
+          response.setHeader('Cache-Control', 'no-store, private')
+        }
+        journey(response, notificationsView, props.importJob); return
       }
       const notificationItem = url.pathname.match(/^\/notifications\/([0-9a-f-]{36})$/)
       if (signup && notifications && request.method === 'GET' && notificationItem) {
         // `?to=profile` (the name and photo on the feed) opens the person's profile instead.
         const toProfile = url.search === '?to=profile'
         const item = await notifications.open(session.owner, notificationItem[1])
+        if (item?.kind === 'meet_swap') {
+          redirect(response, meetBrowser && !crossedAccount(session) ? await meetBrowser.notificationPath(session.owner, item.subjectId) : '/notifications')
+          return
+        }
         const contact = item && toProfile && !item.actorProfileId ? await notificationContact(session.owner, item).catch(() => null) : null
         redirect(response, !item ? '/notifications' : toProfile && item.actorProfileId ? profilePath(item.actorProfileId) : contact ?? notificationTarget(item)); return
       }
@@ -3006,7 +3063,12 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         }
         const props = jobProps(await jobResources())
         response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
-        journey(response, renderContactDetail({ ...props, contact: { ...contact, contactHref: canonical }, enrichment, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null }), props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
+        const meetContext = meetBrowser && meetAsks && !crossedAccount(session) && !iosApp(request) && contact.name && /^[a-f0-9]{64}$/.test(id)
+          ? { kind: 'unlinked', id, name: contact.name } : null
+        const askSection = meetContext ? meetBrowser.personSection(session, meetContext, canonical) : ''
+        const contactView = renderContactDetail({ ...props, askSection, contact: { ...contact, contactHref: canonical }, enrichment, contextUrl: privateContext ? `/api/private-context/contacts/${encodeURIComponent(id)}` : null })
+        if (meetContext) contactView.meetContext = meetContext
+        journey(response, contactView, props.importJob, privateContext ? PRIVATE_CONTEXT_SCRIPT : ''); return
       }
       if (signup && connectionPrivacy && request.method === 'POST' && url.pathname === '/settings/connection-privacy') {
         const input = new URLSearchParams((await body(request, 4096)).toString('utf8'))
@@ -3121,6 +3183,10 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         data.account.accountLabel = session.accountLabel
         data.account.displayName = session.displayName
         // The contact card's details belong to the export; its link does not.
+        if (meetSwap && !crossedAccount(session)) {
+          const swaps = await meetSwap.exportOwner(session.owner)
+          if (swaps) data.meetSwaps = swaps
+        }
         if (contactCards) data.contactCard = await contactCards.exportOwner(session.owner).catch(() => null)
         if (contactEnrichment) data.contactEnrichment = await contactEnrichment.exportOwner(session.owner)
         if (contactSlugs) data.contactAddresses = await contactSlugs.exportOwner(session.owner).catch(() => null)
@@ -3155,6 +3221,7 @@ export function createPrivateBrowserHandler({ bulkExports, isVerified = async ()
         if (memberInvitations) await memberInvitations.removeOwner(session.owner)
         // The contact card goes first: its link must never outlive the account.
         if (contactCards) await contactCards.removeOwner(session.owner)
+        if (meetSwap) await meetSwap.removeOwner(session.owner)
         if (savedSearchLists) await savedSearchLists.removeOwner(session.owner)
         if (homePreferences) await homePreferences.removeOwner(session.owner)
         if (connectionPrivacy) await connectionPrivacy.removeOwner(session.owner)

@@ -1,3 +1,5 @@
+import { createMeetSwap, createNeo4jMeetStore } from './meet-swap.mjs'
+import { createMeetAsks } from './meet-asks.mjs'
 import { createNeo4jAccountLinks } from './account-links.mjs'
 import { createPrivateGroupPilot } from './private-group-pilot.mjs'
 import { createOpenChatGroupSync } from './openchat-groups.mjs'
@@ -732,7 +734,14 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
       issuer: config.issuer, resolveOwner, manage: accountLinkEnv.UNLINKED_ACCOUNT_LINKS === 'on', adminSubjects,
     }) : undefined
     if (accountLinks?.manage) await accountLinks.initialize()
-    return { isVerified, accessTier, unlimitedSearchOwnerIds, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
+    const meetEnabled = process.env.UNLINKED_MEET_SWAP === 'on'
+    const meetStore = createNeo4jMeetStore(driver)
+    if (meetEnabled) await meetStore.initialize()
+    const meetSwap = createMeetSwap({ store: meetStore })
+    const messagingSession = createMessagingSession({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner })
+    const meetAsks = meetEnabled && process.env.UNLINKED_MEET_ASKS === 'on' && process.env.UNLINKED_MESSAGING_SECRET?.length >= 32
+      ? createMeetAsks({ createMessagingSession: messagingSession }) : undefined
+    return { meetEnabled, meetSwap, meetAsks, isVerified, accessTier, unlimitedSearchOwnerIds, login, getBackend, close, audit, requestDiagnostics, searchLog, recordBrowserPerformance, backgroundImports: true,
       // Automatic cross-app sign-in (docs/ideaflow-sign-in.md): on unless
       // runtime.env sets UNLINKED_AUTO_SIGNIN=off.
       autoSignIn: autoSignInEnabled(autoSignInEnv),
@@ -747,7 +756,7 @@ export async function createPrivatePilotDependencies({ root, baseUrl, host, oper
         client: createIdeaflowProfileClient({ origin: process.env.IDEANETWORK_URL || 'https://social.ideaflow.app' }),
         accountForProfile, identityForOwner, choices: ideaflowProfileChoices }) : undefined,
       resolveMessagingRecipient: createMessagingResolver({ readPublishedSnapshot, accountForProfile, identityForOwner }),
-      createMessagingSession: createMessagingSession({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
+      createMessagingSession: messagingSession,
       resolveCardMessagingRecipient: createMessagingRecipient({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
       messagingIdentities: createMessagingIdentities({ secret: process.env.UNLINKED_MESSAGING_SECRET, identityForOwner }),
       // Read-only Ideaflow people overlay (docs/private-context.md): the owner's

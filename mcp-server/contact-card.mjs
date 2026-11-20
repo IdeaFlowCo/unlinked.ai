@@ -279,7 +279,7 @@ export function vcardContentDisposition(card) {
   const encoded = encodeURIComponent(file).replace(/['()*]/g, character => '%' + character.charCodeAt(0).toString(16).toUpperCase())
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`
 }
-export function renderContactVcard(card, origin) {
+export function renderContactVcard(card, origin, { social = [] } = {}) {
   const name = vcardText(card.name ?? '') || 'Unlinked member'
   const parts = vcardNameParts(card.name)
   const structured = parts.given || parts.family ? `${vcardText(parts.family)};${vcardText(parts.given)};;;` : `;${name};;;`
@@ -291,6 +291,7 @@ export function renderContactVcard(card, origin) {
   if (card.link && isSafeContactLink(card.link)) lines.push(`URL:${card.link}`)
   if (card.linkedinUrl && publicLinkedinUrl(card.linkedinUrl)) lines.push(`URL:${publicLinkedinUrl(card.linkedinUrl)}`)
   if (card.whatsapp) lines.push(`URL:${whatsappUrl(card.whatsapp)}`)
+  for (const link of social) if (isSafeContactLink(link)) lines.push(`URL:${link}`)
   if (card.profilePath && PROFILE_PATH.test(card.profilePath)) lines.push(`URL:${origin}${card.profilePath}`)
   lines.push('END:VCARD')
   return `${lines.map(fold).join('\r\n')}\r\n`
